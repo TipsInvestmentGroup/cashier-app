@@ -17,15 +17,18 @@ const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
 
 interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
+  staffName?: string; systemSales?: number
   notes: string; outlet: { name: string }; cashier: { name: string }
 }
 interface Outlet { id: string; name: string }
+interface Person { id: string; name: string; type: string }
 
 export default function CollectionsPage() {
   const { request } = useApi()
   const { user } = useAuth()
   const [collections, setCollections] = useState<Collection[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
+  const [staff, setStaff] = useState<Person[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -34,7 +37,7 @@ export default function CollectionsPage() {
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
 
   const [form, setForm] = useState({
-    cash: '', crdb: '', stanbic: '', mpesa: '', notes: '',
+    cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '',
     outletId: user?.outlet?.id || '', date: format(new Date(), 'yyyy-MM-dd'),
   })
 
@@ -43,12 +46,14 @@ export default function CollectionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [cols, outs] = await Promise.all([
+    const [cols, outs, persons] = await Promise.all([
       request('/api/collections'),
       request('/api/outlets'),
+      request('/api/persons?type=STAFF_LOSS'),
     ])
     setCollections(cols)
     setOutlets(outs)
+    setStaff((persons || []).slice().sort((a: Person, b: Person) => a.name.localeCompare(b.name)))
     if (outs.length && !form.outletId) setForm((f) => ({ ...f, outletId: outs[0].id }))
     setLoading(false)
   }, [request])
@@ -65,7 +70,7 @@ export default function CollectionsPage() {
         body: JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0 }),
       })
       toast.success('Collection saved!')
-      setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+      setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
       setShowForm(false)
       load()
     } catch (err: unknown) {
@@ -108,9 +113,12 @@ export default function CollectionsPage() {
       stanbic: acc.stanbic + c.stanbic,
       mpesa: acc.mpesa + c.mpesa,
       total: acc.total + c.total,
+      systemSales: acc.systemSales + (c.systemSales || 0),
     }),
-    { cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0 }
+    { cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, systemSales: 0 }
   )
+  // Variance = System (POS) sales − money actually collected. Positive = shortfall.
+  const variance = totals.systemSales - totals.total
 
   return (
     <AppShell>
@@ -148,6 +156,25 @@ export default function CollectionsPage() {
                 </div>
               </div>
 
+              {/* Staff + System (POS) sales */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">👤 Staff (collected from)</label>
+                  <select value={form.staffName} onChange={(e) => setForm({ ...form, staffName: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                    <option value="">-- Select staff --</option>
+                    {staff.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">🧾 System Sales (TZS)</label>
+                  <input type="number" min="0" placeholder="0"
+                    value={form.systemSales} onChange={(e) => setForm({ ...form, systemSales: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-medium" />
+                  <p className="text-xs text-gray-400 mt-1">What the POS/system says this staff sold</p>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 {[
                   { key: 'cash', label: '💵 Cash', placeholder: '0' },
@@ -170,6 +197,22 @@ export default function CollectionsPage() {
                 <span className="font-semibold text-indigo-800">Total Collection</span>
                 <span className="text-2xl font-bold text-indigo-700">{formatCurrency(total)}</span>
               </div>
+
+              {/* Live variance vs System Sales */}
+              {Number(form.systemSales) > 0 && (() => {
+                const v = Number(form.systemSales) - total
+                const short = v > 0
+                return (
+                  <div className={`rounded-xl p-4 flex items-center justify-between ${short ? 'bg-red-50' : 'bg-green-50'}`}>
+                    <span className={`font-semibold ${short ? 'text-red-800' : 'text-green-800'}`}>
+                      {short ? '🔻 Shortfall vs System' : v < 0 ? '🔺 Over System' : '✅ Matches System'}
+                    </span>
+                    <span className={`text-xl font-bold ${short ? 'text-red-700' : 'text-green-700'}`}>
+                      {formatCurrency(Math.abs(v))}
+                    </span>
+                  </div>
+                )
+              })()}
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Notes (Optional)</label>
@@ -215,7 +258,7 @@ export default function CollectionsPage() {
         </div>
 
         {/* Totals Summary */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
           <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-2xl p-4 shadow lg:col-span-1 col-span-2">
             <p className="text-indigo-100 text-xs font-medium">Total Collection</p>
             <p className="text-2xl font-bold mt-1">{formatCurrency(totals.total)}</p>
@@ -232,6 +275,14 @@ export default function CollectionsPage() {
               <p className={`text-lg font-bold mt-1 ${s.color}`}>{formatCurrency(s.value)}</p>
             </div>
           ))}
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+            <p className="text-gray-500 text-xs font-medium">🧾 System Sales</p>
+            <p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(totals.systemSales)}</p>
+          </div>
+          <div className={`rounded-2xl p-4 shadow-sm border ${variance > 0 ? 'bg-red-50 border-red-200' : variance < 0 ? 'bg-green-50 border-green-200' : 'bg-white border-gray-100'}`}>
+            <p className="text-gray-500 text-xs font-medium">{variance > 0 ? '🔻 Shortfall' : variance < 0 ? '🔺 Over' : '✅ Variance'}</p>
+            <p className={`text-lg font-bold mt-1 ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-800'}`}>{formatCurrency(Math.abs(variance))}</p>
+          </div>
         </div>
 
         {/* List */}
@@ -251,40 +302,54 @@ export default function CollectionsPage() {
                   <tr className="text-left text-gray-600">
                     <th className="px-5 py-3 font-semibold">Date</th>
                     <th className="px-5 py-3 font-semibold">Outlet</th>
+                    <th className="px-5 py-3 font-semibold">Staff</th>
                     <th className="px-5 py-3 font-semibold">Cash</th>
                     <th className="px-5 py-3 font-semibold">CRDB</th>
                     <th className="px-5 py-3 font-semibold">Stanbic</th>
                     <th className="px-5 py-3 font-semibold">M-PESA</th>
                     <th className="px-5 py-3 font-semibold">Total</th>
+                    <th className="px-5 py-3 font-semibold">System</th>
+                    <th className="px-5 py-3 font-semibold">Variance</th>
                     <th className="px-5 py-3 font-semibold">By</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filtered.map((c) => (
+                  {filtered.map((c) => {
+                    const sys = c.systemSales || 0
+                    const v = sys - c.total // + = shortfall
+                    return (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-5 py-4 text-gray-700">{formatDateTime(c.date)}</td>
                       <td className="px-5 py-4 font-medium text-gray-800">{c.outlet.name}</td>
+                      <td className="px-5 py-4 text-gray-700">{c.staffName || '-'}</td>
                       <td className="px-5 py-4 text-green-700">{c.cash > 0 ? formatCurrency(c.cash) : '-'}</td>
                       <td className="px-5 py-4 text-blue-700">{c.crdb > 0 ? formatCurrency(c.crdb) : '-'}</td>
                       <td className="px-5 py-4 text-purple-700">{c.stanbic > 0 ? formatCurrency(c.stanbic) : '-'}</td>
                       <td className="px-5 py-4 text-yellow-700">{c.mpesa > 0 ? formatCurrency(c.mpesa) : '-'}</td>
                       <td className="px-5 py-4 font-bold text-gray-900">{formatCurrency(c.total)}</td>
+                      <td className="px-5 py-4 text-gray-600">{sys > 0 ? formatCurrency(sys) : '-'}</td>
+                      <td className={`px-5 py-4 font-semibold ${sys === 0 ? 'text-gray-300' : v > 0 ? 'text-red-600' : v < 0 ? 'text-green-600' : 'text-gray-500'}`}>
+                        {sys === 0 ? '-' : `${v > 0 ? '▼ ' : v < 0 ? '▲ ' : ''}${formatCurrency(Math.abs(v))}`}
+                      </td>
                       <td className="px-5 py-4 text-gray-500">{c.cashier.name}</td>
                     </tr>
-                  ))}
+                    )
+                  })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={8} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
+                    <tr><td colSpan={11} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr className="font-bold text-gray-900">
-                      <td className="px-5 py-4" colSpan={2}>TOTAL ({filtered.length})</td>
+                      <td className="px-5 py-4" colSpan={3}>TOTAL ({filtered.length})</td>
                       <td className="px-5 py-4 text-green-700">{formatCurrency(totals.cash)}</td>
                       <td className="px-5 py-4 text-blue-700">{formatCurrency(totals.crdb)}</td>
                       <td className="px-5 py-4 text-purple-700">{formatCurrency(totals.stanbic)}</td>
                       <td className="px-5 py-4 text-yellow-700">{formatCurrency(totals.mpesa)}</td>
                       <td className="px-5 py-4 text-indigo-700 text-base">{formatCurrency(totals.total)}</td>
+                      <td className="px-5 py-4 text-gray-700">{formatCurrency(totals.systemSales)}</td>
+                      <td className={`px-5 py-4 ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(variance))}</td>
                       <td className="px-5 py-4"></td>
                     </tr>
                   </tfoot>

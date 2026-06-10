@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date } = body
+  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
 
   const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
   const usedOutletId = outletId || user.outletId
@@ -52,6 +52,8 @@ export async function POST(req: NextRequest) {
       stanbic: Number(stanbic),
       mpesa: Number(mpesa),
       total,
+      staffName: staffName || null,
+      systemSales: Number(systemSales) || 0,
       notes,
       outletId: usedOutletId,
       cashierId: user.userId,
