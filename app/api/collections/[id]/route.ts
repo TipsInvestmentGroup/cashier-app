@@ -51,7 +51,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Reconcile linked auto staff-loss using the full formula with the
   // credit-sales / payments totals recorded with this collection.
-  const shortfall = (Number(systemSales) || 0) - total - (existing.creditSales || 0) + (existing.paymentsReceived || 0)
+  const shortfall = (Number(systemSales) || 0) - total - (existing.creditSales || 0) - (existing.paymentsReceived || 0)
   const voucher = `SL-${id}`
   const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: voucher } })
   let staffLoss: { amount: number; staffName: string } | null = null

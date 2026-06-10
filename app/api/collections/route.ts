@@ -147,8 +147,8 @@ export async function POST(req: NextRequest) {
     data: { creditSales: signedTotal, paymentsReceived: paidTotal },
   })
 
-  // 3) Staff Loss = System − Collection − SignedBills + PaidBills
-  const lossAmount = (Number(systemSales) || 0) - total - signedTotal + paidTotal
+  // 3) Staff Loss = System − Collection − SignedBills − PaidBills
+  const lossAmount = (Number(systemSales) || 0) - total - signedTotal - paidTotal
   let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
   if (staffName && lossAmount > 0) {
     const person = await prisma.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
         personName: staffName,
         amount: lossAmount,
         serviceStaff: staffName,
-        description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} + paid ${paidTotal} (collection ${collection.id})`,
+        description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid ${paidTotal} (collection ${collection.id})`,
         status: 'UNPAID',
         date: collDate,
         outletId: usedOutletId,

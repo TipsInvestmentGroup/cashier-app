@@ -20,9 +20,9 @@ interface Collection {
   staffName?: string; systemSales?: number; creditSales?: number; paymentsReceived?: number
   notes: string; outlet: { name: string }; cashier: { name: string }
 }
-// Staff Loss = System Sales − Collection − Signed Bills (credit sales) + Paid Bills
+// Staff Loss = System Sales − Collection − Signed Bills (credit sales) − Paid Bills
 const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number; paymentsReceived?: number }) =>
-  (c.systemSales || 0) - c.total - (c.creditSales || 0) + (c.paymentsReceived || 0)
+  (c.systemSales || 0) - c.total - (c.creditSales || 0) - (c.paymentsReceived || 0)
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string }
 
@@ -52,10 +52,10 @@ export default function CollectionsPage() {
   const total = (Number(form.cash) || 0) + (Number(form.crdb) || 0) +
     (Number(form.stanbic) || 0) + (Number(form.mpesa) || 0)
 
-  // Reconciliation: Staff Loss = System − Collection − Signed Bills + Paid Bills
+  // Reconciliation: Staff Loss = System − Collection − Signed Bills − Paid Bills
   const signedTotalForm = signedRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
   const paidTotalForm = paidRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
-  const lossPreview = (Number(form.systemSales) || 0) - total - signedTotalForm + paidTotalForm
+  const lossPreview = (Number(form.systemSales) || 0) - total - signedTotalForm - paidTotalForm
   const hasSigned = signedRows.some((r) => r.name && Number(r.amount) > 0)
   const hasPaid = paidRows.some((r) => r.payerName && Number(r.amount) > 0)
   // Save gate: for a new collection the cashier must record signed/paid bills OR confirm there are none.
@@ -183,8 +183,8 @@ export default function CollectionsPage() {
     }),
     { cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, systemSales: 0, creditSales: 0, paymentsReceived: 0 }
   )
-  // Net loss across the period (full formula)
-  const variance = totals.systemSales - totals.total - totals.creditSales + totals.paymentsReceived
+  // Net loss across the period (full formula): System − Collection − Signed − Paid
+  const variance = totals.systemSales - totals.total - totals.creditSales - totals.paymentsReceived
   // Split per-row so shortfalls (→ staff loss) and overages are tracked separately
   const { shortfall: totalShortfall, overage: totalOverage } = filtered.reduce(
     (a, c) => {
@@ -237,7 +237,12 @@ export default function CollectionsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">👤 Staff (collected from)</label>
-                  <select value={form.staffName} onChange={(e) => setForm({ ...form, staffName: e.target.value })}
+                  <select value={form.staffName} onChange={(e) => {
+                    const ns = e.target.value
+                    // keep paid-bill payers in sync with the collecting staff
+                    setPaidRows((rows) => rows.map((r) => (!r.payerName || r.payerName === form.staffName) ? { ...r, payerName: ns } : r))
+                    setForm({ ...form, staffName: ns })
+                  }}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
                     <option value="">-- Select staff --</option>
                     {staff.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
@@ -305,7 +310,7 @@ export default function CollectionsPage() {
                   <div className="border-2 border-gray-100 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-semibold text-gray-700 text-sm">✅ Paid Bills (debt recovered via this staff)</span>
-                      <button type="button" onClick={() => setPaidRows([...paidRows, { payerName: '', amount: '', paymentMethod: 'CASH' }])}
+                      <button type="button" onClick={() => setPaidRows([...paidRows, { payerName: form.staffName, amount: '', paymentMethod: 'CASH' }])}
                         className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100">➕ Record Payment</button>
                     </div>
                     {paidRows.length === 0 && <p className="text-xs text-gray-400">Add any old debts this staff collected today.</p>}
@@ -338,7 +343,7 @@ export default function CollectionsPage() {
                     <span className={`text-2xl font-bold ${lossPreview > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(lossPreview))}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} + Paid {formatCurrency(paidTotalForm)}
+                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid {formatCurrency(paidTotalForm)}
                   </p>
                 </div>
               )}
