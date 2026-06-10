@@ -123,6 +123,18 @@ export default function CollectionsPage() {
   )
   // Variance = System (POS) sales − money actually collected. Positive = shortfall.
   const variance = totals.systemSales - totals.total
+  // Split per-row so shortfalls and overages are tracked separately (only rows with a system figure)
+  const { shortfall: totalShortfall, overage: totalOverage } = filtered.reduce(
+    (a, c) => {
+      const sys = c.systemSales || 0
+      if (sys <= 0) return a
+      const v = sys - c.total
+      if (v > 0) a.shortfall += v
+      else if (v < 0) a.overage += -v
+      return a
+    },
+    { shortfall: 0, overage: 0 }
+  )
 
   return (
     <AppShell>
@@ -262,7 +274,7 @@ export default function CollectionsPage() {
         </div>
 
         {/* Totals Summary */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-2xl p-4 shadow lg:col-span-1 col-span-2">
             <p className="text-indigo-100 text-xs font-medium">Total Collection</p>
             <p className="text-2xl font-bold mt-1">{formatCurrency(totals.total)}</p>
@@ -283,9 +295,13 @@ export default function CollectionsPage() {
             <p className="text-gray-500 text-xs font-medium">🧾 System Sales</p>
             <p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(totals.systemSales)}</p>
           </div>
-          <div className={`rounded-2xl p-4 shadow-sm border ${variance > 0 ? 'bg-red-50 border-red-200' : variance < 0 ? 'bg-green-50 border-green-200' : 'bg-white border-gray-100'}`}>
-            <p className="text-gray-500 text-xs font-medium">{variance > 0 ? '🔻 Shortfall' : variance < 0 ? '🔺 Over' : '✅ Variance'}</p>
-            <p className={`text-lg font-bold mt-1 ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-800'}`}>{formatCurrency(Math.abs(variance))}</p>
+          <div className={`rounded-2xl p-4 shadow-sm border ${totalShortfall > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}>
+            <p className="text-gray-500 text-xs font-medium">🔻 Shortfalls (→ Staff Loss)</p>
+            <p className={`text-lg font-bold mt-1 ${totalShortfall > 0 ? 'text-red-700' : 'text-gray-800'}`}>{formatCurrency(totalShortfall)}</p>
+          </div>
+          <div className={`rounded-2xl p-4 shadow-sm border ${totalOverage > 0 ? 'bg-green-50 border-green-200' : 'bg-white border-gray-100'}`}>
+            <p className="text-gray-500 text-xs font-medium">🔺 Overages (extra collected)</p>
+            <p className={`text-lg font-bold mt-1 ${totalOverage > 0 ? 'text-green-700' : 'text-gray-800'}`}>{formatCurrency(totalOverage)}</p>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { startOfDay, endOfDay, format } from 'date-fns'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -44,6 +45,24 @@ export async function POST(req: NextRequest) {
   const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
   const usedOutletId = outletId || user.outletId
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
+
+  // Prevent duplicates: one collection per staff, per outlet, per day.
+  const collDate = date ? new Date(date) : new Date()
+  if (staffName) {
+    const dup = await prisma.dailyCollection.findFirst({
+      where: {
+        outletId: usedOutletId,
+        staffName,
+        date: { gte: startOfDay(collDate), lte: endOfDay(collDate) },
+      },
+    })
+    if (dup) {
+      return NextResponse.json(
+        { error: `A collection for ${staffName} on ${format(collDate, 'dd MMM yyyy')} at this outlet already exists. Edit or delete it instead of re-entering.` },
+        { status: 409 }
+      )
+    }
+  }
 
   const collection = await prisma.dailyCollection.create({
     data: {
