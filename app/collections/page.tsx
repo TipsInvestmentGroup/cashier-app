@@ -32,6 +32,7 @@ export default function CollectionsPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [range, setRange] = useState<RangeKey>('today')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -65,16 +66,17 @@ export default function CollectionsPage() {
     if (total === 0) return toast.error('Enter at least one amount')
     setSubmitting(true)
     try {
-      const res = await request('/api/collections', {
-        method: 'POST',
-        body: JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0 }),
-      })
+      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0 })
+      const res = editingId
+        ? await request(`/api/collections/${editingId}`, { method: 'PUT', body: payload })
+        : await request('/api/collections', { method: 'POST', body: payload })
       if (res?.staffLoss) {
-        toast.success(`Collection saved. Staff loss of ${formatCurrency(res.staffLoss.amount)} recorded for ${res.staffLoss.staffName} → Payroll Deductions.`, { duration: 6000 })
+        toast.success(`Saved. Staff loss of ${formatCurrency(res.staffLoss.amount)} recorded for ${res.staffLoss.staffName} → Payroll Deductions.`, { duration: 6000 })
       } else {
-        toast.success('Collection saved!')
+        toast.success(editingId ? 'Collection updated!' : 'Collection saved!')
       }
       setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+      setEditingId(null)
       setShowForm(false)
       load()
     } catch (err: unknown) {
@@ -85,6 +87,40 @@ export default function CollectionsPage() {
   }
 
   const canAdd = ['CASHIER', 'ACCOUNTANT', 'ADMIN'].includes(user?.role || '')
+
+  const startEdit = (c: Collection & { outletId?: string }) => {
+    setEditingId(c.id)
+    setForm({
+      cash: c.cash ? String(c.cash) : '',
+      crdb: c.crdb ? String(c.crdb) : '',
+      stanbic: c.stanbic ? String(c.stanbic) : '',
+      mpesa: c.mpesa ? String(c.mpesa) : '',
+      notes: c.notes || '',
+      staffName: c.staffName || '',
+      systemSales: c.systemSales ? String(c.systemSales) : '',
+      outletId: c.outletId || outlets.find((o) => o.name === c.outlet.name)?.id || form.outletId,
+      date: format(parseISO(c.date), 'yyyy-MM-dd'),
+    })
+    setShowForm(true)
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const newCollection = () => {
+    setEditingId(null)
+    setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+    setShowForm((s) => !s)
+  }
+
+  const deleteCollection = async (c: Collection) => {
+    if (!window.confirm(`Delete this collection${c.staffName ? ` for ${c.staffName}` : ''}? Any auto staff-loss linked to it will also be removed.`)) return
+    try {
+      const res = await request(`/api/collections/${c.id}`, { method: 'DELETE' })
+      toast.success(res?.removedStaffLoss ? 'Collection + linked staff loss deleted' : 'Collection deleted')
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error deleting')
+    }
+  }
 
   // Compute active date interval from the selected range
   const getInterval = (): { start: Date; end: Date } => {
@@ -145,7 +181,7 @@ export default function CollectionsPage() {
             <p className="text-gray-500 text-sm">Record cash, bank & M-PESA collections</p>
           </div>
           {canAdd && (
-            <button onClick={() => setShowForm(!showForm)}
+            <button onClick={newCollection}
               className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
               <span className="text-lg">+</span> New Collection
             </button>
@@ -155,7 +191,7 @@ export default function CollectionsPage() {
         {/* Form */}
         {showForm && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-5">Record Daily Collection</h2>
+            <h2 className="text-lg font-semibold text-gray-800 mb-5">{editingId ? 'Edit Collection' : 'Record Daily Collection'}</h2>
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -240,9 +276,9 @@ export default function CollectionsPage() {
               <div className="flex gap-3">
                 <button type="submit" disabled={submitting}
                   className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
-                  {submitting ? 'Saving...' : 'Save Collection'}
+                  {submitting ? 'Saving...' : editingId ? 'Update Collection' : 'Save Collection'}
                 </button>
-                <button type="button" onClick={() => setShowForm(false)}
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null) }}
                   className="px-6 py-3 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition">
                   Cancel
                 </button>
@@ -331,6 +367,7 @@ export default function CollectionsPage() {
                     <th className="px-5 py-3 font-semibold">System</th>
                     <th className="px-5 py-3 font-semibold">Variance</th>
                     <th className="px-5 py-3 font-semibold">By</th>
+                    {canAdd && <th className="px-5 py-3 font-semibold text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -352,11 +389,19 @@ export default function CollectionsPage() {
                         {sys === 0 ? '-' : `${v > 0 ? '▼ ' : v < 0 ? '▲ ' : ''}${formatCurrency(Math.abs(v))}`}
                       </td>
                       <td className="px-5 py-4 text-gray-500">{c.cashier.name}</td>
+                      {canAdd && (
+                        <td className="px-5 py-4 text-right whitespace-nowrap">
+                          <button onClick={() => startEdit(c)} title="Edit"
+                            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>
+                          <button onClick={() => deleteCollection(c)} title="Delete"
+                            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>
+                        </td>
+                      )}
                     </tr>
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={11} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
+                    <tr><td colSpan={canAdd ? 12 : 11} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
@@ -371,6 +416,7 @@ export default function CollectionsPage() {
                       <td className="px-5 py-4 text-gray-700">{formatCurrency(totals.systemSales)}</td>
                       <td className={`px-5 py-4 ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(variance))}</td>
                       <td className="px-5 py-4"></td>
+                      {canAdd && <td className="px-5 py-4"></td>}
                     </tr>
                   </tfoot>
                 )}

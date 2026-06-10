@@ -1,0 +1,115 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import { getAuthUser } from '@/lib/auth'
+import { startOfDay, endOfDay, format } from 'date-fns'
+
+const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
+
+/** Update a collection and keep its auto staff-loss (voucher SL-<id>) in sync. */
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = getAuthUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!ALLOWED.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { id } = await params
+  const existing = await prisma.dailyCollection.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
+
+  const body = await req.json()
+  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
+  const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
+  const usedOutletId = outletId || existing.outletId
+  const collDate = date ? new Date(date) : existing.date
+
+  // Duplicate guard (exclude this record)
+  if (staffName) {
+    const dup = await prisma.dailyCollection.findFirst({
+      where: {
+        id: { not: id },
+        outletId: usedOutletId,
+        staffName,
+        date: { gte: startOfDay(collDate), lte: endOfDay(collDate) },
+      },
+    })
+    if (dup) {
+      return NextResponse.json(
+        { error: `Another collection for ${staffName} on ${format(collDate, 'dd MMM yyyy')} at this outlet already exists.` },
+        { status: 409 }
+      )
+    }
+  }
+
+  const updated = await prisma.dailyCollection.update({
+    where: { id },
+    data: {
+      cash: Number(cash), crdb: Number(crdb), stanbic: Number(stanbic), mpesa: Number(mpesa),
+      total, staffName: staffName || null, systemSales: Number(systemSales) || 0,
+      notes, outletId: usedOutletId, date: collDate,
+    },
+    include: { outlet: true },
+  })
+
+  // Reconcile linked auto staff-loss
+  const shortfall = (Number(systemSales) || 0) - total
+  const voucher = `SL-${id}`
+  const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: voucher } })
+  let staffLoss: { amount: number; staffName: string } | null = null
+
+  if (staffName && shortfall > 0) {
+    const person = await prisma.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
+    if (sl) {
+      const agg = await prisma.paidBill.aggregate({ where: { signedBillId: sl.id }, _sum: { amountPaid: true } })
+      const paid = agg._sum.amountPaid || 0
+      const status = paid >= shortfall ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID'
+      await prisma.signedBill.update({
+        where: { id: sl.id },
+        data: { amount: shortfall, personName: staffName, personId: person?.id ?? null, serviceStaff: staffName, outletId: usedOutletId, date: collDate, status },
+      })
+    } else {
+      await prisma.signedBill.create({
+        data: {
+          voucherNumber: voucher, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: staffName,
+          amount: shortfall, serviceStaff: staffName,
+          description: `Auto staff loss (edited): System ${Number(systemSales)} − collected ${total} (collection ${id})`,
+          status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
+        },
+      })
+    }
+    staffLoss = { amount: shortfall, staffName }
+  } else if (sl) {
+    // No longer a shortfall → remove the auto loss and any payments against it
+    await prisma.paidBill.deleteMany({ where: { signedBillId: sl.id } })
+    await prisma.signedBill.delete({ where: { id: sl.id } })
+  }
+
+  await prisma.auditLog.create({
+    data: { userId: user.userId, action: 'UPDATE', entity: 'DailyCollection', entityId: id, details: `Total ${total}, staffLoss ${shortfall > 0 ? shortfall : 0}` },
+  })
+
+  return NextResponse.json({ ...updated, staffLoss })
+}
+
+/** Delete a collection and its auto staff-loss. */
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = getAuthUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!ALLOWED.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { id } = await params
+  const existing = await prisma.dailyCollection.findUnique({ where: { id } })
+  if (!existing) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
+
+  // Remove linked auto staff-loss (and its payments) first
+  const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: `SL-${id}` } })
+  if (sl) {
+    await prisma.paidBill.deleteMany({ where: { signedBillId: sl.id } })
+    await prisma.signedBill.delete({ where: { id: sl.id } })
+  }
+  await prisma.dailyCollection.delete({ where: { id } })
+
+  await prisma.auditLog.create({
+    data: { userId: user.userId, action: 'DELETE', entity: 'DailyCollection', entityId: id, details: `Deleted collection${sl ? ' + linked staff loss' : ''}` },
+  })
+
+  return NextResponse.json({ ok: true, removedStaffLoss: !!sl })
+}
