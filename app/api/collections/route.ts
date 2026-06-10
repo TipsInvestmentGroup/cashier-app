@@ -72,5 +72,40 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  return NextResponse.json(collection, { status: 201 })
+  // Auto-create a Staff Loss when the system (POS) sales exceed what was collected.
+  // The shortfall becomes an unpaid STAFF_LOSS bill → flows into Receivables and
+  // the Payroll Deduction report.
+  const shortfall = (Number(systemSales) || 0) - total
+  let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
+  if (staffName && shortfall > 0) {
+    const person = await prisma.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
+    const voucherNumber = `SL-${collection.id}` // unique (derived from collection id)
+    const bill = await prisma.signedBill.create({
+      data: {
+        voucherNumber,
+        billType: 'STAFF_LOSS',
+        personId: person?.id ?? null,
+        personName: staffName,
+        amount: shortfall,
+        serviceStaff: staffName,
+        description: `Auto staff loss: System sales ${Number(systemSales)} − collected ${total} (daily collection ${collection.id})`,
+        status: 'UNPAID',
+        date: date ? new Date(date) : new Date(),
+        outletId: usedOutletId,
+        cashierId: user.userId,
+      },
+    })
+    await prisma.auditLog.create({
+      data: {
+        userId: user.userId,
+        action: 'CREATE',
+        entity: 'SignedBill',
+        entityId: bill.id,
+        details: `Auto staff loss ${shortfall} for ${staffName} from collection ${collection.id}`,
+      },
+    })
+    staffLoss = { amount: shortfall, voucher: voucherNumber, staffName }
+  }
+
+  return NextResponse.json({ ...collection, staffLoss }, { status: 201 })
 }

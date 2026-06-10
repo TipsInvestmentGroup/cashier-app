@@ -65,11 +65,15 @@ export default function CollectionsPage() {
     if (total === 0) return toast.error('Enter at least one amount')
     setSubmitting(true)
     try {
-      await request('/api/collections', {
+      const res = await request('/api/collections', {
         method: 'POST',
         body: JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0 }),
       })
-      toast.success('Collection saved!')
+      if (res?.staffLoss) {
+        toast.success(`Collection saved. Staff loss of ${formatCurrency(res.staffLoss.amount)} recorded for ${res.staffLoss.staffName} → Payroll Deductions.`, { duration: 6000 })
+      } else {
+        toast.success('Collection saved!')
+      }
       setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
       setShowForm(false)
       load()
