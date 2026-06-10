@@ -58,19 +58,18 @@ git push -u origin main
 
 ---
 
-## 4. Seed the database (one time)
+## 4. Seed the database (one click)
 
-Locally, point at the cloud DB and seed users + outlets, then import staff/directors:
-```bash
-# PowerShell — temporarily use the cloud DB:
-$env:DATABASE_URL="<your Neon connection string>"
-npm run db:seed                      # creates the 5 login users + 2 outlets
-npx tsx scripts/import-persons.ts    # imports Directors/Admins/Staff from the Excel file
+After the database is connected and the app has redeployed, open this URL once
+in your browser (replace the host + secret):
 ```
-Then **change the seeded passwords** in the app (Users page) — the defaults are public.
+https://<your-app>.vercel.app/api/admin/seed?secret=<CRON_SECRET>
+```
+It creates the 2 outlets, the login users, and all Directors/Admins/Staff
+(from `prisma/persons.seed.json`). You should see `{"ok":true,...}`.
 
-> After seeding, open the Vercel URL and log in with `admin@lounge.com` / `admin123`
-> (change it immediately).
+Then log in at your Vercel URL with `admin@lounge.com` / `admin123` and
+**change the passwords immediately** (Users page) — the defaults are public.
 
 ---
 
