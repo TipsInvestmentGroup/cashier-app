@@ -95,3 +95,5 @@ emails so they receive it. (Trigger a test anytime from the Payroll page → **�
 - **Local dev still works** unchanged: `npm run dev` uses SQLite (`dev.db`).
 - **Windows Task Scheduler** task from the local setup is now redundant once deployed —
   remove it with: `schtasks /Delete /TN "CashierApp Monthly Payroll Report" /F`.
+
+<!-- deployed to Vercel + Neon -->
