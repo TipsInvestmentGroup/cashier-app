@@ -17,9 +17,12 @@ const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
 
 interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
-  staffName?: string; systemSales?: number
+  staffName?: string; systemSales?: number; creditSales?: number; paymentsReceived?: number
   notes: string; outlet: { name: string }; cashier: { name: string }
 }
+// Staff Loss = System Sales − Collection − Signed Bills (credit sales) + Paid Bills
+const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number; paymentsReceived?: number }) =>
+  (c.systemSales || 0) - c.total - (c.creditSales || 0) + (c.paymentsReceived || 0)
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string }
 
@@ -29,6 +32,10 @@ export default function CollectionsPage() {
   const [collections, setCollections] = useState<Collection[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [staff, setStaff] = useState<Person[]>([])
+  const [personNames, setPersonNames] = useState<string[]>([])
+  const [signedRows, setSignedRows] = useState<{ billType: string; name: string; amount: string }[]>([])
+  const [paidRows, setPaidRows] = useState<{ payerName: string; amount: string; paymentMethod: string }[]>([])
+  const [confirmedZero, setConfirmedZero] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -45,16 +52,27 @@ export default function CollectionsPage() {
   const total = (Number(form.cash) || 0) + (Number(form.crdb) || 0) +
     (Number(form.stanbic) || 0) + (Number(form.mpesa) || 0)
 
+  // Reconciliation: Staff Loss = System − Collection − Signed Bills + Paid Bills
+  const signedTotalForm = signedRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+  const paidTotalForm = paidRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
+  const lossPreview = (Number(form.systemSales) || 0) - total - signedTotalForm + paidTotalForm
+  const hasSigned = signedRows.some((r) => r.name && Number(r.amount) > 0)
+  const hasPaid = paidRows.some((r) => r.payerName && Number(r.amount) > 0)
+  // Save gate: for a new collection the cashier must record signed/paid bills OR confirm there are none.
+  const reconciled = !!editingId || hasSigned || hasPaid || confirmedZero
+
   const load = useCallback(async () => {
     setLoading(true)
     const [cols, outs, persons] = await Promise.all([
       request('/api/collections'),
       request('/api/outlets'),
-      request('/api/persons?type=STAFF_LOSS'),
+      request('/api/persons'),
     ])
     setCollections(cols)
     setOutlets(outs)
-    setStaff((persons || []).slice().sort((a: Person, b: Person) => a.name.localeCompare(b.name)))
+    const all: Person[] = persons || []
+    setStaff(all.filter((p) => p.type === 'STAFF_LOSS').sort((a, b) => a.name.localeCompare(b.name)))
+    setPersonNames(all.map((p) => p.name).sort((a, b) => a.localeCompare(b)))
     if (outs.length && !form.outletId) setForm((f) => ({ ...f, outletId: outs[0].id }))
     setLoading(false)
   }, [request])
@@ -64,18 +82,22 @@ export default function CollectionsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (total === 0) return toast.error('Enter at least one amount')
+    if (!reconciled) return toast.error('Record signed bills & payments, or tick "No other bills" to confirm none.')
     setSubmitting(true)
     try {
-      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0 })
+      const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount) }))
+      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod }))
+      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0, signedBills, paidBills })
       const res = editingId
         ? await request(`/api/collections/${editingId}`, { method: 'PUT', body: payload })
         : await request('/api/collections', { method: 'POST', body: payload })
       if (res?.staffLoss) {
-        toast.success(`Saved. Staff loss of ${formatCurrency(res.staffLoss.amount)} recorded for ${res.staffLoss.staffName} → Payroll Deductions.`, { duration: 6000 })
+        toast.success(`Saved. Staff loss of ${formatCurrency(res.staffLoss.amount)} for ${res.staffLoss.staffName} → Payroll Deductions.`, { duration: 6000 })
       } else {
-        toast.success(editingId ? 'Collection updated!' : 'Collection saved!')
+        toast.success(editingId ? 'Collection updated!' : 'Collection saved — balanced, no loss.')
       }
       setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+      setSignedRows([]); setPaidRows([]); setConfirmedZero(false)
       setEditingId(null)
       setShowForm(false)
       load()
@@ -101,6 +123,7 @@ export default function CollectionsPage() {
       outletId: c.outletId || outlets.find((o) => o.name === c.outlet.name)?.id || form.outletId,
       date: format(parseISO(c.date), 'yyyy-MM-dd'),
     })
+    setSignedRows([]); setPaidRows([])
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -108,6 +131,7 @@ export default function CollectionsPage() {
   const newCollection = () => {
     setEditingId(null)
     setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+    setSignedRows([]); setPaidRows([]); setConfirmedZero(false)
     setShowForm((s) => !s)
   }
 
@@ -154,17 +178,18 @@ export default function CollectionsPage() {
       mpesa: acc.mpesa + c.mpesa,
       total: acc.total + c.total,
       systemSales: acc.systemSales + (c.systemSales || 0),
+      creditSales: acc.creditSales + (c.creditSales || 0),
+      paymentsReceived: acc.paymentsReceived + (c.paymentsReceived || 0),
     }),
-    { cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, systemSales: 0 }
+    { cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, systemSales: 0, creditSales: 0, paymentsReceived: 0 }
   )
-  // Variance = System (POS) sales − money actually collected. Positive = shortfall.
-  const variance = totals.systemSales - totals.total
-  // Split per-row so shortfalls and overages are tracked separately (only rows with a system figure)
+  // Net loss across the period (full formula)
+  const variance = totals.systemSales - totals.total - totals.creditSales + totals.paymentsReceived
+  // Split per-row so shortfalls (→ staff loss) and overages are tracked separately
   const { shortfall: totalShortfall, overage: totalOverage } = filtered.reduce(
     (a, c) => {
-      const sys = c.systemSales || 0
-      if (sys <= 0) return a
-      const v = sys - c.total
+      if ((c.systemSales || 0) <= 0) return a
+      const v = rowLoss(c)
       if (v > 0) a.shortfall += v
       else if (v < 0) a.overage += -v
       return a
@@ -250,21 +275,76 @@ export default function CollectionsPage() {
                 <span className="text-2xl font-bold text-indigo-700">{formatCurrency(total)}</span>
               </div>
 
-              {/* Live variance vs System Sales */}
-              {Number(form.systemSales) > 0 && (() => {
-                const v = Number(form.systemSales) - total
-                const short = v > 0
-                return (
-                  <div className={`rounded-xl p-4 flex items-center justify-between ${short ? 'bg-red-50' : 'bg-green-50'}`}>
-                    <span className={`font-semibold ${short ? 'text-red-800' : 'text-green-800'}`}>
-                      {short ? '🔻 Shortfall vs System' : v < 0 ? '🔺 Over System' : '✅ Matches System'}
-                    </span>
-                    <span className={`text-xl font-bold ${short ? 'text-red-700' : 'text-green-700'}`}>
-                      {formatCurrency(Math.abs(v))}
-                    </span>
+              {/* Signed bills + paid bills for this staff (new entries only) */}
+              {!editingId && (
+                <div className="space-y-4">
+                  {/* Signed bills */}
+                  <div className="border-2 border-gray-100 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-semibold text-gray-700 text-sm">🧾 Signed Bills (credit sales by this staff)</span>
+                      <button type="button" onClick={() => setSignedRows([...signedRows, { billType: 'ADMIN', name: '', amount: '' }])}
+                        className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100">➕ New Bill</button>
+                    </div>
+                    {signedRows.length === 0 && <p className="text-xs text-gray-400">Add Admin / Director / Tips / DJ vouchers this staff served on credit.</p>}
+                    {signedRows.map((r, i) => (
+                      <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
+                        <select value={r.billType} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, billType: e.target.value }; setSignedRows(n) }}
+                          className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                          {['ADMIN', 'DIRECTOR', 'TIPS', 'DJ'].map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <input list="personNames" placeholder="Name" value={r.name} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, name: e.target.value }; setSignedRows(n) }}
+                          className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <input type="number" min="0" placeholder="Amount" value={r.amount} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, amount: e.target.value }; setSignedRows(n) }}
+                          className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <button type="button" onClick={() => setSignedRows(signedRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
+                      </div>
+                    ))}
+                    {signedTotalForm > 0 && <p className="text-xs text-gray-500 mt-1">Signed total: <strong>{formatCurrency(signedTotalForm)}</strong></p>}
                   </div>
-                )
-              })()}
+                  {/* Paid bills */}
+                  <div className="border-2 border-gray-100 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-semibold text-gray-700 text-sm">✅ Paid Bills (debt recovered via this staff)</span>
+                      <button type="button" onClick={() => setPaidRows([...paidRows, { payerName: '', amount: '', paymentMethod: 'CASH' }])}
+                        className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100">➕ Record Payment</button>
+                    </div>
+                    {paidRows.length === 0 && <p className="text-xs text-gray-400">Add any old debts this staff collected today.</p>}
+                    {paidRows.map((r, i) => (
+                      <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
+                        <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, payerName: e.target.value }; setPaidRows(n) }}
+                          className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <input type="number" min="0" placeholder="Amount" value={r.amount} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, amount: e.target.value }; setPaidRows(n) }}
+                          className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <select value={r.paymentMethod} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, paymentMethod: e.target.value }; setPaidRows(n) }}
+                          className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                          {['CASH', 'CRDB', 'STANBIC', 'MPESA'].map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        <button type="button" onClick={() => setPaidRows(paidRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
+                      </div>
+                    ))}
+                    {paidTotalForm > 0 && <p className="text-xs text-gray-500 mt-1">Paid total: <strong>{formatCurrency(paidTotalForm)}</strong></p>}
+                  </div>
+                  <datalist id="personNames">{personNames.map((n) => <option key={n} value={n} />)}</datalist>
+                </div>
+              )}
+
+              {/* Live Staff Loss preview (full formula) */}
+              {!editingId && (Number(form.systemSales) > 0 || signedTotalForm > 0 || paidTotalForm > 0) && (
+                <div className={`rounded-xl p-4 ${lossPreview > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className={`font-semibold ${lossPreview > 0 ? 'text-red-800' : 'text-green-800'}`}>
+                      {lossPreview > 0 ? '🔻 Staff Loss (→ Payroll Deductions)' : lossPreview < 0 ? '🔺 Overage' : '✅ Balanced'}
+                    </span>
+                    <span className={`text-2xl font-bold ${lossPreview > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(lossPreview))}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} + Paid {formatCurrency(paidTotalForm)}
+                  </p>
+                </div>
+              )}
+              {editingId && (
+                <p className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">Editing recalculates the staff loss from the figures recorded with this collection. Manage individual signed/paid bills in their own pages.</p>
+              )}
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Notes (Optional)</label>
@@ -273,12 +353,20 @@ export default function CollectionsPage() {
                   rows={2} placeholder="Any notes..." />
               </div>
 
+              {/* Save gate: must record bills or confirm none (new collections) */}
+              {!editingId && !hasSigned && !hasPaid && (
+                <label className="flex items-center gap-2 text-sm bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800">
+                  <input type="checkbox" checked={confirmedZero} onChange={(e) => setConfirmedZero(e.target.checked)} className="w-4 h-4" />
+                  No other signed bills or payments for this staff — confirm to enable Save.
+                </label>
+              )}
+
               <div className="flex gap-3">
-                <button type="submit" disabled={submitting}
+                <button type="submit" disabled={submitting || !reconciled}
                   className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
                   {submitting ? 'Saving...' : editingId ? 'Update Collection' : 'Save Collection'}
                 </button>
-                <button type="button" onClick={() => { setShowForm(false); setEditingId(null) }}
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setSignedRows([]); setPaidRows([]); setConfirmedZero(false) }}
                   className="px-6 py-3 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition">
                   Cancel
                 </button>
@@ -373,7 +461,7 @@ export default function CollectionsPage() {
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map((c) => {
                     const sys = c.systemSales || 0
-                    const v = sys - c.total // + = shortfall
+                    const v = rowLoss(c) // + = staff loss, − = overage
                     return (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-5 py-4 text-gray-700">{formatDateTime(c.date)}</td>

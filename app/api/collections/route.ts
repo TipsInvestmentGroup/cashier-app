@@ -41,6 +41,11 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
+  // Reconciliation inputs entered during the collection flow
+  const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
+  const paidInput: { payerName: string; amount: number; paymentMethod: string }[] = Array.isArray(body.paidBills) ? body.paidBills : []
+  const SIGNED_TYPES = ['ADMIN', 'DIRECTOR', 'TIPS', 'DJ']
+  const PAY_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
 
   const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
   const usedOutletId = outletId || user.outletId
@@ -82,49 +87,92 @@ export async function POST(req: NextRequest) {
   })
 
   await prisma.auditLog.create({
-    data: {
-      userId: user.userId,
-      action: 'CREATE',
-      entity: 'DailyCollection',
-      entityId: collection.id,
-      details: `Total: ${total}`,
-    },
+    data: { userId: user.userId, action: 'CREATE', entity: 'DailyCollection', entityId: collection.id, details: `Total: ${total}` },
   })
 
-  // Auto-create a Staff Loss when the system (POS) sales exceed what was collected.
-  // The shortfall becomes an unpaid STAFF_LOSS bill → flows into Receivables and
-  // the Payroll Deduction report.
-  const shortfall = (Number(systemSales) || 0) - total
+  // 1) Record the staff's signed bills (credit sales: Admin/Director/Tips/DJ)
+  let signedTotal = 0
+  let signedCreated = 0
+  for (let i = 0; i < signedInput.length; i++) {
+    const sb = signedInput[i]
+    const amt = Number(sb.amount) || 0
+    const type = String(sb.billType || '').toUpperCase()
+    if (amt <= 0 || !SIGNED_TYPES.includes(type) || !sb.name) continue
+    const person = await prisma.person.findFirst({ where: { name: sb.name, type } })
+    await prisma.signedBill.create({
+      data: {
+        voucherNumber: `VCH-${collection.id}-${i}`,
+        billType: type,
+        personId: person?.id ?? null,
+        personName: sb.name,
+        amount: amt,
+        serviceStaff: staffName || null,
+        description: `Recorded during daily collection ${collection.id}`,
+        status: 'UNPAID',
+        date: collDate,
+        outletId: usedOutletId,
+        cashierId: user.userId,
+      },
+    })
+    signedTotal += amt
+    signedCreated++
+  }
+
+  // 2) Record paid bills (debt recoveries this staff collected)
+  let paidTotal = 0
+  let paidCreated = 0
+  for (const pb of paidInput) {
+    const amt = Number(pb.amount) || 0
+    const method = String(pb.paymentMethod || 'CASH').toUpperCase()
+    if (amt <= 0 || !PAY_METHODS.includes(method) || !pb.payerName) continue
+    await prisma.paidBill.create({
+      data: {
+        payerName: pb.payerName,
+        amountPaid: amt,
+        paymentMethod: method,
+        notes: `Recovery recorded during daily collection ${collection.id}`,
+        billRef: `COL-${collection.id}`,
+        outletId: usedOutletId,
+        cashierId: user.userId,
+        date: collDate,
+      },
+    })
+    paidTotal += amt
+    paidCreated++
+  }
+
+  // Persist the reconciliation totals on the collection (for list display + edits)
+  await prisma.dailyCollection.update({
+    where: { id: collection.id },
+    data: { creditSales: signedTotal, paymentsReceived: paidTotal },
+  })
+
+  // 3) Staff Loss = System − Collection − SignedBills + PaidBills
+  const lossAmount = (Number(systemSales) || 0) - total - signedTotal + paidTotal
   let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
-  if (staffName && shortfall > 0) {
+  if (staffName && lossAmount > 0) {
     const person = await prisma.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
-    const voucherNumber = `SL-${collection.id}` // unique (derived from collection id)
+    const voucherNumber = `SL-${collection.id}`
     const bill = await prisma.signedBill.create({
       data: {
         voucherNumber,
         billType: 'STAFF_LOSS',
         personId: person?.id ?? null,
         personName: staffName,
-        amount: shortfall,
+        amount: lossAmount,
         serviceStaff: staffName,
-        description: `Auto staff loss: System sales ${Number(systemSales)} − collected ${total} (daily collection ${collection.id})`,
+        description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} + paid ${paidTotal} (collection ${collection.id})`,
         status: 'UNPAID',
-        date: date ? new Date(date) : new Date(),
+        date: collDate,
         outletId: usedOutletId,
         cashierId: user.userId,
       },
     })
     await prisma.auditLog.create({
-      data: {
-        userId: user.userId,
-        action: 'CREATE',
-        entity: 'SignedBill',
-        entityId: bill.id,
-        details: `Auto staff loss ${shortfall} for ${staffName} from collection ${collection.id}`,
-      },
+      data: { userId: user.userId, action: 'CREATE', entity: 'SignedBill', entityId: bill.id, details: `Auto staff loss ${lossAmount} for ${staffName}` },
     })
-    staffLoss = { amount: shortfall, voucher: voucherNumber, staffName }
+    staffLoss = { amount: lossAmount, voucher: voucherNumber, staffName }
   }
 
-  return NextResponse.json({ ...collection, staffLoss }, { status: 201 })
+  return NextResponse.json({ ...collection, staffLoss, signedCreated, paidCreated, signedTotal, paidTotal }, { status: 201 })
 }

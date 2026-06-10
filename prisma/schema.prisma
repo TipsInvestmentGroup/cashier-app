@@ -52,8 +52,10 @@ model DailyCollection {
   stanbic    Float         @default(0)
   mpesa      Float         @default(0)
   total      Float         @default(0)
-  staffName    String?
-  systemSales  Float         @default(0)
+  staffName        String?
+  systemSales      Float         @default(0)
+  creditSales      Float         @default(0)
+  paymentsReceived Float         @default(0)
   notes      String?
   outletId   String
   outlet     Outlet        @relation(fields: [outletId], references: [id])
