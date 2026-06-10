@@ -90,24 +90,28 @@ export default function PayrollPage() {
     }
   }
 
-  const emailReport = async () => {
+  const emailReport = () => {
+    if (emailing) return
+    // Instant feedback: show a loading toast immediately on click, then do the
+    // (slower) send in the background so the UI never blocks.
     setEmailing(true)
-    try {
-      const res = await request('/api/payroll-deductions/email', {
-        method: 'POST',
-        body: JSON.stringify({ month, outletId: outletId || undefined }),
+    const toastId = toast.loading('Sending report to directors…')
+    request('/api/payroll-deductions/email', {
+      method: 'POST',
+      body: JSON.stringify({ month, outletId: outletId || undefined }),
+    })
+      .then((res) => {
+        if (res.mode === 'ethereal' && res.previewUrl) {
+          toast.success('Test email sent — opening preview…', { id: toastId, duration: 5000 })
+          window.open(res.previewUrl, '_blank')
+        } else {
+          toast.success(`Report emailed to ${res.recipients.length} director(s)`, { id: toastId })
+        }
       })
-      if (res.mode === 'ethereal' && res.previewUrl) {
-        toast.success('Test email sent — opening preview…', { duration: 5000 })
-        window.open(res.previewUrl, '_blank')
-      } else {
-        toast.success(`Report emailed to ${res.recipients.length} director(s)`)
-      }
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error sending email')
-    } finally {
-      setEmailing(false)
-    }
+      .catch((err: unknown) => {
+        toast.error(err instanceof Error ? err.message : 'Error sending email', { id: toastId })
+      })
+      .finally(() => setEmailing(false))
   }
 
   const exportRows = () =>
