@@ -1,0 +1,68 @@
+import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
+
+export function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('en-TZ', {
+    style: 'currency',
+    currency: 'TZS',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+export function formatDate(date: Date | string): string {
+  return format(new Date(date), 'dd MMM yyyy')
+}
+
+export function formatDateTime(date: Date | string): string {
+  return format(new Date(date), 'dd MMM yyyy HH:mm')
+}
+
+export function getTodayRange() {
+  const now = new Date()
+  return { start: startOfDay(now), end: endOfDay(now) }
+}
+
+export function getWeekRange() {
+  const now = new Date()
+  return { start: startOfWeek(now), end: endOfWeek(now) }
+}
+
+export function getMonthRange() {
+  const now = new Date()
+  return { start: startOfMonth(now), end: endOfMonth(now) }
+}
+
+export function generateVoucherNumber(): string {
+  const now = new Date()
+  const dateStr = format(now, 'yyyyMMdd')
+  const rand = Math.floor(Math.random() * 9000) + 1000
+  return `VCH-${dateStr}-${rand}`
+}
+
+export function cn(...classes: (string | undefined | null | false)[]): string {
+  return classes.filter(Boolean).join(' ')
+}
+
+export const BILL_TYPE_COLORS: Record<string, string> = {
+  ADMIN: 'bg-blue-100 text-blue-800',
+  DIRECTOR: 'bg-purple-100 text-purple-800',
+  CUSTOMER: 'bg-green-100 text-green-800',
+  TIPS: 'bg-yellow-100 text-yellow-800',
+  DJ: 'bg-pink-100 text-pink-800',
+  STAFF_LOSS: 'bg-red-100 text-red-800',
+}
+
+export const BILL_TYPE_LABELS: Record<string, string> = {
+  ADMIN: 'Admin Bill',
+  DIRECTOR: 'Director Bill',
+  CUSTOMER: 'Customer Bill',
+  TIPS: 'Tips Bill',
+  DJ: 'DJ Bill',
+  STAFF_LOSS: 'Staff Loss',
+}
+
+export const STATUS_COLORS: Record<string, string> = {
+  UNPAID: 'bg-red-100 text-red-700',
+  PARTIAL: 'bg-yellow-100 text-yellow-700',
+  PAID: 'bg-green-100 text-green-700',
+}

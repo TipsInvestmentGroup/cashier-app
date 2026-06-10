@@ -1,0 +1,94 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import { getAuthUser } from '@/lib/auth'
+import { generateVoucherNumber } from '@/lib/utils'
+
+export async function GET(req: NextRequest) {
+  const user = getAuthUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const { searchParams } = new URL(req.url)
+  const outletId = searchParams.get('outletId')
+  const billType = searchParams.get('billType')
+  const status = searchParams.get('status')
+  const startDate = searchParams.get('startDate')
+  const endDate = searchParams.get('endDate')
+
+  const where: Record<string, unknown> = {}
+  if (outletId) where.outletId = outletId
+  else if (user.outletId && !['ADMIN', 'DIRECTOR', 'MANAGER', 'ACCOUNTANT'].includes(user.role)) {
+    where.outletId = user.outletId
+  }
+  if (billType) where.billType = billType
+  if (status) where.status = status
+  if (startDate && endDate) {
+    where.date = { gte: new Date(startDate), lte: new Date(endDate) }
+  }
+
+  const bills = await prisma.signedBill.findMany({
+    where,
+    include: {
+      outlet: true,
+      cashier: { select: { name: true } },
+      person: true,
+      payments: true,
+    },
+    orderBy: { date: 'desc' },
+    take: 200,
+  })
+
+  return NextResponse.json(bills)
+}
+
+export async function POST(req: NextRequest) {
+  const user = getAuthUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const body = await req.json()
+  const {
+    billType, personId, personName, amount, serviceStaff,
+    description, dueDate, outletId, date,
+  } = body
+
+  const usedOutletId = outletId || user.outletId
+  if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
+
+  const voucherNumber = generateVoucherNumber()
+
+  let limitExceeded = false
+  let exceededAmount = 0
+
+  if (personId && ['ADMIN', 'DIRECTOR'].includes(billType)) {
+    const person = await prisma.person.findUnique({ where: { id: personId } })
+    if (person && person.creditLimit > 0) {
+      const outstanding = await prisma.signedBill.aggregate({
+        where: { personId, status: { not: 'PAID' } },
+        _sum: { amount: true },
+      })
+      const totalOwed = (outstanding._sum.amount || 0) + Number(amount)
+      if (totalOwed > person.creditLimit) {
+        limitExceeded = true
+        exceededAmount = totalOwed - person.creditLimit
+      }
+    }
+  }
+
+  const bill = await prisma.signedBill.create({
+    data: {
+      billType,
+      personId: personId || null,
+      personName,
+      amount: Number(amount),
+      serviceStaff,
+      description,
+      dueDate: dueDate ? new Date(dueDate) : null,
+      voucherNumber,
+      outletId: usedOutletId,
+      cashierId: user.userId,
+      date: date ? new Date(date) : new Date(),
+    },
+    include: { outlet: true, person: true },
+  })
+
+  return NextResponse.json({ ...bill, limitExceeded, exceededAmount }, { status: 201 })
+}

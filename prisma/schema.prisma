@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// NOTE: SQLite does not support native enums. The following values are
+// enforced at the application layer:
+//   Role:          CASHIER | ACCOUNTANT | MANAGER | DIRECTOR | ADMIN
+//   PaymentMethod: CASH | CRDB | STANBIC | MPESA
+//   BillType:      ADMIN | DIRECTOR | CUSTOMER | TIPS | DJ | STAFF_LOSS
+//   BillStatus:    UNPAID | PARTIAL | PAID
+
+model User {
+  id          String   @id @default(cuid())
+  name        String
+  email       String   @unique
+  password    String
+  role        String
+  outletId    String?
+  outlet      Outlet?  @relation(fields: [outletId], references: [id])
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  dailyCollections DailyCollection[]
+  signedBills      SignedBill[]
+  paidBills        PaidBill[]
+  auditLogs        AuditLog[]
+}
+
+model Outlet {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  location    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  users            User[]
+  dailyCollections DailyCollection[]
+  signedBills      SignedBill[]
+  paidBills        PaidBill[]
+}
+
+model DailyCollection {
+  id         String        @id @default(cuid())
+  date       DateTime      @default(now())
+  cash       Float         @default(0)
+  crdb       Float         @default(0)
+  stanbic    Float         @default(0)
+  mpesa      Float         @default(0)
+  total      Float         @default(0)
+  notes      String?
+  outletId   String
+  outlet     Outlet        @relation(fields: [outletId], references: [id])
+  cashierId  String
+  cashier    User          @relation(fields: [cashierId], references: [id])
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([date])
+  @@index([outletId])
+}
+
+model Person {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  email       String?
+  type        String
+  creditLimit Float    @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  signedBills SignedBill[]
+  paidBills   PaidBill[]
+
+  @@index([type])
+}
+
+model SignedBill {
+  id            String     @id @default(cuid())
+  date          DateTime   @default(now())
+  voucherNumber String     @unique
+  billType      String
+  personId      String?
+  person        Person?    @relation(fields: [personId], references: [id])
+  personName    String
+  amount        Float
+  serviceStaff  String?
+  description   String?
+  dueDate       DateTime?
+  status        String     @default("UNPAID")
+  outletId      String
+  outlet        Outlet     @relation(fields: [outletId], references: [id])
+  cashierId     String
+  cashier       User       @relation(fields: [cashierId], references: [id])
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  payments      PaidBill[]
+
+  @@index([date])
+  @@index([billType])
+  @@index([status])
+  @@index([outletId])
+  @@index([personId])
+}
+
+model PaidBill {
+  id            String        @id @default(cuid())
+  date          DateTime      @default(now())
+  billRef       String?
+  signedBillId  String?
+  signedBill    SignedBill?   @relation(fields: [signedBillId], references: [id])
+  personId      String?
+  person        Person?       @relation(fields: [personId], references: [id])
+  payerName     String
+  amountPaid    Float
+  paymentMethod String
+  notes         String?
+  outletId      String
+  outlet        Outlet        @relation(fields: [outletId], references: [id])
+  cashierId     String
+  cashier       User          @relation(fields: [cashierId], references: [id])
+  createdAt     DateTime      @default(now())
+
+  @@index([date])
+  @@index([outletId])
+  @@index([signedBillId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity])
+  @@index([createdAt])
+}
