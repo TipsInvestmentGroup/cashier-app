@@ -8,7 +8,11 @@ export default defineConfig({
   datasource: {
     // Use the DIRECT (unpooled) connection for schema push / migrations.
     // Neon's pooled URL can fail DDL; the unpooled one is reliable for `db push`.
-    url: process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL || 'file:./dev.db',
+    url:
+      process.env.DATABASE_URL_UNPOOLED ||
+      process.env.POSTGRES_URL_NON_POOLING ||
+      process.env.DATABASE_URL ||
+      'file:./dev.db',
   },
   migrations: {
     seed: 'npx tsx prisma/seed.ts',

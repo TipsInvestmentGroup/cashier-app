@@ -9,7 +9,11 @@ import { dirname, join } from 'node:path'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const schemaPath = join(__dirname, '..', 'prisma', 'schema.prisma')
 
-const url = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL || 'file:./dev.db'
+const url =
+  process.env.DATABASE_URL_UNPOOLED ||
+  process.env.POSTGRES_URL_NON_POOLING ||
+  process.env.DATABASE_URL ||
+  'file:./dev.db'
 const provider = /^postgres(ql)?:\/\//.test(url) ? 'postgresql' : 'sqlite'
 
 let schema = readFileSync(schemaPath, 'utf8')
