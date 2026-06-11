@@ -55,7 +55,7 @@ export default function ReceivablesPage() {
     return true
   })
 
-  const types = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'STAFF_LOSS']
+  const types = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'STAFF_LOSS', 'TIPS', 'DJ']
 
   return (
     <AppShell>

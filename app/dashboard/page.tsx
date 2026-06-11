@@ -13,6 +13,7 @@ interface DashboardData {
   today: { total: number; cash: number; crdb: number; stanbic: number; mpesa: number }
   week: { total: number }
   month: { total: number }
+  byBillType: Record<string, number>
   unpaidBills: { total: number; count: number }
   topDebtors: { personName: string; _sum: { amount: number } }[]
   outletPerformance: { name: string; total: number; todayTotal: number; todaySystem: number; todayLoss: number; outstanding: number }[]
@@ -120,6 +121,38 @@ export default function DashboardPage() {
               <p className="text-lg font-bold text-gray-800">{formatCurrency(item.value)}</p>
             </div>
           ))}
+        </div>
+
+        {/* Outstanding Receivables by Category (incl. Tips & DJ) + by Outlet */}
+        <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
+          <h3 className="font-semibold text-gray-800 mb-4">📂 Outstanding Receivables by Category</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {[
+              { k: 'ADMIN', label: 'Admin' }, { k: 'DIRECTOR', label: 'Director' }, { k: 'CUSTOMER', label: 'Customer' },
+              { k: 'TIPS', label: 'Tips' }, { k: 'DJ', label: 'DJ' }, { k: 'STAFF_LOSS', label: 'Staff Loss' },
+            ].map((c) => (
+              <div key={c.k} className="rounded-xl border-2 p-4" style={{ borderColor: (BILL_TYPE_COLORS[c.k] || '#e5e7eb') + '55' }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BILL_TYPE_COLORS[c.k] || '#9ca3af' }} />
+                  <span className="text-xs font-semibold text-gray-600">{c.label}</span>
+                </div>
+                <p className="text-lg font-bold text-gray-800">{formatCurrency(data.byBillType[c.k] || 0)}</p>
+              </div>
+            ))}
+          </div>
+          {data.outletPerformance.length > 0 && (
+            <>
+              <h4 className="text-sm font-semibold text-gray-500 mt-5 mb-2">By Outlet</h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {data.outletPerformance.map((o, i) => (
+                  <div key={i} className="rounded-xl border-2 border-gray-100 p-4">
+                    <div className="flex items-center gap-2 mb-1"><span>🏢</span><span className="text-xs font-semibold text-gray-600 truncate">{o.name}</span></div>
+                    <p className="text-lg font-bold text-gray-800">{formatCurrency(o.outstanding)}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Charts Row */}

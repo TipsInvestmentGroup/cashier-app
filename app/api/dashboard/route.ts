@@ -95,6 +95,15 @@ export async function GET(req: NextRequest) {
     }),
   ])
 
+  // Outstanding signed bills grouped by category (Admin/Director/Customer/Tips/DJ/Staff Loss)
+  const byTypeRaw = await prisma.signedBill.groupBy({
+    by: ['billType'],
+    where: { ...outletFilter, status: { not: 'PAID' } },
+    _sum: { amount: true },
+  })
+  const byBillType: Record<string, number> = {}
+  for (const r of byTypeRaw) byBillType[r.billType] = r._sum.amount || 0
+
   const outletPerformance = outletStats.map((o) => {
     const t = todayByOutlet.find((x) => x.outletId === o.id)
     const todayTotal = t?._sum.total || 0
@@ -122,6 +131,7 @@ export async function GET(req: NextRequest) {
     },
     week: { total: weekCollections._sum.total || 0 },
     month: { total: monthCollections._sum.total || 0 },
+    byBillType,
     unpaidBills: {
       total: unpaidBills._sum.amount || 0,
       count: unpaidBills._count,
