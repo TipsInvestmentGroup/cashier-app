@@ -121,6 +121,7 @@ model PaidBill {
   signedBill    SignedBill?   @relation(fields: [signedBillId], references: [id])
   personId      String?
   person        Person?       @relation(fields: [personId], references: [id])
+  payerCategory String?
   payerName     String
   amountPaid    Float
   paymentMethod String

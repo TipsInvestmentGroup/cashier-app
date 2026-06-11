@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { signedBillId, personId, payerName, amountPaid, paymentMethod, notes, outletId, date, billRef } = body
+  const { signedBillId, personId, payerName, payerCategory, amountPaid, paymentMethod, notes, outletId, date, billRef } = body
 
   const usedOutletId = outletId || user.outletId
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     data: {
       signedBillId: signedBillId || null,
       personId: personId || null,
+      payerCategory: payerCategory || null,
       payerName,
       amountPaid: Number(amountPaid),
       paymentMethod,

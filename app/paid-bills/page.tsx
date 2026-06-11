@@ -11,12 +11,22 @@ import { SearchBox } from '@/components/SearchBox'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface PaidBill {
-  id: string; date: string; payerName: string; amountPaid: number; paymentMethod: string
+  id: string; date: string; payerName: string; payerCategory?: string; amountPaid: number; paymentMethod: string
   outlet: { name: string }; cashier: { name: string }; notes?: string; billRef?: string
   signedBill?: { voucherNumber: string; amount: number; personName: string }
 }
 interface SignedBill { id: string; voucherNumber: string; personName: string; amount: number; billType: string; status: string }
 interface Outlet { id: string; name: string }
+interface Person { id: string; name: string; type: string }
+
+// Payment categories → person type used to suggest payers
+const PAY_CATEGORIES = [
+  { label: 'Customer', type: 'CUSTOMER' },
+  { label: 'Staff Loss', type: 'STAFF_LOSS' },
+  { label: 'Admin', type: 'ADMIN' },
+  { label: 'Director', type: 'DIRECTOR' },
+  { label: 'Sponsors & Partners', type: 'TIPS' },
+]
 
 const PAYMENT_METHODS = [
   { value: 'CASH', label: '💵 Cash', color: 'bg-green-100 text-green-800' },
@@ -32,6 +42,7 @@ export default function PaidBillsPage() {
   const [paidBills, setPaidBills] = useState<PaidBill[]>([])
   const [signedBills, setSignedBills] = useState<SignedBill[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
+  const [persons, setPersons] = useState<Person[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -40,20 +51,22 @@ export default function PaidBillsPage() {
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({
-    signedBillId: '', payerName: '', amountPaid: '', paymentMethod: 'CASH',
+    signedBillId: '', payerCategory: '', payerName: '', amountPaid: '', paymentMethod: 'CASH',
     notes: '', outletId: user?.outlet?.id || '', date: format(new Date(), 'yyyy-MM-dd'), billRef: '',
   })
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [pb, sb, o] = await Promise.all([
+    const [pb, sb, o, ps] = await Promise.all([
       request('/api/paid-bills'),
       request('/api/signed-bills?status=UNPAID'),
       request('/api/outlets'),
+      request('/api/persons'),
     ])
     setPaidBills(pb)
     setSignedBills(sb.filter((b: SignedBill) => b.status !== 'PAID'))
     setOutlets(o)
+    setPersons(ps || [])
     if (o.length && !form.outletId) setForm((f) => ({ ...f, outletId: user?.outlet?.id || o[0].id }))
     setLoading(false)
   }, [request, user])
@@ -80,7 +93,7 @@ export default function PaidBillsPage() {
         body: JSON.stringify({ ...form, amountPaid: Number(form.amountPaid) }),
       })
       toast.success('Payment recorded successfully!')
-      setForm({ signedBillId: '', payerName: '', amountPaid: '', paymentMethod: 'CASH', notes: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd'), billRef: '' })
+      setForm({ signedBillId: '', payerCategory: '', payerName: '', amountPaid: '', paymentMethod: 'CASH', notes: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd'), billRef: '' })
       setShowForm(false)
       load()
     } catch (err: unknown) {
@@ -162,12 +175,31 @@ export default function PaidBillsPage() {
                 </div>
               </div>
 
+              {/* Payment Category */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Category</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                  {PAY_CATEGORIES.map((c) => (
+                    <button key={c.label} type="button"
+                      onClick={() => setForm({ ...form, payerCategory: c.label })}
+                      className={`py-2.5 px-2 rounded-xl text-sm font-medium transition text-center ${form.payerCategory === c.label ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Payer Name *</label>
-                  <input type="text" value={form.payerName} onChange={(e) => setForm({ ...form, payerName: e.target.value })}
+                  <input type="text" list="payerOptions" value={form.payerName} onChange={(e) => setForm({ ...form, payerName: e.target.value })}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none"
-                    placeholder="Who is paying?" required />
+                    placeholder={form.payerCategory ? `Select / type a ${form.payerCategory} name` : 'Who is paying?'} required />
+                  <datalist id="payerOptions">
+                    {persons
+                      .filter((p) => { const cat = PAY_CATEGORIES.find((c) => c.label === form.payerCategory); return !cat || p.type === cat.type })
+                      .map((p) => <option key={p.id} value={p.name} />)}
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Amount Paid (TZS) *</label>
@@ -243,6 +275,7 @@ export default function PaidBillsPage() {
                   <tr className="text-left text-gray-600">
                     <th className="px-4 py-3 font-semibold">Date</th>
                     <th className="px-4 py-3 font-semibold">Payer</th>
+                    <th className="px-4 py-3 font-semibold">Category</th>
                     <th className="px-4 py-3 font-semibold">Linked Bill</th>
                     <th className="px-4 py-3 font-semibold">Amount Paid</th>
                     <th className="px-4 py-3 font-semibold">Method</th>
@@ -257,6 +290,7 @@ export default function PaidBillsPage() {
                       <tr key={p.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-600">{formatDate(p.date)}</td>
                         <td className="px-4 py-3 font-medium text-gray-800">{p.payerName}</td>
+                        <td className="px-4 py-3 text-gray-600">{p.payerCategory || '-'}</td>
                         <td className="px-4 py-3 text-gray-500 font-mono text-xs">
                           {p.signedBill ? `${p.signedBill.voucherNumber}` : '-'}
                         </td>
@@ -272,13 +306,13 @@ export default function PaidBillsPage() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-12 text-gray-400">No payments in this period</td></tr>
+                    <tr><td colSpan={8} className="text-center py-12 text-gray-400">No payments in this period</td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr className="font-bold text-gray-900">
-                      <td className="px-4 py-3" colSpan={3}>TOTAL ({filtered.length})</td>
+                      <td className="px-4 py-3" colSpan={4}>TOTAL ({filtered.length})</td>
                       <td className="px-4 py-3 text-green-700">{formatCurrency(totalReceived)}</td>
                       <td className="px-4 py-3" colSpan={3}></td>
                     </tr>
