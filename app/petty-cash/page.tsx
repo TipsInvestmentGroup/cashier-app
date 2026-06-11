@@ -5,6 +5,8 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
+import { DateRangeFilter } from '@/components/DateRangeFilter'
+import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 
@@ -33,7 +35,12 @@ export default function PettyCashPage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [search, setSearch] = useState('')
+  const [range, setRange] = useState<RangeKey>('month')
+  const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({ ...INIT, requestedBy: user?.name || '' })
+
+  const canApprove = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -63,8 +70,61 @@ export default function PettyCashPage() {
   }
 
   const q = search.trim().toLowerCase()
-  const filtered = items.filter((i) => !q || `${i.requestedBy} ${i.purpose} ${i.department || ''} ${i.payeeName || ''}`.toLowerCase().includes(q))
+  const filtered = items.filter((i) => {
+    if (!inRange(i.date, range, customFrom, customTo)) return false
+    if (q && !`${i.requestedBy} ${i.purpose} ${i.department || ''} ${i.payeeName || ''}`.toLowerCase().includes(q)) return false
+    return true
+  })
   const total = filtered.reduce((s, i) => s + i.amount, 0)
+
+  const act = async (id: string, action: 'approve' | 'reject') => {
+    try {
+      await request(`/api/petty-cash/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) })
+      toast.success(action === 'approve' ? 'Request approved' : 'Request rejected')
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error updating request')
+    }
+  }
+
+  const exportRows = () => filtered.map((i) => ({
+    Date: formatDate(i.date), 'Requested By': i.requestedBy, Department: i.department || '',
+    Purpose: i.purpose, Amount: i.amount, 'Payment Method': i.paymentMethod,
+    Payee: i.payeeName || '', 'Payee Account': i.payeeAccount || '', Status: i.status, 'Approved By': i.approvedBy || '',
+  }))
+  const fileBase = `petty-cash-${format(new Date(), 'yyyy-MM-dd')}`
+
+  const exportCSV = () => {
+    const rows = exportRows()
+    if (!rows.length) return toast.error('No data to export')
+    const keys = Object.keys(rows[0])
+    const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => `"${(r as Record<string, unknown>)[k] ?? ''}"`).join(','))].join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a'); a.href = url; a.download = `${fileBase}.csv`; a.click(); URL.revokeObjectURL(url)
+    toast.success('CSV exported!')
+  }
+  const exportExcel = async () => {
+    const rows = exportRows()
+    if (!rows.length) return toast.error('No data to export')
+    const XLSX = await import('xlsx')
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Petty Cash')
+    XLSX.writeFile(wb, `${fileBase}.xlsx`)
+    toast.success('Excel exported!')
+  }
+  const exportPDF = async () => {
+    const rows = exportRows()
+    if (!rows.length) return toast.error('No data to export')
+    const { jsPDF } = await import('jspdf')
+    const autoTable = (await import('jspdf-autotable')).default
+    const keys = Object.keys(rows[0])
+    const doc = new jsPDF({ orientation: 'landscape' })
+    doc.setFontSize(14); doc.text('Petty Cash Requests', 14, 16)
+    doc.setFontSize(9); doc.text(`Total: ${formatCurrency(total)}`, 14, 22)
+    autoTable(doc, { startY: 26, head: [keys], body: rows.map((r) => keys.map((k) => String((r as Record<string, unknown>)[k] ?? ''))), styles: { fontSize: 7 }, headStyles: { fillColor: [79, 70, 229] } })
+    doc.save(`${fileBase}.pdf`)
+    toast.success('PDF exported!')
+  }
 
   return (
     <AppShell>
@@ -91,8 +151,17 @@ export default function PettyCashPage() {
 
             <SearchBox value={search} onChange={setSearch} placeholder="Search by requester, purpose, department or payee…" />
 
+            <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
+
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="p-4 border-b border-gray-100"><h2 className="font-semibold text-gray-800">Cash Requests</h2></div>
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+                <h2 className="font-semibold text-gray-800">Cash Requests <span className="text-gray-400 font-normal text-sm">· {RANGE_OPTIONS.find((r) => r.key === range)?.label}</span></h2>
+                <div className="flex gap-2">
+                  <button onClick={exportCSV} className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200 transition">📄 CSV</button>
+                  <button onClick={exportExcel} className="px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition">📊 Excel</button>
+                  <button onClick={exportPDF} className="px-3 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition">📕 PDF</button>
+                </div>
+              </div>
               {loading ? (
                 <div className="py-16 text-center text-gray-400">Loading…</div>
               ) : (
@@ -108,6 +177,7 @@ export default function PettyCashPage() {
                         <th className="px-4 py-3 font-semibold">Method</th>
                         <th className="px-4 py-3 font-semibold">Payee</th>
                         <th className="px-4 py-3 font-semibold">Status</th>
+                        {canApprove && <th className="px-4 py-3 font-semibold text-right">Action</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -121,14 +191,24 @@ export default function PettyCashPage() {
                           <td className="px-4 py-3 text-gray-500">{i.paymentMethod}</td>
                           <td className="px-4 py-3 text-gray-500">{i.payeeName || '-'}</td>
                           <td className="px-4 py-3">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${i.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                              {i.status === 'APPROVED' ? `✓ ${i.approvedBy || 'Approved'}` : 'Pending'}
+                            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${i.status === 'APPROVED' ? 'bg-green-100 text-green-700' : i.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                              {i.status === 'APPROVED' ? `✓ ${i.approvedBy || 'Approved'}` : i.status === 'REJECTED' ? `✕ Rejected` : 'Pending'}
                             </span>
                           </td>
+                          {canApprove && (
+                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                              {i.status === 'PENDING' ? (
+                                <>
+                                  <button onClick={() => act(i.id, 'approve')} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 mr-1">Approve</button>
+                                  <button onClick={() => act(i.id, 'reject')} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Reject</button>
+                                </>
+                              ) : <span className="text-gray-300 text-xs">—</span>}
+                            </td>
+                          )}
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={8} className="text-center py-12 text-gray-400">No cash requests yet</td></tr>
+                        <tr><td colSpan={canApprove ? 9 : 8} className="text-center py-12 text-gray-400">No cash requests in this period</td></tr>
                       )}
                     </tbody>
                     {filtered.length > 0 && (
@@ -136,7 +216,7 @@ export default function PettyCashPage() {
                         <tr>
                           <td className="px-4 py-3" colSpan={4}>TOTAL ({filtered.length})</td>
                           <td className="px-4 py-3 text-indigo-700">{formatCurrency(total)}</td>
-                          <td className="px-4 py-3" colSpan={3}></td>
+                          <td className="px-4 py-3" colSpan={canApprove ? 4 : 3}></td>
                         </tr>
                       </tfoot>
                     )}
