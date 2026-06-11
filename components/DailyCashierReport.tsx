@@ -28,14 +28,16 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [outletId, setOutletId] = useState('')
-  const [groupBy, setGroupBy] = useState<'staff' | 'outlet'>('staff')
+  const [groupBy, setGroupBy] = useState<'staff' | 'outlet' | 'customer' | 'admin' | 'director'>('staff')
+  const peopleGroup = groupBy === 'customer' || groupBy === 'admin' || groupBy === 'director'
   const [search, setSearch] = useState('')
   // Detail modal
   const [detailKey, setDetailKey] = useState<string | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [detail, setDetail] = useState<{ rows: any[]; totals: any } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [data, setData] = useState<ReportResp | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
 
   const interval = getRangeInterval(range, customFrom, customTo)
@@ -60,7 +62,8 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const signedKeys = data?.signedKeys || []
   const paidKeys = (data?.paidKeys || []).filter((k) => k !== 'OTHER')
   const q = search.trim().toLowerCase()
-  const visibleRows = (data?.rows || []).filter((r) => !q || r.staffName.toLowerCase().includes(q))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const visibleRows = (data?.rows || []).filter((r: any) => !q || String(r.staffName ?? r.name ?? '').toLowerCase().includes(q))
 
   const openDetail = async (key: string) => {
     setDetailKey(key); setDetail(null); setDetailLoading(true)
@@ -75,17 +78,26 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
     }
   }
 
-  const labelHeader = groupBy === 'outlet' ? 'Outlet' : 'Staff'
-  const fileBase = `cashier-report-${from}_to_${to}`
+  const labelHeader = groupBy === 'outlet' ? 'Outlet' : groupBy === 'customer' ? 'Customer'
+    : groupBy === 'admin' ? 'Admin' : groupBy === 'director' ? 'Director' : 'Staff'
+  const fileBase = `${groupBy}-report-${from}_to_${to}`
 
   // Shared header + numeric body for all export formats
   const buildTable = () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: any[] = data?.rows || []
+    if (groupBy === 'customer') {
+      return { header: ['Customer', 'Debt', 'Paid', 'Unpaid Balance'], body: rows.map((r) => [r.name, r.debt, r.paid, r.unpaid] as (string | number)[]) }
+    }
+    if (peopleGroup) { // admin / director
+      return { header: [labelHeader, 'Amount Spent', 'Credit Limit', 'Deduction'], body: rows.map((r) => [r.name, r.spent, r.creditLimit, r.deduction] as (string | number)[]) }
+    }
     const header = [
       labelHeader, 'System Sales', 'Cash', 'CRDB', 'Stanbic', 'M-PESA', 'Collection',
       ...signedKeys.map((k) => `Signed ${SIGNED_LABELS[k]}`), 'Signed Total',
       ...paidKeys.map((k) => `Paid ${PAID_LABELS[k]}`), 'Paid Total', 'Net Collection',
     ]
-    const body = (data?.rows || []).map((r) => [
+    const body = rows.map((r) => [
       r.staffName, r.systemSales, r.cash, r.crdb, r.stanbic, r.mpesa, r.total,
       ...signedKeys.map((k) => r.signed[k] || 0), r.signed.total,
       ...paidKeys.map((k) => r.paid[k] || 0), r.paid.total, r.netCollection,
@@ -173,10 +185,10 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">Group by</label>
-            <div className="flex gap-1">
-              {(['staff', 'outlet'] as const).map((g) => (
-                <button key={g} onClick={() => setGroupBy(g)}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium capitalize transition ${groupBy === g ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+            <div className="flex gap-1 flex-wrap">
+              {(['staff', 'outlet', 'customer', 'admin', 'director'] as const).map((g) => (
+                <button key={g} onClick={() => { setGroupBy(g); setSearch('') }}
+                  className={`px-3 py-2 rounded-xl text-sm font-medium capitalize transition ${groupBy === g ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                   {g}
                 </button>
               ))}
@@ -191,17 +203,35 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
         </div>
       </div>
 
-      {/* Summary cards */}
-      {data && (
+      {/* Summary cards — staff/outlet */}
+      {data && !peopleGroup && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-2xl p-4 shadow">
             <p className="text-indigo-100 text-xs">Net Collection</p>
             <p className="text-2xl font-bold mt-1">{formatCurrency(data.totals.netCollection)}</p>
-            <p className="text-indigo-200 text-xs mt-1">{data.rows.length} staff</p>
+            <p className="text-indigo-200 text-xs mt-1">{data.rows.length} {labelHeader.toLowerCase()}</p>
           </div>
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">🧾 System Sales</p><p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(data.totals.systemSales)}</p></div>
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">💰 Collection</p><p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(data.totals.total)}</p></div>
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">✅ Paid Bills</p><p className="text-lg font-bold mt-1 text-green-700">{formatCurrency(data.totals.paidTotal)}</p></div>
+        </div>
+      )}
+
+      {/* Summary cards — customer */}
+      {data && groupBy === 'customer' && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">📋 Total Debt</p><p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(data.totals.debt)}</p></div>
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">✅ Paid</p><p className="text-lg font-bold mt-1 text-green-700">{formatCurrency(data.totals.paid)}</p></div>
+          <div className="bg-gradient-to-br from-red-500 to-red-600 text-white rounded-2xl p-4 shadow col-span-2 lg:col-span-1"><p className="text-red-100 text-xs">Unpaid Balance</p><p className="text-2xl font-bold mt-1">{formatCurrency(data.totals.unpaid)}</p><p className="text-red-200 text-xs mt-1">{data.rows.length} customers</p></div>
+        </div>
+      )}
+
+      {/* Summary cards — admin/director */}
+      {data && (groupBy === 'admin' || groupBy === 'director') && (
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">💳 Amount Spent</p><p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(data.totals.spent)}</p></div>
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">🎯 Total Credit Limit</p><p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(data.totals.creditLimit)}</p></div>
+          <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-2xl p-4 shadow col-span-2 lg:col-span-1"><p className="text-orange-100 text-xs">Payroll Deduction</p><p className="text-2xl font-bold mt-1">{formatCurrency(data.totals.deduction)}</p><p className="text-orange-200 text-xs mt-1">{data.rows.length} {labelHeader.toLowerCase()}s</p></div>
         </div>
       )}
 
@@ -247,7 +277,71 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
         {loading ? (
           <div className="flex items-center justify-center py-16 text-gray-400">Generating report…</div>
         ) : !data || data.rows.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">No cashier activity for this period.</div>
+          <div className="text-center py-16 text-gray-400">No activity for this period.</div>
+        ) : peopleGroup ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                {groupBy === 'customer' ? (
+                  <tr className="text-left text-gray-600">
+                    <th className="px-4 py-3 font-semibold">Customer</th>
+                    <th className="px-4 py-3 font-semibold text-right">Debt</th>
+                    <th className="px-4 py-3 font-semibold text-right">Paid</th>
+                    <th className="px-4 py-3 font-semibold text-right">Unpaid Balance</th>
+                  </tr>
+                ) : (
+                  <tr className="text-left text-gray-600">
+                    <th className="px-4 py-3 font-semibold">{labelHeader}</th>
+                    <th className="px-4 py-3 font-semibold text-right">Amount Spent</th>
+                    <th className="px-4 py-3 font-semibold text-right">Credit Limit</th>
+                    <th className="px-4 py-3 font-semibold text-right">Deduction</th>
+                  </tr>
+                )}
+              </thead>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              <tbody className="divide-y divide-gray-50">
+                {visibleRows.length === 0 && (
+                  <tr><td colSpan={4} className="text-center py-8 text-gray-400">No match for “{search}”.</td></tr>
+                )}
+                {groupBy === 'customer'
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  ? visibleRows.map((r: any, i: number) => (
+                    <tr key={i} className={`hover:bg-gray-50 ${r.unpaid > 0 ? 'bg-red-50/40' : ''}`}>
+                      <td className="px-4 py-3 font-medium text-gray-800">{r.name}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.debt)}</td>
+                      <td className="px-4 py-3 text-right text-green-700">{formatCurrency(r.paid)}</td>
+                      <td className={`px-4 py-3 text-right font-bold ${r.unpaid > 0 ? 'text-red-600' : 'text-gray-500'}`}>{formatCurrency(r.unpaid)}</td>
+                    </tr>
+                  ))
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  : visibleRows.map((r: any, i: number) => (
+                    <tr key={i} className={`hover:bg-gray-50 ${r.deduction > 0 ? 'bg-red-50/40' : ''}`}>
+                      <td className="px-4 py-3 font-medium text-gray-800">{r.name}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.spent)}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{formatCurrency(r.creditLimit)}</td>
+                      <td className={`px-4 py-3 text-right font-bold ${r.deduction > 0 ? 'text-red-600' : 'text-gray-400'}`}>{r.deduction > 0 ? formatCurrency(r.deduction) : '-'}</td>
+                    </tr>
+                  ))}
+              </tbody>
+              <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900">
+                {groupBy === 'customer' ? (
+                  <tr>
+                    <td className="px-4 py-3">TOTAL</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(data.totals.debt)}</td>
+                    <td className="px-4 py-3 text-right text-green-700">{formatCurrency(data.totals.paid)}</td>
+                    <td className="px-4 py-3 text-right text-red-700">{formatCurrency(data.totals.unpaid)}</td>
+                  </tr>
+                ) : (
+                  <tr>
+                    <td className="px-4 py-3">TOTAL</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(data.totals.spent)}</td>
+                    <td className="px-4 py-3 text-right">{formatCurrency(data.totals.creditLimit)}</td>
+                    <td className="px-4 py-3 text-right text-orange-700">{formatCurrency(data.totals.deduction)}</td>
+                  </tr>
+                )}
+              </tfoot>
+            </table>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">

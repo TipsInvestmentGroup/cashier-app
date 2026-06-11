@@ -27,7 +27,46 @@ export async function GET(req: NextRequest) {
   }
   const range = { gte: startOfDay(start), lte: endOfDay(end) }
 
-  const byOutlet = searchParams.get('groupBy') === 'outlet'
+  const gb = searchParams.get('groupBy')
+
+  // --- People groups (Customer / Admin / Director) — different columns ---
+  if (gb === 'customer' || gb === 'admin' || gb === 'director') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sWhere: any = { date: range, billType: gb.toUpperCase() }
+    if (outletId) sWhere.outletId = outletId
+
+    if (gb === 'customer') {
+      const [signed, paid] = await Promise.all([
+        prisma.signedBill.findMany({ where: sWhere, select: { personName: true, amount: true } }),
+        prisma.paidBill.findMany({ where: { date: range, payerCategory: 'Customer', ...(outletId ? { outletId } : {}) }, select: { payerName: true, amountPaid: true } }),
+      ])
+      const m = new Map<string, { name: string; debt: number; paid: number }>()
+      const g = (n: string) => { let r = m.get(n); if (!r) { r = { name: n, debt: 0, paid: 0 }; m.set(n, r) } return r }
+      for (const s of signed) g(s.personName).debt += s.amount
+      for (const p of paid) g(p.payerName).paid += p.amountPaid
+      const rows = [...m.values()].map((r) => ({ ...r, unpaid: r.debt - r.paid })).sort((a, b) => b.unpaid - a.unpaid)
+      const totals = rows.reduce((t, r) => ({ debt: t.debt + r.debt, paid: t.paid + r.paid, unpaid: t.unpaid + r.unpaid }), { debt: 0, paid: 0, unpaid: 0 })
+      return NextResponse.json({ kind: 'customer', rows, totals })
+    }
+
+    // admin / director
+    const type = gb.toUpperCase()
+    const [signed, persons] = await Promise.all([
+      prisma.signedBill.findMany({ where: sWhere, select: { personName: true, amount: true } }),
+      prisma.person.findMany({ where: { type }, select: { name: true, creditLimit: true } }),
+    ])
+    const limit = new Map(persons.map((p) => [p.name, p.creditLimit]))
+    const m = new Map<string, { name: string; spent: number }>()
+    for (const s of signed) { const r = m.get(s.personName) || { name: s.personName, spent: 0 }; r.spent += s.amount; m.set(s.personName, r) }
+    const rows = [...m.values()].map((r) => {
+      const creditLimit = limit.get(r.name) ?? 0
+      return { name: r.name, spent: r.spent, creditLimit, deduction: Math.max(0, r.spent - creditLimit) }
+    }).sort((a, b) => b.deduction - a.deduction || b.spent - a.spent)
+    const totals = rows.reduce((t, r) => ({ spent: t.spent + r.spent, creditLimit: t.creditLimit + r.creditLimit, deduction: t.deduction + r.deduction }), { spent: 0, creditLimit: 0, deduction: 0 })
+    return NextResponse.json({ kind: gb, rows, totals })
+  }
+
+  const byOutlet = gb === 'outlet'
   const where: Record<string, unknown> = { date: range }
   if (outletId) where.outletId = outletId
 
