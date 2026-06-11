@@ -30,6 +30,7 @@ export default function ReceivablesPage() {
   const [loading, setLoading] = useState(true)
   const [filterType, setFilterType] = useState('')
   const [filterAging, setFilterAging] = useState('')
+  const [search, setSearch] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -47,7 +48,12 @@ export default function ReceivablesPage() {
 
   useEffect(() => { load() }, [load])
 
-  const filtered = filterAging ? receivables.filter((r) => r.aging === filterAging) : receivables
+  const q = search.trim().toLowerCase()
+  const filtered = receivables.filter((r) => {
+    if (filterAging && r.aging !== filterAging) return false
+    if (q && !(`${r.personName} ${r.voucherNumber}`.toLowerCase().includes(q))) return false
+    return true
+  })
 
   const types = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'STAFF_LOSS']
 
@@ -147,6 +153,22 @@ export default function ReceivablesPage() {
             </div>
           )
         })()}
+
+        {/* Search */}
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search receivables by name or voucher…"
+            className="w-full pl-11 pr-10 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none"
+          />
+          {search && (
+            <button onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg">✕</button>
+          )}
+        </div>
 
         {/* Filters */}
         <div className="flex flex-wrap gap-2">
