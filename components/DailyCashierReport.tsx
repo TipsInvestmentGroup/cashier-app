@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { formatCurrency } from '@/lib/utils'
 import { format } from 'date-fns'
 import { RangeKey, RANGE_OPTIONS, getRangeInterval } from '@/lib/dateRange'
+import { SearchBox } from '@/components/SearchBox'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 
@@ -28,6 +29,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [outletId, setOutletId] = useState('')
   const [groupBy, setGroupBy] = useState<'staff' | 'outlet'>('staff')
+  const [search, setSearch] = useState('')
   const [data, setData] = useState<ReportResp | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -52,6 +54,8 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
 
   const signedKeys = data?.signedKeys || []
   const paidKeys = (data?.paidKeys || []).filter((k) => k !== 'OTHER')
+  const q = search.trim().toLowerCase()
+  const visibleRows = (data?.rows || []).filter((r) => !q || r.staffName.toLowerCase().includes(q))
 
   const labelHeader = groupBy === 'outlet' ? 'Outlet' : 'Staff'
   const fileBase = `cashier-report-${from}_to_${to}`
@@ -215,12 +219,17 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
         </div>
       )}
 
+      {/* Search */}
+      {data && data.rows.length > 0 && (
+        <SearchBox value={search} onChange={setSearch} placeholder={`Search by ${labelHeader.toLowerCase()} name…`} />
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-16 text-gray-400">Generating report…</div>
         ) : !data || data.rows.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">No cashier activity for this day.</div>
+          <div className="text-center py-16 text-gray-400">No cashier activity for this period.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -242,7 +251,10 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {data.rows.map((r, i) => (
+                {visibleRows.length === 0 && (
+                  <tr><td colSpan={9 + signedKeys.length + paidKeys.length} className="text-center py-8 text-gray-400">No match for “{search}”.</td></tr>
+                )}
+                {visibleRows.map((r, i) => (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className={`${td} font-medium text-gray-800`}>{r.staffName}</td>
                     <td className={td}>{formatCurrency(r.systemSales)}</td>
