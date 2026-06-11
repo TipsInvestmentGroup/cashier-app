@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { format } from 'date-fns'
 import { RangeKey, RANGE_OPTIONS, getRangeInterval } from '@/lib/dateRange'
 import { SearchBox } from '@/components/SearchBox'
@@ -30,6 +30,11 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const [outletId, setOutletId] = useState('')
   const [groupBy, setGroupBy] = useState<'staff' | 'outlet'>('staff')
   const [search, setSearch] = useState('')
+  // Detail modal
+  const [detailKey, setDetailKey] = useState<string | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [detail, setDetail] = useState<{ rows: any[]; totals: any } | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [data, setData] = useState<ReportResp | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -56,6 +61,19 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const paidKeys = (data?.paidKeys || []).filter((k) => k !== 'OTHER')
   const q = search.trim().toLowerCase()
   const visibleRows = (data?.rows || []).filter((r) => !q || r.staffName.toLowerCase().includes(q))
+
+  const openDetail = async (key: string) => {
+    setDetailKey(key); setDetail(null); setDetailLoading(true)
+    try {
+      const params = new URLSearchParams({ from, to, groupBy, key })
+      if (outletId) params.set('outletId', outletId)
+      setDetail(await request(`/api/reports/daily-cashier/detail?${params}`))
+    } catch {
+      toast.error('Could not load details')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
 
   const labelHeader = groupBy === 'outlet' ? 'Outlet' : 'Staff'
   const fileBase = `cashier-report-${from}_to_${to}`
@@ -256,7 +274,10 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                 )}
                 {visibleRows.map((r, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    <td className={`${td} font-medium text-gray-800`}>{r.staffName}</td>
+                    <td className={td}>
+                      <button onClick={() => openDetail(r.staffName)}
+                        className="font-medium text-indigo-700 hover:underline text-left">{r.staffName}</button>
+                    </td>
                     <td className={td}>{formatCurrency(r.systemSales)}</td>
                     <td className={`${td} text-green-700`}>{formatCurrency(r.cash)}</td>
                     <td className={`${td} text-blue-700`}>{formatCurrency(r.crdb)}</td>
@@ -291,6 +312,70 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
           </div>
         )}
       </div>
+
+      {/* Per-staff day-by-day detail modal */}
+      {detailKey && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
+          onClick={() => setDetailKey(null)}>
+          <div className="bg-white w-full sm:max-w-3xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-100">
+              <div>
+                <h3 className="font-bold text-gray-900">{detailKey}</h3>
+                <p className="text-xs text-gray-500">{from === to ? from : `${from} → ${to}`} · day-by-day</p>
+              </div>
+              <button onClick={() => setDetailKey(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+            <div className="overflow-auto p-4">
+              {detailLoading ? (
+                <div className="py-12 text-center text-gray-400">Loading…</div>
+              ) : !detail || detail.rows.length === 0 ? (
+                <div className="py-12 text-center text-gray-400">No activity in this period.</div>
+              ) : (
+                <table className="w-full text-xs sm:text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="text-left text-gray-600">
+                      <th className="px-2 py-2 font-semibold">Date</th>
+                      <th className="px-2 py-2 font-semibold text-right">System</th>
+                      <th className="px-2 py-2 font-semibold text-right">Collection</th>
+                      <th className="px-2 py-2 font-semibold text-right">Signed</th>
+                      <th className="px-2 py-2 font-semibold text-right">Paid</th>
+                      <th className="px-2 py-2 font-semibold text-right">Shortage</th>
+                      <th className="px-2 py-2 font-semibold text-right">Net</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {detail.rows.map((r, i) => (
+                      <tr key={i} className={r.difference > 0 ? 'bg-red-50/50' : ''}>
+                        <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
+                        <td className="px-2 py-2 text-right text-gray-600">{formatCurrency(r.system)}</td>
+                        <td className="px-2 py-2 text-right font-semibold text-gray-900">{formatCurrency(r.collection)}</td>
+                        <td className="px-2 py-2 text-right text-amber-700">{r.signed ? formatCurrency(r.signed) : '-'}</td>
+                        <td className="px-2 py-2 text-right text-green-700">{r.paid ? formatCurrency(r.paid) : '-'}</td>
+                        <td className={`px-2 py-2 text-right font-semibold ${r.difference > 0 ? 'text-red-600' : r.difference < 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                          {r.difference === 0 ? '-' : formatCurrency(Math.abs(r.difference))}
+                        </td>
+                        <td className="px-2 py-2 text-right font-bold text-indigo-700">{formatCurrency(r.net)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900">
+                    <tr>
+                      <td className="px-2 py-2">TOTAL</td>
+                      <td className="px-2 py-2 text-right">{formatCurrency(detail.totals.system)}</td>
+                      <td className="px-2 py-2 text-right">{formatCurrency(detail.totals.collection)}</td>
+                      <td className="px-2 py-2 text-right text-amber-700">{formatCurrency(detail.totals.signed)}</td>
+                      <td className="px-2 py-2 text-right text-green-700">{formatCurrency(detail.totals.paid)}</td>
+                      <td className={`px-2 py-2 text-right ${detail.totals.difference > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(detail.totals.difference))}</td>
+                      <td className="px-2 py-2 text-right text-indigo-700">{formatCurrency(detail.totals.net)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
