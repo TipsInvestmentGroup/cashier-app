@@ -76,6 +76,37 @@ export default function PettyCashPage() {
     } finally { setReconBusy(false) }
   }
 
+  // Bank reconciliation modal
+  const [bankOpen, setBankOpen] = useState(false)
+  const [bankForm, setBankForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', reportedAmount: '', verifiedAmount: '', reason: '', reportedBy: '', verifiedBy: '' })
+  const [bankBusy, setBankBusy] = useState(false)
+
+  const loadBank = useCallback(async (date: string, outletId: string) => {
+    const params = new URLSearchParams({ date }); if (outletId) params.set('outletId', outletId)
+    const res = await request(`/api/bank-recon?${params}`)
+    setBankForm((f) => ({
+      ...f,
+      reportedAmount: res.existing ? String(res.existing.reportedAmount) : String(res.computed.reported || 0),
+      verifiedAmount: res.existing ? String(res.existing.verifiedAmount) : f.verifiedAmount,
+      reason: res.existing?.reason || f.reason,
+      reportedBy: res.existing?.reportedBy || f.reportedBy,
+      verifiedBy: res.existing?.verifiedBy || f.verifiedBy,
+    }))
+  }, [request])
+
+  const openBank = () => { setBankForm({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', reportedAmount: '', verifiedAmount: '', reason: '', reportedBy: user?.name || '', verifiedBy: '' }); setBankOpen(true); loadBank(format(new Date(), 'yyyy-MM-dd'), '') }
+
+  const saveBank = async () => {
+    setBankBusy(true)
+    try {
+      await request('/api/bank-recon', { method: 'POST', body: JSON.stringify({ ...bankForm, reportedAmount: Number(bankForm.reportedAmount) || 0, verifiedAmount: Number(bankForm.verifiedAmount) || 0 }) })
+      toast.success('Bank reconciliation saved!')
+      setBankOpen(false)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error saving bank reconciliation')
+    } finally { setBankBusy(false) }
+  }
+
   useEffect(() => { load() }, [load])
 
   const canRequest = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
@@ -163,10 +194,16 @@ export default function PettyCashPage() {
             <h1 className="text-2xl font-bold text-gray-900">Petty Cash Expenses</h1>
             <p className="text-gray-500 text-sm">Record and track cash requests</p>
           </div>
-          <button onClick={openRecon}
-            className="px-5 py-3 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition shadow">
-            💰 Cash Reconciliation
-          </button>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={openRecon}
+              className="px-5 py-3 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition shadow">
+              💰 Cash Reconciliation
+            </button>
+            <button onClick={openBank}
+              className="px-5 py-3 bg-sky-600 text-white rounded-xl font-medium hover:bg-sky-700 transition shadow">
+              🏦 Bank Reconciliation
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -393,6 +430,82 @@ export default function PettyCashPage() {
                 <button onClick={saveRecon} disabled={reconBusy}
                   className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition disabled:opacity-60">
                   {reconBusy ? 'Saving…' : 'Save Reconciliation'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Bank Reconciliation modal */}
+      {bankOpen && (() => {
+        const reported = Number(bankForm.reportedAmount) || 0
+        const verified = Number(bankForm.verifiedAmount) || 0
+        const variance = reported - verified // + = Loss, − = Excess
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={() => setBankOpen(false)}>
+            <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b border-gray-100">
+                <h3 className="font-bold text-gray-900">🏦 Bank Reconciliation</h3>
+                <button onClick={() => setBankOpen(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
+                    <input type="date" value={bankForm.date} onChange={(e) => { setBankForm({ ...bankForm, date: e.target.value }); loadBank(e.target.value, bankForm.outletId) }}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet</label>
+                    <select value={bankForm.outletId} onChange={(e) => { setBankForm({ ...bankForm, outletId: e.target.value }); loadBank(bankForm.date, e.target.value) }}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">All Outlets</option>
+                      {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400">Bank channels = CRDB + Stanbic + M-PESA. Reported is pre-filled from the system; the reconciliation officer enters the verified amount.</p>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Reported by Cashier (TZS)</label>
+                  <input type="number" value={bankForm.reportedAmount} onChange={(e) => setBankForm({ ...bankForm, reportedAmount: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-semibold" placeholder="0" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Verified by Reconciliation Officer (TZS)</label>
+                  <input type="number" value={bankForm.verifiedAmount} onChange={(e) => setBankForm({ ...bankForm, verifiedAmount: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
+                </div>
+
+                <div className={`rounded-xl p-3 flex items-center justify-between ${variance > 0 ? 'bg-red-50' : variance < 0 ? 'bg-green-50' : 'bg-gray-50'}`}>
+                  <span className={`font-semibold ${variance > 0 ? 'text-red-800' : variance < 0 ? 'text-green-800' : 'text-gray-700'}`}>
+                    {variance > 0 ? '🔻 Variance (Loss)' : variance < 0 ? '🔺 Variance (Excess)' : '✅ Balanced'}
+                  </span>
+                  <span className={`text-xl font-bold ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-700'}`}>{formatCurrency(Math.abs(variance))}</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Reported By</label>
+                    <input type="text" value={bankForm.reportedBy} onChange={(e) => setBankForm({ ...bankForm, reportedBy: e.target.value })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Cashier name" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Verified By</label>
+                    <input type="text" value={bankForm.verifiedBy} onChange={(e) => setBankForm({ ...bankForm, verifiedBy: e.target.value })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Officer name" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Reason for Variance</label>
+                  <textarea value={bankForm.reason} onChange={(e) => setBankForm({ ...bankForm, reason: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" rows={2} placeholder="Explain any difference…" />
+                </div>
+
+                <button onClick={saveBank} disabled={bankBusy}
+                  className="w-full py-3 bg-sky-600 text-white font-bold rounded-xl hover:bg-sky-700 transition disabled:opacity-60">
+                  {bankBusy ? 'Saving…' : 'Save Bank Reconciliation'}
                 </button>
               </div>
             </div>

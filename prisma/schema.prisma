@@ -171,6 +171,22 @@ model CashRecon {
   @@index([outletId])
 }
 
+model BankRecon {
+  id             String   @id @default(cuid())
+  date           DateTime @default(now())
+  outletId       String?
+  reportedAmount Float    @default(0) // bank-channel collections reported by cashier
+  verifiedAmount Float    @default(0) // verified by reconciliation officer
+  reason         String?              // reason for variance
+  reportedBy     String?
+  verifiedBy     String?
+  cashierId      String
+  createdAt      DateTime @default(now())
+
+  @@index([date])
+  @@index([outletId])
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String
