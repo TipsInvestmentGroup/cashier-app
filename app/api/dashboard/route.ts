@@ -81,10 +81,36 @@ export async function GET(req: NextRequest) {
     }),
   ])
 
-  const outletPerformance = outletStats.map((o) => ({
-    name: o.name,
-    total: o.dailyCollections.reduce((sum, c) => sum + c.total, 0),
-  }))
+  // Per-outlet metrics for the dashboard outlet-performance widget
+  const [todayByOutlet, unpaidByOutlet] = await Promise.all([
+    prisma.dailyCollection.groupBy({
+      by: ['outletId'],
+      where: { date: { gte: todayStart, lte: todayEnd } },
+      _sum: { total: true, systemSales: true, creditSales: true, paymentsReceived: true },
+    }),
+    prisma.signedBill.groupBy({
+      by: ['outletId'],
+      where: { status: { not: 'PAID' } },
+      _sum: { amount: true },
+    }),
+  ])
+
+  const outletPerformance = outletStats.map((o) => {
+    const t = todayByOutlet.find((x) => x.outletId === o.id)
+    const todayTotal = t?._sum.total || 0
+    const todaySystem = t?._sum.systemSales || 0
+    const credit = t?._sum.creditSales || 0
+    const paid = t?._sum.paymentsReceived || 0
+    const u = unpaidByOutlet.find((x) => x.outletId === o.id)
+    return {
+      name: o.name,
+      total: o.dailyCollections.reduce((sum, c) => sum + c.total, 0), // month (kept for compat)
+      todayTotal,
+      todaySystem,
+      todayLoss: Math.max(0, todaySystem - todayTotal - credit - paid),
+      outstanding: u?._sum.amount || 0,
+    }
+  })
 
   return NextResponse.json({
     today: {

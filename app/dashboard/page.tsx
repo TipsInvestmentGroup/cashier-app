@@ -15,7 +15,7 @@ interface DashboardData {
   month: { total: number }
   unpaidBills: { total: number; count: number }
   topDebtors: { personName: string; _sum: { amount: number } }[]
-  outletPerformance: { name: string; total: number }[]
+  outletPerformance: { name: string; total: number; todayTotal: number; todaySystem: number; todayLoss: number; outstanding: number }[]
   paymentMethodBreakdown: { paymentMethod: string; _sum: { amountPaid: number } }[]
   recentBills: { id: string; personName: string; amount: number; billType: string; status: string; date: string }[]
   dailyTrend: { date: string; total: number }[]
@@ -164,6 +164,46 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {/* Outlet Performance Widget — today's status per outlet */}
+        {data.outletPerformance.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
+            <h3 className="font-semibold text-gray-800 mb-4">🏢 Outlet Performance — Today</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr className="text-left text-gray-600">
+                    <th className="px-4 py-3 font-semibold">Outlet</th>
+                    <th className="px-4 py-3 font-semibold">System Sales</th>
+                    <th className="px-4 py-3 font-semibold">Collected Today</th>
+                    <th className="px-4 py-3 font-semibold">Loss Today</th>
+                    <th className="px-4 py-3 font-semibold">Outstanding</th>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {data.outletPerformance.map((o, i) => {
+                    const healthy = o.todayLoss === 0
+                    return (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-800">{o.name}</td>
+                        <td className="px-4 py-3 text-gray-600">{formatCurrency(o.todaySystem)}</td>
+                        <td className="px-4 py-3 font-bold text-gray-900">{formatCurrency(o.todayTotal)}</td>
+                        <td className={`px-4 py-3 font-semibold ${o.todayLoss > 0 ? 'text-red-600' : 'text-green-600'}`}>{o.todayLoss > 0 ? formatCurrency(o.todayLoss) : '—'}</td>
+                        <td className="px-4 py-3 text-orange-600">{formatCurrency(o.outstanding)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold ${healthy ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            {healthy ? '🟢 On track' : '🔴 Shortfall'}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Outlet Performance & Top Debtors */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
