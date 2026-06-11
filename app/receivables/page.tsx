@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
+import { ExportBar } from '@/components/ExportBar'
 
 interface Receivable {
   id: string; date: string; voucherNumber: string; billType: string; personName: string
@@ -56,6 +57,19 @@ export default function ReceivablesPage() {
   })
 
   const types = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'STAFF_LOSS', 'TIPS', 'DJ']
+
+  const exportRows = filtered.map((r) => ({
+    Date: formatDate(r.date),
+    '#': r.seq ?? '',
+    Type: BILL_TYPE_LABELS[r.billType] || r.billType,
+    Person: r.personName,
+    Original: r.amount,
+    Paid: r.totalPaid,
+    Balance: r.balance,
+    Days: r.daysOutstanding,
+    Aging: r.aging,
+    Outlet: r.outlet.name,
+  }))
 
   return (
     <AppShell>
@@ -128,11 +142,14 @@ export default function ReceivablesPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
-            <h2 className="font-semibold text-gray-800">{filtered.length} Receivables</h2>
-            <span className="text-sm text-gray-500">
-              Balance: <strong className="text-red-600">{formatCurrency(filtered.reduce((s, r) => s + r.balance, 0))}</strong>
-            </span>
+          <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h2 className="font-semibold text-gray-800">{filtered.length} Receivables</h2>
+              <span className="text-sm text-gray-500">
+                Balance: <strong className="text-red-600">{formatCurrency(filtered.reduce((s, r) => s + r.balance, 0))}</strong>
+              </span>
+            </div>
+            <ExportBar rows={exportRows} filename="receivables" title="Receivables Report" />
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-16 text-gray-400">Loading...</div>

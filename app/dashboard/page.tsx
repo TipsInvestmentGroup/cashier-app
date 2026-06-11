@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency } from '@/lib/utils'
+import { ExportBar } from '@/components/ExportBar'
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -78,6 +79,20 @@ export default function DashboardPage() {
     value: p._sum.amountPaid || 0,
   }))
 
+  const CAT_LABELS: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', TIPS: 'Tips', DJ: 'DJ', STAFF_LOSS: 'Staff Loss' }
+  const exportRows = [
+    { Metric: "Today's Collections", Amount: data.today.total },
+    { Metric: 'This Week', Amount: data.week.total },
+    { Metric: 'This Month', Amount: data.month.total },
+    { Metric: 'Outstanding Receivables', Amount: data.unpaidBills.total },
+    { Metric: 'Today — Cash', Amount: data.today.cash },
+    { Metric: 'Today — CRDB', Amount: data.today.crdb },
+    { Metric: 'Today — Stanbic', Amount: data.today.stanbic },
+    { Metric: 'Today — M-PESA', Amount: data.today.mpesa },
+    ...Object.keys(CAT_LABELS).map((k) => ({ Metric: `Outstanding — ${CAT_LABELS[k]}`, Amount: data.byBillType[k] || 0 })),
+    ...data.outletPerformance.map((o) => ({ Metric: `Outlet — ${o.name} (outstanding)`, Amount: o.outstanding })),
+  ]
+
   const todayBreakdown = [
     { name: 'Cash', value: data.today.cash },
     { name: 'CRDB', value: data.today.crdb },
@@ -88,9 +103,12 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-500 text-sm">Real-time overview of sales and receivables</p>
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+            <p className="text-gray-500 text-sm">Real-time overview of sales and receivables</p>
+          </div>
+          <ExportBar rows={exportRows} filename="dashboard-summary" title="Dashboard Summary" />
         </div>
 
         {/* KPI Cards */}
