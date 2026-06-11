@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
+import { SearchBox } from '@/components/SearchBox'
 import toast from 'react-hot-toast'
 
 interface Person {
@@ -26,7 +27,11 @@ export default function PersonsPage() {
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [filterType, setFilterType] = useState('')
+  const [search, setSearch] = useState('')
   const [form, setForm] = useState({ name: '', phone: '', email: '', type: 'CUSTOMER', creditLimit: '0' })
+
+  const q = search.trim().toLowerCase()
+  const filtered = persons.filter((p) => !q || `${p.name} ${p.phone || ''} ${p.email || ''}`.toLowerCase().includes(q))
 
   const canManage = ['ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(user?.role || '')
 
@@ -74,6 +79,8 @@ export default function PersonsPage() {
             </button>
           )}
         </div>
+
+        <SearchBox value={search} onChange={setSearch} placeholder="Search persons by name, phone or email…" />
 
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setFilterType('')}
@@ -145,9 +152,9 @@ export default function PersonsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {loading ? (
             <div className="col-span-4 text-center py-12 text-gray-400">Loading...</div>
-          ) : persons.length === 0 ? (
+          ) : filtered.length === 0 ? (
             <div className="col-span-4 text-center py-12 text-gray-400">No persons found</div>
-          ) : persons.map((p) => (
+          ) : filtered.map((p) => (
             <div key={p.id} className="bg-white rounded-2xl border-2 border-gray-100 p-5 hover:border-indigo-200 transition">
               <div className="flex items-start gap-3 mb-3">
                 <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-lg flex-shrink-0">

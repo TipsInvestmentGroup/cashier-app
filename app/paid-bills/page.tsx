@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
+import { SearchBox } from '@/components/SearchBox'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface PaidBill {
@@ -35,6 +36,7 @@ export default function PaidBillsPage() {
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [range, setRange] = useState<RangeKey>('month')
+  const [search, setSearch] = useState('')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({
@@ -88,7 +90,12 @@ export default function PaidBillsPage() {
     }
   }
 
-  const filtered = paidBills.filter((p) => inRange(p.date, range, customFrom, customTo))
+  const q = search.trim().toLowerCase()
+  const filtered = paidBills.filter((p) => {
+    if (!inRange(p.date, range, customFrom, customTo)) return false
+    if (q && !(`${p.payerName} ${p.billRef || ''} ${p.signedBill?.voucherNumber || ''}`.toLowerCase().includes(q))) return false
+    return true
+  })
   const totalReceived = filtered.reduce((s, p) => s + p.amountPaid, 0)
 
   return (
@@ -104,6 +111,9 @@ export default function PaidBillsPage() {
             <span className="text-lg">+</span> Record Payment
           </button>
         </div>
+
+        {/* Search */}
+        <SearchBox value={search} onChange={setSearch} placeholder="Search payments by payer or reference…" />
 
         {/* Date Range Filter */}
         <DateRangeFilter range={range} setRange={setRange}

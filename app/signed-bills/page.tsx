@@ -7,6 +7,7 @@ import { formatCurrency, formatDate, BILL_TYPE_COLORS, BILL_TYPE_LABELS, STATUS_
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
+import { SearchBox } from '@/components/SearchBox'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface Bill {
@@ -43,6 +44,7 @@ export default function SignedBillsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [filterType, setFilterType] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [search, setSearch] = useState('')
   const [range, setRange] = useState<RangeKey>('month')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -102,10 +104,12 @@ export default function SignedBillsPage() {
     }
   }
 
+  const q = search.trim().toLowerCase()
   const filtered = bills.filter((b) => {
     if (filterType && b.billType !== filterType) return false
     if (filterStatus && b.status !== filterStatus) return false
     if (!inRange(b.date, range, customFrom, customTo)) return false
+    if (q && !(`${b.personName} ${b.voucherNumber} ${b.serviceStaff || ''}`.toLowerCase().includes(q))) return false
     return true
   })
 
@@ -137,6 +141,9 @@ export default function SignedBillsPage() {
             <button onClick={() => setLimitWarning(null)} className="ml-auto text-red-400 hover:text-red-600">✕</button>
           </div>
         )}
+
+        {/* Search */}
+        <SearchBox value={search} onChange={setSearch} placeholder="Search bills by name, voucher or staff…" />
 
         {/* Bill Type Quick Select */}
         <div className="flex gap-2 flex-wrap">
