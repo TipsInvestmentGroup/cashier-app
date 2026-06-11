@@ -90,70 +90,6 @@ export default function ReceivablesPage() {
           </div>
         )}
 
-        {/* Credit Limits — Admins & Directors */}
-        {(() => {
-          const showFor = filterType === '' || filterType === 'ADMIN' || filterType === 'DIRECTOR'
-          const accts = creditAccounts.filter((a) => !filterType || a.billType === filterType)
-          if (!showFor || accts.length === 0) return null
-          const exceededCount = accts.filter((a) => a.exceeded).length
-          return (
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
-                <h2 className="font-semibold text-gray-800">💳 Credit Limits — Admins &amp; Directors</h2>
-                {exceededCount > 0 && (
-                  <span className="px-3 py-1 rounded-lg text-xs font-bold bg-red-100 text-red-700">
-                    {exceededCount} EXCEEDED LIMIT
-                  </span>
-                )}
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr className="text-left text-gray-600">
-                      <th className="px-4 py-3 font-semibold">Person</th>
-                      <th className="px-4 py-3 font-semibold">Type</th>
-                      <th className="px-4 py-3 font-semibold">Credit Limit</th>
-                      <th className="px-4 py-3 font-semibold">Spent (Owed)</th>
-                      <th className="px-4 py-3 font-semibold">Balance</th>
-                      <th className="px-4 py-3 font-semibold">Over Limit</th>
-                      <th className="px-4 py-3 font-semibold">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {accts.map((a) => (
-                      <tr key={`${a.personName}-${a.billType}`} className={`hover:bg-gray-50 ${a.exceeded ? 'bg-red-50/50' : ''}`}>
-                        <td className="px-4 py-3 font-medium text-gray-800">{a.personName}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${BILL_TYPE_COLORS[a.billType]}`}>
-                            {BILL_TYPE_LABELS[a.billType]}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">{formatCurrency(a.creditLimit)}</td>
-                        <td className="px-4 py-3 font-semibold text-gray-800">{formatCurrency(a.spent)}</td>
-                        <td className={`px-4 py-3 font-medium ${a.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          {a.balance > 0 ? '+' : ''}{formatCurrency(a.balance)}
-                        </td>
-                        <td className="px-4 py-3 font-bold text-red-600">{a.overLimit > 0 ? formatCurrency(a.overLimit) : '-'}</td>
-                        <td className="px-4 py-3">
-                          {a.exceeded ? (
-                            <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-red-100 text-red-700">⚠️ EXCEEDED LIMIT</span>
-                          ) : (
-                            <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-100 text-green-700">Within Limit</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500">
-                <strong>Balance</strong> = Amount Spent − Credit Limit. When positive, the over-limit amount is recovered via the{' '}
-                <a href="/payroll" className="text-indigo-600 font-medium hover:underline">Payroll Deduction Report</a>.
-              </div>
-            </div>
-          )
-        })()}
-
         {/* Search */}
         <div className="relative">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
@@ -249,6 +185,70 @@ export default function ReceivablesPage() {
             </div>
           )}
         </div>
+
+        {/* Credit Limits — Admins & Directors (moved to bottom) */}
+        {(() => {
+          const showFor = filterType === '' || filterType === 'ADMIN' || filterType === 'DIRECTOR'
+          const accts = creditAccounts.filter((a) => !filterType || a.billType === filterType)
+          if (!showFor || accts.length === 0) return null
+          const exceededCount = accts.filter((a) => a.exceeded).length
+          return (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
+                <h2 className="font-semibold text-gray-800">💳 Credit Limits — Admins &amp; Directors</h2>
+                {exceededCount > 0 && (
+                  <span className="px-3 py-1 rounded-lg text-xs font-bold bg-red-100 text-red-700">
+                    {exceededCount} EXCEEDED LIMIT
+                  </span>
+                )}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="text-left text-gray-600">
+                      <th className="px-4 py-3 font-semibold">Person</th>
+                      <th className="px-4 py-3 font-semibold">Type</th>
+                      <th className="px-4 py-3 font-semibold">Credit Limit</th>
+                      <th className="px-4 py-3 font-semibold">Spent (Owed)</th>
+                      <th className="px-4 py-3 font-semibold">Balance</th>
+                      <th className="px-4 py-3 font-semibold">Over Limit</th>
+                      <th className="px-4 py-3 font-semibold">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {accts.map((a) => (
+                      <tr key={`${a.personName}-${a.billType}`} className={`hover:bg-gray-50 ${a.exceeded ? 'bg-red-50/50' : ''}`}>
+                        <td className="px-4 py-3 font-medium text-gray-800">{a.personName}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${BILL_TYPE_COLORS[a.billType]}`}>
+                            {BILL_TYPE_LABELS[a.billType]}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">{formatCurrency(a.creditLimit)}</td>
+                        <td className="px-4 py-3 font-semibold text-gray-800">{formatCurrency(a.spent)}</td>
+                        <td className={`px-4 py-3 font-medium ${a.balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {a.balance > 0 ? '+' : ''}{formatCurrency(a.balance)}
+                        </td>
+                        <td className="px-4 py-3 font-bold text-red-600">{a.overLimit > 0 ? formatCurrency(a.overLimit) : '-'}</td>
+                        <td className="px-4 py-3">
+                          {a.exceeded ? (
+                            <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-red-100 text-red-700">⚠️ EXCEEDED LIMIT</span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-100 text-green-700">Within Limit</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500">
+                <strong>Balance</strong> = Amount Spent − Credit Limit. When positive, the over-limit amount is recovered via the{' '}
+                <a href="/payroll" className="text-indigo-600 font-medium hover:underline">Payroll Deduction Report</a>.
+              </div>
+            </div>
+          )
+        })()}
       </div>
     </AppShell>
   )
