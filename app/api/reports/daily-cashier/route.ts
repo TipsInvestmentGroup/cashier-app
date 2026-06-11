@@ -27,13 +27,14 @@ export async function GET(req: NextRequest) {
   }
   const range = { gte: startOfDay(start), lte: endOfDay(end) }
 
+  const byOutlet = searchParams.get('groupBy') === 'outlet'
   const where: Record<string, unknown> = { date: range }
   if (outletId) where.outletId = outletId
 
   const [collections, signedBills, paidBills] = await Promise.all([
     prisma.dailyCollection.findMany({ where, include: { outlet: { select: { name: true } } } }),
-    prisma.signedBill.findMany({ where, select: { serviceStaff: true, billType: true, amount: true } }),
-    prisma.paidBill.findMany({ where, select: { billRef: true, payerCategory: true, amountPaid: true, paymentMethod: true } }),
+    prisma.signedBill.findMany({ where, select: { serviceStaff: true, billType: true, amount: true, outlet: { select: { name: true } } } }),
+    prisma.paidBill.findMany({ where, select: { billRef: true, payerCategory: true, amountPaid: true, paymentMethod: true, outlet: { select: { name: true } } } }),
   ])
 
   // collection id → staff (to attribute paid bills entered during a collection)
@@ -66,27 +67,29 @@ export async function GET(req: NextRequest) {
   }
 
   for (const c of collections) {
-    const r = rowFor(c.staffName || '(Unassigned)', c.outlet?.name || '')
+    const key = byOutlet ? (c.outlet?.name || '(No outlet)') : (c.staffName || '(Unassigned)')
+    const r = rowFor(key, c.outlet?.name || '')
     r.systemSales += c.systemSales || 0
     r.cash += c.cash; r.crdb += c.crdb; r.stanbic += c.stanbic; r.mpesa += c.mpesa; r.total += c.total
     if (!r.outletName) r.outletName = c.outlet?.name || ''
   }
 
   for (const b of signedBills) {
-    if (!b.serviceStaff) continue
     const type = String(b.billType).toUpperCase()
     if (!SIGNED_KEYS.includes(type)) continue
-    const r = rowFor(b.serviceStaff)
+    const key = byOutlet ? (b.outlet?.name || '(No outlet)') : b.serviceStaff
+    if (!key) continue
+    const r = rowFor(key, b.outlet?.name || '')
     r.signed[type] += b.amount
     r.signed.total += b.amount
   }
 
   const CAT_MAP: Record<string, string> = { 'Admin': 'ADMIN', 'Director': 'DIRECTOR', 'Customer': 'CUSTOMER', 'Staff Loss': 'STAFF_LOSS' }
   for (const p of paidBills) {
-    const staff = (p.billRef && colStaff.get(p.billRef)) || '(Other payments)'
-    const r = rowFor(staff)
-    const key = CAT_MAP[p.payerCategory || ''] || 'OTHER'
-    r.paid[key] += p.amountPaid
+    const key = byOutlet ? (p.outlet?.name || '(No outlet)') : ((p.billRef && colStaff.get(p.billRef)) || '(Other payments)')
+    const r = rowFor(key, p.outlet?.name || '')
+    const catKey = CAT_MAP[p.payerCategory || ''] || 'OTHER'
+    r.paid[catKey] += p.amountPaid
     r.paid.total += p.amountPaid
     if (p.paymentMethod !== 'PAYROLL') r.paidCashTotal += p.amountPaid
   }

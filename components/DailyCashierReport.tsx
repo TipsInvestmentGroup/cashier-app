@@ -26,6 +26,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [outletId, setOutletId] = useState('')
+  const [groupBy, setGroupBy] = useState<'staff' | 'outlet'>('staff')
   const [data, setData] = useState<ReportResp | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -36,7 +37,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ from, to })
+      const params = new URLSearchParams({ from, to, groupBy })
       if (outletId) params.set('outletId', outletId)
       setData(await request(`/api/reports/daily-cashier?${params}`))
     } catch (err: unknown) {
@@ -44,32 +45,73 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
     } finally {
       setLoading(false)
     }
-  }, [request, from, to, outletId])
+  }, [request, from, to, outletId, groupBy])
 
   useEffect(() => { load() }, [load])
 
   const signedKeys = data?.signedKeys || []
   const paidKeys = (data?.paidKeys || []).filter((k) => k !== 'OTHER')
 
-  const exportCSV = () => {
-    if (!data?.rows.length) return toast.error('No data to export')
+  const labelHeader = groupBy === 'outlet' ? 'Outlet' : 'Staff'
+  const fileBase = `cashier-report-${from}_to_${to}`
+
+  // Shared header + numeric body for all export formats
+  const buildTable = () => {
     const header = [
-      'Staff', 'Outlet', 'System Sales', 'Cash', 'CRDB', 'Stanbic', 'M-PESA', 'Collection',
+      labelHeader, 'System Sales', 'Cash', 'CRDB', 'Stanbic', 'M-PESA', 'Collection',
       ...signedKeys.map((k) => `Signed ${SIGNED_LABELS[k]}`), 'Signed Total',
       ...paidKeys.map((k) => `Paid ${PAID_LABELS[k]}`), 'Paid Total', 'Net Collection',
     ]
-    const lines = data.rows.map((r) => [
-      r.staffName, r.outletName, r.systemSales, r.cash, r.crdb, r.stanbic, r.mpesa, r.total,
+    const body = (data?.rows || []).map((r) => [
+      r.staffName, r.systemSales, r.cash, r.crdb, r.stanbic, r.mpesa, r.total,
       ...signedKeys.map((k) => r.signed[k] || 0), r.signed.total,
       ...paidKeys.map((k) => r.paid[k] || 0), r.paid.total, r.netCollection,
-    ].map((v) => `"${v}"`).join(','))
-    const csv = [header.join(','), ...lines].join('\n')
+    ] as (string | number)[])
+    return { header, body }
+  }
+
+  const exportCSV = () => {
+    if (!data?.rows.length) return toast.error('No data to export')
+    const { header, body } = buildTable()
+    const csv = [header, ...body].map((row) => row.map((v) => `"${v}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = `cashier-report-${from}_to_${to}.csv`
+    a.href = url; a.download = `${fileBase}.csv`
     a.click(); URL.revokeObjectURL(url)
     toast.success('CSV exported!')
+  }
+
+  const exportExcel = async () => {
+    if (!data?.rows.length) return toast.error('No data to export')
+    const XLSX = await import('xlsx')
+    const { header, body } = buildTable()
+    const ws = XLSX.utils.aoa_to_sheet([header, ...body])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Cashier Report')
+    XLSX.writeFile(wb, `${fileBase}.xlsx`)
+    toast.success('Excel exported!')
+  }
+
+  const exportPDF = async () => {
+    if (!data?.rows.length) return toast.error('No data to export')
+    const { jsPDF } = await import('jspdf')
+    const autoTable = (await import('jspdf-autotable')).default
+    const { header, body } = buildTable()
+    const doc = new jsPDF({ orientation: 'landscape' })
+    doc.setFontSize(13)
+    doc.text('Cashier Report', 14, 14)
+    doc.setFontSize(9)
+    doc.text(`Period: ${from === to ? from : `${from} to ${to}`}  ·  Grouped by ${labelHeader}`, 14, 20)
+    autoTable(doc, {
+      startY: 24,
+      head: [header],
+      body: body.map((row) => row.map((v, i) => (i === 0 ? String(v) : formatCurrency(Number(v))))),
+      styles: { fontSize: 6.5, cellPadding: 1.5 },
+      headStyles: { fillColor: [79, 70, 229], fontSize: 6.5 },
+    })
+    doc.save(`${fileBase}.pdf`)
+    toast.success('PDF exported!')
   }
 
   const th = 'px-3 py-2 font-semibold whitespace-nowrap'
@@ -106,8 +148,23 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
               {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Group by</label>
+            <div className="flex gap-1">
+              {(['staff', 'outlet'] as const).map((g) => (
+                <button key={g} onClick={() => setGroupBy(g)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium capitalize transition ${groupBy === g ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                  {g}
+                </button>
+              ))}
+            </div>
+          </div>
           <span className="text-xs text-gray-500">{from === to ? from : `${from} → ${to}`}</span>
-          <button onClick={exportCSV} className="ml-auto px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">📥 Export CSV</button>
+          <div className="ml-auto flex gap-2">
+            <button onClick={exportCSV} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded-xl hover:bg-gray-200 transition">📄 CSV</button>
+            <button onClick={exportExcel} className="px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">📊 Excel</button>
+            <button onClick={exportPDF} className="px-4 py-2 bg-red-600 text-white text-sm rounded-xl hover:bg-red-700 transition">📕 PDF</button>
+          </div>
         </div>
       </div>
 
@@ -136,7 +193,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-gray-100 text-gray-600 text-left">
-                  <th className={th} rowSpan={2}>Staff</th>
+                  <th className={th} rowSpan={2}>{labelHeader}</th>
                   <th className={th} rowSpan={2}>System Sales</th>
                   <th className={`${th} text-center bg-blue-50`} colSpan={5}>Collection</th>
                   <th className={`${th} text-center bg-amber-50`} colSpan={signedKeys.length + 1}>Signed Bills</th>
