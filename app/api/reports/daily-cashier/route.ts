@@ -15,12 +15,17 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const dateParam = searchParams.get('date')
   const outletId = searchParams.get('outletId')
+  const parseD = (s: string | null) => { if (!s) return null; const p = parse(s, 'yyyy-MM-dd', new Date()); return isValid(p) ? p : null }
 
-  const parsed = dateParam ? parse(dateParam, 'yyyy-MM-dd', new Date()) : new Date()
-  const day = isValid(parsed) ? parsed : new Date()
-  const range = { gte: startOfDay(day), lte: endOfDay(day) }
+  // Accept a range (from/to) or a single day (date). Defaults to today.
+  let start = parseD(searchParams.get('from'))
+  let end = parseD(searchParams.get('to'))
+  if (!start || !end) {
+    const d = parseD(searchParams.get('date')) || new Date()
+    start = d; end = d
+  }
+  const range = { gte: startOfDay(start), lte: endOfDay(end) }
 
   const where: Record<string, unknown> = { date: range }
   if (outletId) where.outletId = outletId
@@ -100,5 +105,5 @@ export async function GET(req: NextRequest) {
     { systemSales: 0, cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, signedTotal: 0, paidTotal: 0, netCollection: 0 }
   )
 
-  return NextResponse.json({ date: startOfDay(day).toISOString(), rows: list, totals, signedKeys: SIGNED_KEYS, paidKeys: PAID_KEYS })
+  return NextResponse.json({ from: startOfDay(start).toISOString(), to: endOfDay(end).toISOString(), rows: list, totals, signedKeys: SIGNED_KEYS, paidKeys: PAID_KEYS })
 }

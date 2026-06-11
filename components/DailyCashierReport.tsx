@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { formatCurrency } from '@/lib/utils'
 import { format } from 'date-fns'
+import { RangeKey, RANGE_OPTIONS, getRangeInterval } from '@/lib/dateRange'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
@@ -11,7 +12,7 @@ interface Row {
   signed: Record<string, number>; paid: Record<string, number>; netCollection: number
 }
 interface ReportResp {
-  date: string; rows: Row[]
+  from: string; to: string; rows: Row[]
   totals: { systemSales: number; cash: number; crdb: number; stanbic: number; mpesa: number; total: number; signedTotal: number; paidTotal: number; netCollection: number }
   signedKeys: string[]; paidKeys: string[]
 }
@@ -21,15 +22,21 @@ const PAID_LABELS: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Directo
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; request: (url: string, opts?: any) => Promise<any> }) {
-  const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [range, setRange] = useState<RangeKey>('today')
+  const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [outletId, setOutletId] = useState('')
   const [data, setData] = useState<ReportResp | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const interval = getRangeInterval(range, customFrom, customTo)
+  const from = format(interval.start, 'yyyy-MM-dd')
+  const to = format(interval.end, 'yyyy-MM-dd')
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ date })
+      const params = new URLSearchParams({ from, to })
       if (outletId) params.set('outletId', outletId)
       setData(await request(`/api/reports/daily-cashier?${params}`))
     } catch (err: unknown) {
@@ -37,7 +44,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
     } finally {
       setLoading(false)
     }
-  }, [request, date, outletId])
+  }, [request, from, to, outletId])
 
   useEffect(() => { load() }, [load])
 
@@ -60,7 +67,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = `daily-cashier-report-${date}.csv`
+    a.href = url; a.download = `cashier-report-${from}_to_${to}.csv`
     a.click(); URL.revokeObjectURL(url)
     toast.success('CSV exported!')
   }
@@ -71,21 +78,37 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   return (
     <div className="space-y-4">
       {/* Controls */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap items-end gap-3">
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Date</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-            className="px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm" />
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-gray-600 mr-1">Period:</span>
+          {RANGE_OPTIONS.map((r) => (
+            <button key={r.key} onClick={() => setRange(r.key)}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition ${range === r.key ? 'bg-indigo-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+              {r.label}
+            </button>
+          ))}
+          {range === 'custom' && (
+            <div className="flex items-center gap-2 ml-1">
+              <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
+                className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
+              <span className="text-gray-400 text-sm">to</span>
+              <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
+                className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
+            </div>
+          )}
         </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Outlet</label>
-          <select value={outletId} onChange={(e) => setOutletId(e.target.value)}
-            className="px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm">
-            <option value="">All Outlets</option>
-            {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Outlet</label>
+            <select value={outletId} onChange={(e) => setOutletId(e.target.value)}
+              className="px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm">
+              <option value="">All Outlets</option>
+              {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+          <span className="text-xs text-gray-500">{from === to ? from : `${from} → ${to}`}</span>
+          <button onClick={exportCSV} className="ml-auto px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">📥 Export CSV</button>
         </div>
-        <button onClick={exportCSV} className="ml-auto px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">📥 Export CSV</button>
       </div>
 
       {/* Summary cards */}

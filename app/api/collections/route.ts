@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
   // Reconciliation inputs entered during the collection flow
   const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
-  const paidInput: { payerName: string; amount: number; paymentMethod: string }[] = Array.isArray(body.paidBills) ? body.paidBills : []
+  const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string }[] = Array.isArray(body.paidBills) ? body.paidBills : []
   const SIGNED_TYPES = ['ADMIN', 'DIRECTOR', 'TIPS', 'DJ', 'CUSTOMER', 'STAFF_LOSS']
   const PAY_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
 
@@ -128,6 +128,7 @@ export async function POST(req: NextRequest) {
     await prisma.paidBill.create({
       data: {
         payerName: pb.payerName,
+        payerCategory: pb.category || null,
         amountPaid: amt,
         paymentMethod: method,
         notes: `Recovery recorded during daily collection ${collection.id}`,

@@ -26,6 +26,8 @@ const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number;
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string }
 
+const PAID_CATEGORIES = ['Customer', 'Staff Loss', 'Admin', 'Director', 'Sponsors & Partners']
+
 export default function CollectionsPage() {
   const { request } = useApi()
   const { user } = useAuth()
@@ -34,7 +36,7 @@ export default function CollectionsPage() {
   const [staff, setStaff] = useState<Person[]>([])
   const [personNames, setPersonNames] = useState<string[]>([])
   const [signedRows, setSignedRows] = useState<{ billType: string; name: string; amount: string }[]>([])
-  const [paidRows, setPaidRows] = useState<{ payerName: string; amount: string; paymentMethod: string }[]>([])
+  const [paidRows, setPaidRows] = useState<{ category: string; payerName: string; amount: string; paymentMethod: string }[]>([])
   const [confirmedZero, setConfirmedZero] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -86,7 +88,7 @@ export default function CollectionsPage() {
     setSubmitting(true)
     try {
       const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount) }))
-      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod }))
+      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category }))
       const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0, signedBills, paidBills })
       const res = editingId
         ? await request(`/api/collections/${editingId}`, { method: 'PUT', body: payload })
@@ -310,18 +312,22 @@ export default function CollectionsPage() {
                   <div className="border-2 border-gray-100 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-semibold text-gray-700 text-sm">✅ Paid Bills (debt recovered via this staff)</span>
-                      <button type="button" onClick={() => setPaidRows([...paidRows, { payerName: form.staffName, amount: '', paymentMethod: 'CASH' }])}
+                      <button type="button" onClick={() => setPaidRows([...paidRows, { category: 'Customer', payerName: form.staffName, amount: '', paymentMethod: 'CASH' }])}
                         className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100">➕ Record Payment</button>
                     </div>
                     {paidRows.length === 0 && <p className="text-xs text-gray-400">Add any old debts this staff collected today.</p>}
                     {paidRows.map((r, i) => (
                       <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
-                        <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, payerName: e.target.value }; setPaidRows(n) }}
-                          className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
-                        <input type="number" min="0" placeholder="Amount" value={r.amount} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, amount: e.target.value }; setPaidRows(n) }}
-                          className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
-                        <select value={r.paymentMethod} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, paymentMethod: e.target.value }; setPaidRows(n) }}
+                        <select value={r.category} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, category: e.target.value }; setPaidRows(n) }}
                           className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                          {PAID_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, payerName: e.target.value }; setPaidRows(n) }}
+                          className="col-span-4 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <input type="number" min="0" placeholder="Amount" value={r.amount} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, amount: e.target.value }; setPaidRows(n) }}
+                          className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <select value={r.paymentMethod} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, paymentMethod: e.target.value }; setPaidRows(n) }}
+                          className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
                           {['CASH', 'CRDB', 'STANBIC', 'MPESA'].map((m) => <option key={m} value={m}>{m}</option>)}
                         </select>
                         <button type="button" onClick={() => setPaidRows(paidRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
