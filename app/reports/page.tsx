@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { DailyCashierReport } from '@/components/DailyCashierReport'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
@@ -36,6 +37,7 @@ export default function ReportsPage() {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [activeTab, setActiveTab] = useState('summary')
+  const [reportView, setReportView] = useState('summary')
 
   useEffect(() => {
     request('/api/outlets').then(setOutlets).catch(console.error)
@@ -86,6 +88,20 @@ export default function ReportsPage() {
           <p className="text-gray-500 text-sm">Generate and export financial reports</p>
         </div>
 
+        {/* Report type switcher */}
+        <div className="flex flex-wrap gap-2">
+          {[{ k: 'summary', label: '📊 Financial Summary' }, { k: 'daily-cashier', label: '🧾 Daily Cashier Report' }].map((v) => (
+            <button key={v.k} onClick={() => setReportView(v.k)}
+              className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${reportView === v.k ? 'bg-indigo-600 text-white shadow' : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-gray-300'}`}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {reportView === 'daily-cashier' && <DailyCashierReport outlets={outlets} request={request} />}
+
+        {reportView === 'summary' && (
+        <>
         {/* Controls */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <div className="flex flex-wrap gap-2 mb-4">
@@ -349,6 +365,8 @@ export default function ReportsPage() {
               </div>
             </div>
           </>
+        )}
+        </>
         )}
       </div>
     </AppShell>
