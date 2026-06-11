@@ -23,6 +23,48 @@ export async function GET(req: NextRequest) {
   let end = parseD(searchParams.get('to'))
   if (!start || !end) { const d = parseD(searchParams.get('date')) || new Date(); start = d; end = d }
   const range = { gte: startOfDay(start), lte: endOfDay(end) }
+  const gb = searchParams.get('groupBy')
+  const dayKey = (d: Date) => new Date(d).toISOString().slice(0, 10)
+  const joinStaff = (set: Set<string>) => [...set].filter(Boolean).join(', ')
+
+  // --- Customer detail: date, debt, paid, outstanding, service staff ---
+  if (gb === 'customer') {
+    const [signed, paid] = await Promise.all([
+      prisma.signedBill.findMany({ where: { date: range, billType: 'CUSTOMER', personName: key, ...(outletId ? { outletId } : {}) }, select: { date: true, amount: true, serviceStaff: true } }),
+      prisma.paidBill.findMany({ where: { date: range, payerCategory: 'Customer', payerName: key, ...(outletId ? { outletId } : {}) }, select: { date: true, amountPaid: true } }),
+    ])
+    const m = new Map<string, { date: string; debt: number; paid: number; staff: Set<string> }>()
+    const g = (d: Date) => { const k = dayKey(d); let r = m.get(k); if (!r) { r = { date: k, debt: 0, paid: 0, staff: new Set() }; m.set(k, r) } return r }
+    for (const s of signed) { const r = g(s.date); r.debt += s.amount; if (s.serviceStaff) r.staff.add(s.serviceStaff) }
+    for (const p of paid) g(p.date).paid += p.amountPaid
+    const rows = [...m.values()].sort((a, b) => a.date.localeCompare(b.date)).map((r) => ({ date: r.date, debt: r.debt, paid: r.paid, outstanding: r.debt - r.paid, serviceStaff: joinStaff(r.staff) }))
+    const totals = rows.reduce((t, r) => ({ debt: t.debt + r.debt, paid: t.paid + r.paid, outstanding: t.outstanding + r.outstanding }), { debt: 0, paid: 0, outstanding: 0 })
+    return NextResponse.json({ kind: 'customer', key, rows, totals })
+  }
+
+  // --- Admin / Director detail: date, spent, credit limit, exceeded, service staff ---
+  if (gb === 'admin' || gb === 'director') {
+    const type = gb.toUpperCase()
+    const [signed, person] = await Promise.all([
+      prisma.signedBill.findMany({ where: { date: range, billType: type, personName: key, ...(outletId ? { outletId } : {}) }, select: { date: true, amount: true, serviceStaff: true } }),
+      prisma.person.findFirst({ where: { type, name: key }, select: { creditLimit: true } }),
+    ])
+    const creditLimit = person?.creditLimit ?? 0
+    const m = new Map<string, { date: string; spent: number; staff: Set<string> }>()
+    const g = (d: Date) => { const k = dayKey(d); let r = m.get(k); if (!r) { r = { date: k, spent: 0, staff: new Set() }; m.set(k, r) } return r }
+    for (const s of signed) { const r = g(s.date); r.spent += s.amount; if (s.serviceStaff) r.staff.add(s.serviceStaff) }
+    // running cumulative so per-day "exceeded" sums to the final over-limit
+    let cum = 0
+    const rows = [...m.values()].sort((a, b) => a.date.localeCompare(b.date)).map((r) => {
+      const before = Math.max(0, cum - creditLimit)
+      cum += r.spent
+      const after = Math.max(0, cum - creditLimit)
+      return { date: r.date, spent: r.spent, creditLimit, exceeded: after - before, serviceStaff: joinStaff(r.staff) }
+    })
+    const spent = rows.reduce((t, r) => t + r.spent, 0)
+    const totals = { spent, creditLimit, exceeded: Math.max(0, spent - creditLimit) }
+    return NextResponse.json({ kind: gb, key, creditLimit, rows, totals })
+  }
 
   const SIGNED_CREDIT = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'TIPS', 'DJ'] // exclude STAFF_LOSS (that IS the shortage)
 
@@ -55,7 +97,6 @@ export async function GET(req: NextRequest) {
 
   type Day = { date: string; system: number; collection: number; signed: number; paid: number; paidCash: number }
   const map = new Map<string, Day>()
-  const dayKey = (d: Date) => new Date(d).toISOString().slice(0, 10)
   const get = (d: Date): Day => {
     const k = dayKey(d)
     let r = map.get(k)

@@ -34,7 +34,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   // Detail modal
   const [detailKey, setDetailKey] = useState<string | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [detail, setDetail] = useState<{ rows: any[]; totals: any } | null>(null)
+  const [detail, setDetail] = useState<{ kind?: string; rows: any[]; totals: any } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null)
@@ -76,6 +76,28 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
     } finally {
       setDetailLoading(false)
     }
+  }
+
+  const downloadDetail = () => {
+    if (!detail || !detail.rows.length) return toast.error('No data to download')
+    const k = detail.kind
+    let header: string[]
+    let body: (string | number)[][]
+    if (k === 'customer') {
+      header = ['Date', 'Debt', 'Paid', 'Outstanding', 'Service Staff']
+      body = detail.rows.map((r: any) => [r.date, r.debt, r.paid, r.outstanding, r.serviceStaff])
+    } else if (k === 'admin' || k === 'director') {
+      header = ['Date', 'Signed Amount', 'Credit Limit', 'Exceeded', 'Service Staff']
+      body = detail.rows.map((r: any) => [r.date, r.spent, r.creditLimit, r.exceeded, r.serviceStaff])
+    } else {
+      header = ['Date', 'System', 'Collection', 'Signed', 'Paid', 'Shortage', 'Net']
+      body = detail.rows.map((r: any) => [r.date, r.system, r.collection, r.signed, r.paid, r.difference, r.net])
+    }
+    const csv = [header, ...body].map((row) => row.map((v) => `"${v}"`).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a')
+    a.href = url; a.download = `${detailKey}-${from}_to_${to}.csv`; a.click(); URL.revokeObjectURL(url)
+    toast.success('Downloaded')
   }
 
   const labelHeader = groupBy === 'outlet' ? 'Outlet' : groupBy === 'customer' ? 'Customer'
@@ -307,7 +329,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   ? visibleRows.map((r: any, i: number) => (
                     <tr key={i} className={`hover:bg-gray-50 ${r.unpaid > 0 ? 'bg-red-50/40' : ''}`}>
-                      <td className="px-4 py-3 font-medium text-gray-800">{r.name}</td>
+                      <td className="px-4 py-3"><button onClick={() => openDetail(r.name)} className="font-medium text-indigo-700 hover:underline text-left">{r.name}</button></td>
                       <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.debt)}</td>
                       <td className="px-4 py-3 text-right text-green-700">{formatCurrency(r.paid)}</td>
                       <td className={`px-4 py-3 text-right font-bold ${r.unpaid > 0 ? 'text-red-600' : 'text-gray-500'}`}>{formatCurrency(r.unpaid)}</td>
@@ -316,7 +338,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   : visibleRows.map((r: any, i: number) => (
                     <tr key={i} className={`hover:bg-gray-50 ${r.deduction > 0 ? 'bg-red-50/40' : ''}`}>
-                      <td className="px-4 py-3 font-medium text-gray-800">{r.name}</td>
+                      <td className="px-4 py-3"><button onClick={() => openDetail(r.name)} className="font-medium text-indigo-700 hover:underline text-left">{r.name}</button></td>
                       <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.spent)}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{formatCurrency(r.creditLimit)}</td>
                       <td className={`px-4 py-3 text-right font-bold ${r.deduction > 0 ? 'text-red-600' : 'text-gray-400'}`}>{r.deduction > 0 ? formatCurrency(r.deduction) : '-'}</td>
@@ -418,13 +440,82 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                 <h3 className="font-bold text-gray-900">{detailKey}</h3>
                 <p className="text-xs text-gray-500">{from === to ? from : `${from} → ${to}`} · day-by-day</p>
               </div>
-              <button onClick={() => setDetailKey(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+              <div className="flex items-center gap-2">
+                {detail && detail.rows.length > 0 && (
+                  <button onClick={downloadDetail} className="px-3 py-1.5 bg-green-600 text-white text-xs font-semibold rounded-lg hover:bg-green-700 transition">📥 Download</button>
+                )}
+                <button onClick={() => setDetailKey(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+              </div>
             </div>
             <div className="overflow-auto p-4">
               {detailLoading ? (
                 <div className="py-12 text-center text-gray-400">Loading…</div>
               ) : !detail || detail.rows.length === 0 ? (
                 <div className="py-12 text-center text-gray-400">No activity in this period.</div>
+              ) : detail.kind === 'customer' ? (
+                <table className="w-full text-xs sm:text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="text-left text-gray-600">
+                      <th className="px-2 py-2 font-semibold">Date</th>
+                      <th className="px-2 py-2 font-semibold text-right">Debt</th>
+                      <th className="px-2 py-2 font-semibold text-right">Paid</th>
+                      <th className="px-2 py-2 font-semibold text-right">Outstanding</th>
+                      <th className="px-2 py-2 font-semibold">Service Staff</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {detail.rows.map((r: any, i: number) => (
+                      <tr key={i} className={r.outstanding > 0 ? 'bg-red-50/50' : ''}>
+                        <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
+                        <td className="px-2 py-2 text-right text-gray-700">{formatCurrency(r.debt)}</td>
+                        <td className="px-2 py-2 text-right text-green-700">{formatCurrency(r.paid)}</td>
+                        <td className={`px-2 py-2 text-right font-bold ${r.outstanding > 0 ? 'text-red-600' : 'text-gray-500'}`}>{formatCurrency(r.outstanding)}</td>
+                        <td className="px-2 py-2 text-gray-500">{r.serviceStaff || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900">
+                    <tr>
+                      <td className="px-2 py-2">TOTAL</td>
+                      <td className="px-2 py-2 text-right">{formatCurrency(detail.totals.debt)}</td>
+                      <td className="px-2 py-2 text-right text-green-700">{formatCurrency(detail.totals.paid)}</td>
+                      <td className="px-2 py-2 text-right text-red-700">{formatCurrency(detail.totals.outstanding)}</td>
+                      <td className="px-2 py-2"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              ) : (detail.kind === 'admin' || detail.kind === 'director') ? (
+                <table className="w-full text-xs sm:text-sm">
+                  <thead className="bg-gray-50">
+                    <tr className="text-left text-gray-600">
+                      <th className="px-2 py-2 font-semibold">Date</th>
+                      <th className="px-2 py-2 font-semibold text-right">Signed Amount</th>
+                      <th className="px-2 py-2 font-semibold text-right">Credit Limit</th>
+                      <th className="px-2 py-2 font-semibold text-right">Exceeded</th>
+                      <th className="px-2 py-2 font-semibold">Service Staff</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {detail.rows.map((r: any, i: number) => (
+                      <tr key={i} className={r.exceeded > 0 ? 'bg-red-50/50' : ''}>
+                        <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
+                        <td className="px-2 py-2 text-right font-semibold text-gray-900">{formatCurrency(r.spent)}</td>
+                        <td className="px-2 py-2 text-right text-gray-500">{formatCurrency(r.creditLimit)}</td>
+                        <td className={`px-2 py-2 text-right font-bold ${r.exceeded > 0 ? 'text-red-600' : 'text-gray-400'}`}>{r.exceeded > 0 ? formatCurrency(r.exceeded) : '-'}</td>
+                        <td className="px-2 py-2 text-gray-500">{r.serviceStaff || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900">
+                    <tr>
+                      <td className="px-2 py-2">TOTAL</td>
+                      <td className="px-2 py-2 text-right">{formatCurrency(detail.totals.spent)}</td>
+                      <td className="px-2 py-2 text-right text-gray-500">{formatCurrency(detail.totals.creditLimit)}</td>
+                      <td className="px-2 py-2 text-right text-red-700">{formatCurrency(detail.totals.exceeded)}</td>
+                      <td className="px-2 py-2"></td>
+                    </tr>
+                  </tfoot>
+                </table>
               ) : (
                 <table className="w-full text-xs sm:text-sm">
                   <thead className="bg-gray-50">
@@ -439,7 +530,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {detail.rows.map((r, i) => (
+                    {detail.rows.map((r: any, i: number) => (
                       <tr key={i} className={r.difference > 0 ? 'bg-red-50/50' : ''}>
                         <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
                         <td className="px-2 py-2 text-right text-gray-600">{formatCurrency(r.system)}</td>
