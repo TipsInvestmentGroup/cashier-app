@@ -137,6 +137,26 @@ model PaidBill {
   @@index([signedBillId])
 }
 
+model PettyCash {
+  id            String   @id @default(cuid())
+  date          DateTime @default(now())
+  requestedBy   String
+  department    String?
+  purpose       String
+  amount        Float    @default(0)
+  paymentMethod String                       // CASH | CRDB | STANBIC | MPESA
+  payeeName     String?
+  payeeAccount  String?
+  approvedBy    String?
+  status        String   @default("PENDING") // PENDING | APPROVED
+  outletId      String?
+  cashierId     String
+  createdAt     DateTime @default(now())
+
+  @@index([date])
+  @@index([status])
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String

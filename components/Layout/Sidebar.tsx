@@ -9,6 +9,7 @@ const navItems = [
   { href: '/collections', icon: '💰', label: 'Daily Collections', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/signed-bills', icon: '📋', label: 'Signed Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/paid-bills', icon: '✅', label: 'Paid Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
+  { href: '/petty-cash', icon: '💵', label: 'Petty Cash', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/receivables', icon: '📈', label: 'Receivables', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/payroll', icon: '🧾', label: 'Payroll Deductions', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/reports', icon: '📄', label: 'Reports', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
