@@ -13,9 +13,9 @@ import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 interface PaidBill {
   id: string; date: string; payerName: string; payerCategory?: string; amountPaid: number; paymentMethod: string
   outlet: { name: string }; cashier: { name: string }; notes?: string; billRef?: string
-  signedBill?: { voucherNumber: string; amount: number; personName: string }
+  signedBill?: { voucherNumber: string; amount: number; personName: string; date?: string }
 }
-interface SignedBill { id: string; voucherNumber: string; personName: string; amount: number; billType: string; status: string }
+interface SignedBill { id: string; voucherNumber: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string }
 
@@ -48,6 +48,8 @@ export default function PaidBillsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [range, setRange] = useState<RangeKey>('month')
   const [search, setSearch] = useState('')
+  const [linkQuery, setLinkQuery] = useState('')
+  const [linkOpen, setLinkOpen] = useState(false)
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({
@@ -82,6 +84,19 @@ export default function PaidBillsPage() {
     }))
   }
 
+  // Friendly label (date + per-person sequence #, no voucher) for the searchable linker
+  const billLabel = (b: SignedBill) => `${b.date ? formatDate(b.date) : ''} · #${b.seq ?? '?'} — ${b.personName} — ${formatCurrency(b.amount)} [${b.billType.replace('_', ' ')}]`
+  const selectBill = (b: SignedBill | null) => {
+    if (!b) { setForm((f) => ({ ...f, signedBillId: '' })); setLinkQuery(''); setLinkOpen(false); return }
+    handleBillSelect(b.id); setLinkQuery(billLabel(b)); setLinkOpen(false)
+  }
+  const lq = linkQuery.trim().toLowerCase()
+  const linkFiltered = signedBills.filter((b) => {
+    if (!lq) return true
+    const hay = `${b.personName} ${b.billType} ${b.billType.replace('_', ' ')} ${b.date ? formatDate(b.date) : ''}`.toLowerCase()
+    return hay.includes(lq)
+  })
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.payerName) return toast.error('Payer name required')
@@ -94,6 +109,7 @@ export default function PaidBillsPage() {
       })
       toast.success('Payment recorded successfully!')
       setForm({ signedBillId: '', payerCategory: '', payerName: '', amountPaid: '', paymentMethod: 'CASH', notes: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd'), billRef: '' })
+      setLinkQuery('')
       setShowForm(false)
       load()
     } catch (err: unknown) {
@@ -158,15 +174,27 @@ export default function PaidBillsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Link to Signed Bill (Optional)</label>
-                  <select value={form.signedBillId} onChange={(e) => handleBillSelect(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none">
-                    <option value="">-- Select unpaid bill --</option>
-                    {signedBills.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.voucherNumber} - {b.personName} - {formatCurrency(b.amount)} [{b.billType}]
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <input type="text" value={linkQuery}
+                      onChange={(e) => { setLinkQuery(e.target.value); setLinkOpen(true); if (!e.target.value) setForm((f) => ({ ...f, signedBillId: '' })) }}
+                      onFocus={() => setLinkOpen(true)}
+                      onBlur={() => setTimeout(() => setLinkOpen(false), 150)}
+                      placeholder="Search by name, date or category (admin, customer…)"
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
+                    {linkOpen && (
+                      <div className="absolute z-30 mt-1 w-full bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-64 overflow-auto">
+                        <button type="button" onClick={() => selectBill(null)} className="block w-full text-left px-3 py-2 hover:bg-gray-50 text-sm text-gray-500 border-b border-gray-100">— None (no linked bill) —</button>
+                        {linkFiltered.map((b) => (
+                          <button type="button" key={b.id} onClick={() => selectBill(b)} className="block w-full text-left px-3 py-2 hover:bg-indigo-50 text-sm">
+                            <span className="font-semibold text-gray-800">{b.date ? formatDate(b.date) : ''} · #{b.seq ?? '?'}</span>
+                            <span className="text-gray-600"> — {b.personName} — {formatCurrency(b.amount)}</span>
+                            <span className="text-xs text-indigo-600"> [{b.billType.replace('_', ' ')}]</span>
+                          </button>
+                        ))}
+                        {linkFiltered.length === 0 && <div className="px-3 py-3 text-gray-400 text-sm">No matching unpaid bills</div>}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
@@ -291,8 +319,8 @@ export default function PaidBillsPage() {
                         <td className="px-4 py-3 text-gray-600">{formatDate(p.date)}</td>
                         <td className="px-4 py-3 font-medium text-gray-800">{p.payerName}</td>
                         <td className="px-4 py-3 text-gray-600">{p.payerCategory || '-'}</td>
-                        <td className="px-4 py-3 text-gray-500 font-mono text-xs">
-                          {p.signedBill ? `${p.signedBill.voucherNumber}` : '-'}
+                        <td className="px-4 py-3 text-gray-500 text-xs">
+                          {p.signedBill ? `${p.signedBill.date ? formatDate(p.signedBill.date) + ' · ' : ''}${p.signedBill.personName}` : '-'}
                         </td>
                         <td className="px-4 py-3 font-bold text-green-700">{formatCurrency(p.amountPaid)}</td>
                         <td className="px-4 py-3">

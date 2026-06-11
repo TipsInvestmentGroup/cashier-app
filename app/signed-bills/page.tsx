@@ -12,7 +12,7 @@ import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface Bill {
   id: string; voucherNumber: string; date: string; billType: string; personName: string
-  amount: number; serviceStaff: string; description: string; status: string
+  amount: number; serviceStaff: string; description: string; status: string; seq?: number
   outlet: { name: string }; cashier: { name: string }; dueDate?: string
   limitExceeded?: boolean; exceededAmount?: number
 }
@@ -298,7 +298,7 @@ export default function SignedBillsPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-gray-600">
-                    <th className="px-4 py-3 font-semibold">Voucher</th>
+                    <th className="px-4 py-3 font-semibold">#</th>
                     <th className="px-4 py-3 font-semibold">Date</th>
                     <th className="px-4 py-3 font-semibold">Type</th>
                     <th className="px-4 py-3 font-semibold">Person</th>
@@ -311,7 +311,7 @@ export default function SignedBillsPage() {
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map((b) => (
                     <tr key={b.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500">{b.voucherNumber}</td>
+                      <td className="px-4 py-3 font-semibold text-gray-600">#{b.seq ?? '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{formatDate(b.date)}</td>
                       <td className="px-4 py-3">
                         <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${BILL_TYPE_COLORS[b.billType]}`}>

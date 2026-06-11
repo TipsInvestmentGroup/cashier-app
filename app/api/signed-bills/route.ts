@@ -37,7 +37,22 @@ export async function GET(req: NextRequest) {
     take: 200,
   })
 
-  return NextResponse.json(bills)
+  // Per-person sequence number (1..N) by signing order — friendly alternative to voucher
+  const all = await prisma.signedBill.findMany({
+    select: { id: true, personId: true, personName: true },
+    orderBy: { createdAt: 'asc' },
+  })
+  const seqMap = new Map<string, number>()
+  const counter = new Map<string, number>()
+  for (const b of all) {
+    const k = b.personId || `name:${b.personName}`
+    const n = (counter.get(k) || 0) + 1
+    counter.set(k, n)
+    seqMap.set(b.id, n)
+  }
+  const withSeq = bills.map((b) => ({ ...b, seq: seqMap.get(b.id) || null }))
+
+  return NextResponse.json(withSeq)
 }
 
 export async function POST(req: NextRequest) {

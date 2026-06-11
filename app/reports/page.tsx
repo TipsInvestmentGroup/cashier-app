@@ -11,7 +11,7 @@ interface ReportData {
   period: { start: string; end: string; type: string }
   summary: { totalCollected: number; totalSigned: number; totalPaid: number }
   collections: { id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number; outlet: { name: string }; cashier: { name: string } }[]
-  signedBills: { id: string; date: string; billType: string; personName: string; amount: number; status: string; outlet: { name: string } }[]
+  signedBills: { id: string; date: string; voucherNumber: string; billType: string; personName: string; amount: number; status: string; outlet: { name: string } }[]
   paidBills: { id: string; date: string; payerName: string; amountPaid: number; paymentMethod: string; outlet: { name: string } }[]
   byBillType: Record<string, number>
   byPaymentMethod: Record<string, number>
@@ -276,7 +276,7 @@ export default function ReportsPage() {
                 {activeTab === 'signed' && (
                   <div>
                     <div className="flex justify-end mb-3">
-                      <ExportBtns rows={data.signedBills.map((b) => ({ Date: formatDate(b.date), Type: b.billType, Person: b.personName, Amount: b.amount, Status: b.status, Outlet: b.outlet.name }))} filename="signed-bills" title="Signed Bills Report" />
+                      <ExportBtns rows={data.signedBills.map((b) => ({ Date: formatDate(b.date), Voucher: b.voucherNumber, Type: b.billType, Person: b.personName, Amount: b.amount, Status: b.status, Outlet: b.outlet.name }))} filename="signed-bills" title="Signed Bills Report" />
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
