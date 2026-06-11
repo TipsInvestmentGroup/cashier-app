@@ -7,7 +7,7 @@ import { formatCurrency, formatDate, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '
 interface Receivable {
   id: string; date: string; voucherNumber: string; billType: string; personName: string
   amount: number; balance: number; totalPaid: number; daysOutstanding: number
-  isOverdue: boolean; aging: string; dueDate?: string; outlet: { name: string }; description?: string
+  isOverdue: boolean; aging: string; dueDate?: string; outlet: { name: string }; description?: string; seq?: number
 }
 interface Summary { total: number; count: number; overdue: number; byType: Record<string, number> }
 interface CreditAccount {
@@ -205,7 +205,7 @@ export default function ReceivablesPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-gray-600">
-                    <th className="px-4 py-3 font-semibold">Voucher</th>
+                    <th className="px-4 py-3 font-semibold">Date / Ref</th>
                     <th className="px-4 py-3 font-semibold">Type</th>
                     <th className="px-4 py-3 font-semibold">Person</th>
                     <th className="px-4 py-3 font-semibold">Original</th>
@@ -219,7 +219,7 @@ export default function ReceivablesPage() {
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map((r) => (
                     <tr key={r.id} className={`hover:bg-gray-50 ${r.isOverdue ? 'bg-red-50/40' : ''}`}>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500">{r.voucherNumber}</td>
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDate(r.date)} · <span className="font-semibold">#{r.seq ?? '—'}</span></td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${BILL_TYPE_COLORS[r.billType]}`}>
                           {BILL_TYPE_LABELS[r.billType]}
