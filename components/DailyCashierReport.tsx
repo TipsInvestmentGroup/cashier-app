@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { formatCurrency } from '@/lib/utils'
 import { format } from 'date-fns'
 import { RangeKey, RANGE_OPTIONS, getRangeInterval } from '@/lib/dateRange'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
@@ -179,6 +180,38 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">🧾 System Sales</p><p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(data.totals.systemSales)}</p></div>
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">💰 Collection</p><p className="text-lg font-bold mt-1 text-gray-800">{formatCurrency(data.totals.total)}</p></div>
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100"><p className="text-gray-500 text-xs">✅ Paid Bills</p><p className="text-lg font-bold mt-1 text-green-700">{formatCurrency(data.totals.paidTotal)}</p></div>
+        </div>
+      )}
+
+      {/* Outlet comparison charts (consolidated view) */}
+      {groupBy === 'outlet' && data && data.rows.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h3 className="font-semibold text-gray-800 mb-4">Net Collection by Outlet</h3>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={data.rows.map((r) => ({ name: r.staffName, Net: r.netCollection }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v: unknown) => formatCurrency(v as number)} />
+                <Bar dataKey="Net" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h3 className="font-semibold text-gray-800 mb-4">System Sales vs Collection by Outlet</h3>
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={data.rows.map((r) => ({ name: r.staffName, System: r.systemSales, Collection: r.total }))}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v: unknown) => formatCurrency(v as number)} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="System" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Collection" fill="#10b981" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       )}
 

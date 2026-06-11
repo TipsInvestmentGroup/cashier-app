@@ -75,6 +75,37 @@ export default function ReportsPage() {
     toast.success('CSV exported!')
   }
 
+  const exportExcel = async (rows: Record<string, unknown>[], filename: string) => {
+    if (!rows.length) return toast.error('No data to export')
+    const XLSX = await import('xlsx')
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Report')
+    XLSX.writeFile(wb, `${filename}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    toast.success('Excel exported!')
+  }
+
+  const exportPDF = async (rows: Record<string, unknown>[], filename: string, title: string) => {
+    if (!rows.length) return toast.error('No data to export')
+    const { jsPDF } = await import('jspdf')
+    const autoTable = (await import('jspdf-autotable')).default
+    const keys = Object.keys(rows[0])
+    const doc = new jsPDF()
+    doc.setFontSize(14); doc.text(title, 14, 16)
+    doc.setFontSize(9); doc.text(`Generated ${new Date().toLocaleString()}`, 14, 22)
+    autoTable(doc, { startY: 26, head: [keys], body: rows.map((r) => keys.map((k) => String(r[k] ?? ''))), styles: { fontSize: 8 }, headStyles: { fillColor: [79, 70, 229] } })
+    doc.save(`${filename}-${new Date().toISOString().slice(0, 10)}.pdf`)
+    toast.success('PDF exported!')
+  }
+
+  const ExportBtns = ({ rows, filename, title }: { rows: Record<string, unknown>[]; filename: string; title: string }) => (
+    <div className="flex gap-2">
+      <button onClick={() => exportCSV(rows, filename)} className="px-3 py-2 bg-gray-100 text-gray-700 text-sm rounded-xl hover:bg-gray-200 transition">📄 CSV</button>
+      <button onClick={() => exportExcel(rows, filename)} className="px-3 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">📊 Excel</button>
+      <button onClick={() => exportPDF(rows, filename, title)} className="px-3 py-2 bg-red-600 text-white text-sm rounded-xl hover:bg-red-700 transition">📕 PDF</button>
+    </div>
+  )
+
   const billTypeChartData = data ? Object.entries(data.byBillType).map(([k, v]) => ({ name: k, amount: v })) : []
   const pmChartData = data ? Object.entries(data.byPaymentMethod).map(([k, v]) => ({ name: k, amount: v })) : []
 
@@ -206,10 +237,7 @@ export default function ReportsPage() {
                 {activeTab === 'collections' && (
                   <div>
                     <div className="flex justify-end mb-3">
-                      <button onClick={() => exportCSV(data.collections.map((c) => ({ Date: formatDate(c.date), Outlet: c.outlet.name, Cash: c.cash, CRDB: c.crdb, Stanbic: c.stanbic, MPESA: c.mpesa, Total: c.total })), 'collections')}
-                        className="px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">
-                        📥 Export CSV
-                      </button>
+                      <ExportBtns rows={data.collections.map((c) => ({ Date: formatDate(c.date), Outlet: c.outlet.name, Cash: c.cash, CRDB: c.crdb, Stanbic: c.stanbic, MPESA: c.mpesa, Total: c.total }))} filename="collections" title="Collections Report" />
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
@@ -248,10 +276,7 @@ export default function ReportsPage() {
                 {activeTab === 'signed' && (
                   <div>
                     <div className="flex justify-end mb-3">
-                      <button onClick={() => exportCSV(data.signedBills.map((b) => ({ Date: formatDate(b.date), Type: b.billType, Person: b.personName, Amount: b.amount, Status: b.status, Outlet: b.outlet.name })), 'signed-bills')}
-                        className="px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">
-                        📥 Export CSV
-                      </button>
+                      <ExportBtns rows={data.signedBills.map((b) => ({ Date: formatDate(b.date), Type: b.billType, Person: b.personName, Amount: b.amount, Status: b.status, Outlet: b.outlet.name }))} filename="signed-bills" title="Signed Bills Report" />
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
@@ -286,10 +311,7 @@ export default function ReportsPage() {
                 {activeTab === 'paid' && (
                   <div>
                     <div className="flex justify-end mb-3">
-                      <button onClick={() => exportCSV(data.paidBills.map((p) => ({ Date: formatDate(p.date), Payer: p.payerName, Amount: p.amountPaid, Method: p.paymentMethod, Outlet: p.outlet.name })), 'paid-bills')}
-                        className="px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">
-                        📥 Export CSV
-                      </button>
+                      <ExportBtns rows={data.paidBills.map((p) => ({ Date: formatDate(p.date), Payer: p.payerName, Amount: p.amountPaid, Method: p.paymentMethod, Outlet: p.outlet.name }))} filename="paid-bills" title="Paid Bills Report" />
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
