@@ -39,13 +39,42 @@ export default function PettyCashPage() {
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({ ...INIT, requestedBy: user?.name || '' })
+  const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([])
+  // Cash reconciliation modal
+  const [reconOpen, setReconOpen] = useState(false)
+  const [reconForm, setReconForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', openingBalance: '', cashDeposited: '', notes: '' })
+  const [reconComputed, setReconComputed] = useState<{ cashCollected: number; paidBillsCash: number; cashExpenses: number } | null>(null)
+  const [reconBusy, setReconBusy] = useState(false)
 
   const canApprove = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setItems(await request('/api/petty-cash')) } finally { setLoading(false) }
+    try {
+      const [its, outs] = await Promise.all([request('/api/petty-cash'), request('/api/outlets')])
+      setItems(its); setOutlets(outs || [])
+    } finally { setLoading(false) }
   }, [request])
+
+  const loadRecon = useCallback(async (date: string, outletId: string) => {
+    const params = new URLSearchParams({ date }); if (outletId) params.set('outletId', outletId)
+    const res = await request(`/api/cash-recon?${params}`)
+    setReconComputed(res.computed)
+    setReconForm((f) => ({ ...f, openingBalance: res.existing ? String(res.existing.openingBalance) : f.openingBalance, cashDeposited: res.existing ? String(res.existing.cashDeposited) : f.cashDeposited, notes: res.existing?.notes || f.notes }))
+  }, [request])
+
+  const openRecon = () => { setReconForm({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', openingBalance: '', cashDeposited: '', notes: '' }); setReconComputed(null); setReconOpen(true); loadRecon(format(new Date(), 'yyyy-MM-dd'), '') }
+
+  const saveRecon = async () => {
+    setReconBusy(true)
+    try {
+      await request('/api/cash-recon', { method: 'POST', body: JSON.stringify({ ...reconForm, openingBalance: Number(reconForm.openingBalance) || 0, cashDeposited: Number(reconForm.cashDeposited) || 0 }) })
+      toast.success('Cash reconciliation saved!')
+      setReconOpen(false)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error saving reconciliation')
+    } finally { setReconBusy(false) }
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -129,9 +158,15 @@ export default function PettyCashPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Petty Cash Expenses</h1>
-          <p className="text-gray-500 text-sm">Record and track cash requests</p>
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Petty Cash Expenses</h1>
+            <p className="text-gray-500 text-sm">Record and track cash requests</p>
+          </div>
+          <button onClick={openRecon}
+            className="px-5 py-3 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition shadow">
+            💰 Cash Reconciliation
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -294,6 +329,76 @@ export default function PettyCashPage() {
           )}
         </div>
       </div>
+
+      {/* Cash Reconciliation modal */}
+      {reconOpen && (() => {
+        const c = reconComputed || { cashCollected: 0, paidBillsCash: 0, cashExpenses: 0 }
+        const opening = Number(reconForm.openingBalance) || 0
+        const deposited = Number(reconForm.cashDeposited) || 0
+        const closing = opening + c.cashCollected + c.paidBillsCash - c.cashExpenses - deposited
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={() => setReconOpen(false)}>
+            <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b border-gray-100">
+                <h3 className="font-bold text-gray-900">💰 Cash Reconciliation</h3>
+                <button onClick={() => setReconOpen(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
+                    <input type="date" value={reconForm.date} onChange={(e) => { setReconForm({ ...reconForm, date: e.target.value }); loadRecon(e.target.value, reconForm.outletId) }}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet</label>
+                    <select value={reconForm.outletId} onChange={(e) => { setReconForm({ ...reconForm, outletId: e.target.value }); loadRecon(reconForm.date, e.target.value) }}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">All Outlets</option>
+                      {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Computed cash figures */}
+                <div className="bg-gray-50 rounded-xl p-3 space-y-1 text-sm">
+                  <div className="flex justify-between"><span className="text-gray-600">💵 Cash collected from staff</span><span className="font-semibold">{formatCurrency(c.cashCollected)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">✅ Paid bills (cash)</span><span className="font-semibold">{formatCurrency(c.paidBillsCash)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">🧾 Cash expenses (requests)</span><span className="font-semibold text-red-600">−{formatCurrency(c.cashExpenses)}</span></div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Opening Cash Balance (TZS)</label>
+                  <input type="number" value={reconForm.openingBalance} onChange={(e) => setReconForm({ ...reconForm, openingBalance: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Deposited to Bank (TZS)</label>
+                  <input type="number" value={reconForm.cashDeposited} onChange={(e) => setReconForm({ ...reconForm, cashDeposited: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
+                </div>
+
+                <div className="bg-indigo-50 rounded-xl p-3 flex items-center justify-between">
+                  <span className="font-semibold text-indigo-800">Closing Cash Balance</span>
+                  <span className={`text-xl font-bold ${closing < 0 ? 'text-red-700' : 'text-indigo-700'}`}>{formatCurrency(closing)}</span>
+                </div>
+                <p className="text-xs text-gray-400">Closing = Opening + Collected + Paid-cash − Expenses − Deposited</p>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Notes</label>
+                  <textarea value={reconForm.notes} onChange={(e) => setReconForm({ ...reconForm, notes: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" rows={2} placeholder="Any notes…" />
+                </div>
+
+                <button onClick={saveRecon} disabled={reconBusy}
+                  className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition disabled:opacity-60">
+                  {reconBusy ? 'Saving…' : 'Save Reconciliation'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </AppShell>
   )
 }

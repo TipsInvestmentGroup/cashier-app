@@ -31,19 +31,24 @@ export default function ReceivablesPage() {
   const [loading, setLoading] = useState(true)
   const [filterType, setFilterType] = useState('')
   const [filterAging, setFilterAging] = useState('')
+  const [filterOutlet, setFilterOutlet] = useState('')
+  const [filterOverdue, setFilterOverdue] = useState(false)
+  const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([])
   const [search, setSearch] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     const params = new URLSearchParams()
     if (filterType) params.set('type', filterType)
-    const [data, payroll] = await Promise.all([
+    const [data, payroll, outs] = await Promise.all([
       request(`/api/receivables?${params}`),
       request('/api/payroll-deductions'),
+      request('/api/outlets'),
     ])
     setReceivables(data.receivables)
     setSummary(data.summary)
     setCreditAccounts(payroll.creditAccounts || [])
+    setOutlets(outs || [])
     setLoading(false)
   }, [request, filterType])
 
@@ -52,6 +57,8 @@ export default function ReceivablesPage() {
   const q = search.trim().toLowerCase()
   const filtered = receivables.filter((r) => {
     if (filterAging && r.aging !== filterAging) return false
+    if (filterOverdue && !r.isOverdue) return false
+    if (filterOutlet && r.outlet.name !== filterOutlet) return false
     if (q && !(`${r.personName} ${r.voucherNumber}`.toLowerCase().includes(q))) return false
     return true
   })
@@ -139,6 +146,18 @@ export default function ReceivablesPage() {
               {a} days
             </button>
           ))}
+          <div className="w-px bg-gray-200 mx-1" />
+          <button onClick={() => setFilterOverdue(!filterOverdue)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition ${filterOverdue ? 'bg-red-500 text-white' : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-gray-300'}`}>
+            🔴 Overdue
+          </button>
+          {outlets.length > 0 && (
+            <select value={filterOutlet} onChange={(e) => setFilterOutlet(e.target.value)}
+              className="px-4 py-2 rounded-xl text-sm font-medium border-2 border-gray-200 text-gray-700 bg-white focus:border-indigo-500 focus:outline-none">
+              <option value="">🏢 All Outlets</option>
+              {outlets.map((o) => <option key={o.id} value={o.name}>{o.name}</option>)}
+            </select>
+          )}
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

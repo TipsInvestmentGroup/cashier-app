@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { DailyCashierReport } from '@/components/DailyCashierReport'
+import { CashReconReport } from '@/components/CashReconReport'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
@@ -121,7 +122,7 @@ export default function ReportsPage() {
 
         {/* Report type switcher */}
         <div className="flex flex-wrap gap-2">
-          {[{ k: 'summary', label: '📊 Financial Summary' }, { k: 'daily-cashier', label: '🧾 Daily Cashier Report' }].map((v) => (
+          {[{ k: 'summary', label: '📊 Financial Summary' }, { k: 'daily-cashier', label: '🧾 Daily Cashier Report' }, { k: 'cash-recon', label: '💰 Cash Reconciliation' }].map((v) => (
             <button key={v.k} onClick={() => setReportView(v.k)}
               className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${reportView === v.k ? 'bg-indigo-600 text-white shadow' : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-gray-300'}`}>
               {v.label}
@@ -130,6 +131,7 @@ export default function ReportsPage() {
         </div>
 
         {reportView === 'daily-cashier' && <DailyCashierReport outlets={outlets} request={request} />}
+        {reportView === 'cash-recon' && <CashReconReport outlets={outlets} request={request} />}
 
         {reportView === 'summary' && (
         <>

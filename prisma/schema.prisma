@@ -157,6 +157,20 @@ model PettyCash {
   @@index([status])
 }
 
+model CashRecon {
+  id             String   @id @default(cuid())
+  date           DateTime @default(now())
+  outletId       String?
+  openingBalance Float    @default(0)
+  cashDeposited  Float    @default(0)
+  notes          String?
+  cashierId      String
+  createdAt      DateTime @default(now())
+
+  @@index([date])
+  @@index([outletId])
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String
