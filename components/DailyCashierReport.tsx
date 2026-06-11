@@ -59,8 +59,8 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
 
   useEffect(() => { load() }, [load])
 
-  const signedKeys = data?.signedKeys || []
-  const paidKeys = (data?.paidKeys || []).filter((k) => k !== 'OTHER')
+  const signedKeys: string[] = data?.signedKeys || []
+  const paidKeys: string[] = (data?.paidKeys || []).filter((k: string) => k !== 'OTHER')
   const q = search.trim().toLowerCase()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const visibleRows = (data?.rows || []).filter((r: any) => !q || String(r.staffName ?? r.name ?? '').toLowerCase().includes(q))
@@ -241,7 +241,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
             <h3 className="font-semibold text-gray-800 mb-4">Net Collection by Outlet</h3>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={data.rows.map((r) => ({ name: r.staffName, Net: r.netCollection }))}>
+              <BarChart data={data.rows.map((r: any) => ({ name: r.staffName, Net: r.netCollection }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
@@ -253,7 +253,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
             <h3 className="font-semibold text-gray-800 mb-4">System Sales vs Collection by Outlet</h3>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={data.rows.map((r) => ({ name: r.staffName, System: r.systemSales, Collection: r.total }))}>
+              <BarChart data={data.rows.map((r: any) => ({ name: r.staffName, System: r.systemSales, Collection: r.total }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
@@ -366,7 +366,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                 {visibleRows.length === 0 && (
                   <tr><td colSpan={9 + signedKeys.length + paidKeys.length} className="text-center py-8 text-gray-400">No match for “{search}”.</td></tr>
                 )}
-                {visibleRows.map((r, i) => (
+                {visibleRows.map((r: any, i: number) => (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className={td}>
                       <button onClick={() => openDetail(r.staffName)}
