@@ -290,12 +290,12 @@ export default function CollectionsPage() {
                       <button type="button" onClick={() => setSignedRows([...signedRows, { billType: 'ADMIN', name: '', amount: '' }])}
                         className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100">➕ New Bill</button>
                     </div>
-                    {signedRows.length === 0 && <p className="text-xs text-gray-400">Add Admin / Director / Tips / DJ vouchers this staff served on credit.</p>}
+                    {signedRows.length === 0 && <p className="text-xs text-gray-400">Add credit sales this staff served: Admin / Director / Tips / DJ / Customer / Staff Loss.</p>}
                     {signedRows.map((r, i) => (
                       <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
                         <select value={r.billType} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, billType: e.target.value }; setSignedRows(n) }}
                           className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
-                          {['ADMIN', 'DIRECTOR', 'TIPS', 'DJ'].map((t) => <option key={t} value={t}>{t}</option>)}
+                          {['ADMIN', 'DIRECTOR', 'TIPS', 'DJ', 'CUSTOMER', 'STAFF_LOSS'].map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                         <input list="personNames" placeholder="Name" value={r.name} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, name: e.target.value }; setSignedRows(n) }}
                           className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />

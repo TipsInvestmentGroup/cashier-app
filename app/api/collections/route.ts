@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   // Reconciliation inputs entered during the collection flow
   const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
   const paidInput: { payerName: string; amount: number; paymentMethod: string }[] = Array.isArray(body.paidBills) ? body.paidBills : []
-  const SIGNED_TYPES = ['ADMIN', 'DIRECTOR', 'TIPS', 'DJ']
+  const SIGNED_TYPES = ['ADMIN', 'DIRECTOR', 'TIPS', 'DJ', 'CUSTOMER', 'STAFF_LOSS']
   const PAY_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
 
   const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
@@ -174,5 +174,5 @@ export async function POST(req: NextRequest) {
     staffLoss = { amount: lossAmount, voucher: voucherNumber, staffName }
   }
 
-  return NextResponse.json({ ...collection, staffLoss, signedCreated, paidCreated, signedTotal, paidTotal }, { status: 201 })
+  return NextResponse.json({ ...collection, creditSales: signedTotal, paymentsReceived: paidTotal, staffLoss, signedCreated, paidCreated, signedTotal, paidTotal }, { status: 201 })
 }
