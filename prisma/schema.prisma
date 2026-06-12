@@ -142,19 +142,36 @@ model PettyCash {
   date          DateTime @default(now())
   requestedBy   String
   department    String?
+  functionName  String?                      // e.g. Purchases of | Allowance | Transport
   purpose       String
   amount        Float    @default(0)
   paymentMethod String                       // CASH | CRDB | STANBIC | MPESA
   payeeName     String?
   payeeAccount  String?
   approvedBy    String?
-  status        String   @default("PENDING") // PENDING | APPROVED
+  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
   outletId      String?
   cashierId     String
   createdAt     DateTime @default(now())
 
   @@index([date])
   @@index([status])
+}
+
+// Departments selectable on the cash-request form (managed in /departments).
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// Functions selectable on the cash-request form (e.g. Purchases of, Allowance, Transport).
+model PettyFunction {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 }
 
 model CashRecon {

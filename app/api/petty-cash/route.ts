@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (!ALLOWED.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json()
-  const { date, requestedBy, department, purpose, amount, paymentMethod, payeeName, payeeAccount, approvedBy, outletId } = body
+  const { date, requestedBy, department, functionName, purpose, amount, paymentMethod, payeeName, payeeAccount, approvedBy, outletId } = body
 
   if (!requestedBy) return NextResponse.json({ error: 'Requested by is required' }, { status: 400 })
   if (!purpose) return NextResponse.json({ error: 'Purpose is required' }, { status: 400 })
@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
       date: date ? new Date(date) : new Date(),
       requestedBy,
       department: department || null,
+      functionName: functionName || null,
       purpose,
       amount: Number(amount),
       paymentMethod: method,

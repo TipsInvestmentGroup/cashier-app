@@ -11,10 +11,16 @@ import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 
 interface PettyCash {
-  id: string; date: string; requestedBy: string; department?: string; purpose: string
+  id: string; date: string; requestedBy: string; department?: string; functionName?: string; purpose: string
   amount: number; paymentMethod: string; payeeName?: string; payeeAccount?: string
   approvedBy?: string; status: string
 }
+interface Person { id: string; name: string; type: string }
+interface NamedItem { id: string; name: string; isActive: boolean }
+interface Approver { name: string; email: string }
+
+// Persons eligible as requester / payee on a cash request (internal people only).
+const PERSON_EXCLUDE = ['CUSTOMER', 'STAFF_LOSS', 'TIPS', 'DJ']
 
 const METHODS = [
   { value: 'CASH', label: '💵 Cash' },
@@ -24,7 +30,7 @@ const METHODS = [
 ]
 
 const INIT = {
-  date: format(new Date(), 'yyyy-MM-dd'), requestedBy: '', department: '', purpose: '',
+  date: format(new Date(), 'yyyy-MM-dd'), requestedBy: '', department: '', functionName: '', purpose: '',
   amount: '', paymentMethod: 'CASH', payeeName: '', payeeAccount: '', approvedBy: '',
 }
 
@@ -38,21 +44,33 @@ export default function PettyCashPage() {
   const [range, setRange] = useState<RangeKey>('month')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [form, setForm] = useState({ ...INIT, requestedBy: user?.name || '' })
+  const [form, setForm] = useState({ ...INIT })
   const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([])
+  const [persons, setPersons] = useState<Person[]>([])
+  const [departments, setDepartments] = useState<NamedItem[]>([])
+  const [functions, setFunctions] = useState<NamedItem[]>([])
+  const [approvers, setApprovers] = useState<Approver[]>([])
   // Cash reconciliation modal
   const [reconOpen, setReconOpen] = useState(false)
   const [reconForm, setReconForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', openingBalance: '', cashDeposited: '', notes: '' })
   const [reconComputed, setReconComputed] = useState<{ cashCollected: number; paidBillsCash: number; cashExpenses: number } | null>(null)
   const [reconBusy, setReconBusy] = useState(false)
 
-  const canApprove = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
+  const [canApprove, setCanApprove] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [its, outs] = await Promise.all([request('/api/petty-cash'), request('/api/outlets')])
+      const [its, outs, ppl, depts, fns, access] = await Promise.all([
+        request('/api/petty-cash'), request('/api/outlets'), request('/api/persons'),
+        request('/api/departments'), request('/api/functions'), request('/api/petty-access'),
+      ])
       setItems(its); setOutlets(outs || [])
+      setPersons((ppl || []).filter((p: Person) => !PERSON_EXCLUDE.includes(p.type)))
+      setDepartments((depts || []).filter((d: NamedItem) => d.isActive))
+      setFunctions((fns || []).filter((f: NamedItem) => f.isActive))
+      setApprovers(access?.approvers || [])
+      setCanApprove(!!access?.canApprove)
     } finally { setLoading(false) }
   }, [request])
 
@@ -120,7 +138,7 @@ export default function PettyCashPage() {
     try {
       await request('/api/petty-cash', { method: 'POST', body: JSON.stringify({ ...form, amount: Number(form.amount) }) })
       toast.success('Cash request submitted!')
-      setForm({ ...INIT, requestedBy: user?.name || '' })
+      setForm({ ...INIT })
       load()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error submitting request')
@@ -148,7 +166,7 @@ export default function PettyCashPage() {
   }
 
   const exportRows = () => filtered.map((i) => ({
-    Date: formatDate(i.date), 'Requested By': i.requestedBy, Department: i.department || '',
+    Date: formatDate(i.date), 'Requested By': i.requestedBy, Department: i.department || '', Function: i.functionName || '',
     Purpose: i.purpose, Amount: i.amount, 'Payment Method': i.paymentMethod,
     Payee: i.payeeName || '', 'Payee Account': i.payeeAccount || '', Status: i.status, 'Approved By': i.approvedBy || '',
   }))
@@ -244,6 +262,7 @@ export default function PettyCashPage() {
                         <th className="px-4 py-3 font-semibold">Date</th>
                         <th className="px-4 py-3 font-semibold">Requested By</th>
                         <th className="px-4 py-3 font-semibold">Department</th>
+                        <th className="px-4 py-3 font-semibold">Function</th>
                         <th className="px-4 py-3 font-semibold">Purpose</th>
                         <th className="px-4 py-3 font-semibold">Amount</th>
                         <th className="px-4 py-3 font-semibold">Method</th>
@@ -258,6 +277,7 @@ export default function PettyCashPage() {
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(i.date)}</td>
                           <td className="px-4 py-3 font-medium text-gray-800">{i.requestedBy}</td>
                           <td className="px-4 py-3 text-gray-500">{i.department || '-'}</td>
+                          <td className="px-4 py-3 text-gray-500">{i.functionName || '-'}</td>
                           <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" title={i.purpose}>{i.purpose}</td>
                           <td className="px-4 py-3 font-bold text-gray-900">{formatCurrency(i.amount)}</td>
                           <td className="px-4 py-3 text-gray-500">{i.paymentMethod}</td>
@@ -280,13 +300,13 @@ export default function PettyCashPage() {
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={canApprove ? 9 : 8} className="text-center py-12 text-gray-400">No cash requests in this period</td></tr>
+                        <tr><td colSpan={canApprove ? 10 : 9} className="text-center py-12 text-gray-400">No cash requests in this period</td></tr>
                       )}
                     </tbody>
                     {filtered.length > 0 && (
                       <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900">
                         <tr>
-                          <td className="px-4 py-3" colSpan={4}>TOTAL ({filtered.length})</td>
+                          <td className="px-4 py-3" colSpan={5}>TOTAL ({filtered.length})</td>
                           <td className="px-4 py-3 text-indigo-700">{formatCurrency(total)}</td>
                           <td className="px-4 py-3" colSpan={canApprove ? 4 : 3}></td>
                         </tr>
@@ -312,13 +332,27 @@ export default function PettyCashPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Requested By *</label>
-                    <input type="text" value={form.requestedBy} onChange={(e) => setForm({ ...form, requestedBy: e.target.value })}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Full name" required />
+                    <select value={form.requestedBy} onChange={(e) => setForm({ ...form, requestedBy: e.target.value })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white" required>
+                      <option value="">Select person…</option>
+                      {persons.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Department</label>
-                    <input type="text" value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="e.g. Kitchen, Bar, Admin" />
+                    <select value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">Select department…</option>
+                      {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Function</label>
+                    <select value={form.functionName} onChange={(e) => setForm({ ...form, functionName: e.target.value })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">Select function…</option>
+                      {functions.map((f) => <option key={f.id} value={f.name}>{f.name}</option>)}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Purpose of Request *</label>
@@ -343,8 +377,11 @@ export default function PettyCashPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Payee Name <span className="text-gray-400 font-normal">(if applicable)</span></label>
-                    <input type="text" value={form.payeeName} onChange={(e) => setForm({ ...form, payeeName: e.target.value })}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Who receives the money" />
+                    <select value={form.payeeName} onChange={(e) => setForm({ ...form, payeeName: e.target.value })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">Select payee…</option>
+                      {persons.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Payee Account <span className="text-gray-400 font-normal">(if applicable)</span></label>
@@ -352,9 +389,12 @@ export default function PettyCashPage() {
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Account / phone number" />
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Approved By</label>
-                    <input type="text" value={form.approvedBy} onChange={(e) => setForm({ ...form, approvedBy: e.target.value })}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Approver name (leave blank if pending)" />
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Approved By <span className="text-gray-400 font-normal">(leave blank if pending)</span></label>
+                    <select value={form.approvedBy} onChange={(e) => setForm({ ...form, approvedBy: e.target.value })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">Pending approval</option>
+                      {approvers.map((a) => <option key={a.email} value={a.name}>{a.name}</option>)}
+                    </select>
                   </div>
                   <button type="submit" disabled={submitting}
                     className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">

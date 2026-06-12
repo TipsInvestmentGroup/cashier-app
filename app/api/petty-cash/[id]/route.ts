@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
-
-const APPROVERS = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
+import { canApprovePetty } from '@/lib/petty-access'
 
 /** Approve or reject a petty-cash request. body: { action: 'approve' | 'reject' } */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!requireRole(user, APPROVERS)) return NextResponse.json({ error: 'Only managers/accountants can approve or reject' }, { status: 403 })
+  if (!canApprovePetty(user.email)) return NextResponse.json({ error: 'Only the designated approvers can approve or reject petty cash' }, { status: 403 })
 
   const { id } = await params
   const { action } = await req.json().catch(() => ({}))
