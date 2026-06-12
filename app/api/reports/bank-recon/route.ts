@@ -23,23 +23,29 @@ export async function GET(req: NextRequest) {
   const f: any = { date: range }
   if (outletId) f.outletId = outletId
 
-  const recons = await prisma.bankRecon.findMany({ where: f, orderBy: { date: 'asc' }, select: { date: true, channel: true, reportedAmount: true, verifiedAmount: true, reason: true, verifiedBy: true } })
+  const recons = await prisma.bankRecon.findMany({ where: f, orderBy: { date: 'asc' }, select: { date: true, channel: true, reportedAmount: true, openingBalance: true, closingBalance: true, verifiedAmount: true, reason: true, verifiedBy: true } })
 
-  // Variance = Verified − Reported (▲ excess, ▼ shortage) to match Cash Recon.
-  const rows = recons.map((r) => ({
-    date: new Date(r.date).toISOString().slice(0, 10),
-    channel: r.channel || 'ALL',
-    reported: r.reportedAmount,
-    verified: r.verifiedAmount,
-    verifiedSet: r.verifiedAmount != null,
-    variance: r.verifiedAmount != null ? r.verifiedAmount - r.reportedAmount : null,
-    reason: r.reason || '',
-    verifiedBy: r.verifiedBy || '',
-  }))
+  const rows = recons.map((r) => {
+    const required = (r.closingBalance || 0) - (r.openingBalance || 0) // closing − opening
+    const hasReq = r.openingBalance != null || r.closingBalance != null
+    return {
+      date: new Date(r.date).toISOString().slice(0, 10),
+      channel: r.channel || 'ALL',
+      opening: r.openingBalance, closing: r.closingBalance,
+      required: hasReq ? required : null,
+      reported: r.reportedAmount,
+      // Variance = Reported (system collected) − Required (account movement)
+      variance: hasReq ? r.reportedAmount - required : null,
+      verified: r.verifiedAmount,
+      verifiedSet: r.verifiedAmount != null,
+      reason: r.reason || '',
+      verifiedBy: r.verifiedBy || '',
+    }
+  })
 
   const totals = rows.reduce(
-    (t, r) => ({ reported: t.reported + r.reported, verified: t.verified + (r.verified || 0), variance: t.variance + (r.variance || 0) }),
-    { reported: 0, verified: 0, variance: 0 }
+    (t, r) => ({ required: t.required + (r.required || 0), reported: t.reported + r.reported, verified: t.verified + (r.verified || 0), variance: t.variance + (r.variance || 0) }),
+    { required: 0, reported: 0, verified: 0, variance: 0 }
   )
 
   return NextResponse.json({ rows, totals })

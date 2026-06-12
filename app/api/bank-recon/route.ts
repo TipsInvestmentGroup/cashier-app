@@ -51,7 +51,12 @@ export async function GET(req: NextRequest) {
     const rows = await Promise.all(chans.map(async (ch) => {
       const reported = await reportedFor(ch.code, startOfDay(day), endOfDay(day), outletId)
       const ex = byChannel.get(ch.code)
-      return { code: ch.code, label: ch.label, reported, verifiedAmount: ex?.verifiedAmount ?? null, reason: ex?.reason || '', verifiedBy: ex?.verifiedBy || '' }
+      return {
+        code: ch.code, label: ch.label, reported,
+        openingBalance: ex?.openingBalance ?? null, closingBalance: ex?.closingBalance ?? null,
+        verifiedAmount: ex?.verifiedAmount ?? null, verifiedOpening: ex?.verifiedOpening ?? null, verifiedClosing: ex?.verifiedClosing ?? null,
+        reason: ex?.reason || '', verifiedBy: ex?.verifiedBy || '',
+      }
     }))
     return NextResponse.json({ rows, canVerify: await canVerifyCash(user.email) })
   }
@@ -67,10 +72,12 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const { date, outletId } = body
-  const channels: { channel: string; verifiedAmount?: number | string; reason?: string }[] = Array.isArray(body.channels) ? body.channels : []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const channels: any[] = Array.isArray(body.channels) ? body.channels : []
   const day = date ? new Date(date) : new Date()
   const usedOutletId = outletId || user.outletId || null
   const canVerify = await canVerifyCash(user.email)
+  const num = (v: unknown) => (v === undefined || v === null || v === '' ? undefined : Number(v) || 0)
 
   for (const entry of channels) {
     if (!entry.channel) continue
@@ -84,9 +91,16 @@ export async function POST(req: NextRequest) {
       reportedAmount: reported, reason: entry.reason || null,
       reportedBy: user.name, cashierId: user.userId,
     }
-    if (entry.verifiedAmount !== undefined && entry.verifiedAmount !== null && entry.verifiedAmount !== '') {
-      if (!canVerify) return NextResponse.json({ error: 'Only an authorized officer can enter the verified amount' }, { status: 403 })
-      data.verifiedAmount = Number(entry.verifiedAmount) || 0
+    // Cashier fields
+    if (num(entry.openingBalance) !== undefined) data.openingBalance = num(entry.openingBalance)
+    if (num(entry.closingBalance) !== undefined) data.closingBalance = num(entry.closingBalance)
+    // Officer-verified fields (gated)
+    const wantsVerify = [entry.verifiedAmount, entry.verifiedOpening, entry.verifiedClosing].some((v) => v !== undefined && v !== null && v !== '')
+    if (wantsVerify) {
+      if (!canVerify) return NextResponse.json({ error: 'Only an authorized officer can enter verified amounts' }, { status: 403 })
+      if (num(entry.verifiedAmount) !== undefined) data.verifiedAmount = num(entry.verifiedAmount)
+      if (num(entry.verifiedOpening) !== undefined) data.verifiedOpening = num(entry.verifiedOpening)
+      if (num(entry.verifiedClosing) !== undefined) data.verifiedClosing = num(entry.verifiedClosing)
       data.verifiedBy = user.name
     }
     if (existing) await prisma.bankRecon.update({ where: { id: existing.id }, data })

@@ -236,8 +236,12 @@ model BankRecon {
   date           DateTime @default(now())
   outletId       String?
   channel        String?              // digital channel code (CRDB | STANBIC | MPESA | …); null = legacy total
-  reportedAmount Float    @default(0) // auto: collections + paid bills for this channel
-  verifiedAmount Float?               // verified by an officer (null = not yet verified)
+  reportedAmount Float    @default(0) // auto: collections + paid bills for this channel (system "collected")
+  openingBalance Float?               // account opening balance (cashier)
+  closingBalance Float?               // account closing balance (cashier) — required = closing − opening
+  verifiedAmount Float?               // verified collected amount by an officer (null = not yet verified)
+  verifiedOpening Float?              // opening balance verified by an officer
+  verifiedClosing Float?              // closing balance verified by an officer
   reason         String?              // reason for variance
   reportedBy     String?
   verifiedBy     String?

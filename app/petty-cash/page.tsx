@@ -129,7 +129,7 @@ export default function PettyCashPage() {
   const [bankDate, setBankDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [bankOutletId, setBankOutletId] = useState('')
   const [bankRows, setBankRows] = useState<{ code: string; label: string; reported: number }[]>([])
-  const [bankEntries, setBankEntries] = useState<Record<string, { verified: string; reason: string }>>({})
+  const [bankEntries, setBankEntries] = useState<Record<string, { opening: string; closing: string; verified: string; verifiedOpening: string; verifiedClosing: string; reason: string }>>({})
   const [bankCanVerify, setBankCanVerify] = useState(false)
   const [bankBusy, setBankBusy] = useState(false)
 
@@ -139,8 +139,17 @@ export default function PettyCashPage() {
     const rows = res.rows || []
     setBankRows(rows.map((r: { code: string; label: string; reported: number }) => ({ code: r.code, label: r.label, reported: r.reported })))
     setBankCanVerify(!!res.canVerify)
-    const entries: Record<string, { verified: string; reason: string }> = {}
-    for (const r of rows) entries[r.code] = { verified: r.verifiedAmount != null ? String(r.verifiedAmount) : '', reason: r.reason || '' }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entries: Record<string, any> = {}
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const r of rows as any[]) entries[r.code] = {
+      opening: r.openingBalance != null ? String(r.openingBalance) : '',
+      closing: r.closingBalance != null ? String(r.closingBalance) : '',
+      verified: r.verifiedAmount != null ? String(r.verifiedAmount) : '',
+      verifiedOpening: r.verifiedOpening != null ? String(r.verifiedOpening) : '',
+      verifiedClosing: r.verifiedClosing != null ? String(r.verifiedClosing) : '',
+      reason: r.reason || '',
+    }
     setBankEntries(entries)
   }, [request])
 
@@ -155,11 +164,16 @@ export default function PettyCashPage() {
   const saveBank = async () => {
     setBankBusy(true)
     try {
-      const channels = bankRows.map((r) => ({
-        channel: r.code,
-        reason: bankEntries[r.code]?.reason || '',
-        ...(bankCanVerify && (bankEntries[r.code]?.verified ?? '') !== '' ? { verifiedAmount: Number(bankEntries[r.code].verified) || 0 } : {}),
-      }))
+      const channels = bankRows.map((r) => {
+        const e = bankEntries[r.code] || {}
+        return {
+          channel: r.code,
+          openingBalance: e.opening ?? '',
+          closingBalance: e.closing ?? '',
+          reason: e.reason || '',
+          ...(bankCanVerify ? { verifiedAmount: e.verified ?? '', verifiedOpening: e.verifiedOpening ?? '', verifiedClosing: e.verifiedClosing ?? '' } : {}),
+        }
+      })
       await request('/api/bank-recon', { method: 'POST', body: JSON.stringify({ date: bankDate, outletId: bankOutletId, channels }) })
       toast.success('Digital payment reconciliation saved!')
       setBankOpen(false)
@@ -585,39 +599,69 @@ export default function PettyCashPage() {
                   </select>
                 </div>
               </div>
-              <p className="text-xs text-gray-400">Each digital channel is reconciled separately. <strong>Reported</strong> is auto-filled from collections + paid bills for that channel. {bankCanVerify ? 'Enter the verified amount per channel.' : 'Only an authorized officer can enter verified amounts.'}</p>
+              <p className="text-xs text-gray-400">Each digital channel is reconciled separately. <strong>Required</strong> = Closing − Opening (you fill these). <strong>Reported</strong> is auto from collections + paid bills. Variance = Reported − Required. {bankCanVerify ? 'Officers can also enter verified figures.' : 'Verified figures are officer-only.'}</p>
 
-              {/* Per-channel rows */}
-              <div className="space-y-2">
-                <div className="hidden sm:grid grid-cols-12 gap-2 text-[11px] font-semibold text-gray-400 px-1">
-                  <span className="col-span-3">Channel</span><span className="col-span-3 text-right">Reported (system)</span><span className="col-span-3 text-right">Verified</span><span className="col-span-3 text-right">Variance</span>
-                </div>
+              {/* Per-channel cards */}
+              <div className="space-y-3">
                 {bankRows.length === 0 && <p className="text-sm text-gray-400 py-2">No digital channels configured.</p>}
                 {bankRows.map((r) => {
-                  const ent = bankEntries[r.code] || { verified: '', reason: '' }
-                  const ver = ent.verified !== '' ? Number(ent.verified) || 0 : null
-                  const v = ver != null ? ver - r.reported : null // + excess, − shortage
+                  const e = bankEntries[r.code] || { opening: '', closing: '', verified: '', verifiedOpening: '', verifiedClosing: '', reason: '' }
+                  const upd = (patch: Partial<typeof e>) => setBankEntries((m) => ({ ...m, [r.code]: { ...e, ...patch } }))
+                  const hasReq = e.opening !== '' || e.closing !== ''
+                  const required = (Number(e.closing) || 0) - (Number(e.opening) || 0)
+                  const variance = hasReq ? r.reported - required : null // + over, − short
                   return (
-                    <div key={r.code} className="border border-gray-100 rounded-xl p-2">
-                      <div className="grid grid-cols-12 gap-2 items-center">
-                        <span className="col-span-3 font-semibold text-gray-800">{r.label}</span>
-                        <span className="col-span-3 text-right text-gray-700">{formatCurrency(r.reported)}</span>
-                        <div className="col-span-3">
-                          {bankCanVerify ? (
-                            <MoneyInput value={ent.verified} onChange={(val) => setBankEntries((m) => ({ ...m, [r.code]: { ...ent, verified: val } }))}
-                              className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm text-right focus:border-indigo-500 focus:outline-none" placeholder="—" />
-                          ) : (
-                            <span className="block text-right text-gray-500 text-sm py-2">{ver != null ? formatCurrency(ver) : '—'}</span>
-                          )}
-                        </div>
-                        <span className={`col-span-3 text-right text-sm font-semibold ${v == null ? 'text-gray-300' : v === 0 ? 'text-gray-500' : v > 0 ? 'text-green-700' : 'text-red-700'}`}>
-                          {v == null ? '—' : `${v > 0 ? '▲ ' : v < 0 ? '▼ ' : ''}${formatCurrency(Math.abs(v))}`}
-                        </span>
+                    <div key={r.code} className="border border-gray-100 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-gray-800">{r.label}</span>
+                        <span className="text-xs text-gray-500">Reported (system): <strong className="text-gray-700">{formatCurrency(r.reported)}</strong></span>
                       </div>
-                      {v != null && v !== 0 && (
-                        <input value={ent.reason} onChange={(e) => setBankEntries((m) => ({ ...m, [r.code]: { ...ent, reason: e.target.value } }))}
-                          placeholder="Reason for variance…"
-                          className="mt-2 w-full px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+                      {/* Cashier opening/closing */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Opening balance</label>
+                          <MoneyInput value={e.opening} onChange={(v) => upd({ opening: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Closing balance</label>
+                          <MoneyInput value={e.closing} onChange={(v) => upd({ closing: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                        </div>
+                      </div>
+                      {/* Required + variance */}
+                      <div className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
+                        <span className="text-gray-600">Required to collect <span className="text-[11px] text-gray-400">(Closing − Opening)</span></span>
+                        <span className="font-semibold text-gray-800">{hasReq ? formatCurrency(required) : '—'}</span>
+                      </div>
+                      {variance != null && (
+                        <div className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 ${variance === 0 ? 'bg-green-50' : 'bg-red-50'}`}>
+                          <span className={`font-semibold ${variance === 0 ? 'text-green-800' : 'text-red-800'}`}>
+                            {variance === 0 ? '✅ Reported matches required' : variance > 0 ? '🔺 Over (reported > required)' : '🔻 Short (reported < required)'}
+                          </span>
+                          <span className={`font-bold ${variance === 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(variance))}</span>
+                        </div>
+                      )}
+                      {/* Officer verification */}
+                      {bankCanVerify ? (
+                        <div className="grid grid-cols-3 gap-2 border-t border-gray-100 pt-2">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified opening</label>
+                            <MoneyInput value={e.verifiedOpening} onChange={(v) => upd({ verifiedOpening: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="—" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified closing</label>
+                            <MoneyInput value={e.verifiedClosing} onChange={(v) => upd({ verifiedClosing: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="—" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified amount</label>
+                            <MoneyInput value={e.verified} onChange={(v) => upd({ verified: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="—" />
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-gray-400 border-t border-gray-100 pt-2">Verified figures: officer-only.</p>
+                      )}
+                      {variance != null && variance !== 0 && (
+                        <input value={e.reason} onChange={(ev) => upd({ reason: ev.target.value })} placeholder="Reason for variance…"
+                          className="w-full px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
                       )}
                     </div>
                   )
