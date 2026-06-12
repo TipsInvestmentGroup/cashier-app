@@ -74,10 +74,11 @@ export default function CollectionsPage() {
   const cashRequiredForm = (Number(form.systemSales) || 0) - (Number(form.crdb) || 0) - (Number(form.stanbic) || 0) - (Number(form.mpesa) || 0)
   const cancelTotalForm = cancelRows.reduce((s, r) => s + (r.sellingPrice * (Number(r.quantity) || 0)), 0)
 
-  // Reconciliation: Staff Loss = System − Collection − Signed Bills − Paid Bills
+  // Reconciliation: Staff Loss = System − Collection − Signed Bills − Paid Bills (Staff Loss only)
   const signedTotalForm = signedRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
   const paidTotalForm = paidRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
-  const lossPreview = (Number(form.systemSales) || 0) - total - signedTotalForm - paidTotalForm
+  const paidStaffLossForm = paidRows.reduce((s, r) => s + (r.category === 'Staff Loss' ? (Number(r.amount) || 0) : 0), 0)
+  const lossPreview = (Number(form.systemSales) || 0) - total - signedTotalForm - paidStaffLossForm
   const hasSigned = signedRows.some((r) => r.name && Number(r.amount) > 0)
   const hasPaid = paidRows.some((r) => r.payerName && Number(r.amount) > 0)
   // Save gate: for a new collection the cashier must record signed/paid bills OR confirm there are none.
@@ -419,7 +420,7 @@ export default function CollectionsPage() {
                       <button type="button" onClick={() => setPaidRows([...paidRows, { category: 'Customer', payerName: form.staffName, amount: '', paymentMethod: 'CASH', signedBillId: '', linkQuery: '' }])}
                         className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100">➕ Record Payment</button>
                     </div>
-                    {paidRows.length === 0 && <p className="text-xs text-gray-400">Add any old debts this staff collected today.</p>}
+                    <p className="text-xs text-gray-400 mb-2">Record payments <strong>this staff received</strong>. Only the <strong>Staff Loss</strong> category reduces this staff&apos;s loss — Customer / Admin / Director payments are saved as normal recoveries.</p>
                     {paidRows.map((r, i) => {
                       const lq = r.linkQuery.trim().toLowerCase()
                       const linkFiltered = signedBillsList.filter((b) => !lq || `${b.personName} ${b.billType} ${b.billType.replace('_', ' ')} ${b.date ? format(parseISO(b.date), 'dd MMM yyyy') : ''}`.toLowerCase().includes(lq))
@@ -482,7 +483,7 @@ export default function CollectionsPage() {
                     <span className={`text-2xl font-bold ${lossPreview > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(lossPreview))}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid {formatCurrency(paidTotalForm)}
+                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid·Staff-Loss {formatCurrency(paidStaffLossForm)}
                   </p>
                 </div>
               )}

@@ -120,8 +120,11 @@ export async function POST(req: NextRequest) {
     signedCreated++
   }
 
-  // 2) Record paid bills (debt recoveries this staff collected)
+  // 2) Record paid bills (debt recoveries this staff collected).
+  //    Only the "Staff Loss" category offsets this staff's loss; all others are
+  //    recorded as normal recoveries (like the Paid Bills page) but do not.
   let paidTotal = 0
+  let paidStaffLoss = 0
   let paidCreated = 0
   for (const pb of paidInput) {
     const amt = Number(pb.amount) || 0
@@ -151,6 +154,7 @@ export async function POST(req: NextRequest) {
       }
     }
     paidTotal += amt
+    if ((pb.category || '') === 'Staff Loss') paidStaffLoss += amt
     paidCreated++
   }
 
@@ -176,14 +180,16 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  // Persist the reconciliation totals on the collection (for list display + edits)
+  // Persist the reconciliation totals on the collection (for list display + edits).
+  // paymentsReceived holds the Staff-Loss-only paid total, since that is what the
+  // loss formula (here and on edit) subtracts.
   await prisma.dailyCollection.update({
     where: { id: collection.id },
-    data: { creditSales: signedTotal, paymentsReceived: paidTotal },
+    data: { creditSales: signedTotal, paymentsReceived: paidStaffLoss },
   })
 
-  // 3) Staff Loss = System − Collection − SignedBills − PaidBills
-  const lossAmount = (Number(systemSales) || 0) - total - signedTotal - paidTotal
+  // 3) Staff Loss = System − Collection − SignedBills − PaidBills (Staff Loss only)
+  const lossAmount = (Number(systemSales) || 0) - total - signedTotal - paidStaffLoss
   let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
   if (staffName && lossAmount > 0) {
     const person = await prisma.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
@@ -196,7 +202,7 @@ export async function POST(req: NextRequest) {
         personName: staffName,
         amount: lossAmount,
         serviceStaff: staffName,
-        description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid ${paidTotal} (collection ${collection.id})`,
+        description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid·staffloss ${paidStaffLoss} (collection ${collection.id})`,
         status: 'UNPAID',
         date: collDate,
         outletId: usedOutletId,
@@ -209,5 +215,5 @@ export async function POST(req: NextRequest) {
     staffLoss = { amount: lossAmount, voucher: voucherNumber, staffName }
   }
 
-  return NextResponse.json({ ...collection, creditSales: signedTotal, paymentsReceived: paidTotal, staffLoss, signedCreated, paidCreated, signedTotal, paidTotal }, { status: 201 })
+  return NextResponse.json({ ...collection, creditSales: signedTotal, paymentsReceived: paidStaffLoss, staffLoss, signedCreated, paidCreated, signedTotal, paidTotal, paidStaffLoss }, { status: 201 })
 }
