@@ -24,6 +24,7 @@ export default function UsersPage() {
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [showPw, setShowPw] = useState(false)
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true })
 
   const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
@@ -69,11 +70,12 @@ export default function UsersPage() {
 
   const startEdit = (u: User) => {
     setEditingId(u.id)
+    setShowPw(false)
     setForm({ name: u.name, email: u.email, password: '', role: u.role, outletId: '', isActive: u.isActive })
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  const newUser = () => { setEditingId(null); resetForm(); setShowForm((s) => !s) }
+  const newUser = () => { setEditingId(null); setShowPw(false); resetForm(); setShowForm((s) => !s) }
   const deleteUser = async (u: User) => {
     if (!window.confirm(`Delete user "${u.name}" (${u.email})? This cannot be undone.`)) return
     try {
@@ -116,9 +118,17 @@ export default function UsersPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">{editingId ? 'New Password (optional)' : 'Password *'}</label>
-                  <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required={!editingId} minLength={editingId ? 0 : 6}
-                    placeholder={editingId ? 'Leave blank to keep current' : ''} />
+                  <div className="relative">
+                    <input type={showPw ? 'text' : 'password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
+                      autoComplete="new-password"
+                      className="w-full px-4 py-3 pr-12 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required={!editingId} minLength={editingId ? 0 : 6}
+                      placeholder={editingId ? 'Leave blank to keep current password' : ''} />
+                    <button type="button" onClick={() => setShowPw((s) => !s)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg" title={showPw ? 'Hide' : 'Show'}>
+                      {showPw ? '🙈' : '👁'}
+                    </button>
+                  </div>
+                  {editingId && <p className="text-xs text-gray-400 mt-1">The current password can&apos;t be displayed (it&apos;s encrypted). Leave blank to keep it unchanged, or type a new one — use 👁 to read what you set, then share it with the user.</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Role *</label>
