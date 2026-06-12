@@ -3,7 +3,6 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
-const METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -30,7 +29,6 @@ export async function POST(req: NextRequest) {
   if (!purpose) return NextResponse.json({ error: 'Purpose is required' }, { status: 400 })
   if (!amount || Number(amount) <= 0) return NextResponse.json({ error: 'Amount must be > 0' }, { status: 400 })
   const method = String(paymentMethod || 'CASH').toUpperCase()
-  if (!METHODS.includes(method)) return NextResponse.json({ error: 'Invalid payment method' }, { status: 400 })
 
   const item = await prisma.pettyCash.create({
     data: {

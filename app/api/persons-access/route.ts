@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
-import { isOwner, getPersonsManagerEmail, setPersonsManagerEmail, FIXED_MANAGER_EMAIL } from '@/lib/persons-access'
+import { isOwner, getPersonsManagerEmail, setPersonsManagerEmail, canManagePersons, FIXED_MANAGER_EMAIL } from '@/lib/persons-access'
 
 const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
 
@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const managerEmail = await getPersonsManagerEmail()
-  return NextResponse.json({ owner: OWNER_EMAIL, fixedManager: FIXED_MANAGER_EMAIL, managerEmail })
+  return NextResponse.json({ owner: OWNER_EMAIL, fixedManager: FIXED_MANAGER_EMAIL, managerEmail, canManage: await canManagePersons(user.email) })
 }
 
 /** Owner sets/changes the third authorized manager. */

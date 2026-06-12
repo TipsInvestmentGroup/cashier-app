@@ -248,6 +248,26 @@ model Setting {
   value String?
 }
 
+// Configurable person/bill categories (managed under Persons). code is the
+// canonical key used as Person.type / SignedBill.billType; label is for display.
+model PersonCategory {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  label     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// Configurable payment channels (managed under Outlets). Used by Paid Bills &
+// Petty Cash method pickers (Daily-Collection channels are fixed columns).
+model PaymentChannel {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  label     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String

@@ -44,10 +44,8 @@ export async function POST(req: NextRequest) {
   const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
   // Reconciliation inputs entered during the collection flow
   const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
-  const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
+  const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; categoryBillType?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
-  const SIGNED_TYPES = ['ADMIN', 'DIRECTOR', 'TIPS', 'DJ', 'CUSTOMER', 'STAFF_LOSS']
-  const PAY_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
   const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 
   const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
@@ -100,7 +98,7 @@ export async function POST(req: NextRequest) {
     const sb = signedInput[i]
     const amt = Number(sb.amount) || 0
     const type = String(sb.billType || '').toUpperCase()
-    if (amt <= 0 || !SIGNED_TYPES.includes(type) || !sb.name) continue
+    if (amt <= 0 || !type || !sb.name) continue
     const person = await prisma.person.findFirst({ where: { name: sb.name, type } })
     await prisma.signedBill.create({
       data: {
@@ -130,12 +128,12 @@ export async function POST(req: NextRequest) {
   for (const pb of paidInput) {
     const amt = Number(pb.amount) || 0
     const method = String(pb.paymentMethod || 'CASH').toUpperCase()
-    if (amt <= 0 || !PAY_METHODS.includes(method) || !pb.payerName) continue
+    if (amt <= 0 || !method || !pb.payerName) continue
     // Allocate across the payer's outstanding bills of the same category
     // (selected first, then oldest-first); leftover becomes an unlinked credit.
     const selectedBillIds = Array.isArray(pb.selectedBillIds) ? pb.selectedBillIds : (pb.signedBillId ? [pb.signedBillId] : [])
     await allocatePayment({
-      payerName: pb.payerName, category: pb.category || null, totalAmount: amt,
+      payerName: pb.payerName, category: pb.category || null, categoryBillType: pb.categoryBillType || null, totalAmount: amt,
       selectedBillIds, paymentMethod: method, outletId: usedOutletId, cashierId: user.userId,
       date: collDate, billRef: `COL-${collection.id}`, notes: `Recovery recorded during daily collection ${collection.id}`,
     })

@@ -4,6 +4,8 @@ import { CATEGORY_TO_BILLTYPE } from '@/lib/categories'
 export interface AllocArgs {
   payerName: string
   category?: string | null
+  /** Explicit category/bill-type code to match against (preferred for custom categories). */
+  categoryBillType?: string | null
   totalAmount: number
   selectedBillIds?: string[]
   paymentMethod: string
@@ -25,7 +27,7 @@ export interface AllocArgs {
  * signed bill's status (UNPAID/PARTIAL/PAID) in sync.
  */
 export async function allocatePayment(a: AllocArgs) {
-  const type = a.category ? CATEGORY_TO_BILLTYPE[a.category] : undefined
+  const type = a.categoryBillType || (a.category ? CATEGORY_TO_BILLTYPE[a.category] : undefined)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = { personName: a.payerName, status: { not: 'PAID' } }

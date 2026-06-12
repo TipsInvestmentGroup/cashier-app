@@ -10,7 +10,6 @@ import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { SearchBox } from '@/components/SearchBox'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
-import { BILLTYPE_TO_CATEGORY } from '@/lib/categories'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface PaidBill {
@@ -28,22 +27,13 @@ interface SignedBill { id: string; voucherNumber: string; personName: string; am
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string }
 
-// Payment categories → person type used to suggest payers
-const PAY_CATEGORIES = [
-  { label: 'Customer', type: 'CUSTOMER' },
-  { label: 'Staff Loss', type: 'STAFF_LOSS' },
-  { label: 'Admin', type: 'ADMIN' },
-  { label: 'Director', type: 'DIRECTOR' },
-  { label: 'Sponsors & Partners', type: 'TIPS' },
-]
-
-const PAYMENT_METHODS = [
-  { value: 'CASH', label: '💵 Cash', color: 'bg-green-100 text-green-800' },
-  { value: 'CRDB', label: '🏦 CRDB', color: 'bg-blue-100 text-blue-800' },
-  { value: 'STANBIC', label: '🏛️ Stanbic', color: 'bg-purple-100 text-purple-800' },
-  { value: 'MPESA', label: '📱 M-PESA', color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'PAYROLL', label: '🧾 Payroll', color: 'bg-indigo-100 text-indigo-800' },
-]
+interface Category { code: string; label: string; isActive: boolean }
+interface Channel { code: string; label: string; isActive: boolean }
+const METHOD_COLOR: Record<string, string> = {
+  CASH: 'bg-green-100 text-green-800', CRDB: 'bg-blue-100 text-blue-800',
+  STANBIC: 'bg-purple-100 text-purple-800', MPESA: 'bg-yellow-100 text-yellow-800',
+  PAYROLL: 'bg-indigo-100 text-indigo-800',
+}
 
 export default function PaidBillsPage() {
   const { request } = useApi()
@@ -68,22 +58,32 @@ export default function PaidBillsPage() {
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({
-    signedBillId: '', payerCategory: '', payerName: '', amountPaid: '', paymentMethod: 'CASH',
+    signedBillId: '', payerCategory: '', categoryCode: '', payerName: '', amountPaid: '', paymentMethod: 'CASH',
     notes: '', outletId: user?.outlet?.id || '', date: format(new Date(), 'yyyy-MM-dd'), billRef: '',
   })
+  const [categories, setCategories] = useState<Category[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
+  const PAY_CATEGORIES = categories.filter((c) => c.isActive).map((c) => ({ label: c.label, type: c.code }))
+  const PAYMENT_METHODS = channels.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: METHOD_COLOR[c.code] || 'bg-gray-100 text-gray-700' }))
+    .concat([{ value: 'PAYROLL', label: 'Payroll', color: METHOD_COLOR.PAYROLL }])
+  const codeToLabel = (code: string) => categories.find((c) => c.code === code)?.label || code
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [pb, sb, o, ps] = await Promise.all([
+    const [pb, sb, o, ps, cats, chs] = await Promise.all([
       request('/api/paid-bills'),
       request('/api/signed-bills?status=UNPAID'),
       request('/api/outlets'),
       request('/api/persons'),
+      request('/api/person-categories'),
+      request('/api/payment-channels'),
     ])
     setPaidBills(pb)
     setSignedBills(sb.filter((b: SignedBill) => b.status !== 'PAID'))
     setOutlets(o)
     setPersons(ps || [])
+    setCategories(cats || [])
+    setChannels(chs || [])
     if (o.length && !form.outletId) setForm((f) => ({ ...f, outletId: user?.outlet?.id || o[0].id }))
     setLoading(false)
   }, [request, user])
@@ -95,10 +95,21 @@ export default function PaidBillsPage() {
     setForm((f) => ({
       ...f, signedBillId: billId,
       payerName: bill?.personName || f.payerName,
-      payerCategory: bill ? (BILLTYPE_TO_CATEGORY[bill.billType] || f.payerCategory) : f.payerCategory,
+      payerCategory: bill ? codeToLabel(bill.billType) : f.payerCategory,
+      categoryCode: bill ? bill.billType : f.categoryCode,
       amountPaid: bill?.amount?.toString() || f.amountPaid,
     }))
     setSelectedBillIds(billId ? [billId] : [])
+  }
+
+  // #3 Auto-link: when a known person is chosen as payer, pull in their category
+  // so the payment matches and links to their bills (avoids unlinked credits).
+  const applyPayer = (name: string) => {
+    const person = persons.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())
+    setForm((f) => ({
+      ...f, payerName: name,
+      ...(person ? { payerCategory: codeToLabel(person.type), categoryCode: person.type } : {}),
+    }))
   }
 
   // Friendly label (date + per-person sequence #, no voucher) for the searchable linker
@@ -122,12 +133,12 @@ export default function PaidBillsPage() {
     try {
       const res = await request('/api/paid-bills', {
         method: 'POST',
-        body: JSON.stringify({ ...form, amountPaid: Number(form.amountPaid), selectedBillIds }),
+        body: JSON.stringify({ ...form, amountPaid: Number(form.amountPaid), selectedBillIds, categoryBillType: form.categoryCode }),
       })
       toast.success(res?.billsPaid > 0
         ? `Payment recorded — ${res.billsPaid} bill(s) settled${res.leftover > 0 ? `, ${formatCurrency(res.leftover)} credit` : ''}.`
         : 'Payment recorded successfully!')
-      setForm({ signedBillId: '', payerCategory: '', payerName: '', amountPaid: '', paymentMethod: 'CASH', notes: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd'), billRef: '' })
+      setForm({ signedBillId: '', payerCategory: '', categoryCode: '', payerName: '', amountPaid: '', paymentMethod: 'CASH', notes: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd'), billRef: '' })
       setSelectedBillIds([])
       setLinkQuery('')
       setShowForm(false)
@@ -241,7 +252,7 @@ export default function PaidBillsPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                   {PAY_CATEGORIES.map((c) => (
                     <button key={c.label} type="button"
-                      onClick={() => setForm({ ...form, payerCategory: c.label })}
+                      onClick={() => setForm({ ...form, payerCategory: c.label, categoryCode: c.type })}
                       className={`py-2.5 px-2 rounded-xl text-sm font-medium transition text-center ${form.payerCategory === c.label ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                       {c.label}
                     </button>
@@ -252,7 +263,7 @@ export default function PaidBillsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Payer Name *</label>
-                  <input type="text" list="payerOptions" value={form.payerName} onChange={(e) => setForm({ ...form, payerName: e.target.value })}
+                  <input type="text" list="payerOptions" value={form.payerName} onChange={(e) => applyPayer(e.target.value)}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none"
                     placeholder={form.payerCategory ? `Select / type a ${form.payerCategory} name` : 'Who is paying?'} required />
                   <datalist id="payerOptions">

@@ -40,7 +40,7 @@ const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number;
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string }
 
-const PAID_CATEGORIES = ['Customer', 'Staff Loss', 'Admin', 'Director', 'Sponsors & Partners']
+interface NamedCode { code: string; label: string; isActive: boolean }
 
 export default function CollectionsPage() {
   const { request } = useApi()
@@ -55,6 +55,14 @@ export default function CollectionsPage() {
   const [linkOpenIdx, setLinkOpenIdx] = useState<number | null>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [cancelRows, setCancelRows] = useState<{ reason: string; productId: string; productName: string; sellingPrice: number; quantity: string }[]>([])
+  const [allPersons, setAllPersons] = useState<Person[]>([])
+  const [categories, setCategories] = useState<NamedCode[]>([])
+  const [channels, setChannels] = useState<NamedCode[]>([])
+  const PAID_CATEGORIES = categories.filter((c) => c.isActive).map((c) => c.label)
+  const SIGNED_TYPE_OPTS = categories.filter((c) => c.isActive)
+  const METHOD_OPTS = channels.filter((c) => c.isActive)
+  const labelToCode = (label: string) => categories.find((c) => c.label === label)?.code || label
+  const codeToLabelCat = (code: string) => categories.find((c) => c.code === code)?.label || BILLTYPE_TO_CATEGORY[code] || code
   const [confirmedZero, setConfirmedZero] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -88,18 +96,23 @@ export default function CollectionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [cols, outs, persons, prods, sbs] = await Promise.all([
+    const [cols, outs, persons, prods, sbs, cats, chs] = await Promise.all([
       request('/api/collections'),
       request('/api/outlets'),
       request('/api/persons'),
       request('/api/products'),
       request('/api/signed-bills?status=UNPAID'),
+      request('/api/person-categories'),
+      request('/api/payment-channels'),
     ])
     setCollections(cols)
     setOutlets(outs)
     setProducts((prods || []).filter((p: Product) => p.isActive))
     setSignedBillsList((sbs || []).filter((b: SignedBill) => b.status !== 'PAID'))
+    setCategories(cats || [])
+    setChannels(chs || [])
     const all: Person[] = persons || []
+    setAllPersons(all)
     setStaff(all.filter((p) => p.type === 'STAFF_LOSS').sort((a, b) => a.name.localeCompare(b.name)))
     setPersonNames(all.map((p) => p.name).sort((a, b) => a.localeCompare(b)))
     if (outs.length && !form.outletId) setForm((f) => ({ ...f, outletId: outs[0].id }))
@@ -118,7 +131,7 @@ export default function CollectionsPage() {
       ...r, signedBillId: b.id, linkQuery: billLabel(b), selectedBillIds: [b.id],
       payerName: r.payerName || b.personName,
       amount: r.amount || String(b.amount),
-      category: BILLTYPE_TO_CATEGORY[b.billType] || r.category,
+      category: codeToLabelCat(b.billType),
     }
     setPaidRows(n); setLinkOpenIdx(null)
   }
@@ -130,7 +143,7 @@ export default function CollectionsPage() {
     setSubmitting(true)
     try {
       const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount) }))
-      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category, signedBillId: r.signedBillId || undefined, selectedBillIds: r.selectedBillIds }))
+      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category, categoryBillType: labelToCode(r.category), signedBillId: r.signedBillId || undefined, selectedBillIds: r.selectedBillIds }))
       const cancellations = cancelRows.filter((r) => r.productName && Number(r.quantity) > 0).map((r) => ({
         reason: r.reason, productId: r.productId || undefined, productName: r.productName,
         sellingPrice: r.sellingPrice, quantity: Number(r.quantity), amount: r.sellingPrice * (Number(r.quantity) || 0),
@@ -404,7 +417,7 @@ export default function CollectionsPage() {
                       <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
                         <select value={r.billType} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, billType: e.target.value }; setSignedRows(n) }}
                           className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
-                          {['ADMIN', 'DIRECTOR', 'TIPS', 'DJ', 'CUSTOMER', 'STAFF_LOSS'].map((t) => <option key={t} value={t}>{t}</option>)}
+                          {SIGNED_TYPE_OPTS.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
                         </select>
                         <input list="personNames" placeholder="Name" value={r.name} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, name: e.target.value }; setSignedRows(n) }}
                           className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
@@ -456,13 +469,17 @@ export default function CollectionsPage() {
                             className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
                             {PAID_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                           </select>
-                          <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, payerName: e.target.value }; setPaidRows(n) }}
+                          <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => {
+                            const name = e.target.value
+                            const person = allPersons.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())
+                            const n = [...paidRows]; n[i] = { ...r, payerName: name, ...(person ? { category: codeToLabelCat(person.type) } : {}) }; setPaidRows(n)
+                          }}
                             className="col-span-4 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
                           <MoneyInput placeholder="Amount" value={r.amount} onChange={(v) => { const n = [...paidRows]; n[i] = { ...r, amount: v }; setPaidRows(n) }}
                             className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
                           <select value={r.paymentMethod} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, paymentMethod: e.target.value }; setPaidRows(n) }}
                             className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
-                            {['CASH', 'CRDB', 'STANBIC', 'MPESA'].map((m) => <option key={m} value={m}>{m}</option>)}
+                            {METHOD_OPTS.map((m) => <option key={m.code} value={m.code}>{m.label}</option>)}
                           </select>
                           <button type="button" onClick={() => setPaidRows(paidRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
                         </div>

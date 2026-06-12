@@ -10,14 +10,7 @@ import toast from 'react-hot-toast'
 interface Person {
   id: string; name: string; phone?: string; email?: string; type: string; creditLimit: number; isActive: boolean
 }
-
-const PERSON_TYPES = [
-  { value: 'ADMIN', label: 'Admin' },
-  { value: 'DIRECTOR', label: 'Director' },
-  { value: 'CUSTOMER', label: 'Customer' },
-  { value: 'DJ', label: 'DJ' },
-  { value: 'STAFF_LOSS', label: 'Staff' },
-]
+interface Category { code: string; label: string; isActive: boolean }
 
 export default function PersonsPage() {
   const { request } = useApi()
@@ -33,6 +26,10 @@ export default function PersonsPage() {
   const [managerEmail, setManagerEmail] = useState('')
   const [accessOpen, setAccessOpen] = useState(false)
   const [allUsers, setAllUsers] = useState<{ id: string; name: string; email: string }[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const PERSON_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label }))
+  const catLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
+  const catColor = (code: string) => BILL_TYPE_COLORS[code] || 'bg-gray-100 text-gray-700'
 
   const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const FIXED_MANAGER = 'r.mlay@tips.co.tz'
@@ -48,9 +45,10 @@ export default function PersonsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     const params = filterType ? `?type=${filterType}` : ''
-    const [data, access] = await Promise.all([request(`/api/persons${params}`), request('/api/persons-access')])
+    const [data, access, cats] = await Promise.all([request(`/api/persons${params}`), request('/api/persons-access'), request('/api/person-categories')])
     setPersons(data)
     setManagerEmail((access?.managerEmail || '').toLowerCase())
+    setCategories(cats || [])
     setLoading(false)
   }, [request, filterType])
 
@@ -220,8 +218,8 @@ export default function PersonsPage() {
                 </div>
                 <div className="min-w-0">
                   <p className="font-semibold text-gray-900 truncate">{p.name}</p>
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-lg ${BILL_TYPE_COLORS[p.type]}`}>
-                    {BILL_TYPE_LABELS[p.type]}
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-lg ${catColor(p.type)}`}>
+                    {catLabel(p.type)}
                   </span>
                 </div>
               </div>

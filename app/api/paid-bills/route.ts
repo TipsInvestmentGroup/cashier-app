@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { signedBillId, personId, payerName, payerCategory, amountPaid, paymentMethod, notes, outletId, date, billRef } = body
+  const { signedBillId, personId, payerName, payerCategory, categoryBillType, amountPaid, paymentMethod, notes, outletId, date, billRef } = body
   const selectedBillIds: string[] = Array.isArray(body.selectedBillIds) ? body.selectedBillIds : (signedBillId ? [signedBillId] : [])
 
   const usedOutletId = outletId || user.outletId
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
   // Allocate across the member's outstanding bills (selected first, then FIFO);
   // any leftover is recorded as an unlinked credit.
   const result = await allocatePayment({
-    payerName, category: payerCategory || null, totalAmount: Number(amountPaid),
+    payerName, category: payerCategory || null, categoryBillType: categoryBillType || null, totalAmount: Number(amountPaid),
     selectedBillIds, paymentMethod: paymentMethod || 'CASH', outletId: usedOutletId,
     cashierId: user.userId, date: date ? new Date(date) : new Date(),
     billRef: billRef || null, notes: notes || null, personId: personId || null,

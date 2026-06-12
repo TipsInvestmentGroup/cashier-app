@@ -21,14 +21,11 @@ interface Bill {
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string; creditLimit: number }
 
-const BILL_TYPES = [
-  { value: 'ADMIN', label: '🏢 Admin Bill', color: 'bg-blue-600' },
-  { value: 'DIRECTOR', label: '👔 Director Bill', color: 'bg-purple-600' },
-  { value: 'CUSTOMER', label: '👤 Customer Bill', color: 'bg-green-600' },
-  { value: 'TIPS', label: '🎁 Tips Bill', color: 'bg-yellow-600' },
-  { value: 'DJ', label: '🎵 DJ Bill', color: 'bg-pink-600' },
-  { value: 'STAFF_LOSS', label: '⚠️ Staff Loss', color: 'bg-red-600' },
-]
+interface Category { code: string; label: string; isActive: boolean }
+const TYPE_COLOR: Record<string, string> = {
+  ADMIN: 'bg-blue-600', DIRECTOR: 'bg-purple-600', CUSTOMER: 'bg-green-600',
+  TIPS: 'bg-yellow-600', DJ: 'bg-pink-600', STAFF_LOSS: 'bg-red-600',
+}
 
 const INIT_FORM = {
   billType: 'CUSTOMER', personId: '', personName: '', amount: '', serviceStaff: '',
@@ -53,17 +50,23 @@ export default function SignedBillsPage() {
   const [form, setForm] = useState(INIT_FORM)
   const [limitWarning, setLimitWarning] = useState<{ exceeded: boolean; amount: number } | null>(null)
   const [storyBillId, setStoryBillId] = useState<string | null>(null)
+  const [categories, setCategories] = useState<Category[]>([])
+  const BILL_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: TYPE_COLOR[c.code] || 'bg-gray-600' }))
+  const typeLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
+  const typeColor = (code: string) => BILL_TYPE_COLORS[code] || 'bg-gray-100 text-gray-700'
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [b, o, p] = await Promise.all([
+    const [b, o, p, cats] = await Promise.all([
       request('/api/signed-bills'),
       request('/api/outlets'),
       request('/api/persons'),
+      request('/api/person-categories'),
     ])
     setBills(b)
     setOutlets(o)
     setPersons(p)
+    setCategories(cats || [])
     if (o.length && !form.outletId) setForm((f) => ({ ...f, outletId: user?.outlet?.id || o[0].id }))
     setLoading(false)
   }, [request, user])
@@ -318,8 +321,8 @@ export default function SignedBillsPage() {
                       <td className="px-4 py-3 font-semibold text-gray-600">#{b.seq ?? '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{formatDate(b.date)}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${BILL_TYPE_COLORS[b.billType]}`}>
-                          {BILL_TYPE_LABELS[b.billType]}
+                        <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${typeColor(b.billType)}`}>
+                          {typeLabel(b.billType)}
                         </span>
                       </td>
                       <td className="px-4 py-3 font-medium text-gray-800">{b.personName}</td>

@@ -20,8 +20,10 @@ const navItems = [
   { href: '/payroll', icon: '🧾', label: 'Payroll Deductions', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/reports', icon: '📄', label: 'Reports', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/persons', icon: '👥', label: 'Persons', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
+  { href: '/person-categories', icon: '🏷️', label: 'Categories', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/users', icon: '⚙️', label: 'Users', roles: ['ADMIN'] },
   { href: '/outlets', icon: '🏢', label: 'Outlets', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
+  { href: '/payment-channels', icon: '💳', label: 'Payment Channels', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
 ]
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {

@@ -23,12 +23,7 @@ interface Approver { name: string; email: string }
 // Persons eligible as requester / payee on a cash request (internal people only).
 const PERSON_EXCLUDE = ['CUSTOMER', 'STAFF_LOSS', 'TIPS', 'DJ']
 
-const METHODS = [
-  { value: 'CASH', label: '💵 Cash' },
-  { value: 'CRDB', label: '🏦 CRDB' },
-  { value: 'STANBIC', label: '🏛️ Stanbic' },
-  { value: 'MPESA', label: '📱 M-PESA' },
-]
+interface Channel { code: string; label: string; isActive: boolean }
 
 const INIT = {
   date: format(new Date(), 'yyyy-MM-dd'), requestedBy: '', department: '', functionName: '', purpose: '',
@@ -51,6 +46,8 @@ export default function PettyCashPage() {
   const [departments, setDepartments] = useState<NamedItem[]>([])
   const [functions, setFunctions] = useState<NamedItem[]>([])
   const [approvers, setApprovers] = useState<Approver[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
+  const METHODS = channels.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label }))
   // Cash reconciliation modal
   const [reconOpen, setReconOpen] = useState(false)
   const [reconForm, setReconForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', openingBalance: '', cashDeposited: '', notes: '' })
@@ -62,11 +59,13 @@ export default function PettyCashPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [its, outs, ppl, depts, fns, access] = await Promise.all([
+      const [its, outs, ppl, depts, fns, access, chs] = await Promise.all([
         request('/api/petty-cash'), request('/api/outlets'), request('/api/persons'),
         request('/api/departments'), request('/api/functions'), request('/api/petty-access'),
+        request('/api/payment-channels'),
       ])
       setItems(its); setOutlets(outs || [])
+      setChannels(chs || [])
       setPersons((ppl || []).filter((p: Person) => !PERSON_EXCLUDE.includes(p.type)))
       setDepartments((depts || []).filter((d: NamedItem) => d.isActive))
       setFunctions((fns || []).filter((f: NamedItem) => f.isActive))
