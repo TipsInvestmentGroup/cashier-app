@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
+import { PaymentStoryModal } from '@/components/PaymentStoryModal'
 
 interface Receivable {
   id: string; date: string; voucherNumber: string; billType: string; personName: string
@@ -35,6 +36,7 @@ export default function ReceivablesPage() {
   const [filterOverdue, setFilterOverdue] = useState(false)
   const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([])
   const [search, setSearch] = useState('')
+  const [storyBillId, setStoryBillId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -190,7 +192,8 @@ export default function ReceivablesPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map((r) => (
-                    <tr key={r.id} className={`hover:bg-gray-50 ${r.isOverdue ? 'bg-red-50/40' : ''}`}>
+                    <tr key={r.id} onClick={() => setStoryBillId(r.id)} title="Click for the full payment story"
+                      className={`cursor-pointer hover:bg-indigo-50/60 ${r.isOverdue ? 'bg-red-50/40' : ''}`}>
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDate(r.date)} · <span className="font-semibold">#{r.seq ?? '—'}</span></td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${BILL_TYPE_COLORS[r.billType]}`}>
@@ -286,6 +289,8 @@ export default function ReceivablesPage() {
           )
         })()}
       </div>
+
+      <PaymentStoryModal billId={storyBillId} request={request} onClose={() => setStoryBillId(null)} />
     </AppShell>
   )
 }

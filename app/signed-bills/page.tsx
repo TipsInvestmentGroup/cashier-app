@@ -9,6 +9,7 @@ import { format } from 'date-fns'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { SearchBox } from '@/components/SearchBox'
 import { MoneyInput } from '@/components/MoneyInput'
+import { PaymentStoryModal } from '@/components/PaymentStoryModal'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface Bill {
@@ -51,6 +52,7 @@ export default function SignedBillsPage() {
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState(INIT_FORM)
   const [limitWarning, setLimitWarning] = useState<{ exceeded: boolean; amount: number } | null>(null)
+  const [storyBillId, setStoryBillId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -311,7 +313,8 @@ export default function SignedBillsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map((b) => (
-                    <tr key={b.id} className="hover:bg-gray-50">
+                    <tr key={b.id} onClick={() => setStoryBillId(b.id)} title="Click for the full payment story"
+                      className="cursor-pointer hover:bg-indigo-50/60">
                       <td className="px-4 py-3 font-semibold text-gray-600">#{b.seq ?? '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{formatDate(b.date)}</td>
                       <td className="px-4 py-3">
@@ -348,6 +351,8 @@ export default function SignedBillsPage() {
           )}
         </div>
       </div>
+
+      <PaymentStoryModal billId={storyBillId} request={request} onClose={() => setStoryBillId(null)} />
     </AppShell>
   )
 }
