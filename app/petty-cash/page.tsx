@@ -50,9 +50,16 @@ export default function PettyCashPage() {
   const METHODS = channels.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label }))
   // Cash reconciliation modal
   const [reconOpen, setReconOpen] = useState(false)
-  const [reconForm, setReconForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', openingBalance: '', cashDeposited: '', notes: '' })
+  const [reconForm, setReconForm] = useState({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', cashDeposited: '', notes: '', verifiedAmount: '' })
   const [reconComputed, setReconComputed] = useState<{ cashCollected: number; paidBillsCash: number; cashExpenses: number } | null>(null)
+  const [autoOpening, setAutoOpening] = useState(0)
+  const [reconCanVerify, setReconCanVerify] = useState(false)
   const [reconBusy, setReconBusy] = useState(false)
+  // Owner: manage the extra verifier
+  const ownerEmail = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const isOwner = !!ownerEmail && (user?.email || '').toLowerCase() === ownerEmail
+  const [verifierEmail, setVerifierEmail] = useState('')
+  const [verifierUsers, setVerifierUsers] = useState<{ id: string; name: string; email: string }[]>([])
 
   const [canApprove, setCanApprove] = useState(false)
 
@@ -78,15 +85,38 @@ export default function PettyCashPage() {
     const params = new URLSearchParams({ date }); if (outletId) params.set('outletId', outletId)
     const res = await request(`/api/cash-recon?${params}`)
     setReconComputed(res.computed)
-    setReconForm((f) => ({ ...f, openingBalance: res.existing ? String(res.existing.openingBalance) : f.openingBalance, cashDeposited: res.existing ? String(res.existing.cashDeposited) : f.cashDeposited, notes: res.existing?.notes || f.notes }))
+    setAutoOpening(res.autoOpening || 0)
+    setReconCanVerify(!!res.canVerify)
+    setReconForm((f) => ({
+      ...f,
+      cashDeposited: res.existing ? String(res.existing.cashDeposited) : f.cashDeposited,
+      notes: res.existing?.notes || f.notes,
+      verifiedAmount: res.existing?.verifiedAmount != null ? String(res.existing.verifiedAmount) : f.verifiedAmount,
+    }))
   }, [request])
 
-  const openRecon = () => { setReconForm({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', openingBalance: '', cashDeposited: '', notes: '' }); setReconComputed(null); setReconOpen(true); loadRecon(format(new Date(), 'yyyy-MM-dd'), '') }
+  const openRecon = () => {
+    setReconForm({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', cashDeposited: '', notes: '', verifiedAmount: '' })
+    setReconComputed(null); setAutoOpening(0); setReconOpen(true); loadRecon(format(new Date(), 'yyyy-MM-dd'), '')
+    if (isOwner) {
+      request('/api/cash-verifiers').then((r) => setVerifierEmail((r?.verifierEmail || '').toLowerCase())).catch(() => {})
+      request('/api/users').then((u) => setVerifierUsers(u || [])).catch(() => {})
+    }
+  }
+
+  const saveVerifier = async (email: string) => {
+    try { await request('/api/cash-verifiers', { method: 'PUT', body: JSON.stringify({ email }) }); setVerifierEmail(email.toLowerCase()); toast.success('Verifier access updated') }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Error updating access') }
+  }
 
   const saveRecon = async () => {
     setReconBusy(true)
     try {
-      await request('/api/cash-recon', { method: 'POST', body: JSON.stringify({ ...reconForm, openingBalance: Number(reconForm.openingBalance) || 0, cashDeposited: Number(reconForm.cashDeposited) || 0 }) })
+      await request('/api/cash-recon', { method: 'POST', body: JSON.stringify({
+        date: reconForm.date, outletId: reconForm.outletId, notes: reconForm.notes,
+        cashDeposited: Number(reconForm.cashDeposited) || 0,
+        ...(reconCanVerify && reconForm.verifiedAmount !== '' ? { verifiedAmount: Number(reconForm.verifiedAmount) || 0 } : {}),
+      }) })
       toast.success('Cash reconciliation saved!')
       setReconOpen(false)
     } catch (err: unknown) {
@@ -410,9 +440,11 @@ export default function PettyCashPage() {
       {/* Cash Reconciliation modal */}
       {reconOpen && (() => {
         const c = reconComputed || { cashCollected: 0, paidBillsCash: 0, cashExpenses: 0 }
-        const opening = Number(reconForm.openingBalance) || 0
+        const opening = autoOpening
         const deposited = Number(reconForm.cashDeposited) || 0
         const closing = opening + c.cashCollected + c.paidBillsCash - c.cashExpenses - deposited
+        const verified = reconForm.verifiedAmount !== '' ? Number(reconForm.verifiedAmount) || 0 : null
+        const vVar = verified != null ? verified - closing : null // + = excess cash, − = shortage
         return (
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={() => setReconOpen(false)}>
             <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
@@ -446,8 +478,10 @@ export default function PettyCashPage() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Opening Cash Balance (TZS)</label>
-                  <MoneyInput value={reconForm.openingBalance} onChange={(v) => setReconForm({ ...reconForm, openingBalance: v })}
-                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                  <div className="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl bg-gray-50 flex items-center justify-between">
+                    <span className="text-lg font-semibold text-gray-700">{formatCurrency(opening)}</span>
+                    <span className="text-[11px] text-gray-400">auto · yesterday&apos;s closing</span>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Deposited to Bank (TZS)</label>
@@ -460,6 +494,43 @@ export default function PettyCashPage() {
                   <span className={`text-xl font-bold ${closing < 0 ? 'text-red-700' : 'text-indigo-700'}`}>{formatCurrency(closing)}</span>
                 </div>
                 <p className="text-xs text-gray-400">Closing = Opening + Collected + Paid-cash − Expenses − Deposited</p>
+
+                {/* Cash verified by officer */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    Cash Verified (TZS) {!reconCanVerify && <span className="text-gray-400 font-normal">— officers only</span>}
+                  </label>
+                  {reconCanVerify ? (
+                    <MoneyInput value={reconForm.verifiedAmount} onChange={(v) => setReconForm({ ...reconForm, verifiedAmount: v })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Physical cash counted" />
+                  ) : (
+                    <div className="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl bg-gray-50 text-gray-500">
+                      {verified != null ? formatCurrency(verified) : 'Not yet verified'}
+                    </div>
+                  )}
+                </div>
+                {vVar != null && (
+                  <div className={`rounded-xl p-3 flex items-center justify-between ${vVar === 0 ? 'bg-gray-50' : vVar > 0 ? 'bg-green-50' : 'bg-red-50'}`}>
+                    <span className={`font-semibold ${vVar === 0 ? 'text-gray-700' : vVar > 0 ? 'text-green-800' : 'text-red-800'}`}>
+                      {vVar === 0 ? '✅ Verified matches closing' : vVar > 0 ? '🔺 Excess cash' : '🔻 Cash shortage'}
+                    </span>
+                    <span className={`text-lg font-bold ${vVar === 0 ? 'text-gray-700' : vVar > 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(vVar))}</span>
+                  </div>
+                )}
+
+                {isOwner && (
+                  <div className="border-t border-gray-100 pt-3">
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">🔐 Extra verifier (owner picks)</label>
+                    <select value={verifierEmail} onChange={(e) => saveVerifier(e.target.value)}
+                      className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">— None —</option>
+                      {verifierUsers
+                        .filter((u) => !['shabinam@tips.co.tz', 'siyer.mkama@tips.co.tz', ownerEmail].includes(u.email.toLowerCase()))
+                        .map((u) => <option key={u.id} value={u.email}>{u.name} ({u.email})</option>)}
+                    </select>
+                    <p className="text-[11px] text-gray-400 mt-1">Always allowed: owner, shabinam@tips.co.tz, siyer.mkama@tips.co.tz.</p>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Notes</label>

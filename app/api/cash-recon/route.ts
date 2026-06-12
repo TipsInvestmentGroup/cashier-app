@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { canVerifyCash } from '@/lib/cash-verify'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
+
+/** Yesterday's (or the most recent prior) closing balance becomes today's opening. */
+async function previousClosing(day: Date, outletId?: string | null): Promise<number> {
+  const prev = await prisma.cashRecon.findFirst({
+    where: { date: { lt: startOfDay(day) }, outletId: outletId || null },
+    orderBy: { date: 'desc' },
+  })
+  return prev?.closingBalance || 0
+}
 
 /** Computed cash figures for a day+outlet (collected / paid-cash / expenses). */
 async function computeCash(dayStart: Date, dayEnd: Date, outletId?: string | null) {
@@ -39,7 +49,8 @@ export async function GET(req: NextRequest) {
     const existing = await prisma.cashRecon.findFirst({
       where: { date: { gte: startOfDay(day), lte: endOfDay(day) }, ...(outletId ? { outletId } : {}) },
     })
-    return NextResponse.json({ computed, existing })
+    const autoOpening = await previousClosing(day, outletId)
+    return NextResponse.json({ computed, existing, autoOpening, canVerify: await canVerifyCash(user.email) })
   }
 
   // List
@@ -57,29 +68,47 @@ export async function POST(req: NextRequest) {
   if (!ALLOWED.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const body = await req.json()
-  const { date, outletId, openingBalance = 0, cashDeposited = 0, notes } = body
+  const { date, outletId, cashDeposited = 0, notes } = body
   const day = date ? new Date(date) : new Date()
   const usedOutletId = outletId || user.outletId || null
+
+  // Opening = previous closing (auto). Closing computed & stored.
+  const opening = await previousClosing(day, usedOutletId)
+  const c = await computeCash(startOfDay(day), endOfDay(day), usedOutletId)
+  const deposited = Number(cashDeposited) || 0
+  const closing = opening + c.cashCollected + c.paidBillsCash - c.cashExpenses - deposited
 
   // One reconciliation per day+outlet — update if it exists
   const existing = await prisma.cashRecon.findFirst({
     where: { date: { gte: startOfDay(day), lte: endOfDay(day) }, outletId: usedOutletId },
   })
 
-  const data = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = {
     date: day,
     outletId: usedOutletId,
-    openingBalance: Number(openingBalance) || 0,
-    cashDeposited: Number(cashDeposited) || 0,
+    openingBalance: opening,
+    cashDeposited: deposited,
+    closingBalance: closing,
     notes: notes || null,
     cashierId: user.userId,
   }
+  // Verified amount: only an authorized officer may set/change it.
+  if (body.verifiedAmount !== undefined && body.verifiedAmount !== null && body.verifiedAmount !== '') {
+    if (await canVerifyCash(user.email)) {
+      data.verifiedAmount = Number(body.verifiedAmount) || 0
+      data.verifiedBy = user.name
+    } else {
+      return NextResponse.json({ error: 'Only an authorized officer can enter the verified cash amount' }, { status: 403 })
+    }
+  }
+
   const item = existing
     ? await prisma.cashRecon.update({ where: { id: existing.id }, data })
     : await prisma.cashRecon.create({ data })
 
   await prisma.auditLog.create({
-    data: { userId: user.userId, action: existing ? 'UPDATE' : 'CREATE', entity: 'CashRecon', entityId: item.id, details: `Deposited ${data.cashDeposited}` },
+    data: { userId: user.userId, action: existing ? 'UPDATE' : 'CREATE', entity: 'CashRecon', entityId: item.id, details: `Deposited ${deposited}, closing ${closing}` },
   })
 
   return NextResponse.json(item, { status: 201 })

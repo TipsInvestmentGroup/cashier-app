@@ -217,8 +217,11 @@ model CashRecon {
   id             String   @id @default(cuid())
   date           DateTime @default(now())
   outletId       String?
-  openingBalance Float    @default(0)
+  openingBalance Float    @default(0) // auto = previous day's closing
   cashDeposited  Float    @default(0)
+  closingBalance Float    @default(0) // computed & stored so next day can auto-open
+  verifiedAmount Float?              // physical cash verified by an officer
+  verifiedBy     String?
   notes          String?
   cashierId      String
   createdAt      DateTime @default(now())
