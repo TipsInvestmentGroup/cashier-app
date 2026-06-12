@@ -7,8 +7,8 @@ import { ExportBar } from '@/components/ExportBar'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
-interface Row { date: string; channel: string; opening: number | null; closing: number | null; required: number | null; reported: number; verified: number | null; verifiedSet: boolean; variance: number | null; reason: string; verifiedBy?: string }
-interface Resp { rows: Row[]; totals: { required: number; reported: number; verified: number; variance: number } }
+interface Row { date: string; channel: string; opening: number | null; closing: number | null; required: number | null; reported: number; verified: number | null; verifiedSet: boolean; variance: number | null; verifiedVariance: number | null; reason: string; verifiedBy?: string }
+interface Resp { rows: Row[]; totals: { required: number; reported: number; verified: number; variance: number; verifiedVariance: number } }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function BankReconReport({ outlets, request }: { outlets: Outlet[]; request: (url: string, opts?: any) => Promise<any> }) {
@@ -41,7 +41,7 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
     Date: formatDate(r.date), Channel: r.channel,
     Opening: r.opening ?? '', Closing: r.closing ?? '', Required: r.required ?? '',
     'Reported (System)': r.reported, 'Variance (Reported−Required)': r.variance ?? '', 'Variance Type': r.variance == null ? '' : varLabel(r.variance),
-    Verified: r.verifiedSet ? r.verified : '', Reason: r.reason, 'Verified By': r.verifiedBy || '',
+    Verified: r.verifiedSet ? r.verified : '', 'Verified Variance': r.verifiedVariance ?? '', 'Verified By': r.verifiedBy || '', Reason: r.reason,
   }))
 
   return (
@@ -91,6 +91,8 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
                   <th className="px-4 py-3 font-semibold text-right">Reported</th>
                   <th className="px-4 py-3 font-semibold text-right">Variance</th>
                   <th className="px-4 py-3 font-semibold text-right">Verified</th>
+                  <th className="px-4 py-3 font-semibold text-right">Verified Var</th>
+                  <th className="px-4 py-3 font-semibold">Verified By</th>
                   <th className="px-4 py-3 font-semibold">Reason</th>
                 </tr>
               </thead>
@@ -106,8 +108,12 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
                     <td className={`px-4 py-3 text-right font-bold ${r.variance == null ? 'text-gray-300' : r.variance === 0 ? 'text-green-600' : 'text-red-600'}`}>
                       {r.variance == null ? '-' : r.variance === 0 ? '✓' : `${r.variance > 0 ? '▲ ' : '▼ '}${formatCurrency(Math.abs(r.variance))} ${varLabel(r.variance)}`}
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900" title={r.verifiedBy || ''}>{r.verifiedSet ? formatCurrency(r.verified || 0) : '-'}</td>
-                    <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate" title={r.reason}>{r.reason || '-'}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{r.verifiedSet ? formatCurrency(r.verified || 0) : '-'}</td>
+                    <td className={`px-4 py-3 text-right font-bold ${r.verifiedVariance == null ? 'text-gray-300' : r.verifiedVariance === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {r.verifiedVariance == null ? '-' : r.verifiedVariance === 0 ? '✓' : `${r.verifiedVariance > 0 ? '▲ ' : '▼ '}${formatCurrency(Math.abs(r.verifiedVariance))}`}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">{r.verifiedBy || '-'}</td>
+                    <td className="px-4 py-3 text-gray-600 max-w-[180px] truncate" title={r.reason}>{r.reason || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -118,6 +124,8 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
                   <td className="px-4 py-3 text-right">{formatCurrency(data.totals.reported)}</td>
                   <td className={`px-4 py-3 text-right ${data.totals.variance === 0 ? 'text-green-700' : 'text-red-700'}`}>{data.totals.variance === 0 ? '✓' : `${formatCurrency(Math.abs(data.totals.variance))} ${varLabel(data.totals.variance)}`}</td>
                   <td className="px-4 py-3 text-right">{formatCurrency(data.totals.verified)}</td>
+                  <td className={`px-4 py-3 text-right ${data.totals.verifiedVariance === 0 ? 'text-green-700' : 'text-red-700'}`}>{data.totals.verifiedVariance === 0 ? '✓' : formatCurrency(Math.abs(data.totals.verifiedVariance))}</td>
+                  <td className="px-4 py-3"></td>
                   <td className="px-4 py-3"></td>
                 </tr>
               </tfoot>

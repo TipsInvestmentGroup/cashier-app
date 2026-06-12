@@ -38,14 +38,16 @@ export async function GET(req: NextRequest) {
       variance: hasReq ? r.reportedAmount - required : null,
       verified: r.verifiedAmount,
       verifiedSet: r.verifiedAmount != null,
+      // Verified variance = Verified amount − Reported (officer vs system)
+      verifiedVariance: r.verifiedAmount != null ? r.verifiedAmount - r.reportedAmount : null,
       reason: r.reason || '',
       verifiedBy: r.verifiedBy || '',
     }
   })
 
   const totals = rows.reduce(
-    (t, r) => ({ required: t.required + (r.required || 0), reported: t.reported + r.reported, verified: t.verified + (r.verified || 0), variance: t.variance + (r.variance || 0) }),
-    { required: 0, reported: 0, verified: 0, variance: 0 }
+    (t, r) => ({ required: t.required + (r.required || 0), reported: t.reported + r.reported, verified: t.verified + (r.verified || 0), variance: t.variance + (r.variance || 0), verifiedVariance: t.verifiedVariance + (r.verifiedVariance || 0) }),
+    { required: 0, reported: 0, verified: 0, variance: 0, verifiedVariance: 0 }
   )
 
   return NextResponse.json({ rows, totals })

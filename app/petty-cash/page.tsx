@@ -171,7 +171,7 @@ export default function PettyCashPage() {
           openingBalance: e.opening ?? '',
           closingBalance: e.closing ?? '',
           reason: e.reason || '',
-          ...(bankCanVerify ? { verifiedAmount: e.verified ?? '', verifiedOpening: e.verifiedOpening ?? '', verifiedClosing: e.verifiedClosing ?? '' } : {}),
+          ...(bankCanVerify ? { verifiedOpening: e.verifiedOpening ?? '', verifiedClosing: e.verifiedClosing ?? '' } : {}),
         }
       })
       await request('/api/bank-recon', { method: 'POST', body: JSON.stringify({ date: bankDate, outletId: bankOutletId, channels }) })
@@ -660,11 +660,23 @@ export default function PettyCashPage() {
                               <MoneyInput value={e.verifiedClosing} onChange={(v) => upd({ verifiedClosing: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified amount</label>
-                              <MoneyInput value={e.verified} onChange={(v) => upd({ verified: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified amount <span className="text-gray-400 font-normal">(auto)</span></label>
+                              <div className="w-full px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm bg-gray-50 font-semibold text-gray-700">{formatCurrency((Number(e.verifiedClosing) || 0) - (Number(e.verifiedOpening) || 0))}</div>
                             </div>
                           </div>
-                          <p className="text-[10px] text-gray-400 mt-1">The cashier&apos;s opening/closing are locked and not shown here — the report compares both sides.</p>
+                          {(e.verifiedOpening !== '' || e.verifiedClosing !== '') && (() => {
+                            const vAmt = (Number(e.verifiedClosing) || 0) - (Number(e.verifiedOpening) || 0)
+                            const vVar = vAmt - r.reported // verified vs system reported
+                            return (
+                              <div className={`mt-2 flex items-center justify-between text-sm rounded-lg px-3 py-2 ${vVar === 0 ? 'bg-green-50' : vVar > 0 ? 'bg-amber-50' : 'bg-red-50'}`}>
+                                <span className={`font-semibold ${vVar === 0 ? 'text-green-800' : vVar > 0 ? 'text-amber-800' : 'text-red-800'}`}>
+                                  {vVar === 0 ? '✅ Verified matches reported' : vVar > 0 ? '🔺 Verified Excess of' : '🔻 Verified Loss of'}
+                                </span>
+                                <span className={`font-bold ${vVar === 0 ? 'text-green-700' : vVar > 0 ? 'text-amber-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(vVar))}</span>
+                              </div>
+                            )
+                          })()}
+                          <p className="text-[10px] text-gray-400 mt-1">Verified amount = Verified Closing − Verified Opening. Variance compares it to the system-reported amount. The cashier&apos;s figures are locked and not shown here.</p>
                         </div>
                       ) : (
                         <p className="text-[11px] text-gray-400 border-t border-gray-100 pt-2">Verified figures: officer-only.</p>

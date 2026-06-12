@@ -94,13 +94,15 @@ export async function POST(req: NextRequest) {
     // Cashier fields
     if (num(entry.openingBalance) !== undefined) data.openingBalance = num(entry.openingBalance)
     if (num(entry.closingBalance) !== undefined) data.closingBalance = num(entry.closingBalance)
-    // Officer-verified fields (gated)
-    const wantsVerify = [entry.verifiedAmount, entry.verifiedOpening, entry.verifiedClosing].some((v) => v !== undefined && v !== null && v !== '')
+    // Officer-verified fields (gated). Verified amount is auto = verified closing − verified opening.
+    const wantsVerify = [entry.verifiedOpening, entry.verifiedClosing].some((v) => v !== undefined && v !== null && v !== '')
     if (wantsVerify) {
       if (!canVerify) return NextResponse.json({ error: 'Only an authorized officer can enter verified amounts' }, { status: 403 })
-      if (num(entry.verifiedAmount) !== undefined) data.verifiedAmount = num(entry.verifiedAmount)
-      if (num(entry.verifiedOpening) !== undefined) data.verifiedOpening = num(entry.verifiedOpening)
-      if (num(entry.verifiedClosing) !== undefined) data.verifiedClosing = num(entry.verifiedClosing)
+      const vo = num(entry.verifiedOpening) ?? (existing?.verifiedOpening ?? 0)
+      const vc = num(entry.verifiedClosing) ?? (existing?.verifiedClosing ?? 0)
+      data.verifiedOpening = vo
+      data.verifiedClosing = vc
+      data.verifiedAmount = vc - vo
       data.verifiedBy = user.name
     }
     if (existing) await prisma.bankRecon.update({ where: { id: existing.id }, data })
