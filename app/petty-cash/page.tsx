@@ -110,6 +110,8 @@ export default function PettyCashPage() {
   }
 
   const saveRecon = async () => {
+    if (reconForm.cashDeposited === '') return toast.error('Cash Deposited to Bank is required')
+    if (reconCanVerify && reconForm.verifiedAmount === '') return toast.error('Cash Verified amount is required (officer)')
     setReconBusy(true)
     try {
       await request('/api/cash-recon', { method: 'POST', body: JSON.stringify({
@@ -162,6 +164,16 @@ export default function PettyCashPage() {
   }
 
   const saveBank = async () => {
+    // Every channel must have its required fields: cashier → opening & closing; officer → verified opening & closing.
+    const missing = bankRows.filter((r) => {
+      const e = bankEntries[r.code] || {}
+      return bankCanVerify
+        ? ((e.verifiedOpening ?? '') === '' || (e.verifiedClosing ?? '') === '')
+        : ((e.opening ?? '') === '' || (e.closing ?? '') === '')
+    }).map((r) => r.label)
+    if (missing.length) {
+      return toast.error(`Fill ${bankCanVerify ? 'Verified Opening & Closing' : 'Opening & Closing'} for: ${missing.join(', ')}`)
+    }
     setBankBusy(true)
     try {
       const channels = bankRows.map((r) => {
@@ -511,7 +523,7 @@ export default function PettyCashPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Deposited to Bank (TZS)</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Deposited to Bank (TZS) *</label>
                   <MoneyInput value={reconForm.cashDeposited} onChange={(v) => setReconForm({ ...reconForm, cashDeposited: v })}
                     className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
                 </div>
@@ -525,7 +537,7 @@ export default function PettyCashPage() {
                 {/* Cash verified by officer */}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    Cash Verified (TZS) {!reconCanVerify && <span className="text-gray-400 font-normal">— officers only</span>}
+                    Cash Verified (TZS) {reconCanVerify ? '*' : <span className="text-gray-400 font-normal">— officers only</span>}
                   </label>
                   {reconCanVerify ? (
                     <MoneyInput value={reconForm.verifiedAmount} onChange={(v) => setReconForm({ ...reconForm, verifiedAmount: v })}
@@ -624,11 +636,11 @@ export default function PettyCashPage() {
                         <>
                           <div className="grid grid-cols-2 gap-2">
                             <div>
-                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Opening balance</label>
+                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Opening balance *</label>
                               <MoneyInput value={e.opening} onChange={(v) => upd({ opening: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
-                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Closing balance</label>
+                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Closing balance *</label>
                               <MoneyInput value={e.closing} onChange={(v) => upd({ closing: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                           </div>
@@ -652,11 +664,11 @@ export default function PettyCashPage() {
                           <p className="text-[11px] font-semibold text-indigo-600 mb-1">🔎 Officer verification — enter the actual figures independently</p>
                           <div className="grid grid-cols-3 gap-2">
                             <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified opening</label>
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified opening *</label>
                               <MoneyInput value={e.verifiedOpening} onChange={(v) => upd({ verifiedOpening: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified closing</label>
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified closing *</label>
                               <MoneyInput value={e.verifiedClosing} onChange={(v) => upd({ verifiedClosing: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
