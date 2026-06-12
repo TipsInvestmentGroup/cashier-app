@@ -16,7 +16,13 @@ import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 interface PaidBill {
   id: string; date: string; payerName: string; payerCategory?: string; amountPaid: number; paymentMethod: string
   outlet: { name: string }; cashier: { name: string }; notes?: string; billRef?: string
-  signedBill?: { voucherNumber: string; amount: number; personName: string; date?: string; billType?: string }
+  signedBill?: { id: string; voucherNumber: string; amount: number; personName: string; date?: string; billType?: string }
+}
+interface Story {
+  bill: { id: string; date: string; billType: string; personName: string; serviceStaff?: string; amount: number; status: string; description?: string; outlet?: { name: string }; cashier?: { name: string } }
+  payments: { id: string; date: string; payerName: string; payerCategory?: string; amountPaid: number; paymentMethod: string; cashier?: { name: string } }[]
+  totalPaid: number
+  balance: number
 }
 interface SignedBill { id: string; voucherNumber: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
 interface Outlet { id: string; name: string }
@@ -54,6 +60,11 @@ export default function PaidBillsPage() {
   const [linkQuery, setLinkQuery] = useState('')
   const [linkOpen, setLinkOpen] = useState(false)
   const [selectedBillIds, setSelectedBillIds] = useState<string[]>([])
+  // Payment-story modal
+  const [storyOpen, setStoryOpen] = useState(false)
+  const [story, setStory] = useState<Story | null>(null)
+  const [creditOnly, setCreditOnly] = useState<PaidBill | null>(null)
+  const [storyLoading, setStoryLoading] = useState(false)
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({
@@ -125,6 +136,18 @@ export default function PaidBillsPage() {
       toast.error(err instanceof Error ? err.message : 'Error recording payment')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const openStory = async (p: PaidBill) => {
+    setStoryOpen(true); setStory(null); setCreditOnly(null)
+    if (p.signedBill?.id) {
+      setStoryLoading(true)
+      try { const res = await request(`/api/signed-bills/${p.signedBill.id}/story`); setStory(res) }
+      catch { toast.error('Could not load payment story') }
+      finally { setStoryLoading(false) }
+    } else {
+      setCreditOnly(p)
     }
   }
 
@@ -333,7 +356,8 @@ export default function PaidBillsPage() {
                   {filtered.map((p) => {
                     const pm = PAYMENT_METHODS.find((m) => m.value === p.paymentMethod)
                     return (
-                      <tr key={p.id} className="hover:bg-gray-50">
+                      <tr key={p.id} onClick={() => openStory(p)} title="Click for the full payment story"
+                        className="hover:bg-indigo-50/60 cursor-pointer">
                         <td className="px-4 py-3 text-gray-600">{formatDate(p.date)}</td>
                         <td className="px-4 py-3 font-medium text-gray-800">{p.payerName}</td>
                         <td className="px-4 py-3 text-gray-600">{p.payerCategory || '-'}</td>
@@ -372,6 +396,89 @@ export default function PaidBillsPage() {
           )}
         </div>
       </div>
+
+      {/* Payment Story modal */}
+      {storyOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={() => setStoryOpen(false)}>
+          <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 sticky top-0 bg-white">
+              <h3 className="font-bold text-gray-900">📖 Payment Story</h3>
+              <button onClick={() => setStoryOpen(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {storyLoading && <div className="py-10 text-center text-gray-400">Loading…</div>}
+
+              {/* Unlinked credit payment */}
+              {!storyLoading && creditOnly && (
+                <div className="space-y-3">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-amber-800">Recorded as credit — not linked to any bill</p>
+                    <p className="text-xs text-amber-600 mt-1">This payment was not applied to a specific signed bill (e.g. an overpayment or advance).</p>
+                  </div>
+                  <div className="rounded-xl border border-gray-100 p-4 space-y-1 text-sm">
+                    <div className="flex justify-between"><span className="text-gray-500">Payer</span><span className="font-semibold">{creditOnly.payerName}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Category</span><span>{creditOnly.payerCategory || '-'}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Date</span><span>{formatDate(creditOnly.date)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Method</span><span>{creditOnly.paymentMethod}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Recorded by</span><span>{creditOnly.cashier.name}</span></div>
+                    <div className="flex justify-between border-t border-gray-100 pt-1 mt-1"><span className="font-semibold text-gray-700">Amount</span><span className="font-bold text-green-700">{formatCurrency(creditOnly.amountPaid)}</span></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Linked bill story */}
+              {!storyLoading && story && (
+                <div className="space-y-4">
+                  {/* The signed bill */}
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-indigo-700 uppercase">{story.bill.billType.replace('_', ' ')} bill</span>
+                      <span className={`px-2 py-0.5 rounded-lg text-xs font-semibold ${story.bill.status === 'PAID' ? 'bg-green-100 text-green-700' : story.bill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}>{story.bill.status}</span>
+                    </div>
+                    <p className="text-lg font-bold text-gray-900 mt-1">{story.bill.personName}</p>
+                    <p className="text-sm text-gray-600">Signed on <strong>{formatDate(story.bill.date)}</strong> · {formatCurrency(story.bill.amount)}</p>
+                    {story.bill.serviceStaff && <p className="text-xs text-gray-500 mt-1">Served by {story.bill.serviceStaff}{story.bill.outlet?.name ? ` · ${story.bill.outlet.name}` : ''}</p>}
+                    {story.bill.description && <p className="text-xs text-gray-400 mt-1 italic">{story.bill.description}</p>}
+                  </div>
+
+                  {/* Payment timeline */}
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700 mb-2">Payments ({story.payments.length})</p>
+                    {story.payments.length === 0 ? (
+                      <p className="text-sm text-gray-400">No payments recorded yet.</p>
+                    ) : (
+                      <ol className="space-y-2">
+                        {(() => { let rem = story.bill.amount; return story.payments.map((pay) => { rem -= pay.amountPaid; return (
+                          <li key={pay.id} className="flex items-start gap-3">
+                            <span className="mt-1 w-2 h-2 rounded-full bg-green-500 shrink-0" />
+                            <div className="flex-1 text-sm">
+                              <div className="flex justify-between">
+                                <span className="font-medium text-gray-800">{formatDate(pay.date)} — {pay.payerName}</span>
+                                <span className="font-bold text-green-700">{formatCurrency(pay.amountPaid)}</span>
+                              </div>
+                              <p className="text-xs text-gray-500">{pay.paymentMethod}{pay.cashier?.name ? ` · recorded by ${pay.cashier.name}` : ''} · remaining {formatCurrency(Math.max(0, rem))}</p>
+                            </div>
+                          </li>
+                        ) }) })()}
+                      </ol>
+                    )}
+                  </div>
+
+                  {/* Balance summary */}
+                  <div className={`rounded-xl p-4 flex items-center justify-between ${story.balance <= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
+                    <div>
+                      <p className={`font-semibold ${story.balance <= 0 ? 'text-green-800' : 'text-red-800'}`}>{story.balance <= 0 ? '✅ Fully settled' : '🔴 Outstanding balance'}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">Paid {formatCurrency(story.totalPaid)} of {formatCurrency(story.bill.amount)}</p>
+                    </div>
+                    <span className={`text-2xl font-bold ${story.balance <= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(Math.max(0, story.balance))}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   )
 }
