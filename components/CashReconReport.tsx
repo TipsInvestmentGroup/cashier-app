@@ -7,8 +7,8 @@ import { ExportBar } from '@/components/ExportBar'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
-interface Row { date: string; opening: number; collected: number; paidCash: number; expenses: number; deposited: number; closing: number }
-interface Resp { rows: Row[]; totals: { opening: number; collected: number; paidCash: number; expenses: number; deposited: number; closing: number } }
+interface Row { date: string; opening: number; collected: number; paidCash: number; expenses: number; deposited: number; closing: number; verified: number; verifiedSet: boolean; verifiedBy?: string; variance: number | null }
+interface Resp { rows: Row[]; totals: { opening: number; collected: number; paidCash: number; expenses: number; deposited: number; closing: number; verified: number; variance: number } }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function CashReconReport({ outlets, request }: { outlets: Outlet[]; request: (url: string, opts?: any) => Promise<any> }) {
@@ -39,6 +39,7 @@ export function CashReconReport({ outlets, request }: { outlets: Outlet[]; reque
   const exportRows = (data?.rows || []).map((r) => ({
     Date: formatDate(r.date), 'Opening Balance': r.opening, 'Cash Collected': r.collected,
     'Paid Bills (Cash)': r.paidCash, 'Cash Expenses': r.expenses, 'Deposited to Bank': r.deposited, 'Closing Balance': r.closing,
+    'Verified': r.verifiedSet ? r.verified : '', 'Variance': r.variance ?? '', 'Verified By': r.verifiedBy || '',
   }))
 
   return (
@@ -87,6 +88,8 @@ export function CashReconReport({ outlets, request }: { outlets: Outlet[]; reque
                   <th className="px-4 py-3 font-semibold text-right">Cash Expenses</th>
                   <th className="px-4 py-3 font-semibold text-right">Deposited to Bank</th>
                   <th className="px-4 py-3 font-semibold text-right">Closing Balance</th>
+                  <th className="px-4 py-3 font-semibold text-right">Verified</th>
+                  <th className="px-4 py-3 font-semibold text-right">Variance</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -99,6 +102,10 @@ export function CashReconReport({ outlets, request }: { outlets: Outlet[]; reque
                     <td className="px-4 py-3 text-right text-red-600">{formatCurrency(r.expenses)}</td>
                     <td className="px-4 py-3 text-right text-blue-700">{formatCurrency(r.deposited)}</td>
                     <td className={`px-4 py-3 text-right font-bold ${r.closing < 0 ? 'text-red-700' : 'text-indigo-700'}`}>{formatCurrency(r.closing)}</td>
+                    <td className="px-4 py-3 text-right text-gray-700" title={r.verifiedBy || ''}>{r.verifiedSet ? formatCurrency(r.verified) : '-'}</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${r.variance == null ? 'text-gray-300' : r.variance === 0 ? 'text-gray-500' : r.variance > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {r.variance == null ? '-' : `${r.variance > 0 ? '▲ ' : r.variance < 0 ? '▼ ' : ''}${formatCurrency(Math.abs(r.variance))}`}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -111,6 +118,8 @@ export function CashReconReport({ outlets, request }: { outlets: Outlet[]; reque
                   <td className="px-4 py-3 text-right text-red-600">{formatCurrency(data.totals.expenses)}</td>
                   <td className="px-4 py-3 text-right text-blue-700">{formatCurrency(data.totals.deposited)}</td>
                   <td className="px-4 py-3 text-right text-indigo-700">{formatCurrency(data.totals.closing)}</td>
+                  <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(data.totals.verified)}</td>
+                  <td className={`px-4 py-3 text-right ${data.totals.variance > 0 ? 'text-green-700' : data.totals.variance < 0 ? 'text-red-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(data.totals.variance))}</td>
                 </tr>
               </tfoot>
             </table>
