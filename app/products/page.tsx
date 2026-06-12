@@ -5,6 +5,7 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
+import { MoneyInput } from '@/components/MoneyInput'
 import toast from 'react-hot-toast'
 
 interface Product {
@@ -120,12 +121,12 @@ export default function ProductsPage() {
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Buying Price (TZS)</label>
-                <input type="number" min="0" value={form.buyingPrice} onChange={(e) => setForm({ ...form, buyingPrice: e.target.value })}
+                <MoneyInput value={form.buyingPrice} onChange={(v) => setForm({ ...form, buyingPrice: v })}
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="0" />
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Selling Price (TZS)</label>
-                <input type="number" min="0" value={form.sellingPrice} onChange={(e) => setForm({ ...form, sellingPrice: e.target.value })}
+                <MoneyInput value={form.sellingPrice} onChange={(v) => setForm({ ...form, sellingPrice: v })}
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="0" />
               </div>
               <div className="sm:col-span-2 flex gap-3">

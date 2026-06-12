@@ -5,6 +5,7 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
+import { MoneyInput } from '@/components/MoneyInput'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 import toast from 'react-hot-toast'
@@ -361,7 +362,7 @@ export default function PettyCashPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Amount Requested (TZS) *</label>
-                    <input type="number" min="1" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                    <MoneyInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })}
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" required />
                   </div>
                   <div>
@@ -446,12 +447,12 @@ export default function PettyCashPage() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Opening Cash Balance (TZS)</label>
-                  <input type="number" value={reconForm.openingBalance} onChange={(e) => setReconForm({ ...reconForm, openingBalance: e.target.value })}
+                  <MoneyInput value={reconForm.openingBalance} onChange={(v) => setReconForm({ ...reconForm, openingBalance: v })}
                     className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="0" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Deposited to Bank (TZS)</label>
-                  <input type="number" value={reconForm.cashDeposited} onChange={(e) => setReconForm({ ...reconForm, cashDeposited: e.target.value })}
+                  <MoneyInput value={reconForm.cashDeposited} onChange={(v) => setReconForm({ ...reconForm, cashDeposited: v })}
                     className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
                 </div>
 
@@ -509,12 +510,12 @@ export default function PettyCashPage() {
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Reported by Cashier (TZS)</label>
-                  <input type="number" value={bankForm.reportedAmount} onChange={(e) => setBankForm({ ...bankForm, reportedAmount: e.target.value })}
+                  <MoneyInput value={bankForm.reportedAmount} onChange={(v) => setBankForm({ ...bankForm, reportedAmount: v })}
                     className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-semibold" placeholder="0" />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Verified by Reconciliation Officer (TZS)</label>
-                  <input type="number" value={bankForm.verifiedAmount} onChange={(e) => setBankForm({ ...bankForm, verifiedAmount: e.target.value })}
+                  <MoneyInput value={bankForm.verifiedAmount} onChange={(v) => setBankForm({ ...bankForm, verifiedAmount: v })}
                     className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
                 </div>
 

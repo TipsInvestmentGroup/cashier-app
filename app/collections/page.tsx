@@ -5,6 +5,7 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { BillSelector, BillLite } from '@/components/BillSelector'
+import { MoneyInput } from '@/components/MoneyInput'
 import toast from 'react-hot-toast'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns'
 
@@ -303,8 +304,8 @@ export default function CollectionsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">🧾 System Sales (TZS)</label>
-                  <input type="number" min="0" placeholder="0"
-                    value={form.systemSales} onChange={(e) => setForm({ ...form, systemSales: e.target.value })}
+                  <MoneyInput placeholder="0"
+                    value={form.systemSales} onChange={(v) => setForm({ ...form, systemSales: v })}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-medium" />
                   <p className="text-xs text-gray-400 mt-1">What the POS/system says this staff sold</p>
                 </div>
@@ -319,9 +320,9 @@ export default function CollectionsPage() {
                 ].map(({ key, label, placeholder }) => (
                   <div key={key}>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">{label}</label>
-                    <input type="number" min="0" placeholder={placeholder}
-                      value={form[key as keyof typeof form]}
-                      onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                    <MoneyInput placeholder={placeholder}
+                      value={form[key as keyof typeof form] as string}
+                      onChange={(v) => setForm({ ...form, [key]: v })}
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-medium" />
                   </div>
                 ))}
@@ -377,7 +378,7 @@ export default function CollectionsPage() {
                         <option value="">Select product…</option>
                         {products.map((p) => <option key={p.id} value={p.id}>{p.name} · {formatCurrency(p.sellingPrice)}</option>)}
                       </select>
-                      <input type="number" min="0" placeholder="Qty" value={r.quantity} onChange={(e) => { const n = [...cancelRows]; n[i] = { ...r, quantity: e.target.value }; setCancelRows(n) }}
+                      <MoneyInput placeholder="Qty" value={r.quantity} onChange={(v) => { const n = [...cancelRows]; n[i] = { ...r, quantity: v }; setCancelRows(n) }}
                         className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
                       <span className="col-span-2 text-sm font-semibold text-gray-700 text-right pr-1">{formatCurrency(amt)}</span>
                       <button type="button" onClick={() => setCancelRows(cancelRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
@@ -407,7 +408,7 @@ export default function CollectionsPage() {
                         </select>
                         <input list="personNames" placeholder="Name" value={r.name} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, name: e.target.value }; setSignedRows(n) }}
                           className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
-                        <input type="number" min="0" placeholder="Amount" value={r.amount} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, amount: e.target.value }; setSignedRows(n) }}
+                        <MoneyInput placeholder="Amount" value={r.amount} onChange={(v) => { const n = [...signedRows]; n[i] = { ...r, amount: v }; setSignedRows(n) }}
                           className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
                         <button type="button" onClick={() => setSignedRows(signedRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
                       </div>
@@ -457,7 +458,7 @@ export default function CollectionsPage() {
                           </select>
                           <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, payerName: e.target.value }; setPaidRows(n) }}
                             className="col-span-4 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
-                          <input type="number" min="0" placeholder="Amount" value={r.amount} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, amount: e.target.value }; setPaidRows(n) }}
+                          <MoneyInput placeholder="Amount" value={r.amount} onChange={(v) => { const n = [...paidRows]; n[i] = { ...r, amount: v }; setPaidRows(n) }}
                             className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
                           <select value={r.paymentMethod} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, paymentMethod: e.target.value }; setPaidRows(n) }}
                             className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">

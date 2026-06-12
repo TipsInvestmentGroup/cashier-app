@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { SearchBox } from '@/components/SearchBox'
+import { MoneyInput } from '@/components/MoneyInput'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface Bill {
@@ -210,7 +211,7 @@ export default function SignedBillsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Amount (TZS) *</label>
-                  <input type="number" min="1" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  <MoneyInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-xl font-bold"
                     placeholder="0" required />
                 </div>

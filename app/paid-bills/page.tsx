@@ -9,13 +9,14 @@ import { format } from 'date-fns'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { SearchBox } from '@/components/SearchBox'
 import { BillSelector, BillLite } from '@/components/BillSelector'
+import { MoneyInput } from '@/components/MoneyInput'
 import { BILLTYPE_TO_CATEGORY } from '@/lib/categories'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface PaidBill {
   id: string; date: string; payerName: string; payerCategory?: string; amountPaid: number; paymentMethod: string
   outlet: { name: string }; cashier: { name: string }; notes?: string; billRef?: string
-  signedBill?: { voucherNumber: string; amount: number; personName: string; date?: string }
+  signedBill?: { voucherNumber: string; amount: number; personName: string; date?: string; billType?: string }
 }
 interface SignedBill { id: string; voucherNumber: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
 interface Outlet { id: string; name: string }
@@ -239,7 +240,7 @@ export default function PaidBillsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Amount Paid (TZS) *</label>
-                  <input type="number" min="1" value={form.amountPaid} onChange={(e) => setForm({ ...form, amountPaid: e.target.value })}
+                  <MoneyInput value={form.amountPaid} onChange={(v) => setForm({ ...form, amountPaid: v })}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-xl font-bold"
                     placeholder="0" required />
                 </div>
@@ -320,7 +321,8 @@ export default function PaidBillsPage() {
                     <th className="px-4 py-3 font-semibold">Date</th>
                     <th className="px-4 py-3 font-semibold">Payer</th>
                     <th className="px-4 py-3 font-semibold">Category</th>
-                    <th className="px-4 py-3 font-semibold">Linked Bill</th>
+                    <th className="px-4 py-3 font-semibold">Applied To (Bill)</th>
+                    <th className="px-4 py-3 font-semibold">Bill Person</th>
                     <th className="px-4 py-3 font-semibold">Amount Paid</th>
                     <th className="px-4 py-3 font-semibold">Method</th>
                     <th className="px-4 py-3 font-semibold">Outlet</th>
@@ -336,8 +338,11 @@ export default function PaidBillsPage() {
                         <td className="px-4 py-3 font-medium text-gray-800">{p.payerName}</td>
                         <td className="px-4 py-3 text-gray-600">{p.payerCategory || '-'}</td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
-                          {p.signedBill ? `${p.signedBill.date ? formatDate(p.signedBill.date) + ' · ' : ''}${p.signedBill.personName}` : '-'}
+                          {p.signedBill
+                            ? `${p.signedBill.date ? formatDate(p.signedBill.date) + ' · ' : ''}${formatCurrency(p.signedBill.amount)}`
+                            : <span className="text-amber-600">credit (unlinked)</span>}
                         </td>
+                        <td className="px-4 py-3 text-gray-700">{p.signedBill?.personName || '-'}</td>
                         <td className="px-4 py-3 font-bold text-green-700">{formatCurrency(p.amountPaid)}</td>
                         <td className="px-4 py-3">
                           <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${pm?.color || 'bg-gray-100 text-gray-700'}`}>
@@ -350,13 +355,13 @@ export default function PaidBillsPage() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={8} className="text-center py-12 text-gray-400">No payments in this period</td></tr>
+                    <tr><td colSpan={9} className="text-center py-12 text-gray-400">No payments in this period</td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr className="font-bold text-gray-900">
-                      <td className="px-4 py-3" colSpan={4}>TOTAL ({filtered.length})</td>
+                      <td className="px-4 py-3" colSpan={5}>TOTAL ({filtered.length})</td>
                       <td className="px-4 py-3 text-green-700">{formatCurrency(totalReceived)}</td>
                       <td className="px-4 py-3" colSpan={3}></td>
                     </tr>
