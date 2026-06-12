@@ -106,9 +106,11 @@ export default function PaidBillsPage() {
   // so the payment matches and links to their bills (avoids unlinked credits).
   const applyPayer = (name: string) => {
     const person = persons.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())
+    // If a bill is linked, its category is authoritative — don't override it.
+    const locked = selectedBillIds.length > 0
     setForm((f) => ({
       ...f, payerName: name,
-      ...(person ? { payerCategory: codeToLabel(person.type), categoryCode: person.type } : {}),
+      ...(!locked && person ? { payerCategory: codeToLabel(person.type), categoryCode: person.type } : {}),
     }))
   }
 
@@ -246,17 +248,24 @@ export default function PaidBillsPage() {
                 </div>
               </div>
 
-              {/* Payment Category */}
+              {/* Payment Category — locked to the linked bill's category */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Category</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Payment Category
+                  {selectedBillIds.length > 0 && <span className="ml-2 text-xs font-normal text-indigo-600">🔒 locked to linked bill ({form.payerCategory})</span>}
+                </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                  {PAY_CATEGORIES.map((c) => (
-                    <button key={c.label} type="button"
-                      onClick={() => setForm({ ...form, payerCategory: c.label, categoryCode: c.type })}
-                      className={`py-2.5 px-2 rounded-xl text-sm font-medium transition text-center ${form.payerCategory === c.label ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                      {c.label}
-                    </button>
-                  ))}
+                  {PAY_CATEGORIES.map((c) => {
+                    const locked = selectedBillIds.length > 0
+                    const active = form.payerCategory === c.label
+                    return (
+                      <button key={c.label} type="button" disabled={locked}
+                        onClick={() => { if (!locked) setForm({ ...form, payerCategory: c.label, categoryCode: c.type }) }}
+                        className={`py-2.5 px-2 rounded-xl text-sm font-medium transition text-center ${active ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'} ${locked && !active ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                        {c.label}
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
