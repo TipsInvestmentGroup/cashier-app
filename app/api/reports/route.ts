@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   const dateFilter = { gte: start, lte: end }
   const outletFilter = outletId ? { outletId } : {}
 
-  const [collections, signedBills, paidBills] = await Promise.all([
+  const [collections, signedBills, paidBills, cancellations, products] = await Promise.all([
     prisma.dailyCollection.findMany({
       where: { ...outletFilter, date: dateFilter },
       include: { outlet: true, cashier: { select: { name: true } } },
@@ -48,6 +48,12 @@ export async function GET(req: NextRequest) {
       include: { outlet: true, signedBill: true },
       orderBy: { date: 'desc' },
     }),
+    prisma.cancellation.findMany({
+      where: { ...outletFilter, date: dateFilter },
+      include: { collection: { select: { staffName: true, outlet: { select: { name: true } } } } },
+      orderBy: { date: 'desc' },
+    }),
+    prisma.product.findMany({ orderBy: { name: 'asc' } }),
   ])
 
   const totalCollected = collections.reduce((s, c) => s + c.total, 0)
@@ -64,12 +70,16 @@ export async function GET(req: NextRequest) {
     return acc
   }, {})
 
+  const totalCancelled = cancellations.reduce((s, c) => s + c.amount, 0)
+
   return NextResponse.json({
     period: { start, end, type },
-    summary: { totalCollected, totalSigned, totalPaid },
+    summary: { totalCollected, totalSigned, totalPaid, totalCancelled },
     collections,
     signedBills,
     paidBills,
+    cancellations,
+    products,
     byBillType,
     byPaymentMethod,
   })

@@ -11,10 +11,12 @@ import toast from 'react-hot-toast'
 
 interface ReportData {
   period: { start: string; end: string; type: string }
-  summary: { totalCollected: number; totalSigned: number; totalPaid: number }
+  summary: { totalCollected: number; totalSigned: number; totalPaid: number; totalCancelled: number }
   collections: { id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number; outlet: { name: string }; cashier: { name: string } }[]
   signedBills: { id: string; date: string; voucherNumber: string; billType: string; personName: string; amount: number; status: string; outlet: { name: string } }[]
   paidBills: { id: string; date: string; payerName: string; amountPaid: number; paymentMethod: string; outlet: { name: string } }[]
+  cancellations: { id: string; date: string; reason: string; productName: string; sellingPrice: number; quantity: number; amount: number; outletId?: string; collection?: { staffName?: string; outlet?: { name: string } } }[]
+  products: { id: string; code: string; name: string; buyingPrice: number; sellingPrice: number; unitMeasure: string; isActive: boolean }[]
   byBillType: Record<string, number>
   byPaymentMethod: Record<string, number>
 }
@@ -111,7 +113,7 @@ export default function ReportsPage() {
   const billTypeChartData = data ? Object.entries(data.byBillType).map(([k, v]) => ({ name: k, amount: v })) : []
   const pmChartData = data ? Object.entries(data.byPaymentMethod).map(([k, v]) => ({ name: k, amount: v })) : []
 
-  const tabs = ['summary', 'collections', 'signed', 'paid']
+  const tabs = ['summary', 'collections', 'signed', 'paid', 'cancellations', 'products']
 
   return (
     <AppShell>
@@ -339,6 +341,82 @@ export default function ReportsPage() {
                             </tr>
                           ))}
                           {data.paidBills.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-gray-400">No data</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'cancellations' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                      <p className="text-sm text-gray-500">Total cancelled: <strong className="text-rose-700">{formatCurrency(data.summary.totalCancelled)}</strong> · {data.cancellations.length} entries</p>
+                      <ExportBtns rows={data.cancellations.map((c) => ({ Date: formatDate(c.date), Staff: c.collection?.staffName || '', Outlet: c.collection?.outlet?.name || '', Reason: c.reason, Product: c.productName, 'Selling Price': c.sellingPrice, Qty: c.quantity, Amount: c.amount }))} filename="cancellations" title="Cancellations Report" />
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr className="text-left text-gray-600">
+                            <th className="px-4 py-3 font-semibold">Date</th>
+                            <th className="px-4 py-3 font-semibold">Staff</th>
+                            <th className="px-4 py-3 font-semibold">Reason</th>
+                            <th className="px-4 py-3 font-semibold">Product</th>
+                            <th className="px-4 py-3 font-semibold">Selling Price</th>
+                            <th className="px-4 py-3 font-semibold">Qty</th>
+                            <th className="px-4 py-3 font-semibold">Amount</th>
+                            <th className="px-4 py-3 font-semibold">Outlet</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {data.cancellations.map((c) => (
+                            <tr key={c.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3">{formatDate(c.date)}</td>
+                              <td className="px-4 py-3 text-gray-600">{c.collection?.staffName || '-'}</td>
+                              <td className="px-4 py-3"><span className="px-2 py-1 rounded-lg text-xs font-semibold bg-rose-100 text-rose-700">{c.reason}</span></td>
+                              <td className="px-4 py-3 font-medium">{c.productName}</td>
+                              <td className="px-4 py-3">{formatCurrency(c.sellingPrice)}</td>
+                              <td className="px-4 py-3">{c.quantity}</td>
+                              <td className="px-4 py-3 font-bold text-rose-700">{formatCurrency(c.amount)}</td>
+                              <td className="px-4 py-3 text-gray-500">{c.collection?.outlet?.name || '-'}</td>
+                            </tr>
+                          ))}
+                          {data.cancellations.length === 0 && <tr><td colSpan={8} className="text-center py-8 text-gray-400">No cancellations in this period</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'products' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                      <p className="text-sm text-gray-500">{data.products.length} products in catalogue</p>
+                      <ExportBtns rows={data.products.map((p) => ({ Code: p.code, Product: p.name, Unit: p.unitMeasure, 'Buying Price': p.buyingPrice, 'Selling Price': p.sellingPrice, Status: p.isActive ? 'Active' : 'Disabled' }))} filename="products" title="Products Report" />
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr className="text-left text-gray-600">
+                            <th className="px-4 py-3 font-semibold">Code</th>
+                            <th className="px-4 py-3 font-semibold">Product</th>
+                            <th className="px-4 py-3 font-semibold">Unit</th>
+                            <th className="px-4 py-3 font-semibold">Buying</th>
+                            <th className="px-4 py-3 font-semibold">Selling</th>
+                            <th className="px-4 py-3 font-semibold">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {data.products.map((p) => (
+                            <tr key={p.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 font-mono text-indigo-700 font-semibold">{p.code}</td>
+                              <td className={`px-4 py-3 font-medium ${p.isActive ? '' : 'text-gray-400 line-through'}`}>{p.name}</td>
+                              <td className="px-4 py-3 text-gray-500">{p.unitMeasure}</td>
+                              <td className="px-4 py-3">{formatCurrency(p.buyingPrice)}</td>
+                              <td className="px-4 py-3 font-bold">{formatCurrency(p.sellingPrice)}</td>
+                              <td className="px-4 py-3"><span className={`px-2 py-1 rounded-lg text-xs font-semibold ${p.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{p.isActive ? 'Active' : 'Disabled'}</span></td>
+                            </tr>
+                          ))}
+                          {data.products.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No products yet</td></tr>}
                         </tbody>
                       </table>
                     </div>

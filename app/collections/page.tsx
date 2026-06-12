@@ -309,13 +309,19 @@ export default function CollectionsPage() {
                 <span className="text-2xl font-bold text-indigo-700">{formatCurrency(total)}</span>
               </div>
 
-              {/* Cash required from staff (auto) */}
-              <div className="bg-amber-50 rounded-xl p-4 flex items-center justify-between">
+              {/* Cash required from staff (auto) — negative means excess cash */}
+              <div className={`rounded-xl p-4 flex items-center justify-between ${cashRequiredForm < 0 ? 'bg-green-50' : 'bg-amber-50'}`}>
                 <div>
-                  <span className="font-semibold text-amber-800">💵 Cash Collection Required from Staff</span>
-                  <p className="text-xs text-amber-600 mt-0.5">System Sales − (CRDB + Stanbic + M-PESA)</p>
+                  <span className={`font-semibold ${cashRequiredForm < 0 ? 'text-green-800' : 'text-amber-800'}`}>
+                    {cashRequiredForm < 0 ? '🟢 Excess Cash Collected' : '💵 Cash Collection Required from Staff'}
+                  </span>
+                  <p className={`text-xs mt-0.5 ${cashRequiredForm < 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                    {cashRequiredForm < 0
+                      ? 'Cash collected is more than required by this amount'
+                      : 'System Sales − (CRDB + Stanbic + M-PESA)'}
+                  </p>
                 </div>
-                <span className={`text-2xl font-bold ${cashRequiredForm < 0 ? 'text-gray-400' : 'text-amber-700'}`}>{formatCurrency(cashRequiredForm)}</span>
+                <span className={`text-2xl font-bold ${cashRequiredForm < 0 ? 'text-green-700' : 'text-amber-700'}`}>{formatCurrency(Math.abs(cashRequiredForm))}</span>
               </div>
 
               {/* Cancellations (available on new + edit) */}
