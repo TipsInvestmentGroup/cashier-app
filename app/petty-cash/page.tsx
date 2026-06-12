@@ -599,7 +599,9 @@ export default function PettyCashPage() {
                   </select>
                 </div>
               </div>
-              <p className="text-xs text-gray-400">Each digital channel is reconciled separately. <strong>Required</strong> = Closing − Opening (you fill these). <strong>Reported</strong> is auto from collections + paid bills. Variance = Reported − Required. {bankCanVerify ? 'Officers can also enter verified figures.' : 'Verified figures are officer-only.'}</p>
+              <p className="text-xs text-gray-400">Each digital channel is reconciled separately. {bankCanVerify
+                ? <>You are an <strong>officer</strong>: enter the verified figures independently. The cashier&apos;s opening/closing are locked and hidden.</>
+                : <><strong>Required</strong> = Closing − Opening (you fill these). <strong>Reported</strong> is auto from collections + paid bills. Variance = Reported − Required.</>}</p>
 
               {/* Per-channel cards */}
               <div className="space-y-3">
@@ -616,56 +618,58 @@ export default function PettyCashPage() {
                         <span className="font-bold text-gray-800">{r.label}</span>
                         <span className="text-xs text-gray-500">Reported (system): <strong className="text-gray-700">{formatCurrency(r.reported)}</strong></span>
                       </div>
-                      {/* Cashier opening/closing */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Opening balance</label>
-                          <MoneyInput value={e.opening} onChange={(v) => upd({ opening: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Closing balance</label>
-                          <MoneyInput value={e.closing} onChange={(v) => upd({ closing: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
-                        </div>
-                      </div>
-                      {/* Required + variance */}
-                      <div className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
-                        <span className="text-gray-600">Required to collect <span className="text-[11px] text-gray-400">(Closing − Opening)</span></span>
-                        <span className="font-semibold text-gray-800">{hasReq ? formatCurrency(required) : '—'}</span>
-                      </div>
-                      {variance != null && (
-                        <div className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 ${variance === 0 ? 'bg-green-50' : variance > 0 ? 'bg-amber-50' : 'bg-red-50'}`}>
-                          <span className={`font-semibold ${variance === 0 ? 'text-green-800' : variance > 0 ? 'text-amber-800' : 'text-red-800'}`}>
-                            {variance === 0 ? '✅ Reported matches required' : variance > 0 ? '🔺 You have an Excess of' : '🔻 You have a Loss of'}
-                          </span>
-                          <span className={`font-bold ${variance === 0 ? 'text-green-700' : variance > 0 ? 'text-amber-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(variance))}</span>
-                        </div>
+                      {/* Cashier side — only visible to non-verifiers. Once it reaches an
+                          officer, these figures are frozen and hidden for independent verification. */}
+                      {!bankCanVerify && (
+                        <>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Opening balance</label>
+                              <MoneyInput value={e.opening} onChange={(v) => upd({ opening: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Closing balance</label>
+                              <MoneyInput value={e.closing} onChange={(v) => upd({ closing: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
+                            <span className="text-gray-600">Required to collect <span className="text-[11px] text-gray-400">(Closing − Opening)</span></span>
+                            <span className="font-semibold text-gray-800">{hasReq ? formatCurrency(required) : '—'}</span>
+                          </div>
+                          {variance != null && (
+                            <div className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 ${variance === 0 ? 'bg-green-50' : variance > 0 ? 'bg-amber-50' : 'bg-red-50'}`}>
+                              <span className={`font-semibold ${variance === 0 ? 'text-green-800' : variance > 0 ? 'text-amber-800' : 'text-red-800'}`}>
+                                {variance === 0 ? '✅ Reported matches required' : variance > 0 ? '🔺 You have an Excess of' : '🔻 You have a Loss of'}
+                              </span>
+                              <span className={`font-bold ${variance === 0 ? 'text-green-700' : variance > 0 ? 'text-amber-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(variance))}</span>
+                            </div>
+                          )}
+                        </>
                       )}
-                      {/* Officer verification — verifies the cashier's opening/closing & the system reported */}
+                      {/* Officer verification — independent: no sight of the cashier's opening/closing */}
                       {bankCanVerify ? (
                         <div className="border-t border-gray-100 pt-2">
-                          <p className="text-[11px] font-semibold text-indigo-600 mb-1">🔎 Officer verification — confirm the cashier&apos;s opening/closing &amp; system amount</p>
+                          <p className="text-[11px] font-semibold text-indigo-600 mb-1">🔎 Officer verification — enter the actual figures independently</p>
                           <div className="grid grid-cols-3 gap-2">
                             <div>
                               <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified opening</label>
-                              <MoneyInput value={e.verifiedOpening} onChange={(v) => upd({ verifiedOpening: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder={String(Number(e.opening) || 0)} />
-                              <p className="text-[10px] text-gray-400 mt-0.5">Cashier: {formatCurrency(Number(e.opening) || 0)}</p>
+                              <MoneyInput value={e.verifiedOpening} onChange={(v) => upd({ verifiedOpening: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
                               <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified closing</label>
-                              <MoneyInput value={e.verifiedClosing} onChange={(v) => upd({ verifiedClosing: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder={String(Number(e.closing) || 0)} />
-                              <p className="text-[10px] text-gray-400 mt-0.5">Cashier: {formatCurrency(Number(e.closing) || 0)}</p>
+                              <MoneyInput value={e.verifiedClosing} onChange={(v) => upd({ verifiedClosing: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
                               <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified amount</label>
-                              <MoneyInput value={e.verified} onChange={(v) => upd({ verified: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder={String(r.reported)} />
-                              <p className="text-[10px] text-gray-400 mt-0.5">System: {formatCurrency(r.reported)}</p>
+                              <MoneyInput value={e.verified} onChange={(v) => upd({ verified: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                           </div>
+                          <p className="text-[10px] text-gray-400 mt-1">The cashier&apos;s opening/closing are locked and not shown here — the report compares both sides.</p>
                         </div>
                       ) : (
                         <p className="text-[11px] text-gray-400 border-t border-gray-100 pt-2">Verified figures: officer-only.</p>
                       )}
-                      {variance != null && variance !== 0 && (
+                      {((bankCanVerify) || (variance != null && variance !== 0)) && (
                         <input value={e.reason} onChange={(ev) => upd({ reason: ev.target.value })} placeholder="Reason for variance…"
                           className="w-full px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
                       )}
