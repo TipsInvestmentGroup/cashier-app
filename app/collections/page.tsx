@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { BillSelector, BillLite } from '@/components/BillSelector'
 import toast from 'react-hot-toast'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns'
 
@@ -48,7 +49,7 @@ export default function CollectionsPage() {
   const [staff, setStaff] = useState<Person[]>([])
   const [personNames, setPersonNames] = useState<string[]>([])
   const [signedRows, setSignedRows] = useState<{ billType: string; name: string; amount: string }[]>([])
-  const [paidRows, setPaidRows] = useState<{ category: string; payerName: string; amount: string; paymentMethod: string; signedBillId: string; linkQuery: string }[]>([])
+  const [paidRows, setPaidRows] = useState<{ category: string; payerName: string; amount: string; paymentMethod: string; signedBillId: string; linkQuery: string; selectedBillIds: string[] }[]>([])
   const [signedBillsList, setSignedBillsList] = useState<SignedBill[]>([])
   const [linkOpenIdx, setLinkOpenIdx] = useState<number | null>(null)
   const [products, setProducts] = useState<Product[]>([])
@@ -111,9 +112,9 @@ export default function CollectionsPage() {
   const selectBillForRow = (i: number, b: SignedBill | null) => {
     const n = [...paidRows]
     const r = n[i]
-    if (!b) { n[i] = { ...r, signedBillId: '', linkQuery: '' }; setPaidRows(n); setLinkOpenIdx(null); return }
+    if (!b) { n[i] = { ...r, signedBillId: '', linkQuery: '', selectedBillIds: [] }; setPaidRows(n); setLinkOpenIdx(null); return }
     n[i] = {
-      ...r, signedBillId: b.id, linkQuery: billLabel(b),
+      ...r, signedBillId: b.id, linkQuery: billLabel(b), selectedBillIds: [b.id],
       payerName: r.payerName || b.personName,
       amount: r.amount || String(b.amount),
       category: BILLTYPE_TO_CATEGORY[b.billType] || r.category,
@@ -128,7 +129,7 @@ export default function CollectionsPage() {
     setSubmitting(true)
     try {
       const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount) }))
-      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category, signedBillId: r.signedBillId || undefined }))
+      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category, signedBillId: r.signedBillId || undefined, selectedBillIds: r.selectedBillIds }))
       const cancellations = cancelRows.filter((r) => r.productName && Number(r.quantity) > 0).map((r) => ({
         reason: r.reason, productId: r.productId || undefined, productName: r.productName,
         sellingPrice: r.sellingPrice, quantity: Number(r.quantity), amount: r.sellingPrice * (Number(r.quantity) || 0),
@@ -417,7 +418,7 @@ export default function CollectionsPage() {
                   <div className="border-2 border-gray-100 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-semibold text-gray-700 text-sm">✅ Paid Bills (debt recovered via this staff)</span>
-                      <button type="button" onClick={() => setPaidRows([...paidRows, { category: 'Customer', payerName: form.staffName, amount: '', paymentMethod: 'CASH', signedBillId: '', linkQuery: '' }])}
+                      <button type="button" onClick={() => setPaidRows([...paidRows, { category: 'Customer', payerName: form.staffName, amount: '', paymentMethod: 'CASH', signedBillId: '', linkQuery: '', selectedBillIds: [] }])}
                         className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100">➕ Record Payment</button>
                     </div>
                     <p className="text-xs text-gray-400 mb-2">Record payments <strong>this staff received</strong>. Only the <strong>Staff Loss</strong> category reduces this staff&apos;s loss — Customer / Admin / Director payments are saved as normal recoveries.</p>
@@ -464,6 +465,15 @@ export default function CollectionsPage() {
                           </select>
                           <button type="button" onClick={() => setPaidRows(paidRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
                         </div>
+                        {/* Multi-select when this payer has >1 outstanding bill in the category */}
+                        <BillSelector bills={signedBillsList as BillLite[]} payerName={r.payerName} category={r.category}
+                          selectedIds={r.selectedBillIds}
+                          onChange={(ids, matching) => {
+                            const n = [...paidRows]
+                            const sum = matching.filter((b) => ids.includes(b.id)).reduce((s, b) => s + b.amount, 0)
+                            n[i] = { ...r, selectedBillIds: ids, amount: sum > 0 ? String(sum) : r.amount }
+                            setPaidRows(n)
+                          }} />
                       </div>
                       )
                     })}

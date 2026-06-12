@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { allocatePayment } from '@/lib/payment-alloc'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
   const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
   // Reconciliation inputs entered during the collection flow
   const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
-  const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; signedBillId?: string }[] = Array.isArray(body.paidBills) ? body.paidBills : []
+  const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
   const SIGNED_TYPES = ['ADMIN', 'DIRECTOR', 'TIPS', 'DJ', 'CUSTOMER', 'STAFF_LOSS']
   const PAY_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
@@ -130,29 +131,14 @@ export async function POST(req: NextRequest) {
     const amt = Number(pb.amount) || 0
     const method = String(pb.paymentMethod || 'CASH').toUpperCase()
     if (amt <= 0 || !PAY_METHODS.includes(method) || !pb.payerName) continue
-    await prisma.paidBill.create({
-      data: {
-        signedBillId: pb.signedBillId || null,
-        payerName: pb.payerName,
-        payerCategory: pb.category || null,
-        amountPaid: amt,
-        paymentMethod: method,
-        notes: `Recovery recorded during daily collection ${collection.id}`,
-        billRef: `COL-${collection.id}`,
-        outletId: usedOutletId,
-        cashierId: user.userId,
-        date: collDate,
-      },
+    // Allocate across the payer's outstanding bills of the same category
+    // (selected first, then oldest-first); leftover becomes an unlinked credit.
+    const selectedBillIds = Array.isArray(pb.selectedBillIds) ? pb.selectedBillIds : (pb.signedBillId ? [pb.signedBillId] : [])
+    await allocatePayment({
+      payerName: pb.payerName, category: pb.category || null, totalAmount: amt,
+      selectedBillIds, paymentMethod: method, outletId: usedOutletId, cashierId: user.userId,
+      date: collDate, billRef: `COL-${collection.id}`, notes: `Recovery recorded during daily collection ${collection.id}`,
     })
-    // Keep the linked signed bill's status in sync
-    if (pb.signedBillId) {
-      const sb = await prisma.signedBill.findUnique({ where: { id: pb.signedBillId } })
-      if (sb) {
-        const agg = await prisma.paidBill.aggregate({ where: { signedBillId: pb.signedBillId }, _sum: { amountPaid: true } })
-        const tot = agg._sum.amountPaid || 0
-        await prisma.signedBill.update({ where: { id: pb.signedBillId }, data: { status: tot >= sb.amount ? 'PAID' : tot > 0 ? 'PARTIAL' : 'UNPAID' } })
-      }
-    }
     paidTotal += amt
     if ((pb.category || '') === 'Staff Loss') paidStaffLoss += amt
     paidCreated++

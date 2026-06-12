@@ -8,6 +8,8 @@ import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { SearchBox } from '@/components/SearchBox'
+import { BillSelector, BillLite } from '@/components/BillSelector'
+import { BILLTYPE_TO_CATEGORY } from '@/lib/categories'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 
 interface PaidBill {
@@ -50,6 +52,7 @@ export default function PaidBillsPage() {
   const [search, setSearch] = useState('')
   const [linkQuery, setLinkQuery] = useState('')
   const [linkOpen, setLinkOpen] = useState(false)
+  const [selectedBillIds, setSelectedBillIds] = useState<string[]>([])
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({
@@ -80,14 +83,16 @@ export default function PaidBillsPage() {
     setForm((f) => ({
       ...f, signedBillId: billId,
       payerName: bill?.personName || f.payerName,
+      payerCategory: bill ? (BILLTYPE_TO_CATEGORY[bill.billType] || f.payerCategory) : f.payerCategory,
       amountPaid: bill?.amount?.toString() || f.amountPaid,
     }))
+    setSelectedBillIds(billId ? [billId] : [])
   }
 
   // Friendly label (date + per-person sequence #, no voucher) for the searchable linker
   const billLabel = (b: SignedBill) => `${b.date ? formatDate(b.date) : ''} · #${b.seq ?? '?'} — ${b.personName} — ${formatCurrency(b.amount)} [${b.billType.replace('_', ' ')}]`
   const selectBill = (b: SignedBill | null) => {
-    if (!b) { setForm((f) => ({ ...f, signedBillId: '' })); setLinkQuery(''); setLinkOpen(false); return }
+    if (!b) { setForm((f) => ({ ...f, signedBillId: '' })); setSelectedBillIds([]); setLinkQuery(''); setLinkOpen(false); return }
     handleBillSelect(b.id); setLinkQuery(billLabel(b)); setLinkOpen(false)
   }
   const lq = linkQuery.trim().toLowerCase()
@@ -103,12 +108,15 @@ export default function PaidBillsPage() {
     if (!form.amountPaid || Number(form.amountPaid) <= 0) return toast.error('Amount must be > 0')
     setSubmitting(true)
     try {
-      await request('/api/paid-bills', {
+      const res = await request('/api/paid-bills', {
         method: 'POST',
-        body: JSON.stringify({ ...form, amountPaid: Number(form.amountPaid) }),
+        body: JSON.stringify({ ...form, amountPaid: Number(form.amountPaid), selectedBillIds }),
       })
-      toast.success('Payment recorded successfully!')
+      toast.success(res?.billsPaid > 0
+        ? `Payment recorded — ${res.billsPaid} bill(s) settled${res.leftover > 0 ? `, ${formatCurrency(res.leftover)} credit` : ''}.`
+        : 'Payment recorded successfully!')
       setForm({ signedBillId: '', payerCategory: '', payerName: '', amountPaid: '', paymentMethod: 'CASH', notes: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd'), billRef: '' })
+      setSelectedBillIds([])
       setLinkQuery('')
       setShowForm(false)
       load()
@@ -236,6 +244,14 @@ export default function PaidBillsPage() {
                     placeholder="0" required />
                 </div>
               </div>
+
+              <BillSelector bills={signedBills as BillLite[]} payerName={form.payerName} category={form.payerCategory}
+                selectedIds={selectedBillIds}
+                onChange={(ids, matching) => {
+                  setSelectedBillIds(ids)
+                  const sum = matching.filter((b) => ids.includes(b.id)).reduce((s, b) => s + b.amount, 0)
+                  if (sum > 0) setForm((f) => ({ ...f, amountPaid: String(sum) }))
+                }} />
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Method *</label>

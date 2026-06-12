@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { allocatePayment } from '@/lib/payment-alloc'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -41,41 +42,25 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const { signedBillId, personId, payerName, payerCategory, amountPaid, paymentMethod, notes, outletId, date, billRef } = body
+  const selectedBillIds: string[] = Array.isArray(body.selectedBillIds) ? body.selectedBillIds : (signedBillId ? [signedBillId] : [])
 
   const usedOutletId = outletId || user.outletId
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
+  if (!payerName) return NextResponse.json({ error: 'Payer name required' }, { status: 400 })
+  if (!amountPaid || Number(amountPaid) <= 0) return NextResponse.json({ error: 'Amount must be > 0' }, { status: 400 })
 
-  const payment = await prisma.paidBill.create({
-    data: {
-      signedBillId: signedBillId || null,
-      personId: personId || null,
-      payerCategory: payerCategory || null,
-      payerName,
-      amountPaid: Number(amountPaid),
-      paymentMethod,
-      notes,
-      billRef,
-      outletId: usedOutletId,
-      cashierId: user.userId,
-      date: date ? new Date(date) : new Date(),
-    },
+  // Allocate across the member's outstanding bills (selected first, then FIFO);
+  // any leftover is recorded as an unlinked credit.
+  const result = await allocatePayment({
+    payerName, category: payerCategory || null, totalAmount: Number(amountPaid),
+    selectedBillIds, paymentMethod: paymentMethod || 'CASH', outletId: usedOutletId,
+    cashierId: user.userId, date: date ? new Date(date) : new Date(),
+    billRef: billRef || null, notes: notes || null, personId: personId || null,
   })
 
-  if (signedBillId) {
-    const signedBill = await prisma.signedBill.findUnique({ where: { id: signedBillId } })
-    if (signedBill) {
-      const allPayments = await prisma.paidBill.aggregate({
-        where: { signedBillId },
-        _sum: { amountPaid: true },
-      })
-      const totalPaid = allPayments._sum.amountPaid || 0
-      const newStatus = totalPaid >= signedBill.amount ? 'PAID' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID'
-      await prisma.signedBill.update({
-        where: { id: signedBillId },
-        data: { status: newStatus },
-      })
-    }
-  }
+  await prisma.auditLog.create({
+    data: { userId: user.userId, action: 'CREATE', entity: 'PaidBill', entityId: null, details: `Payment ${amountPaid} for ${payerName}: ${result.billsPaid} bill(s) settled${result.leftover > 0 ? `, ${result.leftover} credit` : ''}` },
+  })
 
-  return NextResponse.json(payment, { status: 201 })
+  return NextResponse.json({ ok: true, ...result }, { status: 201 })
 }
