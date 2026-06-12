@@ -25,6 +25,9 @@ interface Collection {
   notes: string; outlet: { name: string }; cashier: { name: string }; cancellations?: Cancellation[]
 }
 interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean }
+interface SignedBill { id: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
+// signed-bill type → paid-bill category label
+const BILLTYPE_TO_CATEGORY: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', STAFF_LOSS: 'Staff Loss', TIPS: 'Sponsors & Partners' }
 // Cash the staff must physically hand over = System Sales − digital channels
 const cashRequired = (c: { systemSales?: number; crdb: number; stanbic: number; mpesa: number }) =>
   (c.systemSales || 0) - c.crdb - c.stanbic - c.mpesa
@@ -45,7 +48,9 @@ export default function CollectionsPage() {
   const [staff, setStaff] = useState<Person[]>([])
   const [personNames, setPersonNames] = useState<string[]>([])
   const [signedRows, setSignedRows] = useState<{ billType: string; name: string; amount: string }[]>([])
-  const [paidRows, setPaidRows] = useState<{ category: string; payerName: string; amount: string; paymentMethod: string }[]>([])
+  const [paidRows, setPaidRows] = useState<{ category: string; payerName: string; amount: string; paymentMethod: string; signedBillId: string; linkQuery: string }[]>([])
+  const [signedBillsList, setSignedBillsList] = useState<SignedBill[]>([])
+  const [linkOpenIdx, setLinkOpenIdx] = useState<number | null>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [cancelRows, setCancelRows] = useState<{ reason: string; productId: string; productName: string; sellingPrice: number; quantity: string }[]>([])
   const [confirmedZero, setConfirmedZero] = useState(false)
@@ -80,15 +85,17 @@ export default function CollectionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [cols, outs, persons, prods] = await Promise.all([
+    const [cols, outs, persons, prods, sbs] = await Promise.all([
       request('/api/collections'),
       request('/api/outlets'),
       request('/api/persons'),
       request('/api/products'),
+      request('/api/signed-bills?status=UNPAID'),
     ])
     setCollections(cols)
     setOutlets(outs)
     setProducts((prods || []).filter((p: Product) => p.isActive))
+    setSignedBillsList((sbs || []).filter((b: SignedBill) => b.status !== 'PAID'))
     const all: Person[] = persons || []
     setStaff(all.filter((p) => p.type === 'STAFF_LOSS').sort((a, b) => a.name.localeCompare(b.name)))
     setPersonNames(all.map((p) => p.name).sort((a, b) => a.localeCompare(b)))
@@ -98,6 +105,21 @@ export default function CollectionsPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Searchable signed-bill linker for a paid row
+  const billLabel = (b: SignedBill) => `${b.date ? format(parseISO(b.date), 'dd MMM yyyy') : ''} · #${b.seq ?? '?'} — ${b.personName} — ${formatCurrency(b.amount)} [${b.billType.replace('_', ' ')}]`
+  const selectBillForRow = (i: number, b: SignedBill | null) => {
+    const n = [...paidRows]
+    const r = n[i]
+    if (!b) { n[i] = { ...r, signedBillId: '', linkQuery: '' }; setPaidRows(n); setLinkOpenIdx(null); return }
+    n[i] = {
+      ...r, signedBillId: b.id, linkQuery: billLabel(b),
+      payerName: r.payerName || b.personName,
+      amount: r.amount || String(b.amount),
+      category: BILLTYPE_TO_CATEGORY[b.billType] || r.category,
+    }
+    setPaidRows(n); setLinkOpenIdx(null)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (total === 0) return toast.error('Enter at least one amount')
@@ -105,7 +127,7 @@ export default function CollectionsPage() {
     setSubmitting(true)
     try {
       const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount) }))
-      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category }))
+      const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category, signedBillId: r.signedBillId || undefined }))
       const cancellations = cancelRows.filter((r) => r.productName && Number(r.quantity) > 0).map((r) => ({
         reason: r.reason, productId: r.productId || undefined, productName: r.productName,
         sellingPrice: r.sellingPrice, quantity: Number(r.quantity), amount: r.sellingPrice * (Number(r.quantity) || 0),
@@ -394,27 +416,56 @@ export default function CollectionsPage() {
                   <div className="border-2 border-gray-100 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-semibold text-gray-700 text-sm">✅ Paid Bills (debt recovered via this staff)</span>
-                      <button type="button" onClick={() => setPaidRows([...paidRows, { category: 'Customer', payerName: form.staffName, amount: '', paymentMethod: 'CASH' }])}
+                      <button type="button" onClick={() => setPaidRows([...paidRows, { category: 'Customer', payerName: form.staffName, amount: '', paymentMethod: 'CASH', signedBillId: '', linkQuery: '' }])}
                         className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-green-50 text-green-700 hover:bg-green-100">➕ Record Payment</button>
                     </div>
                     {paidRows.length === 0 && <p className="text-xs text-gray-400">Add any old debts this staff collected today.</p>}
-                    {paidRows.map((r, i) => (
-                      <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
-                        <select value={r.category} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, category: e.target.value }; setPaidRows(n) }}
-                          className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
-                          {PAID_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                        <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, payerName: e.target.value }; setPaidRows(n) }}
-                          className="col-span-4 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
-                        <input type="number" min="0" placeholder="Amount" value={r.amount} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, amount: e.target.value }; setPaidRows(n) }}
-                          className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
-                        <select value={r.paymentMethod} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, paymentMethod: e.target.value }; setPaidRows(n) }}
-                          className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
-                          {['CASH', 'CRDB', 'STANBIC', 'MPESA'].map((m) => <option key={m} value={m}>{m}</option>)}
-                        </select>
-                        <button type="button" onClick={() => setPaidRows(paidRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
+                    {paidRows.map((r, i) => {
+                      const lq = r.linkQuery.trim().toLowerCase()
+                      const linkFiltered = signedBillsList.filter((b) => !lq || `${b.personName} ${b.billType} ${b.billType.replace('_', ' ')} ${b.date ? format(parseISO(b.date), 'dd MMM yyyy') : ''}`.toLowerCase().includes(lq))
+                      return (
+                      <div key={i} className="border border-gray-100 rounded-lg p-2 mb-2 space-y-2">
+                        {/* Link to signed bill (optional) */}
+                        <div className="relative">
+                          <input value={r.linkQuery}
+                            onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, linkQuery: e.target.value, ...(e.target.value ? {} : { signedBillId: '' }) }; setPaidRows(n); setLinkOpenIdx(i) }}
+                            onFocus={() => setLinkOpenIdx(i)}
+                            onBlur={() => setTimeout(() => setLinkOpenIdx((cur) => (cur === i ? null : cur)), 150)}
+                            placeholder="🔗 Link to signed bill (optional) — search name, date or category"
+                            className={`w-full px-2 py-2 border-2 rounded-lg text-sm ${r.signedBillId ? 'border-indigo-300 bg-indigo-50/40' : 'border-gray-200'}`} />
+                          {linkOpenIdx === i && (
+                            <div className="absolute z-30 mt-1 w-full bg-white border-2 border-gray-200 rounded-xl shadow-lg max-h-56 overflow-auto">
+                              <button type="button" onClick={() => selectBillForRow(i, null)} className="block w-full text-left px-3 py-2 hover:bg-gray-50 text-sm text-gray-500 border-b border-gray-100">— None (no linked bill) —</button>
+                              {linkFiltered.map((b) => (
+                                <button type="button" key={b.id} onClick={() => selectBillForRow(i, b)} className="block w-full text-left px-3 py-2 hover:bg-indigo-50 text-sm">
+                                  <span className="font-semibold text-gray-800">{b.date ? format(parseISO(b.date), 'dd MMM yyyy') : ''} · #{b.seq ?? '?'}</span>
+                                  <span className="text-gray-600"> — {b.personName} — {formatCurrency(b.amount)}</span>
+                                  <span className="text-xs text-indigo-600"> [{b.billType.replace('_', ' ')}]</span>
+                                </button>
+                              ))}
+                              {linkFiltered.length === 0 && <div className="px-3 py-3 text-gray-400 text-sm">No matching unpaid bills</div>}
+                            </div>
+                          )}
+                        </div>
+                        {/* Category / payer / amount / method */}
+                        <div className="grid grid-cols-12 gap-2 items-center">
+                          <select value={r.category} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, category: e.target.value }; setPaidRows(n) }}
+                            className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                            {PAID_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, payerName: e.target.value }; setPaidRows(n) }}
+                            className="col-span-4 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                          <input type="number" min="0" placeholder="Amount" value={r.amount} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, amount: e.target.value }; setPaidRows(n) }}
+                            className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                          <select value={r.paymentMethod} onChange={(e) => { const n = [...paidRows]; n[i] = { ...r, paymentMethod: e.target.value }; setPaidRows(n) }}
+                            className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                            {['CASH', 'CRDB', 'STANBIC', 'MPESA'].map((m) => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                          <button type="button" onClick={() => setPaidRows(paidRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
+                        </div>
                       </div>
-                    ))}
+                      )
+                    })}
                     {paidTotalForm > 0 && <p className="text-xs text-gray-500 mt-1">Paid total: <strong>{formatCurrency(paidTotalForm)}</strong></p>}
                   </div>
                   <datalist id="personNames">{personNames.map((n) => <option key={n} value={n} />)}</datalist>
