@@ -7,7 +7,7 @@ import { ExportBar } from '@/components/ExportBar'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
-interface Row { date: string; reported: number; verified: number; variance: number; reason: string }
+interface Row { date: string; channel: string; reported: number; verified: number | null; verifiedSet: boolean; variance: number | null; reason: string; verifiedBy?: string }
 interface Resp { rows: Row[]; totals: { reported: number; verified: number; variance: number } }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,10 +36,11 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
 
   useEffect(() => { load() }, [load])
 
-  const varLabel = (v: number) => (v > 0 ? 'Loss' : v < 0 ? 'Excess' : '—')
+  const varLabel = (v: number) => (v > 0 ? 'Excess' : v < 0 ? 'Shortage' : '—')
   const exportRows = (data?.rows || []).map((r) => ({
-    Date: formatDate(r.date), 'Reported (Cashier)': r.reported, 'Verified (Officer)': r.verified,
-    Variance: Math.abs(r.variance), 'Variance Type': varLabel(r.variance), Reason: r.reason,
+    Date: formatDate(r.date), Channel: r.channel, 'Reported (System)': r.reported,
+    Verified: r.verifiedSet ? r.verified : '', Variance: r.variance ?? '', 'Variance Type': r.variance == null ? '' : varLabel(r.variance),
+    Reason: r.reason, 'Verified By': r.verifiedBy || '',
   }))
 
   return (
@@ -67,7 +68,7 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
               {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
-          <div className="ml-auto"><ExportBar rows={exportRows} filename={`bank-recon-${from}_to_${to}`} title="Bank Reconciliation Report" /></div>
+          <div className="ml-auto"><ExportBar rows={exportRows} filename={`digital-payment-recon-${from}_to_${to}`} title="Digital Payment Reconciliation Report" /></div>
         </div>
       </div>
 
@@ -75,38 +76,40 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
         {loading ? (
           <div className="py-16 text-center text-gray-400">Generating report…</div>
         ) : !data || data.rows.length === 0 ? (
-          <div className="py-16 text-center text-gray-400">No bank reconciliations for this period.</div>
+          <div className="py-16 text-center text-gray-400">No digital payment reconciliations for this period.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr className="text-left text-gray-600">
                   <th className="px-4 py-3 font-semibold">Date</th>
-                  <th className="px-4 py-3 font-semibold text-right">Reported (Cashier)</th>
-                  <th className="px-4 py-3 font-semibold text-right">Verified (Officer)</th>
+                  <th className="px-4 py-3 font-semibold">Channel</th>
+                  <th className="px-4 py-3 font-semibold text-right">Reported (System)</th>
+                  <th className="px-4 py-3 font-semibold text-right">Verified</th>
                   <th className="px-4 py-3 font-semibold text-right">Variance</th>
                   <th className="px-4 py-3 font-semibold">Reason</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {data.rows.map((r, i) => (
-                  <tr key={i} className={`hover:bg-gray-50 ${r.variance > 0 ? 'bg-red-50/40' : ''}`}>
+                  <tr key={i} className={`hover:bg-gray-50 ${r.variance != null && r.variance < 0 ? 'bg-red-50/40' : ''}`}>
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
+                    <td className="px-4 py-3 font-medium text-gray-700">{r.channel}</td>
                     <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.reported)}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(r.verified)}</td>
-                    <td className={`px-4 py-3 text-right font-bold ${r.variance > 0 ? 'text-red-600' : r.variance < 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                      {r.variance === 0 ? '—' : `${formatCurrency(Math.abs(r.variance))} ${varLabel(r.variance)}`}
+                    <td className="px-4 py-3 text-right font-semibold text-gray-900" title={r.verifiedBy || ''}>{r.verifiedSet ? formatCurrency(r.verified || 0) : '-'}</td>
+                    <td className={`px-4 py-3 text-right font-bold ${r.variance == null ? 'text-gray-300' : r.variance > 0 ? 'text-green-600' : r.variance < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                      {r.variance == null ? '-' : r.variance === 0 ? '—' : `${r.variance > 0 ? '▲ ' : '▼ '}${formatCurrency(Math.abs(r.variance))} ${varLabel(r.variance)}`}
                     </td>
-                    <td className="px-4 py-3 text-gray-600 max-w-[260px] truncate" title={r.reason}>{r.reason || '-'}</td>
+                    <td className="px-4 py-3 text-gray-600 max-w-[240px] truncate" title={r.reason}>{r.reason || '-'}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900">
                 <tr>
-                  <td className="px-4 py-3">TOTAL</td>
+                  <td className="px-4 py-3" colSpan={2}>TOTAL</td>
                   <td className="px-4 py-3 text-right">{formatCurrency(data.totals.reported)}</td>
                   <td className="px-4 py-3 text-right">{formatCurrency(data.totals.verified)}</td>
-                  <td className={`px-4 py-3 text-right ${data.totals.variance > 0 ? 'text-red-700' : data.totals.variance < 0 ? 'text-green-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(data.totals.variance))} {varLabel(data.totals.variance)}</td>
+                  <td className={`px-4 py-3 text-right ${data.totals.variance > 0 ? 'text-green-700' : data.totals.variance < 0 ? 'text-red-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(data.totals.variance))} {varLabel(data.totals.variance)}</td>
                   <td className="px-4 py-3"></td>
                 </tr>
               </tfoot>

@@ -23,18 +23,22 @@ export async function GET(req: NextRequest) {
   const f: any = { date: range }
   if (outletId) f.outletId = outletId
 
-  const recons = await prisma.bankRecon.findMany({ where: f, orderBy: { date: 'asc' }, select: { date: true, reportedAmount: true, verifiedAmount: true, reason: true } })
+  const recons = await prisma.bankRecon.findMany({ where: f, orderBy: { date: 'asc' }, select: { date: true, channel: true, reportedAmount: true, verifiedAmount: true, reason: true, verifiedBy: true } })
 
+  // Variance = Verified − Reported (▲ excess, ▼ shortage) to match Cash Recon.
   const rows = recons.map((r) => ({
     date: new Date(r.date).toISOString().slice(0, 10),
+    channel: r.channel || 'ALL',
     reported: r.reportedAmount,
     verified: r.verifiedAmount,
-    variance: r.reportedAmount - r.verifiedAmount,
+    verifiedSet: r.verifiedAmount != null,
+    variance: r.verifiedAmount != null ? r.verifiedAmount - r.reportedAmount : null,
     reason: r.reason || '',
+    verifiedBy: r.verifiedBy || '',
   }))
 
   const totals = rows.reduce(
-    (t, r) => ({ reported: t.reported + r.reported, verified: t.verified + r.verified, variance: t.variance + r.variance }),
+    (t, r) => ({ reported: t.reported + r.reported, verified: t.verified + (r.verified || 0), variance: t.variance + (r.variance || 0) }),
     { reported: 0, verified: 0, variance: 0 }
   )
 

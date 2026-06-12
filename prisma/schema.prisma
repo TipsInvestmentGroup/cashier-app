@@ -230,12 +230,14 @@ model CashRecon {
   @@index([outletId])
 }
 
+// Digital Payment Reconciliation — one row per digital channel per day+outlet.
 model BankRecon {
   id             String   @id @default(cuid())
   date           DateTime @default(now())
   outletId       String?
-  reportedAmount Float    @default(0) // bank-channel collections reported by cashier
-  verifiedAmount Float    @default(0) // verified by reconciliation officer
+  channel        String?              // digital channel code (CRDB | STANBIC | MPESA | …); null = legacy total
+  reportedAmount Float    @default(0) // auto: collections + paid bills for this channel
+  verifiedAmount Float?               // verified by an officer (null = not yet verified)
   reason         String?              // reason for variance
   reportedBy     String?
   verifiedBy     String?
