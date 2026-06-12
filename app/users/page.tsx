@@ -23,9 +23,13 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'CASHIER', outletId: '' })
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true })
 
-  if (user?.role !== 'ADMIN') return (
+  const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const isOwner = !!OWNER_EMAIL && (user?.email || '').toLowerCase() === OWNER_EMAIL
+
+  if (user?.role !== 'ADMIN' && !isOwner) return (
     <AppShell>
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -44,17 +48,41 @@ export default function UsersPage() {
 
   useEffect(() => { load() }, [load])
 
+  const resetForm = () => setForm({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true })
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     try {
-      await request('/api/users', { method: 'POST', body: JSON.stringify(form) })
-      toast.success('User created!')
-      setForm({ name: '', email: '', password: '', role: 'CASHIER', outletId: '' })
-      setShowForm(false); load()
+      if (editingId) {
+        await request(`/api/users/${editingId}`, { method: 'PUT', body: JSON.stringify(form) })
+        toast.success('User updated!')
+      } else {
+        await request('/api/users', { method: 'POST', body: JSON.stringify(form) })
+        toast.success('User created!')
+      }
+      resetForm(); setEditingId(null); setShowForm(false); load()
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error creating user')
+      toast.error(err instanceof Error ? err.message : 'Error saving user')
     } finally { setSubmitting(false) }
+  }
+
+  const startEdit = (u: User) => {
+    setEditingId(u.id)
+    setForm({ name: u.name, email: u.email, password: '', role: u.role, outletId: '', isActive: u.isActive })
+    setShowForm(true)
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const newUser = () => { setEditingId(null); resetForm(); setShowForm((s) => !s) }
+  const deleteUser = async (u: User) => {
+    if (!window.confirm(`Delete user "${u.name}" (${u.email})? This cannot be undone.`)) return
+    try {
+      await request(`/api/users/${u.id}`, { method: 'DELETE' })
+      toast.success('User deleted')
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error deleting user')
+    }
   }
 
   return (
@@ -65,7 +93,7 @@ export default function UsersPage() {
             <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
             <p className="text-gray-500 text-sm">Create and manage system users</p>
           </div>
-          <button onClick={() => setShowForm(!showForm)}
+          <button onClick={newUser}
             className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
             <span>+</span> New User
           </button>
@@ -73,7 +101,7 @@ export default function UsersPage() {
 
         {showForm && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-5">Create New User</h2>
+            <h2 className="text-lg font-semibold text-gray-800 mb-5">{editingId ? 'Edit User' : 'Create New User'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -87,9 +115,10 @@ export default function UsersPage() {
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Password *</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">{editingId ? 'New Password (optional)' : 'Password *'}</label>
                   <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required minLength={6} />
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required={!editingId} minLength={editingId ? 0 : 6}
+                    placeholder={editingId ? 'Leave blank to keep current' : ''} />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Role *</label>
@@ -106,13 +135,19 @@ export default function UsersPage() {
                     {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </select>
                 </div>
+                {editingId && (
+                  <div className="flex items-center gap-2 pt-7">
+                    <input id="isActive" type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} className="w-4 h-4" />
+                    <label htmlFor="isActive" className="text-sm font-semibold text-gray-700">Active (uncheck to deactivate)</label>
+                  </div>
+                )}
               </div>
               <div className="flex gap-3">
                 <button type="submit" disabled={submitting}
                   className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
-                  {submitting ? 'Creating...' : 'Create User'}
+                  {submitting ? 'Saving...' : editingId ? 'Update User' : 'Create User'}
                 </button>
-                <button type="button" onClick={() => setShowForm(false)}
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null) }}
                   className="px-6 py-3 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition">
                   Cancel
                 </button>
@@ -135,6 +170,7 @@ export default function UsersPage() {
                     <th className="px-5 py-3 font-semibold">Outlet</th>
                     <th className="px-5 py-3 font-semibold">Status</th>
                     <th className="px-5 py-3 font-semibold">Created</th>
+                    {isOwner && <th className="px-5 py-3 font-semibold text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -159,6 +195,12 @@ export default function UsersPage() {
                         </span>
                       </td>
                       <td className="px-5 py-4 text-gray-500">{formatDate(u.createdAt)}</td>
+                      {isOwner && (
+                        <td className="px-5 py-4 text-right whitespace-nowrap">
+                          <button onClick={() => startEdit(u)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>
+                          <button onClick={() => deleteUser(u)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
