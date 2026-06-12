@@ -633,27 +633,33 @@ export default function PettyCashPage() {
                         <span className="font-semibold text-gray-800">{hasReq ? formatCurrency(required) : '—'}</span>
                       </div>
                       {variance != null && (
-                        <div className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 ${variance === 0 ? 'bg-green-50' : 'bg-red-50'}`}>
-                          <span className={`font-semibold ${variance === 0 ? 'text-green-800' : 'text-red-800'}`}>
-                            {variance === 0 ? '✅ Reported matches required' : variance > 0 ? '🔺 Over (reported > required)' : '🔻 Short (reported < required)'}
+                        <div className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 ${variance === 0 ? 'bg-green-50' : variance > 0 ? 'bg-amber-50' : 'bg-red-50'}`}>
+                          <span className={`font-semibold ${variance === 0 ? 'text-green-800' : variance > 0 ? 'text-amber-800' : 'text-red-800'}`}>
+                            {variance === 0 ? '✅ Reported matches required' : variance > 0 ? '🔺 You have an Excess of' : '🔻 You have a Loss of'}
                           </span>
-                          <span className={`font-bold ${variance === 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(variance))}</span>
+                          <span className={`font-bold ${variance === 0 ? 'text-green-700' : variance > 0 ? 'text-amber-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(variance))}</span>
                         </div>
                       )}
-                      {/* Officer verification */}
+                      {/* Officer verification — verifies the cashier's opening/closing & the system reported */}
                       {bankCanVerify ? (
-                        <div className="grid grid-cols-3 gap-2 border-t border-gray-100 pt-2">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified opening</label>
-                            <MoneyInput value={e.verifiedOpening} onChange={(v) => upd({ verifiedOpening: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="—" />
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified closing</label>
-                            <MoneyInput value={e.verifiedClosing} onChange={(v) => upd({ verifiedClosing: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="—" />
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified amount</label>
-                            <MoneyInput value={e.verified} onChange={(v) => upd({ verified: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="—" />
+                        <div className="border-t border-gray-100 pt-2">
+                          <p className="text-[11px] font-semibold text-indigo-600 mb-1">🔎 Officer verification — confirm the cashier&apos;s opening/closing &amp; system amount</p>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified opening</label>
+                              <MoneyInput value={e.verifiedOpening} onChange={(v) => upd({ verifiedOpening: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder={String(Number(e.opening) || 0)} />
+                              <p className="text-[10px] text-gray-400 mt-0.5">Cashier: {formatCurrency(Number(e.opening) || 0)}</p>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified closing</label>
+                              <MoneyInput value={e.verifiedClosing} onChange={(v) => upd({ verifiedClosing: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder={String(Number(e.closing) || 0)} />
+                              <p className="text-[10px] text-gray-400 mt-0.5">Cashier: {formatCurrency(Number(e.closing) || 0)}</p>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified amount</label>
+                              <MoneyInput value={e.verified} onChange={(v) => upd({ verified: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder={String(r.reported)} />
+                              <p className="text-[10px] text-gray-400 mt-0.5">System: {formatCurrency(r.reported)}</p>
+                            </div>
                           </div>
                         </div>
                       ) : (
