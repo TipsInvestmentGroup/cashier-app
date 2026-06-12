@@ -64,6 +64,8 @@ model DailyCollection {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
+  cancellations Cancellation[]
+
   @@index([date])
   @@index([outletId])
 }
@@ -172,6 +174,43 @@ model PettyFunction {
   name      String   @unique
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+}
+
+// Product catalogue (managed in /products).
+model Product {
+  id           String   @id @default(cuid())
+  code         String   @unique // auto-generated, human-readable e.g. COC-001
+  name         String
+  buyingPrice  Float    @default(0)
+  sellingPrice Float    @default(0)
+  unitMeasure  String            // unit | kg | crate 24 bottle | crate 25 bottle | crate 6 bottle
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  cancellations Cancellation[]
+
+  @@index([name])
+}
+
+// Cancellations recorded against a daily collection (Double Punch / Out of Stock / Wrong Punch).
+model Cancellation {
+  id           String           @id @default(cuid())
+  date         DateTime         @default(now())
+  collectionId String?
+  collection   DailyCollection? @relation(fields: [collectionId], references: [id])
+  reason       String           // Double Punch | Out of Stock | Wrong Punch
+  productId    String?
+  product      Product?         @relation(fields: [productId], references: [id])
+  productName  String
+  sellingPrice Float            @default(0)
+  quantity     Float            @default(0)
+  amount       Float            @default(0) // sellingPrice * quantity
+  outletId     String?
+  cashierId    String
+  createdAt    DateTime         @default(now())
+
+  @@index([collectionId])
+  @@index([date])
 }
 
 model CashRecon {

@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   const collections = await prisma.dailyCollection.findMany({
     where,
-    include: { outlet: true, cashier: { select: { name: true } } },
+    include: { outlet: true, cashier: { select: { name: true } }, cancellations: true },
     orderBy: { date: 'desc' },
     take: 100,
   })
@@ -44,8 +44,10 @@ export async function POST(req: NextRequest) {
   // Reconciliation inputs entered during the collection flow
   const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
   const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string }[] = Array.isArray(body.paidBills) ? body.paidBills : []
+  const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
   const SIGNED_TYPES = ['ADMIN', 'DIRECTOR', 'TIPS', 'DJ', 'CUSTOMER', 'STAFF_LOSS']
   const PAY_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
+  const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 
   const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
   const usedOutletId = outletId || user.outletId
@@ -140,6 +142,28 @@ export async function POST(req: NextRequest) {
     })
     paidTotal += amt
     paidCreated++
+  }
+
+  // 2b) Record cancellations linked to this collection
+  for (const cn of cancelInput) {
+    const qty = Number(cn.quantity) || 0
+    const price = Number(cn.sellingPrice) || 0
+    const reason = CANCEL_REASONS.includes(cn.reason) ? cn.reason : (cn.reason || '')
+    if (!cn.productName || qty <= 0) continue
+    await prisma.cancellation.create({
+      data: {
+        collectionId: collection.id,
+        reason,
+        productId: cn.productId || null,
+        productName: cn.productName,
+        sellingPrice: price,
+        quantity: qty,
+        amount: Number(cn.amount) || price * qty,
+        outletId: usedOutletId,
+        cashierId: user.userId,
+        date: collDate,
+      },
+    })
   }
 
   // Persist the reconciliation totals on the collection (for list display + edits)

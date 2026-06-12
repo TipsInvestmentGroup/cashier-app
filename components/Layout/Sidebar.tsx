@@ -13,6 +13,7 @@ const navItems = [
   { href: '/signed-bills', icon: '📋', label: 'Signed Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/paid-bills', icon: '✅', label: 'Paid Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/petty-cash', icon: '💵', label: 'Petty Cash', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
+  { href: '/products', icon: '📦', label: 'Products', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/approvals', icon: '🗳️', label: 'Approval Requests', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/departments', icon: '🗂️', label: 'Departments', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/receivables', icon: '📈', label: 'Receivables', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },

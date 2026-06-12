@@ -15,11 +15,20 @@ const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
   { key: 'custom', label: 'Custom' },
 ]
 
+interface Cancellation {
+  id: string; reason: string; productId?: string | null; productName: string
+  sellingPrice: number; quantity: number; amount: number
+}
 interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
   staffName?: string; systemSales?: number; creditSales?: number; paymentsReceived?: number
-  notes: string; outlet: { name: string }; cashier: { name: string }
+  notes: string; outlet: { name: string }; cashier: { name: string }; cancellations?: Cancellation[]
 }
+interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean }
+// Cash the staff must physically hand over = System Sales − digital channels
+const cashRequired = (c: { systemSales?: number; crdb: number; stanbic: number; mpesa: number }) =>
+  (c.systemSales || 0) - c.crdb - c.stanbic - c.mpesa
+const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 // Staff Loss = System Sales − Collection − Signed Bills (credit sales) − Paid Bills
 const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number; paymentsReceived?: number }) =>
   (c.systemSales || 0) - c.total - (c.creditSales || 0) - (c.paymentsReceived || 0)
@@ -37,6 +46,8 @@ export default function CollectionsPage() {
   const [personNames, setPersonNames] = useState<string[]>([])
   const [signedRows, setSignedRows] = useState<{ billType: string; name: string; amount: string }[]>([])
   const [paidRows, setPaidRows] = useState<{ category: string; payerName: string; amount: string; paymentMethod: string }[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [cancelRows, setCancelRows] = useState<{ reason: string; productId: string; productName: string; sellingPrice: number; quantity: string }[]>([])
   const [confirmedZero, setConfirmedZero] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -54,6 +65,10 @@ export default function CollectionsPage() {
   const total = (Number(form.cash) || 0) + (Number(form.crdb) || 0) +
     (Number(form.stanbic) || 0) + (Number(form.mpesa) || 0)
 
+  // Cash required from staff = System Sales − (CRDB + Stanbic + M-PESA)
+  const cashRequiredForm = (Number(form.systemSales) || 0) - (Number(form.crdb) || 0) - (Number(form.stanbic) || 0) - (Number(form.mpesa) || 0)
+  const cancelTotalForm = cancelRows.reduce((s, r) => s + (r.sellingPrice * (Number(r.quantity) || 0)), 0)
+
   // Reconciliation: Staff Loss = System − Collection − Signed Bills − Paid Bills
   const signedTotalForm = signedRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
   const paidTotalForm = paidRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
@@ -65,13 +80,15 @@ export default function CollectionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [cols, outs, persons] = await Promise.all([
+    const [cols, outs, persons, prods] = await Promise.all([
       request('/api/collections'),
       request('/api/outlets'),
       request('/api/persons'),
+      request('/api/products'),
     ])
     setCollections(cols)
     setOutlets(outs)
+    setProducts((prods || []).filter((p: Product) => p.isActive))
     const all: Person[] = persons || []
     setStaff(all.filter((p) => p.type === 'STAFF_LOSS').sort((a, b) => a.name.localeCompare(b.name)))
     setPersonNames(all.map((p) => p.name).sort((a, b) => a.localeCompare(b)))
@@ -89,7 +106,11 @@ export default function CollectionsPage() {
     try {
       const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount) }))
       const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category }))
-      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0, signedBills, paidBills })
+      const cancellations = cancelRows.filter((r) => r.productName && Number(r.quantity) > 0).map((r) => ({
+        reason: r.reason, productId: r.productId || undefined, productName: r.productName,
+        sellingPrice: r.sellingPrice, quantity: Number(r.quantity), amount: r.sellingPrice * (Number(r.quantity) || 0),
+      }))
+      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0, signedBills, paidBills, cancellations })
       const res = editingId
         ? await request(`/api/collections/${editingId}`, { method: 'PUT', body: payload })
         : await request('/api/collections', { method: 'POST', body: payload })
@@ -99,7 +120,7 @@ export default function CollectionsPage() {
         toast.success(editingId ? 'Collection updated!' : 'Collection saved — balanced, no loss.')
       }
       setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
-      setSignedRows([]); setPaidRows([]); setConfirmedZero(false)
+      setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
       setEditingId(null)
       setShowForm(false)
       load()
@@ -126,6 +147,10 @@ export default function CollectionsPage() {
       date: format(parseISO(c.date), 'yyyy-MM-dd'),
     })
     setSignedRows([]); setPaidRows([])
+    setCancelRows((c.cancellations || []).map((cn) => ({
+      reason: cn.reason || CANCEL_REASONS[0], productId: cn.productId || '', productName: cn.productName,
+      sellingPrice: cn.sellingPrice, quantity: String(cn.quantity),
+    })))
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -133,7 +158,7 @@ export default function CollectionsPage() {
   const newCollection = () => {
     setEditingId(null)
     setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
-    setSignedRows([]); setPaidRows([]); setConfirmedZero(false)
+    setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
     setShowForm((s) => !s)
   }
 
@@ -198,6 +223,8 @@ export default function CollectionsPage() {
     },
     { shortfall: 0, overage: 0 }
   )
+  // Cancellations recorded in the period
+  const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).reduce((a, x) => a + (x.amount || 0), 0), 0)
 
   return (
     <AppShell>
@@ -280,6 +307,55 @@ export default function CollectionsPage() {
               <div className="bg-indigo-50 rounded-xl p-4 flex items-center justify-between">
                 <span className="font-semibold text-indigo-800">Total Collection</span>
                 <span className="text-2xl font-bold text-indigo-700">{formatCurrency(total)}</span>
+              </div>
+
+              {/* Cash required from staff (auto) */}
+              <div className="bg-amber-50 rounded-xl p-4 flex items-center justify-between">
+                <div>
+                  <span className="font-semibold text-amber-800">💵 Cash Collection Required from Staff</span>
+                  <p className="text-xs text-amber-600 mt-0.5">System Sales − (CRDB + Stanbic + M-PESA)</p>
+                </div>
+                <span className={`text-2xl font-bold ${cashRequiredForm < 0 ? 'text-gray-400' : 'text-amber-700'}`}>{formatCurrency(cashRequiredForm)}</span>
+              </div>
+
+              {/* Cancellations (available on new + edit) */}
+              <div className="border-2 border-gray-100 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-semibold text-gray-700 text-sm">🚫 Cancellations</span>
+                  <button type="button" onClick={() => setCancelRows([...cancelRows, { reason: CANCEL_REASONS[0], productId: '', productName: '', sellingPrice: 0, quantity: '' }])}
+                    className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100">➕ Add Cancellation</button>
+                </div>
+                {cancelRows.length === 0 && <p className="text-xs text-gray-400">Record cancelled punches: Double Punch / Out of Stock / Wrong Punch.</p>}
+                {cancelRows.length > 0 && (
+                  <div className="hidden sm:grid grid-cols-12 gap-2 text-[11px] font-semibold text-gray-400 mb-1">
+                    <span className="col-span-3">Reason</span><span className="col-span-4">Product</span><span className="col-span-2">Qty</span><span className="col-span-2">Amount</span><span className="col-span-1"></span>
+                  </div>
+                )}
+                {cancelRows.map((r, i) => {
+                  const amt = r.sellingPrice * (Number(r.quantity) || 0)
+                  return (
+                    <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
+                      <select value={r.reason} onChange={(e) => { const n = [...cancelRows]; n[i] = { ...r, reason: e.target.value }; setCancelRows(n) }}
+                        className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                        {CANCEL_REASONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <select value={r.productId} onChange={(e) => {
+                        const p = products.find((x) => x.id === e.target.value)
+                        const n = [...cancelRows]; n[i] = { ...r, productId: e.target.value, productName: p?.name || '', sellingPrice: p?.sellingPrice || 0 }; setCancelRows(n)
+                      }}
+                        className="col-span-4 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                        <option value="">Select product…</option>
+                        {products.map((p) => <option key={p.id} value={p.id}>{p.name} · {formatCurrency(p.sellingPrice)}</option>)}
+                      </select>
+                      <input type="number" min="0" placeholder="Qty" value={r.quantity} onChange={(e) => { const n = [...cancelRows]; n[i] = { ...r, quantity: e.target.value }; setCancelRows(n) }}
+                        className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                      <span className="col-span-2 text-sm font-semibold text-gray-700 text-right pr-1">{formatCurrency(amt)}</span>
+                      <button type="button" onClick={() => setCancelRows(cancelRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
+                    </div>
+                  )
+                })}
+                {cancelTotalForm > 0 && <p className="text-xs text-gray-500 mt-1">Cancellation total: <strong>{formatCurrency(cancelTotalForm)}</strong></p>}
+                {products.length === 0 && <p className="text-xs text-amber-600 mt-1">No products yet — add some under <strong>Products</strong> to select them here.</p>}
               </div>
 
               {/* Signed bills + paid bills for this staff (new entries only) */}
@@ -377,7 +453,7 @@ export default function CollectionsPage() {
                   className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
                   {submitting ? 'Saving...' : editingId ? 'Update Collection' : 'Save Collection'}
                 </button>
-                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setSignedRows([]); setPaidRows([]); setConfirmedZero(false) }}
+                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false) }}
                   className="px-6 py-3 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition">
                   Cancel
                 </button>
@@ -438,6 +514,10 @@ export default function CollectionsPage() {
             <p className="text-gray-500 text-xs font-medium">🔺 Overages (extra collected)</p>
             <p className={`text-lg font-bold mt-1 ${totalOverage > 0 ? 'text-green-700' : 'text-gray-800'}`}>{formatCurrency(totalOverage)}</p>
           </div>
+          <div className={`rounded-2xl p-4 shadow-sm border ${cancelTotalPeriod > 0 ? 'bg-rose-50 border-rose-200' : 'bg-white border-gray-100'}`}>
+            <p className="text-gray-500 text-xs font-medium">🚫 Cancellations</p>
+            <p className={`text-lg font-bold mt-1 ${cancelTotalPeriod > 0 ? 'text-rose-700' : 'text-gray-800'}`}>{formatCurrency(cancelTotalPeriod)}</p>
+          </div>
         </div>
 
         {/* List */}
@@ -464,6 +544,7 @@ export default function CollectionsPage() {
                     <th className="px-5 py-3 font-semibold">M-PESA</th>
                     <th className="px-5 py-3 font-semibold">Total</th>
                     <th className="px-5 py-3 font-semibold">System</th>
+                    <th className="px-5 py-3 font-semibold">Cash Req</th>
                     <th className="px-5 py-3 font-semibold">Variance</th>
                     <th className="px-5 py-3 font-semibold">By</th>
                     {canAdd && <th className="px-5 py-3 font-semibold text-right">Actions</th>}
@@ -484,6 +565,7 @@ export default function CollectionsPage() {
                       <td className="px-5 py-4 text-yellow-700">{c.mpesa > 0 ? formatCurrency(c.mpesa) : '-'}</td>
                       <td className="px-5 py-4 font-bold text-gray-900">{formatCurrency(c.total)}</td>
                       <td className="px-5 py-4 text-gray-600">{sys > 0 ? formatCurrency(sys) : '-'}</td>
+                      <td className="px-5 py-4 text-amber-700">{sys > 0 ? formatCurrency(cashRequired(c)) : '-'}</td>
                       <td className={`px-5 py-4 font-semibold ${sys === 0 ? 'text-gray-300' : v > 0 ? 'text-red-600' : v < 0 ? 'text-green-600' : 'text-gray-500'}`}>
                         {sys === 0 ? '-' : `${v > 0 ? '▼ ' : v < 0 ? '▲ ' : ''}${formatCurrency(Math.abs(v))}`}
                       </td>
@@ -500,7 +582,7 @@ export default function CollectionsPage() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={canAdd ? 12 : 11} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
+                    <tr><td colSpan={canAdd ? 13 : 12} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
@@ -513,6 +595,7 @@ export default function CollectionsPage() {
                       <td className="px-5 py-4 text-yellow-700">{formatCurrency(totals.mpesa)}</td>
                       <td className="px-5 py-4 text-indigo-700 text-base">{formatCurrency(totals.total)}</td>
                       <td className="px-5 py-4 text-gray-700">{formatCurrency(totals.systemSales)}</td>
+                      <td className="px-5 py-4 text-amber-700">{formatCurrency(totals.systemSales - totals.crdb - totals.stanbic - totals.mpesa)}</td>
                       <td className={`px-5 py-4 ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(variance))}</td>
                       <td className="px-5 py-4"></td>
                       {canAdd && <td className="px-5 py-4"></td>}

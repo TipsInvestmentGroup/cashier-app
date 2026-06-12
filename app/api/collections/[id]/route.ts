@@ -49,6 +49,31 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     include: { outlet: true },
   })
 
+  // Replace cancellations for this collection if the edit form sent them.
+  if (Array.isArray(body.cancellations)) {
+    const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
+    await prisma.cancellation.deleteMany({ where: { collectionId: id } })
+    for (const cn of body.cancellations as { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[]) {
+      const qty = Number(cn.quantity) || 0
+      const price = Number(cn.sellingPrice) || 0
+      if (!cn.productName || qty <= 0) continue
+      await prisma.cancellation.create({
+        data: {
+          collectionId: id,
+          reason: CANCEL_REASONS.includes(cn.reason) ? cn.reason : (cn.reason || ''),
+          productId: cn.productId || null,
+          productName: cn.productName,
+          sellingPrice: price,
+          quantity: qty,
+          amount: Number(cn.amount) || price * qty,
+          outletId: usedOutletId,
+          cashierId: user.userId,
+          date: collDate,
+        },
+      })
+    }
+  }
+
   // Reconcile linked auto staff-loss using the full formula with the
   // credit-sales / payments totals recorded with this collection.
   const shortfall = (Number(systemSales) || 0) - total - (existing.creditSales || 0) - (existing.paymentsReceived || 0)
@@ -106,6 +131,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     await prisma.paidBill.deleteMany({ where: { signedBillId: sl.id } })
     await prisma.signedBill.delete({ where: { id: sl.id } })
   }
+  // Remove linked cancellations (FK) before deleting the collection
+  await prisma.cancellation.deleteMany({ where: { collectionId: id } })
   await prisma.dailyCollection.delete({ where: { id } })
 
   await prisma.auditLog.create({
