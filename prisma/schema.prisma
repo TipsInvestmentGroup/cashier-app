@@ -187,6 +187,11 @@ model BankRecon {
   @@index([outletId])
 }
 
+model Setting {
+  key   String  @id
+  value String?
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String
