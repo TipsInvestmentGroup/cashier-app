@@ -37,6 +37,7 @@ export default function PettyCashPage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
   const [range, setRange] = useState<RangeKey>('month')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -219,6 +220,7 @@ export default function PettyCashPage() {
   const q = search.trim().toLowerCase()
   const filtered = items.filter((i) => {
     if (!inRange(i.date, range, customFrom, customTo)) return false
+    if (statusFilter && i.status !== statusFilter) return false
     if (q && !`${i.requestedBy} ${i.purpose} ${i.department || ''} ${i.payeeName || ''}`.toLowerCase().includes(q)) return false
     return true
   })
@@ -311,6 +313,19 @@ export default function PettyCashPage() {
             <SearchBox value={search} onChange={setSearch} placeholder="Search by requester, purpose, department or payee…" />
 
             <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-gray-600 mr-1">Status:</span>
+              {[['', 'All'], ['PENDING', 'Pending'], ['APPROVED', 'Approved'], ['REJECTED', 'Rejected']].map(([s, label]) => {
+                const count = s ? items.filter((i) => i.status === s && inRange(i.date, range, customFrom, customTo)).length : null
+                return (
+                  <button key={s || 'all'} onClick={() => setStatusFilter(s)}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition ${statusFilter === s ? (s === 'APPROVED' ? 'bg-green-600 text-white' : s === 'REJECTED' ? 'bg-red-600 text-white' : s === 'PENDING' ? 'bg-orange-500 text-white' : 'bg-indigo-600 text-white') + ' shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                    {label}{count != null ? ` (${count})` : ''}
+                  </button>
+                )
+              })}
+            </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="p-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
