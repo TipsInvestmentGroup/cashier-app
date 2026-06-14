@@ -79,6 +79,7 @@ export default function PettyCashPage() {
       setFunctions((fns || []).filter((f: NamedItem) => f.isActive))
       setApprovers(access?.approvers || [])
       setCanApprove(!!access?.canApprove)
+      setCanRequest(!!access?.canRequest)
     } finally { setLoading(false) }
   }, [request])
 
@@ -197,7 +198,7 @@ export default function PettyCashPage() {
 
   useEffect(() => { load() }, [load])
 
-  const canRequest = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
+  const [canRequest, setCanRequest] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

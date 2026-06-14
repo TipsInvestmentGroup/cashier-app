@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-
-const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
+import { canRequestPetty } from '@/lib/petty-access'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -20,7 +19,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!ALLOWED.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!canRequestPetty(user.email)) return NextResponse.json({ error: 'You are not authorized to submit petty cash requests' }, { status: 403 })
 
   const body = await req.json()
   const { date, requestedBy, department, functionName, purpose, amount, paymentMethod, payeeName, payeeAccount, approvedBy, outletId } = body

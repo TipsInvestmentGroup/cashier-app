@@ -6,6 +6,14 @@ const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
 // and who are the petty-cash approvers.
 export const DEPT_FIXED_MANAGERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
 export const PETTY_APPROVERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
+// Accounts allowed to SUBMIT a petty-cash request.
+export const PETTY_REQUESTERS = [
+  'bonzon@tips.co.tz',
+  'shabinam@tips.co.tz',
+  'alphonce.mvungi@tips.co.tz',
+  'triphillus@tips.co.tz',
+  'john.onesmo@tips.co.tz',
+]
 const SETTING_KEY = 'departmentsManagerEmail'
 
 export function isOwner(email?: string) {
@@ -42,4 +50,12 @@ export function canApprovePetty(email?: string): boolean {
   if (!e) return false
   if (isOwner(e)) return true
   return PETTY_APPROVERS.includes(e)
+}
+
+/** Accounts allowed to submit a petty-cash request (owner has override). */
+export function canRequestPetty(email?: string): boolean {
+  const e = (email || '').toLowerCase()
+  if (!e) return false
+  if (isOwner(e)) return true
+  return PETTY_REQUESTERS.includes(e)
 }

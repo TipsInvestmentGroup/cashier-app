@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import {
   isOwner, getDeptManagerEmail, setDeptManagerEmail,
-  canManageDepartments, canApprovePetty,
+  canManageDepartments, canApprovePetty, canRequestPetty,
   DEPT_FIXED_MANAGERS, PETTY_APPROVERS,
 } from '@/lib/petty-access'
 
@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
     isOwner: isOwner(user.email),
     canManageDepartments: await canManageDepartments(user.email),
     canApprove: canApprovePetty(user.email),
+    canRequest: canRequestPetty(user.email),
   })
 }
 
