@@ -51,3 +51,8 @@ Neon keeps continuous history; enable/confirm it:
 - A collection's stored staff‑loss is computed at save time; rejecting a bill later updates live reports/receivables but not that one stored figure.
 - Lists cap at 200–500 rows (no pagination yet) — fine for pilot, revisit as data grows.
 - No automated tests yet — rely on the UAT checklist.
+- Daily‑Collection channels are fixed (Cash/CRDB/Stanbic/M‑PESA). Extra sales channels (e.g. Airtel Money, NMB) are **not** addable to collections yet.
+
+## 9. Planned after a successful pilot
+- **Extra collection channels** — make Daily‑Collection payment channels owner‑managed (add new channels) and wire them fully through Total, Cash‑Required, dashboard, reports, and **digital reconciliation**. Adding channels gated to the **owner** (`johnonecmo@gmail.com`). *(Deferred from go‑live to avoid destabilising the core money/reconciliation flow.)*
+- Pagination on long lists; automated tests for the money calculations; consider paid managed DB backups.
