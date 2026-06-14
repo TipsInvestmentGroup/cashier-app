@@ -11,9 +11,10 @@ import { RangeKey, inRange } from '@/lib/dateRange'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 
+interface BillItem { productName: string; quantity: number; amount: number }
 interface Bill {
   id: string; date: string; personName: string; serviceStaff: string
-  amount: number; status: string; approvedBy: string; outletName: string; description: string
+  amount: number; status: string; approvedBy: string; outletName: string; description: string; items?: BillItem[]
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -32,7 +33,7 @@ export default function CustomerBillsPage() {
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [statusFilter, setStatusFilter] = useState('')
-  const [groupBy, setGroupBy] = useState<'none' | 'staff' | 'customer'>('none')
+  const [groupBy, setGroupBy] = useState<'none' | 'staff' | 'customer' | 'product'>('none')
 
   const canApprove = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
 
@@ -66,12 +67,19 @@ export default function CustomerBillsPage() {
   const grouped = (() => {
     if (groupBy === 'none') return []
     const m = new Map<string, { key: string; count: number; amount: number; approved: number; rejected: number; pending: number }>()
-    for (const b of filtered) {
-      const key = groupBy === 'staff' ? b.serviceStaff : b.personName
+    const add = (key: string, amount: number, status: string) => {
       let r = m.get(key)
       if (!r) { r = { key, count: 0, amount: 0, approved: 0, rejected: 0, pending: 0 }; m.set(key, r) }
-      r.count++; r.amount += b.amount
-      if (b.status === 'APPROVED') r.approved++; else if (b.status === 'REJECTED') r.rejected++; else r.pending++
+      r.count++; r.amount += amount
+      if (status === 'APPROVED') r.approved++; else if (status === 'REJECTED') r.rejected++; else r.pending++
+    }
+    for (const b of filtered) {
+      if (groupBy === 'product') {
+        if (b.items && b.items.length) b.items.forEach((it) => add(it.productName, it.amount, b.status))
+        else add('(No product)', b.amount, b.status)
+      } else {
+        add(groupBy === 'staff' ? b.serviceStaff : b.personName, b.amount, b.status)
+      }
     }
     return [...m.values()].sort((a, b) => b.amount - a.amount)
   })()
@@ -118,7 +126,7 @@ export default function CustomerBillsPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-gray-600">View:</span>
-          {([['none', 'Detailed'], ['staff', 'By Staff'], ['customer', 'By Customer']] as const).map(([k, label]) => (
+          {([['none', 'Detailed'], ['staff', 'By Staff'], ['customer', 'By Customer'], ['product', 'By Product']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setGroupBy(k)}
               className={`px-4 py-2 rounded-xl text-sm font-medium transition ${groupBy === k ? 'bg-indigo-600 text-white shadow' : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-gray-300'}`}>{label}</button>
           ))}
@@ -137,7 +145,7 @@ export default function CustomerBillsPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr className="text-left text-gray-600">
-                    <th className="px-4 py-3 font-semibold">{groupBy === 'staff' ? 'Staff' : 'Customer'}</th>
+                    <th className="px-4 py-3 font-semibold">{groupBy === 'staff' ? 'Staff' : groupBy === 'product' ? 'Product' : 'Customer'}</th>
                     <th className="px-4 py-3 font-semibold text-right">Requests</th>
                     <th className="px-4 py-3 font-semibold text-right">Amount</th>
                     <th className="px-4 py-3 font-semibold text-right">✅/⏳/✕</th>

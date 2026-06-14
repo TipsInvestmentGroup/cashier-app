@@ -109,12 +109,30 @@ model SignedBill {
   updatedAt     DateTime   @updatedAt
 
   payments      PaidBill[]
+  items         BillItem[]
 
   @@index([date])
   @@index([billType])
   @@index([status])
   @@index([outletId])
   @@index([personId])
+}
+
+// Product line items on a signed bill (Customer / Tips / DJ etc.).
+model BillItem {
+  id           String     @id @default(cuid())
+  signedBillId String
+  signedBill   SignedBill @relation(fields: [signedBillId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product?   @relation(fields: [productId], references: [id])
+  productName  String
+  unitPrice    Float      @default(0)
+  quantity     Float      @default(0)
+  amount       Float      @default(0) // unitPrice * quantity
+  createdAt    DateTime   @default(now())
+
+  @@index([signedBillId])
+  @@index([productId])
 }
 
 model PaidBill {
@@ -190,6 +208,7 @@ model Product {
   createdAt    DateTime @default(now())
 
   cancellations Cancellation[]
+  billItems     BillItem[]
 
   @@index([name])
 }

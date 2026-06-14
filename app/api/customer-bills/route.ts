@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   const items = await prisma.signedBill.findMany({
     where: { billType: 'CUSTOMER', ...(outletId ? { outletId } : {}) },
-    include: { outlet: { select: { name: true } } },
+    include: { outlet: { select: { name: true } }, items: { select: { productName: true, quantity: true, amount: true } } },
     orderBy: { date: 'desc' },
     take: 500,
   })
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     id: b.id, date: b.date, personName: b.personName,
     serviceStaff: b.serviceStaff || '(Unassigned)', amount: b.amount,
     status: b.approvalStatus, approvedBy: b.approvedBy || '', outletName: b.outlet?.name || '',
-    description: b.description || '',
+    description: b.description || '', items: b.items,
   }))
   return NextResponse.json(rows)
 }

@@ -20,6 +20,8 @@ interface Bill {
 }
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string; creditLimit: number }
+interface Product { id: string; name: string; sellingPrice: number; isActive: boolean }
+interface ItemRow { productId: string; productName: string; unitPrice: number; quantity: string }
 
 interface Category { code: string; label: string; isActive: boolean }
 const TYPE_COLOR: Record<string, string> = {
@@ -51,22 +53,28 @@ export default function SignedBillsPage() {
   const [limitWarning, setLimitWarning] = useState<{ exceeded: boolean; amount: number } | null>(null)
   const [storyBillId, setStoryBillId] = useState<string | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [itemRows, setItemRows] = useState<ItemRow[]>([])
+  const itemsTotal = itemRows.reduce((s, r) => s + r.unitPrice * (Number(r.quantity) || 0), 0)
+  const hasItems = itemRows.some((r) => r.productName && Number(r.quantity) > 0)
   const BILL_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: TYPE_COLOR[c.code] || 'bg-gray-600' }))
   const typeLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
   const typeColor = (code: string) => BILL_TYPE_COLORS[code] || 'bg-gray-100 text-gray-700'
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [b, o, p, cats] = await Promise.all([
+    const [b, o, p, cats, prods] = await Promise.all([
       request('/api/signed-bills'),
       request('/api/outlets'),
       request('/api/persons'),
       request('/api/person-categories'),
+      request('/api/products'),
     ])
     setBills(b)
     setOutlets(o)
     setPersons(p)
     setCategories(cats || [])
+    setProducts((prods || []).filter((x: Product) => x.isActive))
     if (o.length && !form.outletId) setForm((f) => ({ ...f, outletId: user?.outlet?.id || o[0].id }))
     setLoading(false)
   }, [request, user])
@@ -87,12 +95,14 @@ export default function SignedBillsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.personName) return toast.error('Person name is required')
-    if (!form.amount || Number(form.amount) <= 0) return toast.error('Amount must be > 0')
+    const effectiveAmount = hasItems ? itemsTotal : Number(form.amount)
+    if (!effectiveAmount || effectiveAmount <= 0) return toast.error('Amount must be > 0 (add a product line or enter an amount)')
     setSubmitting(true)
     try {
+      const items = itemRows.filter((r) => r.productName && Number(r.quantity) > 0).map((r) => ({ productId: r.productId || undefined, productName: r.productName, unitPrice: r.unitPrice, quantity: Number(r.quantity) }))
       const res = await request('/api/signed-bills', {
         method: 'POST',
-        body: JSON.stringify({ ...form, amount: Number(form.amount) }),
+        body: JSON.stringify({ ...form, amount: effectiveAmount, items }),
       })
       if (res.limitExceeded) {
         setLimitWarning({ exceeded: true, amount: res.exceededAmount })
@@ -101,6 +111,7 @@ export default function SignedBillsPage() {
         toast.success(`Bill saved! Voucher: ${res.voucherNumber}`)
       }
       setForm({ ...INIT_FORM, outletId: form.outletId })
+      setItemRows([])
       setShowForm(false)
       load()
     } catch (err: unknown) {
@@ -216,9 +227,16 @@ export default function SignedBillsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Amount (TZS) *</label>
-                  <MoneyInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-xl font-bold"
-                    placeholder="0" required />
+                  {hasItems ? (
+                    <div className="w-full px-4 py-3 border-2 border-gray-100 rounded-xl bg-gray-50 text-xl font-bold text-gray-800 flex items-center justify-between">
+                      <span>{formatCurrency(itemsTotal)}</span>
+                      <span className="text-[11px] font-normal text-gray-400">auto · from products</span>
+                    </div>
+                  ) : (
+                    <MoneyInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-xl font-bold"
+                      placeholder="0" />
+                  )}
                 </div>
               </div>
 
@@ -240,6 +258,39 @@ export default function SignedBillsPage() {
                 )}
               </div>
 
+              {/* Product line items (optional) */}
+              <div className="border-2 border-gray-100 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-semibold text-gray-700 text-sm">🧾 Products <span className="text-gray-400 font-normal">(optional — itemise the bill)</span></span>
+                  <button type="button" onClick={() => setItemRows([...itemRows, { productId: '', productName: '', unitPrice: 0, quantity: '' }])}
+                    className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100">➕ Add Product</button>
+                </div>
+                {itemRows.length === 0 && <p className="text-xs text-gray-400">Add products to itemise this bill — the Amount becomes their total. Leave empty to type a manual amount.</p>}
+                {itemRows.length > 0 && (
+                  <div className="hidden sm:grid grid-cols-12 gap-2 text-[11px] font-semibold text-gray-400 mb-1">
+                    <span className="col-span-5">Product</span><span className="col-span-3">Qty</span><span className="col-span-3 text-right">Amount</span><span className="col-span-1"></span>
+                  </div>
+                )}
+                {itemRows.map((r, i) => {
+                  const amt = r.unitPrice * (Number(r.quantity) || 0)
+                  return (
+                    <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
+                      <select value={r.productId} onChange={(e) => { const p = products.find((x) => x.id === e.target.value); const n = [...itemRows]; n[i] = { ...r, productId: e.target.value, productName: p?.name || '', unitPrice: p?.sellingPrice || 0 }; setItemRows(n) }}
+                        className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                        <option value="">Select product…</option>
+                        {products.map((p) => <option key={p.id} value={p.id}>{p.name} · {formatCurrency(p.sellingPrice)}</option>)}
+                      </select>
+                      <input type="number" min="0" placeholder="Qty" value={r.quantity} onChange={(e) => { const n = [...itemRows]; n[i] = { ...r, quantity: e.target.value }; setItemRows(n) }}
+                        className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                      <span className="col-span-3 text-sm font-semibold text-gray-700 text-right pr-1">{formatCurrency(amt)}</span>
+                      <button type="button" onClick={() => setItemRows(itemRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
+                    </div>
+                  )
+                })}
+                {hasItems && <p className="text-xs text-gray-500 mt-1">Items total: <strong>{formatCurrency(itemsTotal)}</strong></p>}
+                {products.length === 0 && <p className="text-xs text-amber-600 mt-1">No products yet — add some under <strong>Products</strong> to itemise bills.</p>}
+              </div>
+
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
                 <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -252,7 +303,7 @@ export default function SignedBillsPage() {
                   className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
                   {submitting ? 'Saving...' : 'Save Signed Bill'}
                 </button>
-                <button type="button" onClick={() => setShowForm(false)}
+                <button type="button" onClick={() => { setShowForm(false); setItemRows([]) }}
                   className="px-6 py-3 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition">
                   Cancel
                 </button>

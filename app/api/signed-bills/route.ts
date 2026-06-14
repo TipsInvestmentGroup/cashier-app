@@ -68,6 +68,14 @@ export async function POST(req: NextRequest) {
   const usedOutletId = outletId || user.outletId
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
 
+  // Optional product line items. When present, the bill amount is their sum.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const itemsInput: any[] = Array.isArray(body.items)
+    ? body.items.filter((it: { productName?: string; quantity?: number }) => it.productName && Number(it.quantity) > 0)
+    : []
+  const itemsTotal = itemsInput.reduce((s, it) => s + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0), 0)
+  const finalAmount = itemsInput.length ? itemsTotal : Number(amount)
+
   const voucherNumber = generateVoucherNumber()
 
   let limitExceeded = false
@@ -80,7 +88,7 @@ export async function POST(req: NextRequest) {
         where: { personId, status: { not: 'PAID' } },
         _sum: { amount: true },
       })
-      const totalOwed = (outstanding._sum.amount || 0) + Number(amount)
+      const totalOwed = (outstanding._sum.amount || 0) + finalAmount
       if (totalOwed > person.creditLimit) {
         limitExceeded = true
         exceededAmount = totalOwed - person.creditLimit
@@ -93,7 +101,7 @@ export async function POST(req: NextRequest) {
       billType,
       personId: personId || null,
       personName,
-      amount: Number(amount),
+      amount: finalAmount,
       serviceStaff,
       description,
       dueDate: dueDate ? new Date(dueDate) : null,
@@ -104,6 +112,18 @@ export async function POST(req: NextRequest) {
     },
     include: { outlet: true, person: true },
   })
+
+  // Create the line items
+  for (const it of itemsInput) {
+    const qty = Number(it.quantity) || 0
+    const price = Number(it.unitPrice) || 0
+    await prisma.billItem.create({
+      data: {
+        signedBillId: bill.id, productId: it.productId || null, productName: it.productName,
+        unitPrice: price, quantity: qty, amount: price * qty,
+      },
+    })
+  }
 
   return NextResponse.json({ ...bill, limitExceeded, exceededAmount }, { status: 201 })
 }
