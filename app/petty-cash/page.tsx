@@ -61,6 +61,10 @@ export default function PettyCashPage() {
   const isOwner = !!ownerEmail && (user?.email || '').toLowerCase() === ownerEmail
   const [verifierEmail, setVerifierEmail] = useState('')
   const [verifierUsers, setVerifierUsers] = useState<{ id: string; name: string; email: string }[]>([])
+  // Owner: manage who can submit petty-cash requests
+  const [reqAccessOpen, setReqAccessOpen] = useState(false)
+  const [reqEmails, setReqEmails] = useState<string[]>([])
+  const [reqUsers, setReqUsers] = useState<{ id: string; name: string; email: string }[]>([])
 
   const [canApprove, setCanApprove] = useState(false)
 
@@ -109,6 +113,23 @@ export default function PettyCashPage() {
   const saveVerifier = async (email: string) => {
     try { await request('/api/cash-verifiers', { method: 'PUT', body: JSON.stringify({ email }) }); setVerifierEmail(email.toLowerCase()); toast.success('Verifier access updated') }
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Error updating access') }
+  }
+
+  const openReqAccess = async () => {
+    setReqAccessOpen(true)
+    try {
+      const [us, cfg] = await Promise.all([request('/api/users'), request('/api/petty-requesters')])
+      setReqUsers(us || [])
+      setReqEmails((cfg?.requesters || []).map((e: string) => e.toLowerCase()))
+    } catch { toast.error('Could not load request access') }
+  }
+  const toggleReq = (email: string) => {
+    const e = email.toLowerCase()
+    setReqEmails((list) => list.includes(e) ? list.filter((x) => x !== e) : [...list, e])
+  }
+  const saveReqAccess = async () => {
+    try { await request('/api/petty-requesters', { method: 'PUT', body: JSON.stringify({ emails: reqEmails }) }); toast.success('Request access updated'); setReqAccessOpen(false) }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not save') }
   }
 
   const saveRecon = async () => {
@@ -293,6 +314,12 @@ export default function PettyCashPage() {
               className="px-5 py-3 bg-sky-600 text-white rounded-xl font-medium hover:bg-sky-700 transition shadow">
               📲 Digital Payment Reconciliation
             </button>
+            {isOwner && (
+              <button onClick={openReqAccess}
+                className="px-5 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:border-gray-300 transition">
+                🔐 Manage Request Access
+              </button>
+            )}
           </div>
         </div>
 
@@ -736,6 +763,32 @@ export default function PettyCashPage() {
                 className="w-full py-3 bg-sky-600 text-white font-bold rounded-xl hover:bg-sky-700 transition disabled:opacity-60">
                 {bankBusy ? 'Saving…' : 'Save Digital Payment Reconciliation'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Owner: manage who can submit petty-cash requests */}
+      {reqAccessOpen && isOwner && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setReqAccessOpen(false)}>
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-xl max-h-[85vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 sticky top-0 bg-white">
+              <h3 className="font-bold text-gray-900">🔐 Petty Cash Request Access</h3>
+              <button onClick={() => setReqAccessOpen(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-sm text-gray-500">Tick the accounts allowed to submit cash requests. The owner always can.</p>
+              <div className="space-y-1 max-h-72 overflow-auto">
+                {reqUsers.map((u) => (
+                  <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 rounded px-2 py-1.5">
+                    <input type="checkbox" className="w-4 h-4" checked={reqEmails.includes(u.email.toLowerCase())} onChange={() => toggleReq(u.email)} />
+                    <span className="font-medium text-gray-800">{u.name}</span>
+                    <span className="text-gray-400">({u.email})</span>
+                  </label>
+                ))}
+                {reqUsers.length === 0 && <p className="text-sm text-gray-400 py-2">No users found.</p>}
+              </div>
+              <button onClick={saveReqAccess} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">Save Request Access</button>
             </div>
           </div>
         </div>

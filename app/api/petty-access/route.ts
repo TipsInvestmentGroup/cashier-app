@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     isOwner: isOwner(user.email),
     canManageDepartments: await canManageDepartments(user.email),
     canApprove: canApprovePetty(user.email),
-    canRequest: canRequestPetty(user.email),
+    canRequest: await canRequestPetty(user.email),
   })
 }
 

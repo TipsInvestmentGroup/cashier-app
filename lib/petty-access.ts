@@ -6,8 +6,8 @@ const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
 // and who are the petty-cash approvers.
 export const DEPT_FIXED_MANAGERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
 export const PETTY_APPROVERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
-// Accounts allowed to SUBMIT a petty-cash request.
-export const PETTY_REQUESTERS = [
+// Default accounts allowed to SUBMIT a petty-cash request (used until the owner customises the list).
+export const DEFAULT_PETTY_REQUESTERS = [
   'bonzon@tips.co.tz',
   'shabinam@tips.co.tz',
   'alphonce.mvungi@tips.co.tz',
@@ -15,6 +15,7 @@ export const PETTY_REQUESTERS = [
   'john.onesmo@tips.co.tz',
 ]
 const SETTING_KEY = 'departmentsManagerEmail'
+const REQUESTERS_KEY = 'pettyRequesterEmails'
 
 export function isOwner(email?: string) {
   return !!OWNER_EMAIL && (email || '').toLowerCase() === OWNER_EMAIL
@@ -52,10 +53,32 @@ export function canApprovePetty(email?: string): boolean {
   return PETTY_APPROVERS.includes(e)
 }
 
+/** The owner-managed list of petty-cash requester emails (falls back to defaults). */
+export async function getPettyRequesters(): Promise<string[]> {
+  const s = await prisma.setting.findUnique({ where: { key: REQUESTERS_KEY } })
+  if (!s?.value) return DEFAULT_PETTY_REQUESTERS
+  try {
+    const arr = JSON.parse(s.value)
+    return Array.isArray(arr) ? arr.map((x) => String(x).toLowerCase()).filter(Boolean) : DEFAULT_PETTY_REQUESTERS
+  } catch {
+    return DEFAULT_PETTY_REQUESTERS
+  }
+}
+
+export async function setPettyRequesters(emails: string[]) {
+  const clean = (emails || []).map((e) => String(e).trim().toLowerCase()).filter(Boolean)
+  await prisma.setting.upsert({
+    where: { key: REQUESTERS_KEY },
+    update: { value: JSON.stringify(clean) },
+    create: { key: REQUESTERS_KEY, value: JSON.stringify(clean) },
+  })
+}
+
 /** Accounts allowed to submit a petty-cash request (owner has override). */
-export function canRequestPetty(email?: string): boolean {
+export async function canRequestPetty(email?: string): Promise<boolean> {
   const e = (email || '').toLowerCase()
   if (!e) return false
   if (isOwner(e)) return true
-  return PETTY_REQUESTERS.includes(e)
+  const list = await getPettyRequesters()
+  return list.includes(e)
 }

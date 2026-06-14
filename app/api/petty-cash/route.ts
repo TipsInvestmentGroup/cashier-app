@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canRequestPetty(user.email)) return NextResponse.json({ error: 'You are not authorized to submit petty cash requests' }, { status: 403 })
+  if (!(await canRequestPetty(user.email))) return NextResponse.json({ error: 'You are not authorized to submit petty cash requests' }, { status: 403 })
 
   const body = await req.json()
   const { date, requestedBy, department, functionName, purpose, amount, paymentMethod, payeeName, payeeAccount, approvedBy, outletId } = body
