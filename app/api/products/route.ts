@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { roundMoney } from '@/lib/utils'
 
 const MANAGERS = ['ADMIN', 'ACCOUNTANT', 'MANAGER']
 const UNITS = ['unit', 'kg', 'crate 24 bottle', 'crate 25 bottle', 'crate 6 bottle']
@@ -42,8 +43,8 @@ export async function POST(req: NextRequest) {
       data: {
         code: finalCode,
         name: String(name).trim(),
-        buyingPrice: Number(buyingPrice) || 0,
-        sellingPrice: Number(sellingPrice) || 0,
+        buyingPrice: roundMoney(buyingPrice),
+        sellingPrice: roundMoney(sellingPrice),
         unitMeasure: unit,
       },
     })

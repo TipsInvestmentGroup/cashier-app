@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
+import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
@@ -75,8 +76,8 @@ export async function POST(req: NextRequest) {
   // Opening = previous closing (auto). Closing computed & stored.
   const opening = await previousClosing(day, usedOutletId)
   const c = await computeCash(startOfDay(day), endOfDay(day), usedOutletId)
-  const deposited = Number(cashDeposited) || 0
-  const closing = opening + c.cashCollected + c.paidBillsCash - c.cashExpenses - deposited
+  const deposited = roundMoney(cashDeposited)
+  const closing = roundMoney(opening + c.cashCollected + c.paidBillsCash - c.cashExpenses - deposited)
 
   // One reconciliation per day+outlet — update if it exists
   const existing = await prisma.cashRecon.findFirst({
@@ -96,7 +97,7 @@ export async function POST(req: NextRequest) {
   // Verified amount: only an authorized officer may set/change it.
   if (body.verifiedAmount !== undefined && body.verifiedAmount !== null && body.verifiedAmount !== '') {
     if (await canVerifyCash(user.email)) {
-      data.verifiedAmount = Number(body.verifiedAmount) || 0
+      data.verifiedAmount = roundMoney(body.verifiedAmount)
       data.verifiedBy = user.name
     } else {
       return NextResponse.json({ error: 'Only an authorized officer can enter the verified cash amount' }, { status: 403 })

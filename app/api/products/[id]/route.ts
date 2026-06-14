@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { roundMoney } from '@/lib/utils'
 
 const MANAGERS = ['ADMIN', 'ACCOUNTANT', 'MANAGER']
 const UNITS = ['unit', 'kg', 'crate 24 bottle', 'crate 25 bottle', 'crate 6 bottle']
@@ -17,8 +18,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const data: any = {}
   if (body.name !== undefined) data.name = String(body.name).trim()
   if (body.code !== undefined && String(body.code).trim()) data.code = String(body.code).trim().toUpperCase()
-  if (body.buyingPrice !== undefined) data.buyingPrice = Number(body.buyingPrice) || 0
-  if (body.sellingPrice !== undefined) data.sellingPrice = Number(body.sellingPrice) || 0
+  if (body.buyingPrice !== undefined) data.buyingPrice = roundMoney(body.buyingPrice)
+  if (body.sellingPrice !== undefined) data.sellingPrice = roundMoney(body.sellingPrice)
   if (body.unitMeasure !== undefined) data.unitMeasure = UNITS.includes(body.unitMeasure) ? body.unitMeasure : (body.unitMeasure || 'unit')
   if (body.isActive !== undefined) data.isActive = !!body.isActive
 

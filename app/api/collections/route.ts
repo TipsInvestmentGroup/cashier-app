@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
+import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
   const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 
-  const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
+  const total = roundMoney(Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa))
   const usedOutletId = outletId || user.outletId
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
 
@@ -72,13 +73,13 @@ export async function POST(req: NextRequest) {
 
   const collection = await prisma.dailyCollection.create({
     data: {
-      cash: Number(cash),
-      crdb: Number(crdb),
-      stanbic: Number(stanbic),
-      mpesa: Number(mpesa),
+      cash: roundMoney(cash),
+      crdb: roundMoney(crdb),
+      stanbic: roundMoney(stanbic),
+      mpesa: roundMoney(mpesa),
       total,
       staffName: staffName || null,
-      systemSales: Number(systemSales) || 0,
+      systemSales: roundMoney(systemSales),
       notes,
       outletId: usedOutletId,
       cashierId: user.userId,
@@ -96,7 +97,7 @@ export async function POST(req: NextRequest) {
   let signedCreated = 0
   for (let i = 0; i < signedInput.length; i++) {
     const sb = signedInput[i]
-    const amt = Number(sb.amount) || 0
+    const amt = roundMoney(sb.amount)
     const type = String(sb.billType || '').toUpperCase()
     if (amt <= 0 || !type || !sb.name) continue
     const person = await prisma.person.findFirst({ where: { name: sb.name, type } })
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
   let paidStaffLoss = 0
   let paidCreated = 0
   for (const pb of paidInput) {
-    const amt = Number(pb.amount) || 0
+    const amt = roundMoney(pb.amount)
     const method = String(pb.paymentMethod || 'CASH').toUpperCase()
     if (amt <= 0 || !method || !pb.payerName) continue
     // Allocate across the payer's outstanding bills of the same category
@@ -145,7 +146,7 @@ export async function POST(req: NextRequest) {
   // 2b) Record cancellations linked to this collection
   for (const cn of cancelInput) {
     const qty = Number(cn.quantity) || 0
-    const price = Number(cn.sellingPrice) || 0
+    const price = roundMoney(cn.sellingPrice)
     const reason = CANCEL_REASONS.includes(cn.reason) ? cn.reason : (cn.reason || '')
     if (!cn.productName || qty <= 0) continue
     await prisma.cancellation.create({
@@ -156,7 +157,7 @@ export async function POST(req: NextRequest) {
         productName: cn.productName,
         sellingPrice: price,
         quantity: qty,
-        amount: Number(cn.amount) || price * qty,
+        amount: roundMoney(Number(cn.amount) || price * qty),
         outletId: usedOutletId,
         cashierId: user.userId,
         date: collDate,
@@ -169,11 +170,11 @@ export async function POST(req: NextRequest) {
   // loss formula (here and on edit) subtracts.
   await prisma.dailyCollection.update({
     where: { id: collection.id },
-    data: { creditSales: signedTotal, paymentsReceived: paidStaffLoss },
+    data: { creditSales: roundMoney(signedTotal), paymentsReceived: roundMoney(paidStaffLoss) },
   })
 
   // 3) Staff Loss = System − Collection − SignedBills − PaidBills (Staff Loss only)
-  const lossAmount = (Number(systemSales) || 0) - total - signedTotal - paidStaffLoss
+  const lossAmount = roundMoney((Number(systemSales) || 0) - total - signedTotal - paidStaffLoss)
   let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
   if (staffName && lossAmount > 0) {
     const person = await prisma.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })

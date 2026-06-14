@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canRequestPetty } from '@/lib/petty-access'
+import { roundMoney } from '@/lib/utils'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
       department: department || null,
       functionName: functionName || null,
       purpose,
-      amount: Number(amount),
+      amount: roundMoney(amount),
       paymentMethod: method,
       payeeName: payeeName || null,
       payeeAccount: payeeAccount || null,

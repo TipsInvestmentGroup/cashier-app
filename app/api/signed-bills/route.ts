@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
-import { generateVoucherNumber } from '@/lib/utils'
+import { generateVoucherNumber, roundMoney } from '@/lib/utils'
 
 const CAN_WRITE = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
@@ -76,8 +76,8 @@ export async function POST(req: NextRequest) {
   const itemsInput: any[] = Array.isArray(body.items)
     ? body.items.filter((it: { productName?: string; quantity?: number }) => it.productName && Number(it.quantity) > 0)
     : []
-  const itemsTotal = itemsInput.reduce((s, it) => s + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0), 0)
-  const finalAmount = itemsInput.length ? itemsTotal : Number(amount)
+  const itemsTotal = roundMoney(itemsInput.reduce((s, it) => s + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0), 0))
+  const finalAmount = roundMoney(itemsInput.length ? itemsTotal : Number(amount))
 
   const voucherNumber = generateVoucherNumber()
 
@@ -119,11 +119,11 @@ export async function POST(req: NextRequest) {
   // Create the line items
   for (const it of itemsInput) {
     const qty = Number(it.quantity) || 0
-    const price = Number(it.unitPrice) || 0
+    const price = roundMoney(it.unitPrice)
     await prisma.billItem.create({
       data: {
         signedBillId: bill.id, productId: it.productId || null, productName: it.productName,
-        unitPrice: price, quantity: qty, amount: price * qty,
+        unitPrice: price, quantity: qty, amount: roundMoney(price * qty),
       },
     })
   }

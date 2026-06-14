@@ -1,5 +1,11 @@
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
 
+/** Round a monetary value to 2 decimals to avoid floating-point drift (e.g. 0.1+0.2). */
+export function roundMoney(n: number | string | null | undefined): number {
+  const v = Number(n) || 0
+  return Math.round(v * 100) / 100
+}
+
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-TZ', {
     style: 'currency',

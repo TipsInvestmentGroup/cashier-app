@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
+import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
@@ -29,7 +30,7 @@ async function reportedFor(channel: string, dayStart: Date, dayEnd: Date, outlet
   ])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const collAmt = col ? ((coll as any)._sum[col] || 0) : 0
-  return collAmt + (paid._sum.amountPaid || 0)
+  return roundMoney(collAmt + (paid._sum.amountPaid || 0))
 }
 
 export async function GET(req: NextRequest) {
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
   const day = date ? new Date(date) : new Date()
   const usedOutletId = outletId || user.outletId || null
   const canVerify = await canVerifyCash(user.email)
-  const num = (v: unknown) => (v === undefined || v === null || v === '' ? undefined : Number(v) || 0)
+  const num = (v: unknown) => (v === undefined || v === null || v === '' ? undefined : roundMoney(v as number))
 
   for (const entry of channels) {
     if (!entry.channel) continue
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest) {
       const vc = num(entry.verifiedClosing) ?? (existing?.verifiedClosing ?? 0)
       data.verifiedOpening = vo
       data.verifiedClosing = vc
-      data.verifiedAmount = vc - vo
+      data.verifiedAmount = roundMoney(vc - vo)
       data.verifiedBy = user.name
     }
     if (existing) await prisma.bankRecon.update({ where: { id: existing.id }, data })

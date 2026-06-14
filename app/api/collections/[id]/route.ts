@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -22,7 +23,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const body = await req.json()
   const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
-  const total = Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa)
+  const total = roundMoney(Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa))
   const usedOutletId = outletId || existing.outletId
   const collDate = date ? new Date(date) : existing.date
 
@@ -47,8 +48,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const updated = await prisma.dailyCollection.update({
     where: { id },
     data: {
-      cash: Number(cash), crdb: Number(crdb), stanbic: Number(stanbic), mpesa: Number(mpesa),
-      total, staffName: staffName || null, systemSales: Number(systemSales) || 0,
+      cash: roundMoney(cash), crdb: roundMoney(crdb), stanbic: roundMoney(stanbic), mpesa: roundMoney(mpesa),
+      total, staffName: staffName || null, systemSales: roundMoney(systemSales),
       notes, outletId: usedOutletId, date: collDate,
     },
     include: { outlet: true },
@@ -60,7 +61,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     await prisma.cancellation.deleteMany({ where: { collectionId: id } })
     for (const cn of body.cancellations as { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[]) {
       const qty = Number(cn.quantity) || 0
-      const price = Number(cn.sellingPrice) || 0
+      const price = roundMoney(cn.sellingPrice)
       if (!cn.productName || qty <= 0) continue
       await prisma.cancellation.create({
         data: {
@@ -70,7 +71,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           productName: cn.productName,
           sellingPrice: price,
           quantity: qty,
-          amount: Number(cn.amount) || price * qty,
+          amount: roundMoney(Number(cn.amount) || price * qty),
           outletId: usedOutletId,
           cashierId: user.userId,
           date: collDate,
@@ -81,7 +82,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Reconcile linked auto staff-loss using the full formula with the
   // credit-sales / payments totals recorded with this collection.
-  const shortfall = (Number(systemSales) || 0) - total - (existing.creditSales || 0) - (existing.paymentsReceived || 0)
+  const shortfall = roundMoney((Number(systemSales) || 0) - total - (existing.creditSales || 0) - (existing.paymentsReceived || 0))
   const voucher = `SL-${id}`
   const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: voucher } })
   let staffLoss: { amount: number; staffName: string } | null = null
