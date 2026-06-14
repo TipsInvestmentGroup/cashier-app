@@ -16,6 +16,9 @@ interface Bill {
   id: string; date: string; billType: string; personName: string; serviceStaff: string
   amount: number; status: string; approvedBy: string; outletName: string; description: string; items?: BillItem[]
 }
+interface Staff { id: string; name: string; type: string }
+interface Product { id: string; name: string; sellingPrice: number; isActive: boolean }
+interface ItemRow { productId: string; productName: string; unitPrice: number; quantity: string }
 
 const STATUS_STYLE: Record<string, string> = {
   APPROVED: 'bg-green-100 text-green-700',
@@ -35,14 +38,46 @@ export default function TipsDjBillsPage() {
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [groupBy, setGroupBy] = useState<'none' | 'staff' | 'person' | 'product'>('none')
+  const [staff, setStaff] = useState<Staff[]>([])
+  const [persons, setPersons] = useState<Staff[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [form, setForm] = useState({ billType: 'TIPS', serviceStaff: '', personName: '', amount: '' })
+  const [itemRows, setItemRows] = useState<ItemRow[]>([])
+  const itemsTotal = itemRows.reduce((s, r) => s + r.unitPrice * (Number(r.quantity) || 0), 0)
+  const hasItems = itemRows.some((r) => r.productName && Number(r.quantity) > 0)
 
   const canApprove = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
+  const ownerEmail = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const myEmail = (user?.email || '').toLowerCase()
+  const canCreate = user?.role === 'CASHIER' || myEmail === 'alphonce.mvungi@tips.co.tz' || (!!ownerEmail && myEmail === ownerEmail)
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setItems(await request('/api/tips-dj') || []) }
-    finally { setLoading(false) }
+    try {
+      const [rows, ppl, prods] = await Promise.all([request('/api/tips-dj'), request('/api/persons'), request('/api/products')])
+      setItems(rows || [])
+      setStaff((ppl || []).filter((p: Staff) => p.type === 'STAFF_LOSS').sort((a: Staff, b: Staff) => a.name.localeCompare(b.name)))
+      setPersons(ppl || [])
+      setProducts((prods || []).filter((p: Product) => p.isActive))
+    } finally { setLoading(false) }
   }, [request])
+
+  const submitRequest = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.personName) return toast.error('Person name is required')
+    if (!hasItems && (!form.amount || Number(form.amount) <= 0)) return toast.error('Add a product line or enter an amount')
+    setSubmitting(true)
+    try {
+      const items = itemRows.filter((r) => r.productName && Number(r.quantity) > 0).map((r) => ({ productId: r.productId || undefined, productName: r.productName, unitPrice: r.unitPrice, quantity: Number(r.quantity) }))
+      await request('/api/tips-dj', { method: 'POST', body: JSON.stringify({ ...form, amount: Number(form.amount) || 0, items }) })
+      toast.success(`${form.billType} bill request filed`)
+      setForm({ billType: form.billType, serviceStaff: '', personName: '', amount: '' }); setItemRows([]); setShowForm(false); load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not file request')
+    } finally { setSubmitting(false) }
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -99,8 +134,81 @@ export default function TipsDjBillsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Tips &amp; DJ Bills Requests</h1>
             <p className="text-gray-500 text-sm">Tips &amp; DJ bill requests by staff, person and status</p>
           </div>
-          <ExportBar rows={exportRows} filename={`tips-dj-bills-${format(new Date(), 'yyyy-MM-dd')}`} title="Tips & DJ Bills Report" />
+          <div className="flex gap-2 flex-wrap">
+            {canCreate && (
+              <button onClick={() => setShowForm((s) => !s)} className="px-5 py-3 bg-amber-500 text-white rounded-xl font-medium hover:bg-amber-600 transition shadow">➕ Add Tips/DJ Bill</button>
+            )}
+            <ExportBar rows={exportRows} filename={`tips-dj-bills-${format(new Date(), 'yyyy-MM-dd')}`} title="Tips & DJ Bills Report" />
+          </div>
         </div>
+
+        {showForm && canCreate && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h2 className="font-semibold text-gray-800 mb-3">🎁 New Tips / DJ Bill Request</h2>
+            <form onSubmit={submitRequest} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Type</label>
+                  <select value={form.billType} onChange={(e) => setForm({ ...form, billType: e.target.value, personName: '' })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white text-sm">
+                    <option value="TIPS">🎁 Tips</option>
+                    <option value="DJ">🎵 DJ</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Service Staff</label>
+                  <select value={form.serviceStaff} onChange={(e) => setForm({ ...form, serviceStaff: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white text-sm">
+                    <option value="">Select staff…</option>
+                    {staff.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Person *</label>
+                  <input list="tipsPersonNames" value={form.personName} onChange={(e) => setForm({ ...form, personName: e.target.value })}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm" placeholder={form.billType === 'DJ' ? 'DJ name' : 'Tips recipient'} />
+                  <datalist id="tipsPersonNames">{persons.filter((p) => p.type === form.billType).map((p) => <option key={p.id} value={p.name} />)}</datalist>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Amount (TZS) {hasItems && <span className="text-gray-400 font-normal">auto</span>}</label>
+                  {hasItems ? (
+                    <div className="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl bg-gray-50 text-sm font-bold">{formatCurrency(itemsTotal)}</div>
+                  ) : (
+                    <input type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm" placeholder="0" />
+                  )}
+                </div>
+              </div>
+
+              <div className="border-2 border-gray-100 rounded-xl p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-gray-600">🧾 Products (optional — itemise)</span>
+                  <button type="button" onClick={() => setItemRows([...itemRows, { productId: '', productName: '', unitPrice: 0, quantity: '' }])}
+                    className="px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100">➕ Add Product</button>
+                </div>
+                {itemRows.map((r, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
+                    <select value={r.productId} onChange={(e) => { const p = products.find((x) => x.id === e.target.value); const n = [...itemRows]; n[i] = { ...r, productId: e.target.value, productName: p?.name || '', unitPrice: p?.sellingPrice || 0 }; setItemRows(n) }}
+                      className="col-span-6 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
+                      <option value="">Select product…</option>
+                      {products.map((p) => <option key={p.id} value={p.id}>{p.name} · {formatCurrency(p.sellingPrice)}</option>)}
+                    </select>
+                    <input type="number" min="0" placeholder="Qty" value={r.quantity} onChange={(e) => { const n = [...itemRows]; n[i] = { ...r, quantity: e.target.value }; setItemRows(n) }} className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                    <span className="col-span-2 text-sm font-semibold text-right">{formatCurrency(r.unitPrice * (Number(r.quantity) || 0))}</span>
+                    <button type="button" onClick={() => setItemRows(itemRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
+                  </div>
+                ))}
+                {itemRows.length === 0 && <p className="text-xs text-gray-400">No products — the manual Amount will be used.</p>}
+              </div>
+
+              <div className="flex gap-2">
+                <button type="submit" disabled={submitting} className="px-6 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">{submitting ? 'Saving…' : 'File Request'}</button>
+                <button type="button" onClick={() => { setShowForm(false); setItemRows([]) }} className="px-5 py-2.5 border-2 border-gray-200 text-gray-700 rounded-xl hover:bg-gray-50">Cancel</button>
+                <span className="text-xs text-gray-400 self-center">Filed as Pending → manager/accountant approves.</span>
+              </div>
+            </form>
+          </div>
+        )}
 
         {/* Summary */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
