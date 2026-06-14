@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { TipsLogo } from '@/components/TipsLogo'
 import toast from 'react-hot-toast'
 
 export default function LoginPage() {
@@ -30,7 +31,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-8 text-white text-center">
-            <div className="text-5xl mb-3">🍹</div>
+            <TipsLogo height={64} className="mb-3" />
             <h1 className="text-2xl font-bold">Cashier Management</h1>
             <p className="text-indigo-200 text-sm mt-1">Sales & Receivables System</p>
           </div>
@@ -45,7 +46,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:outline-none text-lg transition"
-                placeholder="cashier@lounge.com"
+                placeholder="you@tips.co.tz"
                 required
               />
             </div>
@@ -71,10 +72,6 @@ export default function LoginPage() {
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
-
-            <p className="text-center text-sm text-gray-500">
-              Default: admin@lounge.com / admin123
-            </p>
           </form>
         </div>
       </div>

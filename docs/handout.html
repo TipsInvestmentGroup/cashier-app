@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>tips — Cashier Management · Training Handout</title>
+<style>
+  :root { --indigo:#4f46e5; --purple:#7c3aed; --ink:#1f2937; --muted:#6b7280; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); margin: 0; background:#f3f4f6; }
+  .toolbar { background:#111827; color:#fff; padding:10px 16px; font-size:13px; text-align:center; }
+  .toolbar b { color:#fde68a; }
+  .page { background:#fff; max-width: 800px; margin: 16px auto; padding: 40px 48px; box-shadow:0 1px 6px rgba(0,0,0,.1); }
+  .brand { text-align:center; }
+  .brand .tips { font-family:"Segoe Script","Brush Script MT",cursive; font-style:italic; font-size:64px; line-height:1; color:var(--indigo); }
+  .brand .est { letter-spacing:.35em; font-size:11px; color:var(--muted); }
+  h1 { font-size:24px; margin:6px 0 2px; }
+  h2 { font-size:19px; margin:22px 0 6px; padding-bottom:4px; border-bottom:2px solid #e5e7eb; }
+  h3 { font-size:14px; margin:14px 0 4px; color:var(--purple); }
+  p, li { font-size:13.5px; line-height:1.5; }
+  ul { margin:4px 0 4px 18px; padding:0; }
+  .sub { color:var(--muted); font-size:13px; }
+  .badge { display:inline-block; background:var(--indigo); color:#fff; border-radius:999px; padding:3px 12px; font-size:12px; font-weight:600; }
+  .rule { background:#eef2ff; border:1px solid #c7d2fe; border-radius:10px; padding:10px 14px; margin-top:10px; font-size:12.5px; }
+  .cover { min-height: 70vh; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:4px; }
+  .cover .tips { font-size:96px; }
+  @media print {
+    body { background:#fff; }
+    .toolbar { display:none; }
+    .page { box-shadow:none; margin:0; max-width:none; padding:18mm 16mm; }
+    .page + .page { page-break-before: always; }
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar">To make a PDF: press <b>Ctrl/Cmd + P</b> → Destination <b>“Save as PDF”</b>. Each role prints on its own page.</div>
+
+  <!-- COVER -->
+  <section class="page">
+    <div class="cover">
+      <div class="brand"><div class="tips">tips</div><div class="est">— EST. 2017 —</div></div>
+      <h1>Cashier Management</h1>
+      <p class="sub">Sales &amp; Receivables System — Training Handout</p>
+      <p class="sub">https://cashier-app-psi.vercel.app</p>
+      <p class="sub" style="margin-top:24px;">First login: use your email + temporary password, then click <b>🔑 Change Password</b> and set your own. Keep it private.</p>
+    </div>
+  </section>
+
+  <!-- CASHIER -->
+  <section class="page">
+    <span class="badge">👤 Cashier</span>
+    <h1>Daily routine</h1>
+    <h2>Daily Collections</h2>
+    <ul>
+      <li><b>+ New Collection</b> → choose Date, Outlet, and the <b>Staff</b> you're collecting from.</li>
+      <li>Enter <b>System Sales</b> (what the POS says that staff sold).</li>
+      <li>Enter money handed in: <b>Cash, CRDB, Stanbic, M‑PESA</b>. <b>Cash Required</b> auto‑fills = System − (CRDB+Stanbic+M‑PESA); negative shows 🟢 Excess Cash.</li>
+      <li><b>🚫 Cancellations</b> — voided punches: reason + product + qty.</li>
+      <li><b>🧾 Signed Bills</b> — credit sales served (Admin/Director/Customer/Tips/DJ/Staff Loss).</li>
+      <li><b>✅ Paid Bills</b> — old debts collected; use <b>🔗 Link to signed bill</b> to apply to the right one.</li>
+      <li>Check the <b>Staff Loss</b> preview, tick “No other bills” if none, then <b>Save</b>.</li>
+    </ul>
+    <h2>Other screens</h2>
+    <ul>
+      <li><b>Signed Bills</b> — record a credit bill; optionally itemise products (Amount = products total).</li>
+      <li><b>Paid Bills</b> — record a payment; payer category auto‑fills; settles oldest bill first. Click a row for its full story.</li>
+      <li><b>Petty Cash</b> — <i>(if a requester)</i> fill the Cash Request Form.</li>
+    </ul>
+    <div class="rule"><b>Staff Loss = System − Collection − Signed − Paid (Staff‑Loss only).</b> You can only edit/delete collections for <b>your own outlet</b>.</div>
+  </section>
+
+  <!-- ACCOUNTANT -->
+  <section class="page">
+    <span class="badge">🧮 Accountant</span>
+    <h1>Money &amp; control</h1>
+    <p class="sub">Everything a cashier can do, plus:</p>
+    <h3>Receivables</h3>
+    <p>Outstanding debts by person — aging, overdue, credit limits. Search + export.</p>
+    <h3>Payroll Deductions</h3>
+    <p>Over‑limit Admin/Director bills + staff losses by month. <b>Run Deduction</b>, <b>Email Directors</b> (also auto‑emails monthly).</p>
+    <h3>Reports (CSV / Excel / PDF)</h3>
+    <p>Financial Summary · Daily Cashier Report · Cash Reconciliation · Digital Payment Reconciliation.</p>
+    <h3>Cash Reconciliation</h3>
+    <p>Opening auto‑fills from yesterday's closing; enter <b>Cash Deposited</b>; closing computes. (Cash Verified is officer‑only.)</p>
+    <h3>Approvals</h3>
+    <p>Approve / Reject Cancellations, Tips &amp; DJ, and Customer bills.</p>
+    <div class="rule"><b>Rejected items are excluded from all financial totals; Pending still counts.</b> Digital: Required = Closing − Opening; Variance = Reported − Required.</div>
+  </section>
+
+  <!-- MANAGER -->
+  <section class="page">
+    <span class="badge">🧑‍💼 Manager / Director</span>
+    <h1>Oversight &amp; approvals</h1>
+    <h3>Approvals</h3>
+    <ul>
+      <li><b>Approval Requests</b> — approve/reject petty cash <i>(designated approvers only)</i>.</li>
+      <li><b>Cancellations / Tips &amp; DJ / Customer Bills</b> — review By Staff / Product / Person and Approve / Reject.</li>
+    </ul>
+    <h3>Reconciliation verification (officers)</h3>
+    <p>On Cash / Digital reconciliation, enter the <b>Verified</b> figures <b>independently</b> — the cashier's opening/closing are hidden and locked; the report compares both sides.</p>
+    <h3>Configuration (if authorized)</h3>
+    <p>Departments, Categories, Payment Channels — add / rename / disable.</p>
+    <h3>Oversight</h3>
+    <p>Dashboard (all outlets, performance, top debtors) and all Reports + exports.</p>
+    <div class="rule">Approvers: <b>r.mlay@tips.co.tz</b>, <b>siyer.mkama@tips.co.tz</b>. Verification officers: owner, <b>shabinam@tips.co.tz</b>, <b>siyer.mkama@tips.co.tz</b> (+ owner‑picked).</div>
+  </section>
+
+  <!-- OWNER -->
+  <section class="page">
+    <span class="badge">👑 Owner / Admin</span>
+    <h1>Full control &amp; setup</h1>
+    <p class="sub">Log in with the owner email to get owner powers.</p>
+    <h3>One‑time access setup</h3>
+    <ul>
+      <li><b>Users (⚙️)</b> — create/edit/delete accounts, reset passwords (owner only).</li>
+      <li><b>Persons → 🔐 Manage Access</b> — pick the 3rd person manager.</li>
+      <li><b>Petty Cash → 🔐 Manage Request Access</b> — who can submit cash requests.</li>
+      <li><b>Reconciliation → 🔐 Extra verifier</b> — extra verification officer.</li>
+      <li><b>Departments / Categories / Payment Channels / Products</b> — maintain lists &amp; catalogue.</li>
+    </ul>
+    <h3>First‑time production setup (run once)</h3>
+    <ul>
+      <li>Set Vercel env: strong <code>JWT_SECRET</code>, <code>CRON_SECRET</code>, <code>NEXT_PUBLIC_OWNER_EMAIL</code>, <code>SMTP_*</code>.</li>
+      <li><code>/api/admin/seed?secret=CRON_SECRET</code> — outlets + persons.</li>
+      <li><code>/api/admin/setup-team?secret=CRON_SECRET&amp;password=&lt;TEMP&gt;</code> — staff accounts.</li>
+      <li>Share temp passwords privately; everyone changes theirs on first login.</li>
+    </ul>
+    <div class="rule">Rejected items are void (excluded from totals). Reconciliation opening carries from yesterday's closing. Money is rounded to the shilling on save.</div>
+  </section>
+</body>
+</html>
