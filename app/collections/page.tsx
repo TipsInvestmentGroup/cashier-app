@@ -19,7 +19,7 @@ const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
 
 interface Cancellation {
   id: string; reason: string; productId?: string | null; productName: string
-  sellingPrice: number; quantity: number; amount: number
+  sellingPrice: number; quantity: number; amount: number; status?: string
 }
 interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
@@ -262,7 +262,7 @@ export default function CollectionsPage() {
     { shortfall: 0, overage: 0 }
   )
   // Cancellations recorded in the period
-  const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).reduce((a, x) => a + (x.amount || 0), 0), 0)
+  const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).filter((x) => x.status !== 'REJECTED').reduce((a, x) => a + (x.amount || 0), 0), 0)
 
   return (
     <AppShell>

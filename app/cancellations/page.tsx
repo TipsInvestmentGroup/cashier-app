@@ -60,7 +60,8 @@ export default function CancellationsPage() {
     return true
   })
 
-  const total = filtered.reduce((s, c) => s + c.amount, 0)
+  // Rejected cancellations are void → excluded from the financial total
+  const total = filtered.filter((c) => c.status !== 'REJECTED').reduce((s, c) => s + c.amount, 0)
   const pending = filtered.filter((c) => c.status === 'PENDING').length
 
   // Grouped aggregation

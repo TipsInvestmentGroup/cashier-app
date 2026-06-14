@@ -11,7 +11,8 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get('type')
   const outletId = searchParams.get('outletId')
 
-  const where: Record<string, unknown> = { status: { not: 'PAID' } }
+  // Rejected bill requests are void → never a receivable
+  const where: Record<string, unknown> = { status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' } }
   if (type) where.billType = type
   if (outletId) where.outletId = outletId
 

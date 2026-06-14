@@ -4,6 +4,8 @@ import { getAuthUser } from '@/lib/auth'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
+// Roles allowed to edit/delete collections of ANY outlet; others are limited to their own.
+const CROSS_OUTLET = ['ADMIN', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR']
 
 /** Update a collection and keep its auto staff-loss (voucher SL-<id>) in sync. */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -14,6 +16,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   const existing = await prisma.dailyCollection.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
+  if (!CROSS_OUTLET.includes(user.role) && user.outletId && existing.outletId !== user.outletId) {
+    return NextResponse.json({ error: 'You can only edit collections from your own outlet' }, { status: 403 })
+  }
 
   const body = await req.json()
   const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
@@ -124,6 +129,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id } = await params
   const existing = await prisma.dailyCollection.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
+  if (!CROSS_OUTLET.includes(user.role) && user.outletId && existing.outletId !== user.outletId) {
+    return NextResponse.json({ error: 'You can only delete collections from your own outlet' }, { status: 403 })
+  }
 
   // Remove linked auto staff-loss (and its payments) first
   const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: `SL-${id}` } })

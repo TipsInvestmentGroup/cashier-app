@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   // --- People groups (Customer / Admin / Director) — different columns ---
   if (gb === 'customer' || gb === 'admin' || gb === 'director') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sWhere: any = { date: range, billType: gb.toUpperCase() }
+    const sWhere: any = { date: range, billType: gb.toUpperCase(), approvalStatus: { not: 'REJECTED' } }
     if (outletId) sWhere.outletId = outletId
 
     if (gb === 'customer') {
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
 
   const [collections, signedBills, paidBills] = await Promise.all([
     prisma.dailyCollection.findMany({ where, include: { outlet: { select: { name: true } } } }),
-    prisma.signedBill.findMany({ where, select: { serviceStaff: true, billType: true, amount: true, outlet: { select: { name: true } } } }),
+    prisma.signedBill.findMany({ where: { ...where, approvalStatus: { not: 'REJECTED' } }, select: { serviceStaff: true, billType: true, amount: true, outlet: { select: { name: true } } } }),
     prisma.paidBill.findMany({ where, select: { billRef: true, payerCategory: true, amountPaid: true, paymentMethod: true, outlet: { select: { name: true } } } }),
   ])
 

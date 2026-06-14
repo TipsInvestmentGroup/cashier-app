@@ -44,13 +44,13 @@ export async function GET(req: NextRequest) {
       _sum: { total: true },
     }),
     prisma.signedBill.aggregate({
-      where: { ...outletFilter, status: { not: 'PAID' } },
+      where: { ...outletFilter, status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' } },
       _sum: { amount: true },
       _count: true,
     }),
     prisma.signedBill.groupBy({
       by: ['personName'],
-      where: { ...outletFilter, status: { not: 'PAID' }, billType: { in: ['CUSTOMER', 'ADMIN', 'DIRECTOR'] } },
+      where: { ...outletFilter, status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' }, billType: { in: ['CUSTOMER', 'ADMIN', 'DIRECTOR'] } },
       _sum: { amount: true },
       orderBy: { _sum: { amount: 'desc' } },
       take: 5,
@@ -90,7 +90,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.signedBill.groupBy({
       by: ['outletId'],
-      where: { status: { not: 'PAID' } },
+      where: { status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' } },
       _sum: { amount: true },
     }),
   ])
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
   // Outstanding signed bills grouped by category (Admin/Director/Customer/Tips/DJ/Staff Loss)
   const byTypeRaw = await prisma.signedBill.groupBy({
     by: ['billType'],
-    where: { ...outletFilter, status: { not: 'PAID' } },
+    where: { ...outletFilter, status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' } },
     _sum: { amount: true },
   })
   const byBillType: Record<string, number> = {}

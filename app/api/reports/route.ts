@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'desc' },
     }),
     prisma.signedBill.findMany({
-      where: { ...outletFilter, date: dateFilter },
+      where: { ...outletFilter, date: dateFilter, approvalStatus: { not: 'REJECTED' } },
       include: { outlet: true, person: true },
       orderBy: { date: 'desc' },
     }),
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'desc' },
     }),
     prisma.cancellation.findMany({
-      where: { ...outletFilter, date: dateFilter },
+      where: { ...outletFilter, date: dateFilter, status: { not: 'REJECTED' } },
       include: { collection: { select: { staffName: true, outlet: { select: { name: true } } } } },
       orderBy: { date: 'desc' },
     }),

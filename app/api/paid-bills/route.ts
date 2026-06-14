@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, requireRole } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
+
+const CAN_WRITE = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -39,6 +41,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!requireRole(user, CAN_WRITE)) return NextResponse.json({ error: 'You are not authorized to record payments' }, { status: 403 })
 
   const body = await req.json()
   const { signedBillId, personId, payerName, payerCategory, categoryBillType, amountPaid, paymentMethod, notes, outletId, date, billRef } = body
