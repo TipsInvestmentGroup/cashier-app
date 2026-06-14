@@ -220,6 +220,7 @@ model Cancellation {
   collectionId String?
   collection   DailyCollection? @relation(fields: [collectionId], references: [id])
   reason       String           // Double Punch | Out of Stock | Wrong Punch
+  staffName    String?          // set directly for standalone requests (collection ones use collection.staffName)
   productId    String?
   product      Product?         @relation(fields: [productId], references: [id])
   productName  String

@@ -15,6 +15,10 @@ interface Cancellation {
   id: string; date: string; reason: string; productName: string; sellingPrice: number
   quantity: number; amount: number; status: string; approvedBy: string; staffName: string; outletName: string
 }
+interface Staff { id: string; name: string; type: string }
+interface Product { id: string; name: string; sellingPrice: number; isActive: boolean }
+const REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
+const INIT = { staffName: '', productId: '', productName: '', sellingPrice: 0, reason: 'Double Punch', quantity: '' }
 
 const STATUS_STYLE: Record<string, string> = {
   APPROVED: 'bg-green-100 text-green-700',
@@ -33,14 +37,40 @@ export default function CancellationsPage() {
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [statusFilter, setStatusFilter] = useState('')
   const [groupBy, setGroupBy] = useState<'none' | 'staff' | 'product'>('none')
+  const [staff, setStaff] = useState<Staff[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [form, setForm] = useState({ ...INIT })
 
   const canApprove = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
+  const ownerEmail = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const myEmail = (user?.email || '').toLowerCase()
+  const canCreate = user?.role === 'CASHIER' || myEmail === 'alphonce.mvungi@tips.co.tz' || (!!ownerEmail && myEmail === ownerEmail)
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setItems(await request('/api/cancellations') || []) }
-    finally { setLoading(false) }
+    try {
+      const [rows, persons, prods] = await Promise.all([request('/api/cancellations'), request('/api/persons'), request('/api/products')])
+      setItems(rows || [])
+      setStaff((persons || []).filter((p: Staff) => p.type === 'STAFF_LOSS').sort((a: Staff, b: Staff) => a.name.localeCompare(b.name)))
+      setProducts((prods || []).filter((p: Product) => p.isActive))
+    } finally { setLoading(false) }
   }, [request])
+
+  const submitRequest = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.productName) return toast.error('Select a product')
+    if (!form.quantity || Number(form.quantity) <= 0) return toast.error('Quantity must be > 0')
+    setSubmitting(true)
+    try {
+      await request('/api/cancellations', { method: 'POST', body: JSON.stringify({ ...form, quantity: Number(form.quantity) }) })
+      toast.success('Cancellation request filed')
+      setForm({ ...INIT }); setShowForm(false); load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not file request')
+    } finally { setSubmitting(false) }
+  }
 
   useEffect(() => { load() }, [load])
 
@@ -91,8 +121,57 @@ export default function CancellationsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Cancellations</h1>
             <p className="text-gray-500 text-sm">Cancellation report by staff, product and status</p>
           </div>
-          <ExportBar rows={exportRows} filename={`cancellations-${format(new Date(), 'yyyy-MM-dd')}`} title="Cancellation Report" />
+          <div className="flex gap-2 flex-wrap">
+            {canCreate && (
+              <button onClick={() => setShowForm((s) => !s)}
+                className="px-5 py-3 bg-rose-600 text-white rounded-xl font-medium hover:bg-rose-700 transition shadow">
+                ➕ Add Cancellation
+              </button>
+            )}
+            <ExportBar rows={exportRows} filename={`cancellations-${format(new Date(), 'yyyy-MM-dd')}`} title="Cancellation Report" />
+          </div>
         </div>
+
+        {showForm && canCreate && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h2 className="font-semibold text-gray-800 mb-3">🚫 New Cancellation Request</h2>
+            <form onSubmit={submitRequest} className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Staff</label>
+                <select value={form.staffName} onChange={(e) => setForm({ ...form, staffName: e.target.value })}
+                  className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white text-sm">
+                  <option value="">Select staff…</option>
+                  {staff.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Product</label>
+                <select value={form.productId} onChange={(e) => { const p = products.find((x) => x.id === e.target.value); setForm({ ...form, productId: e.target.value, productName: p?.name || '', sellingPrice: p?.sellingPrice || 0 }) }}
+                  className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white text-sm">
+                  <option value="">Select product…</option>
+                  {products.map((p) => <option key={p.id} value={p.id}>{p.name} · {formatCurrency(p.sellingPrice)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Reason</label>
+                <select value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })}
+                  className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white text-sm">
+                  {REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Qty <span className="text-gray-400 font-normal">→ {formatCurrency(form.sellingPrice * (Number(form.quantity) || 0))}</span></label>
+                <input type="number" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })}
+                  className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm" placeholder="Qty" />
+              </div>
+              <button type="submit" disabled={submitting}
+                className="py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
+                {submitting ? 'Saving…' : 'File Request'}
+              </button>
+            </form>
+            <p className="text-xs text-gray-400 mt-2">Filed as <strong>Pending</strong> — a manager/accountant approves or rejects it. {products.length === 0 && 'Add products first under Products.'}</p>
+          </div>
+        )}
 
         {/* Summary */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
