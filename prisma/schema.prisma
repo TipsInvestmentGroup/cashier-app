@@ -205,12 +205,15 @@ model Cancellation {
   sellingPrice Float            @default(0)
   quantity     Float            @default(0)
   amount       Float            @default(0) // sellingPrice * quantity
+  status       String           @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedBy   String?
   outletId     String?
   cashierId    String
   createdAt    DateTime         @default(now())
 
   @@index([collectionId])
   @@index([date])
+  @@index([status])
 }
 
 model CashRecon {
