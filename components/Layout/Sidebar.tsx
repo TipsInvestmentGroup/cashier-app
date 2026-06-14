@@ -8,26 +8,35 @@ import { cn } from '@/lib/utils'
 import { TipsLogo } from '@/components/TipsLogo'
 import toast from 'react-hot-toast'
 
+const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+
+const SECTIONS = ['Daily', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
+
 const navItems = [
-  { href: '/dashboard', icon: '📊', label: 'Dashboard', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/collections', icon: '💰', label: 'Daily Collections', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/signed-bills', icon: '📋', label: 'Signed Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/paid-bills', icon: '✅', label: 'Paid Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/petty-cash', icon: '💵', label: 'Petty Cash', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/products', icon: '📦', label: 'Products', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/cancellations', icon: '🚫', label: 'Cancellations', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/tips-dj-bills', icon: '🎁', label: 'Tips & DJ Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/customer-bills', icon: '👤', label: 'Customer Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/approvals', icon: '🗳️', label: 'Approval Requests', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/departments', icon: '🗂️', label: 'Departments', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/receivables', icon: '📈', label: 'Receivables', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/payroll', icon: '🧾', label: 'Payroll Deductions', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/reports', icon: '📄', label: 'Reports', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/persons', icon: '👥', label: 'Persons', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
-  { href: '/person-categories', icon: '🏷️', label: 'Categories', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
-  { href: '/users', icon: '⚙️', label: 'Users', roles: ['ADMIN'] },
-  { href: '/outlets', icon: '🏢', label: 'Outlets', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
-  { href: '/payment-channels', icon: '💳', label: 'Payment Channels', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
+  { href: '/dashboard', icon: '📊', label: 'Dashboard', section: 'Daily', roles: ALL },
+  { href: '/collections', icon: '💰', label: 'Daily Collections', section: 'Daily', roles: ALL },
+
+  { href: '/signed-bills', icon: '📋', label: 'Signed Bills', section: 'Bills & Requests', roles: ALL },
+  { href: '/paid-bills', icon: '✅', label: 'Paid Bills', section: 'Bills & Requests', roles: ALL },
+  { href: '/customer-bills', icon: '👤', label: 'Customer Bills', section: 'Bills & Requests', roles: ALL },
+  { href: '/tips-dj-bills', icon: '🎁', label: 'Tips & DJ Bills', section: 'Bills & Requests', roles: ALL },
+  { href: '/cancellations', icon: '🚫', label: 'Cancellations', section: 'Bills & Requests', roles: ALL },
+
+  { href: '/petty-cash', icon: '💵', label: 'Petty Cash', section: 'Petty Cash', roles: ALL },
+  { href: '/approvals', icon: '🗳️', label: 'Approval Requests', section: 'Petty Cash', roles: ALL },
+
+  { href: '/receivables', icon: '📈', label: 'Receivables', section: 'Finance', roles: MGMT },
+  { href: '/payroll', icon: '🧾', label: 'Payroll Deductions', section: 'Finance', roles: MGMT },
+  { href: '/reports', icon: '📄', label: 'Reports', section: 'Finance', roles: MGMT },
+
+  { href: '/products', icon: '📦', label: 'Products', section: 'Setup', roles: ALL },
+  { href: '/departments', icon: '🗂️', label: 'Departments', section: 'Setup', roles: ALL },
+  { href: '/person-categories', icon: '🏷️', label: 'Categories', section: 'Setup', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
+  { href: '/payment-channels', icon: '💳', label: 'Payment Channels', section: 'Setup', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
+  { href: '/persons', icon: '👥', label: 'Persons', section: 'Setup', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
+  { href: '/outlets', icon: '🏢', label: 'Outlets', section: 'Setup', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
+  { href: '/users', icon: '⚙️', label: 'Users', section: 'Setup', roles: ['ADMIN'] },
 ]
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
@@ -70,16 +79,23 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         </div>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-        {visible.map((item) => {
-          const active = pathname.startsWith(item.href)
+      <nav className="flex-1 p-3 overflow-y-auto">
+        {SECTIONS.map((sec) => {
+          const items = visible.filter((i) => i.section === sec)
+          if (items.length === 0) return null
           return (
+            <div key={sec} className="mb-2">
+              <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-indigo-400">{sec}</p>
+              <div className="space-y-1">
+                {items.map((item) => {
+                  const active = pathname.startsWith(item.href)
+                  return (
             <Link
               key={item.href}
               href={item.href}
               onClick={onClose}
               className={cn(
-                'flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all',
+                'flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all',
                 active
                   ? 'bg-white text-indigo-900 shadow-lg'
                   : 'text-indigo-200 hover:bg-indigo-700/60 hover:text-white'
@@ -88,6 +104,10 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               <span className="text-xl">{item.icon}</span>
               <span>{item.label}</span>
             </Link>
+                  )
+                })}
+              </div>
+            </div>
           )
         })}
       </nav>

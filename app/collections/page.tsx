@@ -262,7 +262,7 @@ export default function CollectionsPage() {
     { shortfall: 0, overage: 0 }
   )
   // Cancellations recorded in the period
-  const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).filter((x) => x.status !== 'REJECTED').reduce((a, x) => a + (x.amount || 0), 0), 0)
+  const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).filter((x) => x.status === 'APPROVED').reduce((a, x) => a + (x.amount || 0), 0), 0)
 
   return (
     <AppShell>

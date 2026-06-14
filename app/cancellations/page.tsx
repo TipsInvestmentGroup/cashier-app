@@ -90,8 +90,8 @@ export default function CancellationsPage() {
     return true
   })
 
-  // Rejected cancellations are void → excluded from the financial total
-  const total = filtered.filter((c) => c.status !== 'REJECTED').reduce((s, c) => s + c.amount, 0)
+  // Only APPROVED cancellations count toward the financial total (Pending awaits approval)
+  const total = filtered.filter((c) => c.status === 'APPROVED').reduce((s, c) => s + c.amount, 0)
   const pending = filtered.filter((c) => c.status === 'PENDING').length
 
   // Grouped aggregation

@@ -1,6 +1,9 @@
-import { prisma } from '@/lib/prisma'
 import { CATEGORY_TO_BILLTYPE } from '@/lib/categories'
 import { roundMoney } from '@/lib/utils'
+
+// Accepts a PrismaClient or an interactive-transaction client.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Db = any
 
 export interface AllocArgs {
   payerName: string
@@ -27,13 +30,14 @@ export interface AllocArgs {
  * Creates one PaidBill per bill it (partially) settles and keeps each linked
  * signed bill's status (UNPAID/PARTIAL/PAID) in sync.
  */
-export async function allocatePayment(a: AllocArgs) {
+export async function allocatePayment(db: Db, a: AllocArgs) {
   const type = a.categoryBillType || (a.category ? CATEGORY_TO_BILLTYPE[a.category] : undefined)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const where: any = { personName: a.payerName, status: { not: 'PAID' } }
   if (type) where.billType = type
-  const bills = a.payerName ? await prisma.signedBill.findMany({ where, orderBy: { date: 'asc' } }) : []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bills: any[] = a.payerName ? await db.signedBill.findMany({ where, orderBy: { date: 'asc' } }) : []
 
   // Selected first (in the given order), then the rest oldest-first.
   const sel = a.selectedBillIds || []
@@ -46,11 +50,11 @@ export async function allocatePayment(a: AllocArgs) {
 
   for (const b of ordered) {
     if (leftover <= 0) break
-    const agg = await prisma.paidBill.aggregate({ where: { signedBillId: b.id }, _sum: { amountPaid: true } })
+    const agg = await db.paidBill.aggregate({ where: { signedBillId: b.id }, _sum: { amountPaid: true } })
     const remaining = roundMoney(b.amount - (agg._sum.amountPaid || 0))
     if (remaining <= 0) continue
     const pay = roundMoney(Math.min(remaining, leftover))
-    await prisma.paidBill.create({
+    await db.paidBill.create({
       data: {
         signedBillId: b.id, personId: a.personId || null, payerCategory: a.category || null, payerName: a.payerName,
         amountPaid: pay, paymentMethod: a.paymentMethod, notes: a.notes || null, billRef: a.billRef || null,
@@ -58,14 +62,14 @@ export async function allocatePayment(a: AllocArgs) {
       },
     })
     const tot = (agg._sum.amountPaid || 0) + pay
-    await prisma.signedBill.update({ where: { id: b.id }, data: { status: tot >= b.amount ? 'PAID' : tot > 0 ? 'PARTIAL' : 'UNPAID' } })
+    await db.signedBill.update({ where: { id: b.id }, data: { status: tot >= b.amount ? 'PAID' : tot > 0 ? 'PARTIAL' : 'UNPAID' } })
     allocations.push({ billId: b.id, amount: pay })
     leftover = roundMoney(leftover - pay)
   }
 
   // Anything left after all bills are settled → unlinked credit
   if (leftover > 0.0001) {
-    await prisma.paidBill.create({
+    await db.paidBill.create({
       data: {
         signedBillId: null, personId: a.personId || null, payerCategory: a.category || null, payerName: a.payerName,
         amountPaid: leftover, paymentMethod: a.paymentMethod,

@@ -10,7 +10,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const outletId = searchParams.get('outletId')
+  // Cashiers are locked to their own outlet.
+  const outletId = user.role === 'CASHIER' && user.outletId ? user.outletId : searchParams.get('outletId')
   const startDate = searchParams.get('startDate')
   const endDate = searchParams.get('endDate')
 
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   // Allocate across the member's outstanding bills (selected first, then FIFO);
   // any leftover is recorded as an unlinked credit.
-  const result = await allocatePayment({
+  const result = await allocatePayment(prisma, {
     payerName, category: payerCategory || null, categoryBillType: categoryBillType || null, totalAmount: Number(amountPaid),
     selectedBillIds, paymentMethod: paymentMethod || 'CASH', outletId: usedOutletId,
     cashierId: user.userId, date: date ? new Date(date) : new Date(),

@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const type = searchParams.get('type') || 'daily'
-  const outletId = searchParams.get('outletId')
+  const outletId = user.role === 'CASHIER' ? user.outletId : searchParams.get('outletId')
   const customStart = searchParams.get('startDate')
   const customEnd = searchParams.get('endDate')
 
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'desc' },
     }),
     prisma.signedBill.findMany({
-      where: { ...outletFilter, date: dateFilter, approvalStatus: { not: 'REJECTED' } },
+      where: { ...outletFilter, date: dateFilter, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] },
       include: { outlet: true, person: true },
       orderBy: { date: 'desc' },
     }),
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'desc' },
     }),
     prisma.cancellation.findMany({
-      where: { ...outletFilter, date: dateFilter, status: { not: 'REJECTED' } },
+      where: { ...outletFilter, date: dateFilter, status: 'APPROVED' },
       include: { collection: { select: { staffName: true, outlet: { select: { name: true } } } } },
       orderBy: { date: 'desc' },
     }),

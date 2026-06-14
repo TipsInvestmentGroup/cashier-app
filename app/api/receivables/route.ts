@@ -9,10 +9,13 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const type = searchParams.get('type')
-  const outletId = searchParams.get('outletId')
+  const outletId = user.role === 'CASHIER' ? user.outletId : searchParams.get('outletId')
 
-  // Rejected bill requests are void → never a receivable
-  const where: Record<string, unknown> = { status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' } }
+  // Request-type bills (Customer/Tips/DJ) only count once APPROVED; other types aren't gated.
+  const where: Record<string, unknown> = {
+    status: { not: 'PAID' },
+    OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }],
+  }
   if (type) where.billType = type
   if (outletId) where.outletId = outletId
 

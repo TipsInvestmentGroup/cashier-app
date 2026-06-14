@@ -10,7 +10,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const outletId = searchParams.get('outletId')
+  // Cashiers are locked to their own outlet.
+  const outletId = user.role === 'CASHIER' && user.outletId ? user.outletId : searchParams.get('outletId')
   const billType = searchParams.get('billType')
   const status = searchParams.get('status')
   const startDate = searchParams.get('startDate')

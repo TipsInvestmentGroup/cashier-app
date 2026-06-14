@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const outletId = searchParams.get('outletId')
+  const outletId = user.role === 'CASHIER' ? user.outletId : searchParams.get('outletId')
   const parseD = (s: string | null) => { if (!s) return null; const p = parse(s, 'yyyy-MM-dd', new Date()); return isValid(p) ? p : null }
 
   // Accept a range (from/to) or a single day (date). Defaults to today.
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   // --- People groups (Customer / Admin / Director) — different columns ---
   if (gb === 'customer' || gb === 'admin' || gb === 'director') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sWhere: any = { date: range, billType: gb.toUpperCase(), approvalStatus: { not: 'REJECTED' } }
+    const sWhere: any = { date: range, billType: gb.toUpperCase(), OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] }
     if (outletId) sWhere.outletId = outletId
 
     if (gb === 'customer') {
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
 
   const [collections, signedBills, paidBills] = await Promise.all([
     prisma.dailyCollection.findMany({ where, include: { outlet: { select: { name: true } } } }),
-    prisma.signedBill.findMany({ where: { ...where, approvalStatus: { not: 'REJECTED' } }, select: { serviceStaff: true, billType: true, amount: true, outlet: { select: { name: true } } } }),
+    prisma.signedBill.findMany({ where: { ...where, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] }, select: { serviceStaff: true, billType: true, amount: true, outlet: { select: { name: true } } } }),
     prisma.paidBill.findMany({ where, select: { billRef: true, payerCategory: true, amountPaid: true, paymentMethod: true, outlet: { select: { name: true } } } }),
   ])
 

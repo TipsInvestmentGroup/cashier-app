@@ -17,7 +17,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const outletId = searchParams.get('outletId')
+  // Cashiers are scoped to their own outlet.
+  const outletId = user.role === 'CASHIER' ? user.outletId : searchParams.get('outletId')
 
   const items = await prisma.cancellation.findMany({
     where: outletId ? { outletId } : {},

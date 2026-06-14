@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const outletId = searchParams.get('outletId')
+  const outletId = user.role === 'CASHIER' ? user.outletId : searchParams.get('outletId')
   const parseD = (s: string | null) => { if (!s) return null; const p = parse(s, 'yyyy-MM-dd', new Date()); return isValid(p) ? p : null }
   let start = parseD(searchParams.get('from'))
   let end = parseD(searchParams.get('to'))

@@ -8,7 +8,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const outletId = searchParams.get('outletId') || user.outletId
+  // Cashiers are locked to their own outlet; managers/admin can pick any.
+  const outletId = user.role === 'CASHIER' && user.outletId ? user.outletId : (searchParams.get('outletId') || user.outletId)
 
   const now = new Date()
   const todayStart = startOfDay(now)
@@ -44,13 +45,13 @@ export async function GET(req: NextRequest) {
       _sum: { total: true },
     }),
     prisma.signedBill.aggregate({
-      where: { ...outletFilter, status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' } },
+      where: { ...outletFilter, status: { not: 'PAID' }, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] },
       _sum: { amount: true },
       _count: true,
     }),
     prisma.signedBill.groupBy({
       by: ['personName'],
-      where: { ...outletFilter, status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' }, billType: { in: ['CUSTOMER', 'ADMIN', 'DIRECTOR'] } },
+      where: { ...outletFilter, status: { not: 'PAID' }, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }], billType: { in: ['CUSTOMER', 'ADMIN', 'DIRECTOR'] } },
       _sum: { amount: true },
       orderBy: { _sum: { amount: 'desc' } },
       take: 5,
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.signedBill.groupBy({
       by: ['outletId'],
-      where: { status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' } },
+      where: { status: { not: 'PAID' }, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] },
       _sum: { amount: true },
     }),
   ])
@@ -98,7 +99,7 @@ export async function GET(req: NextRequest) {
   // Outstanding signed bills grouped by category (Admin/Director/Customer/Tips/DJ/Staff Loss)
   const byTypeRaw = await prisma.signedBill.groupBy({
     by: ['billType'],
-    where: { ...outletFilter, status: { not: 'PAID' }, approvalStatus: { not: 'REJECTED' } },
+    where: { ...outletFilter, status: { not: 'PAID' }, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] },
     _sum: { amount: true },
   })
   const byBillType: Record<string, number> = {}
