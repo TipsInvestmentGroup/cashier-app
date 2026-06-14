@@ -16,6 +16,7 @@ const navItems = [
   { href: '/products', icon: '📦', label: 'Products', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/cancellations', icon: '🚫', label: 'Cancellations', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/tips-dj-bills', icon: '🎁', label: 'Tips & DJ Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
+  { href: '/customer-bills', icon: '👤', label: 'Customer Bills', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/approvals', icon: '🗳️', label: 'Approval Requests', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/departments', icon: '🗂️', label: 'Departments', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
   { href: '/receivables', icon: '📈', label: 'Receivables', roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
