@@ -2,7 +2,6 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { TipsLogo } from '@/components/TipsLogo'
 import toast from 'react-hot-toast'
 
 export default function LoginPage() {
@@ -31,7 +30,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
           <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-8 text-white text-center">
-            <TipsLogo height={64} className="mb-3" />
+            <div className="text-5xl mb-3">🍹</div>
             <h1 className="text-2xl font-bold">Cashier Management</h1>
             <p className="text-indigo-200 text-sm mt-1">Sales & Receivables System</p>
           </div>

@@ -5,7 +5,6 @@ import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useApi } from '@/hooks/useApi'
 import { cn } from '@/lib/utils'
-import { TipsLogo } from '@/components/TipsLogo'
 import toast from 'react-hot-toast'
 
 const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -67,7 +66,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-indigo-900 to-indigo-800 text-white w-64">
       <div className="p-6 border-b border-indigo-700">
-        <TipsLogo height={40} className="!mx-0 mb-2" />
+        <div className="text-3xl mb-1">🍹</div>
         <h1 className="text-lg font-bold leading-tight">Cashier Manager</h1>
         <p className="text-indigo-300 text-xs mt-1">{user?.outlet?.name || 'All Outlets'}</p>
       </div>
