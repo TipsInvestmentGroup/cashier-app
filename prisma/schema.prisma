@@ -99,6 +99,8 @@ model SignedBill {
   description   String?
   dueDate       DateTime?
   status        String     @default("UNPAID")
+  approvalStatus String    @default("PENDING") // PENDING | APPROVED | REJECTED (used for Tips/DJ bill requests)
+  approvedBy    String?
   outletId      String
   outlet        Outlet     @relation(fields: [outletId], references: [id])
   cashierId     String
