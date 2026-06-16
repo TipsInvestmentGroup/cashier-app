@@ -29,3 +29,31 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Print: show only the report area (used by the Cashier Daily Report). */
+@media print {
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  .print-area {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+  }
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+}

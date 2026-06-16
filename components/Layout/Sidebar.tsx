@@ -15,6 +15,7 @@ const SECTIONS = ['Daily', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup']
 const navItems = [
   { href: '/dashboard', icon: '📊', label: 'Dashboard', section: 'Daily', roles: ALL },
   { href: '/collections', icon: '💰', label: 'Daily Collections', section: 'Daily', roles: ALL },
+  { href: '/daily-report', icon: '📑', label: 'Daily Report', section: 'Daily', roles: ALL },
 
   { href: '/signed-bills', icon: '📋', label: 'Signed Bills', section: 'Bills & Requests', roles: ALL },
   { href: '/paid-bills', icon: '✅', label: 'Paid Bills', section: 'Bills & Requests', roles: ALL },
