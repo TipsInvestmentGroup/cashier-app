@@ -1,0 +1,1024 @@
+[
+  {
+    "code": "TIPS-VG-0050",
+    "name": "Absolut 750ml",
+    "category": "Vodka & Gin",
+    "buyingPrice": 41949.15,
+    "sellingPrice": 100000
+  },
+  {
+    "code": "TIPS-LC-0052",
+    "name": "Amarula 750ml",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 25423.73,
+    "sellingPrice": 80000
+  },
+  {
+    "code": "TIPS-LC-0444",
+    "name": "Angostura Amaro 700ML",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 33474.58,
+    "sellingPrice": 100000
+  },
+  {
+    "code": "TIPS-LC-0054",
+    "name": "Baileys 750ml",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 34915.25,
+    "sellingPrice": 80000
+  },
+  {
+    "code": "TIPS-WK-0055",
+    "name": "Ballantine 750ml",
+    "category": "Whiskey",
+    "buyingPrice": 39406.77,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-BE-0102",
+    "name": "Bavaria",
+    "category": "Beers",
+    "buyingPrice": 2144.79,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-CH-0659",
+    "name": "Belaire Lux Rose",
+    "category": "Champagne",
+    "buyingPrice": 93220.34,
+    "sellingPrice": 220000
+  },
+  {
+    "code": "TIPS-CH-0657",
+    "name": "Belaire Rare Luxe",
+    "category": "Champagne",
+    "buyingPrice": 105932.2,
+    "sellingPrice": 220000
+  },
+  {
+    "code": "TIPS-VG-0154",
+    "name": "Belvedere vodka 70cl",
+    "category": "Vodka & Gin",
+    "buyingPrice": 77457.63,
+    "sellingPrice": 180000
+  },
+  {
+    "code": "TIPS-SD-0103",
+    "name": "Bitter Lemon",
+    "category": "Soft Drinks",
+    "buyingPrice": 473.17,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-BE-0611",
+    "name": "Brutal Fruit 275ml",
+    "category": "Beers",
+    "buyingPrice": 2761.92,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-LC-0439",
+    "name": "BUMBU",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 84745.76,
+    "sellingPrice": 200000
+  },
+  {
+    "code": "TIPS-CI-0291",
+    "name": "camel white",
+    "category": "Cigarettes",
+    "buyingPrice": 3732.2,
+    "sellingPrice": 12000
+  },
+  {
+    "code": "TIPS-LC-0056",
+    "name": "Captain Morgan Dark",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 26271.18,
+    "sellingPrice": 80000
+  },
+  {
+    "code": "TIPS-LC-0057",
+    "name": "Captain Morgan spice Gold",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 22145.41,
+    "sellingPrice": 80000
+  },
+  {
+    "code": "TIPS-LC-0618",
+    "name": "Casamigos blanco 75cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 110169.49,
+    "sellingPrice": 280000
+  },
+  {
+    "code": "TIPS-LC-0613",
+    "name": "Casamigos Reposado 70cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 139830.51,
+    "sellingPrice": 300000
+  },
+  {
+    "code": "TIPS-BE-0002",
+    "name": "Castle Lager",
+    "category": "Beers",
+    "buyingPrice": 1610.17,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-BE-0003",
+    "name": "Castle Lite",
+    "category": "Beers",
+    "buyingPrice": 1688.03,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-SD-0104",
+    "name": "Ceres Juice (Box)",
+    "category": "Soft Drinks",
+    "buyingPrice": 3802.73,
+    "sellingPrice": 10000
+  },
+  {
+    "code": "TIPS-SD-0105",
+    "name": "Coca Cola",
+    "category": "Soft Drinks",
+    "buyingPrice": 537.56,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-BE-0417",
+    "name": "Corona Extra",
+    "category": "Beers",
+    "buyingPrice": 2592.46,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-SD-0106",
+    "name": "Cranberry Juice",
+    "category": "Soft Drinks",
+    "buyingPrice": 4536.8,
+    "sellingPrice": 10000
+  },
+  {
+    "code": "TIPS-SD-0546",
+    "name": "Cranbery Ocean spary 1L",
+    "category": "Soft Drinks",
+    "buyingPrice": 6070.16,
+    "sellingPrice": 15000
+  },
+  {
+    "code": "TIPS-SD-0411",
+    "name": "Dasani 500ml",
+    "category": "Soft Drinks",
+    "buyingPrice": 452.06,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-BE-0004",
+    "name": "Desperado",
+    "category": "Beers",
+    "buyingPrice": 2776.76,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-LC-0675",
+    "name": "Don Julio Anejo 75cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 207627.0,
+    "sellingPrice": 400000
+  },
+  {
+    "code": "TIPS-LC-0604",
+    "name": "Don Julio Anel 1942 75cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 673729.0,
+    "sellingPrice": 1500000
+  },
+  {
+    "code": "TIPS-LC-0601",
+    "name": "Don Julio Reposado 75cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 165254.03,
+    "sellingPrice": 350000
+  },
+  {
+    "code": "TIPS-CI-0312",
+    "name": "EMBASSY CLICK",
+    "category": "Cigarettes",
+    "buyingPrice": 5490.54,
+    "sellingPrice": 12000
+  },
+  {
+    "code": "TIPS-CI-0020",
+    "name": "Embassy Kings",
+    "category": "Cigarettes",
+    "buyingPrice": 4886.01,
+    "sellingPrice": 12000
+  },
+  {
+    "code": "TIPS-CI-0021",
+    "name": "Embassy Light",
+    "category": "Cigarettes",
+    "buyingPrice": 4661.02,
+    "sellingPrice": 12000
+  },
+  {
+    "code": "TIPS-SD-0107",
+    "name": "Fanta",
+    "category": "Soft Drinks",
+    "buyingPrice": 519.41,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-BE-0440",
+    "name": "Flying Fish",
+    "category": "Beers",
+    "buyingPrice": 1652.54,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-WN-0287",
+    "name": "Four Cousin Sweet Red 75cl",
+    "category": "Wine",
+    "buyingPrice": 14528.26,
+    "sellingPrice": 35000
+  },
+  {
+    "code": "TIPS-WN-0416",
+    "name": "Four Cousin Sweet Rose 75cl",
+    "category": "Wine",
+    "buyingPrice": 14406.77,
+    "sellingPrice": 35000
+  },
+  {
+    "code": "TIPS-WN-0130",
+    "name": "Four Cousin Sweet White 75cl",
+    "category": "Wine",
+    "buyingPrice": 14344.18,
+    "sellingPrice": 35000
+  },
+  {
+    "code": "TIPS-WN-0150",
+    "name": "Four Cousins Sweet Red 1.5Lt",
+    "category": "Wine",
+    "buyingPrice": 28333.33,
+    "sellingPrice": 60000
+  },
+  {
+    "code": "TIPS-WN-0455",
+    "name": "Four Cousins Sweet Rose 1.5Lt",
+    "category": "Wine",
+    "buyingPrice": 29449.15,
+    "sellingPrice": 60000
+  },
+  {
+    "code": "TIPS-WN-0149",
+    "name": "Four Cousins Sweet White 1.5Lt",
+    "category": "Wine",
+    "buyingPrice": 27743.37,
+    "sellingPrice": 60000
+  },
+  {
+    "code": "TIPS-WN-0571",
+    "name": "Franco's Sweet Red 75cl",
+    "category": "Wine",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 35000
+  },
+  {
+    "code": "TIPS-WN-0583",
+    "name": "Franco's sweet Rose 75cl",
+    "category": "Wine",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 35000
+  },
+  {
+    "code": "TIPS-WN-0572",
+    "name": "Franco's sweet white 75cl",
+    "category": "Wine",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 35000
+  },
+  {
+    "code": "TIPS-CH-0584",
+    "name": "Freixenet NonAlcoholic White 75cl",
+    "category": "Champagne",
+    "buyingPrice": 24152.54,
+    "sellingPrice": 60000
+  },
+  {
+    "code": "TIPS-WK-0059",
+    "name": "Glenfiddich 12yrs",
+    "category": "Whiskey",
+    "buyingPrice": 97457.63,
+    "sellingPrice": 250000
+  },
+  {
+    "code": "TIPS-WK-0060",
+    "name": "Glenfiddich 18YRS",
+    "category": "Whiskey",
+    "buyingPrice": 245762.71,
+    "sellingPrice": 450000
+  },
+  {
+    "code": "TIPS-VG-0062",
+    "name": "Gordons 750ml",
+    "category": "Vodka & Gin",
+    "buyingPrice": 33583.53,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-VG-0666",
+    "name": "Gordons Gin and Tonic 330ml",
+    "category": "Vodka & Gin",
+    "buyingPrice": 3559.32,
+    "sellingPrice": 8000
+  },
+  {
+    "code": "TIPS-VG-0661",
+    "name": "Gordons lemon 75cl",
+    "category": "Vodka & Gin",
+    "buyingPrice": 25423.73,
+    "sellingPrice": 80000
+  },
+  {
+    "code": "TIPS-VG-0662",
+    "name": "Gordons pink 75cl",
+    "category": "Vodka & Gin",
+    "buyingPrice": 32203.39,
+    "sellingPrice": 80000
+  },
+  {
+    "code": "TIPS-VG-0667",
+    "name": "Gordons Pink and Tonic 330ml",
+    "category": "Vodka & Gin",
+    "buyingPrice": 3559.32,
+    "sellingPrice": 8000
+  },
+  {
+    "code": "TIPS-WK-0065",
+    "name": "Grants 750ml",
+    "category": "Whiskey",
+    "buyingPrice": 25659.13,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-BE-0005",
+    "name": "Guiness lager",
+    "category": "Beers",
+    "buyingPrice": 1491.2,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-BE-0679",
+    "name": "Guiness Lager Promo",
+    "category": "Beers",
+    "buyingPrice": 1840.0,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-BE-0429",
+    "name": "Guiness Smooth",
+    "category": "Beers",
+    "buyingPrice": 1559.32,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-BE-0621",
+    "name": "Guiness smooth Bucket - 5",
+    "category": "Beers",
+    "buyingPrice": 8474.58,
+    "sellingPrice": 20000
+  },
+  {
+    "code": "TIPS-BE-0680",
+    "name": "Heineken 0.0",
+    "category": "Beers",
+    "buyingPrice": 2612.99,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-BE-0006",
+    "name": "Heineken lager 330ml",
+    "category": "Beers",
+    "buyingPrice": 2701.61,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-BE-0620",
+    "name": "Heineken Silver 330ml",
+    "category": "Beers",
+    "buyingPrice": 2257.87,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-VG-0145",
+    "name": "Hendricks",
+    "category": "Vodka & Gin",
+    "buyingPrice": 81949.15,
+    "sellingPrice": 180000
+  },
+  {
+    "code": "TIPS-LC-0068",
+    "name": "Hennessy VS 70 cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 80508.47,
+    "sellingPrice": 180000
+  },
+  {
+    "code": "TIPS-LC-0069",
+    "name": "Hennessy VSOP 70 cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 136102.97,
+    "sellingPrice": 300000
+  },
+  {
+    "code": "TIPS-LC-0320",
+    "name": "Hennessy XO",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 614406.78,
+    "sellingPrice": 1400000
+  },
+  {
+    "code": "TIPS-BE-0522",
+    "name": "Hunters Gold 330ml",
+    "category": "Beers",
+    "buyingPrice": 3001.41,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-CH-0645",
+    "name": "Ice Tropez 35cl",
+    "category": "Champagne",
+    "buyingPrice": 11016.95,
+    "sellingPrice": 20000
+  },
+  {
+    "code": "TIPS-LC-0070",
+    "name": "Jagermeister 750ML",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 32203.39,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-WK-0072",
+    "name": "Jameson 750ml",
+    "category": "Whiskey",
+    "buyingPrice": 51135.27,
+    "sellingPrice": 120000
+  },
+  {
+    "code": "TIPS-WK-0434",
+    "name": "JAMESON BLACK BARREL",
+    "category": "Whiskey",
+    "buyingPrice": 88983.05,
+    "sellingPrice": 180000
+  },
+  {
+    "code": "TIPS-WK-0612",
+    "name": "JD Apple 70cl",
+    "category": "Whiskey",
+    "buyingPrice": 53390.19,
+    "sellingPrice": 130000
+  },
+  {
+    "code": "TIPS-WK-0413",
+    "name": "JD Fire 700ml",
+    "category": "Whiskey",
+    "buyingPrice": 53707.96,
+    "sellingPrice": 130000
+  },
+  {
+    "code": "TIPS-WK-0076",
+    "name": "JD Gentlemen 70cl",
+    "category": "Whiskey",
+    "buyingPrice": 82203.39,
+    "sellingPrice": 200000
+  },
+  {
+    "code": "TIPS-WK-0078",
+    "name": "JD Honey 700ml",
+    "category": "Whiskey",
+    "buyingPrice": 53704.95,
+    "sellingPrice": 130000
+  },
+  {
+    "code": "TIPS-WK-0075",
+    "name": "JD Old 700ml",
+    "category": "Whiskey",
+    "buyingPrice": 52050.54,
+    "sellingPrice": 130000
+  },
+  {
+    "code": "TIPS-WK-0081",
+    "name": "JW Black Label 75 Cl",
+    "category": "Whiskey",
+    "buyingPrice": 63050.85,
+    "sellingPrice": 180000
+  },
+  {
+    "code": "TIPS-WK-0660",
+    "name": "Jw blonde 75cl",
+    "category": "Whiskey",
+    "buyingPrice": 46610.17,
+    "sellingPrice": 120000
+  },
+  {
+    "code": "TIPS-WK-0082",
+    "name": "JW DoubleBlack 1L",
+    "category": "Whiskey",
+    "buyingPrice": 114406.78,
+    "sellingPrice": 250000
+  },
+  {
+    "code": "TIPS-WK-0441",
+    "name": "JW Gold label 750ml",
+    "category": "Whiskey",
+    "buyingPrice": 139830.51,
+    "sellingPrice": 280000
+  },
+  {
+    "code": "TIPS-WK-0085",
+    "name": "JW RedLabel 750ml",
+    "category": "Whiskey",
+    "buyingPrice": 30587.92,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-VG-0091",
+    "name": "K-vant 200ml",
+    "category": "Vodka & Gin",
+    "buyingPrice": 3363.04,
+    "sellingPrice": 10000
+  },
+  {
+    "code": "TIPS-BE-0007",
+    "name": "Kilimanjaro Lager",
+    "category": "Beers",
+    "buyingPrice": 1452.33,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-BE-0462",
+    "name": "Kilimanjaro Lite",
+    "category": "Beers",
+    "buyingPrice": 1765.54,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-VG-0088",
+    "name": "Konyagi Ndogo",
+    "category": "Vodka & Gin",
+    "buyingPrice": 3194.64,
+    "sellingPrice": 10000
+  },
+  {
+    "code": "TIPS-WN-0383",
+    "name": "KWV Cab/Sav - Red",
+    "category": "Wine",
+    "buyingPrice": 28389.83,
+    "sellingPrice": 60000
+  },
+  {
+    "code": "TIPS-WN-0384",
+    "name": "KWV Sav/Blanc - White",
+    "category": "Wine",
+    "buyingPrice": 24576.27,
+    "sellingPrice": 60000
+  },
+  {
+    "code": "TIPS-CH-0658",
+    "name": "Luc Belaire Gold",
+    "category": "Champagne",
+    "buyingPrice": 93220.34,
+    "sellingPrice": 220000
+  },
+  {
+    "code": "TIPS-LC-0454",
+    "name": "Martel Blue Swift",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 194915.25,
+    "sellingPrice": 380000
+  },
+  {
+    "code": "TIPS-LC-0093",
+    "name": "Martell VS 70cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 97457.63,
+    "sellingPrice": 220000
+  },
+  {
+    "code": "TIPS-LC-0655",
+    "name": "Martell VSOP 70cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 165254.24,
+    "sellingPrice": 380000
+  },
+  {
+    "code": "TIPS-WN-0391",
+    "name": "Martini Rose",
+    "category": "Wine",
+    "buyingPrice": 35593.22,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-CH-0131",
+    "name": "Moet and chandon Imperial BRUT",
+    "category": "Champagne",
+    "buyingPrice": 127602.91,
+    "sellingPrice": 300000
+  },
+  {
+    "code": "TIPS-CH-0485",
+    "name": "Moet and chandon Nectar Imperial",
+    "category": "Champagne",
+    "buyingPrice": 155190.88,
+    "sellingPrice": 350000
+  },
+  {
+    "code": "TIPS-CH-0132",
+    "name": "Moet and Chandon Nectar Imperial ROSE",
+    "category": "Champagne",
+    "buyingPrice": 184142.49,
+    "sellingPrice": 380000
+  },
+  {
+    "code": "TIPS-CH-0414",
+    "name": "MOET Nectar Imperial Rose luminous",
+    "category": "Champagne",
+    "buyingPrice": 169491.53,
+    "sellingPrice": 400000
+  },
+  {
+    "code": "TIPS-WN-0608",
+    "name": "Nederberg chardonnay 75cl",
+    "category": "Wine",
+    "buyingPrice": 22457.63,
+    "sellingPrice": 60000
+  },
+  {
+    "code": "TIPS-WN-0607",
+    "name": "Nederburg Shiraz 70cl",
+    "category": "Wine",
+    "buyingPrice": 27966.1,
+    "sellingPrice": 60000
+  },
+  {
+    "code": "TIPS-LC-0148",
+    "name": "Olmeca Silver tequila 75cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 48954.78,
+    "sellingPrice": 100000
+  },
+  {
+    "code": "TIPS-LC-0521",
+    "name": "Olmeca Tequila Gold 750ml",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 50423.73,
+    "sellingPrice": 100000
+  },
+  {
+    "code": "TIPS-LC-0519",
+    "name": "Olmelca Dark Chocolate Tequila 75cl",
+    "category": "Liquor/Cognac/Tequila",
+    "buyingPrice": 45762.71,
+    "sellingPrice": 100000
+  },
+  {
+    "code": "TIPS-WN-0133",
+    "name": "PearlyBay - RED",
+    "category": "Wine",
+    "buyingPrice": 15758.52,
+    "sellingPrice": 35000
+  },
+  {
+    "code": "TIPS-WN-0135",
+    "name": "PearlyBay - WHITE",
+    "category": "Wine",
+    "buyingPrice": 15337.77,
+    "sellingPrice": 35000
+  },
+  {
+    "code": "TIPS-SD-0112",
+    "name": "Redbull",
+    "category": "Soft Drinks",
+    "buyingPrice": 2524.1,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-BE-0009",
+    "name": "Safari Lager",
+    "category": "Beers",
+    "buyingPrice": 1252.15,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-BE-0010",
+    "name": "Savannah",
+    "category": "Beers",
+    "buyingPrice": 2718.99,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-BE-0677",
+    "name": "Serengeti Apple 330ml",
+    "category": "Beers",
+    "buyingPrice": 2330.51,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-BE-0011",
+    "name": "Serengeti lager 330ml",
+    "category": "Beers",
+    "buyingPrice": 1736.67,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-BE-0587",
+    "name": "Serengeti Lemon 330ml",
+    "category": "Beers",
+    "buyingPrice": 1652.54,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-BE-0012",
+    "name": "Serengeti Lite 330ml",
+    "category": "Beers",
+    "buyingPrice": 1394.46,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-SH-0629",
+    "name": "Shisha - Double Apple",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0627",
+    "name": "Shisha - Gum",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0641",
+    "name": "Shisha - Gum and mint",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0625",
+    "name": "Shisha - Love 66",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0636",
+    "name": "Shisha - Love 66 and Mint",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0624",
+    "name": "Shisha - Mint",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0639",
+    "name": "Shisha - Peach and Mint",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0638",
+    "name": "Shisha - Strawberry and Mint",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0630",
+    "name": "Shisha - Strawbery",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0635",
+    "name": "Shisha - Strong Mint",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0628",
+    "name": "Shisha - Watermelon",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0643",
+    "name": "Shisha - Watermelon and Love 66",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-SH-0637",
+    "name": "Shisha - Watermelon and mint",
+    "category": "SHISHA",
+    "buyingPrice": 12711.86,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-ST-0048",
+    "name": "SHOT - Jagermeister",
+    "category": "Shots",
+    "buyingPrice": 2638.03,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-ST-0038",
+    "name": "SHOT - Tequila",
+    "category": "Shots",
+    "buyingPrice": 1000.91,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-WK-0582",
+    "name": "Singleton 75cl 15yrs",
+    "category": "Whiskey",
+    "buyingPrice": 139831.0,
+    "sellingPrice": 250000
+  },
+  {
+    "code": "TIPS-WK-0665",
+    "name": "Singleton 75cl 18 yrs",
+    "category": "Whiskey",
+    "buyingPrice": 211864.41,
+    "sellingPrice": 350000
+  },
+  {
+    "code": "TIPS-WK-0609",
+    "name": "Singletone 70cl - 12yrs",
+    "category": "Whiskey",
+    "buyingPrice": 72033.9,
+    "sellingPrice": 180000
+  },
+  {
+    "code": "TIPS-BE-0013",
+    "name": "Smirnoff Balck Ice",
+    "category": "Beers",
+    "buyingPrice": 2305.59,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-BE-0593",
+    "name": "Smirnoff Guarana",
+    "category": "Beers",
+    "buyingPrice": 2237.29,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-BE-0594",
+    "name": "Smirnoff Pinaple",
+    "category": "Beers",
+    "buyingPrice": 3008.23,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-SD-0113",
+    "name": "Soda Water",
+    "category": "Soft Drinks",
+    "buyingPrice": 558.95,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-SD-0114",
+    "name": "Sprite",
+    "category": "Soft Drinks",
+    "buyingPrice": 588.37,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-SD-0399",
+    "name": "sprite take away",
+    "category": "Soft Drinks",
+    "buyingPrice": 734.5,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-BE-0664",
+    "name": "Stella Artois 330ml",
+    "category": "Beers",
+    "buyingPrice": 2471.75,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-SD-0115",
+    "name": "Stone Tangawizi",
+    "category": "Soft Drinks",
+    "buyingPrice": 465.25,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-SD-0398",
+    "name": "stone Tangawizi take away",
+    "category": "Soft Drinks",
+    "buyingPrice": 734.5,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-SD-0545",
+    "name": "Switch booster",
+    "category": "Soft Drinks",
+    "buyingPrice": 3107.34,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-VG-0547",
+    "name": "Switch booster lemon and ginger",
+    "category": "Vodka & Gin",
+    "buyingPrice": 3107.34,
+    "sellingPrice": 6000
+  },
+  {
+    "code": "TIPS-VG-0476",
+    "name": "Tanqueray Gin 75cl",
+    "category": "Vodka & Gin",
+    "buyingPrice": 44067.79,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-SD-0117",
+    "name": "Tonic Water",
+    "category": "Soft Drinks",
+    "buyingPrice": 257.54,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-SD-0600",
+    "name": "Tonic Water Takeaway",
+    "category": "Soft Drinks",
+    "buyingPrice": 706.24,
+    "sellingPrice": 2000
+  },
+  {
+    "code": "TIPS-CH-0590",
+    "name": "Victor Rose 20cl",
+    "category": "Champagne",
+    "buyingPrice": 21186.44,
+    "sellingPrice": 50000
+  },
+  {
+    "code": "TIPS-WN-0674",
+    "name": "Waymaker Merlot 75cl",
+    "category": "Wine",
+    "buyingPrice": 20338.98,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-WN-0671",
+    "name": "Waymaker Sparkilne Rose 75cl",
+    "category": "Wine",
+    "buyingPrice": 33050.85,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-WN-0672",
+    "name": "Waymaker Sparkline Demi Sec 75cl",
+    "category": "Wine",
+    "buyingPrice": 33050.85,
+    "sellingPrice": 90000
+  },
+  {
+    "code": "TIPS-WN-0673",
+    "name": "Waymaker Sweet white 75cl",
+    "category": "Wine",
+    "buyingPrice": 20338.98,
+    "sellingPrice": 40000
+  },
+  {
+    "code": "TIPS-BE-0619",
+    "name": "Whitecap Crisp 330ml",
+    "category": "Beers",
+    "buyingPrice": 2440.68,
+    "sellingPrice": 5000
+  },
+  {
+    "code": "TIPS-BE-0016",
+    "name": "Windhoek",
+    "category": "Beers",
+    "buyingPrice": 2744.8,
+    "sellingPrice": 6000
+  }
+]
