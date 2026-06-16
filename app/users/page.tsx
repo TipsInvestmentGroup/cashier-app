@@ -30,6 +30,14 @@ export default function UsersPage() {
   const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && (user?.email || '').toLowerCase() === OWNER_EMAIL
 
+  const load = useCallback(async () => {
+    setLoading(true)
+    const [u, o] = await Promise.all([request('/api/users'), request('/api/outlets')])
+    setUsers(u); setOutlets(o); setLoading(false)
+  }, [request])
+
+  useEffect(() => { load() }, [load])
+
   if (user?.role !== 'ADMIN' && !isOwner) return (
     <AppShell>
       <div className="flex items-center justify-center h-64">
@@ -40,14 +48,6 @@ export default function UsersPage() {
       </div>
     </AppShell>
   )
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const [u, o] = await Promise.all([request('/api/users'), request('/api/outlets')])
-    setUsers(u); setOutlets(o); setLoading(false)
-  }, [request])
-
-  useEffect(() => { load() }, [load])
 
   const resetForm = () => setForm({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true })
 
