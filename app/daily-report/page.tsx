@@ -54,6 +54,117 @@ export default function DailyReportPage() {
 
   useEffect(() => { load() }, [load])
 
+  const [busy, setBusy] = useState(false)
+
+  // Build a clean one-page PDF (Blob) from the report — mirrors the on-screen layout.
+  const buildPdf = async (d: ReportData) => {
+    const { jsPDF } = await import('jspdf')
+    const autoTable = (await import('jspdf-autotable')).default
+    const doc = new jsPDF()
+    const W = doc.internal.pageSize.getWidth()
+    const n = (v: number) => Number(v).toLocaleString('en-US')
+
+    // Header band
+    doc.setFillColor(79, 70, 229); doc.rect(0, 0, W, 28, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(20); doc.setFont('helvetica', 'bold'); doc.text('tips', 14, 14)
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal'); doc.text('CASHIER DAILY REPORT', 14, 22)
+    doc.setFontSize(10)
+    doc.text(d.outletName, W - 14, 12, { align: 'right' })
+    doc.text(format(new Date(d.date), 'EEEE, dd MMM yyyy'), W - 14, 18, { align: 'right' })
+    doc.text(`By: ${d.generatedBy || '—'}`, W - 14, 24, { align: 'right' })
+    doc.setTextColor(31, 41, 55)
+
+    const base = {
+      theme: 'grid' as const, styles: { fontSize: 9 },
+      headStyles: { fillColor: [79, 70, 229] as [number, number, number] },
+      margin: { left: 14, right: 14 }, columnStyles: { 1: { halign: 'right' as const } },
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const afterY = () => (doc as any).lastAutoTable.finalY + 5
+    const foot = (rgb: [number, number, number], white = false) => ({ fillColor: rgb, textColor: (white ? [255, 255, 255] : [31, 41, 55]) as [number, number, number], fontStyle: 'bold' as const })
+
+    autoTable(doc, {
+      ...base, startY: 34,
+      head: [['COLLECTION (SALES)', 'TZS']],
+      body: [
+        ['System Sales', n(d.collection.systemSales)],
+        ['Cash', n(d.collection.cash)],
+        ['Lipa Hapa — CRDB', n(d.collection.crdb)],
+        ['Stanbic', n(d.collection.stanbic)],
+        ['M-PESA', n(d.collection.mpesa)],
+        ['Variance (Collected − System)', n(d.collection.variance)],
+      ],
+      foot: [['TOTAL COLLECTED', n(d.collection.total)]], footStyles: foot([238, 242, 255]),
+    })
+    autoTable(doc, {
+      ...base, startY: afterY(),
+      head: [['SIGNED BILLS', 'TYPE', 'TZS']], columnStyles: { 2: { halign: 'right' } },
+      body: d.signed.rows.length ? d.signed.rows.map((r) => [`${r.name}${r.staff ? ` — ${r.staff}` : ''}`, SIGNED_LABELS[r.type] || r.type, n(r.amount)]) : [['No signed bills', '', '0']],
+      foot: [['TOTAL SIGNED BILLS', '', n(d.signed.total)]], footStyles: foot([255, 247, 237]),
+    })
+    autoTable(doc, {
+      ...base, startY: afterY(),
+      head: [['PAID BILLS (DEBTS COLLECTED)', 'METHOD', 'TZS']], columnStyles: { 2: { halign: 'right' } },
+      body: d.paid.rows.length ? d.paid.rows.map((r) => [`${r.name}${r.category ? ` (${r.category})` : ''}`, r.method, n(r.amount)]) : [['No paid bills', '', '0']],
+      foot: [['TOTAL PAID BILLS', '', n(d.paid.total)]], footStyles: foot([236, 253, 245]),
+    })
+    if (d.cancellations.rows.length) {
+      autoTable(doc, {
+        ...base, startY: afterY(),
+        head: [['CANCELLATIONS', 'QTY', 'TZS']], columnStyles: { 2: { halign: 'right' } },
+        body: d.cancellations.rows.map((r) => [`${r.product}${r.staff ? ` — ${r.staff}` : ''}`, String(r.qty), n(r.amount)]),
+        foot: [['TOTAL CANCELLATIONS', '', n(d.cancellations.total)]], footStyles: foot([255, 241, 242]),
+      })
+    }
+    autoTable(doc, {
+      ...base, startY: afterY(),
+      head: [['PETTY CASH / EXPENSES', 'STATUS', 'TZS']], columnStyles: { 2: { halign: 'right' } },
+      body: d.pettyCash.rows.length ? d.pettyCash.rows.map((r) => [`${r.purpose}${r.by ? ` — ${r.by}` : ''}`, r.status, n(r.amount)]) : [['No petty cash', '', '0']],
+      foot: [['TOTAL PETTY CASH', '', n(d.pettyCash.total)]], footStyles: foot([240, 253, 244]),
+    })
+    autoTable(doc, {
+      ...base, startY: afterY(),
+      head: [['SUMMARY', 'TZS']],
+      body: [['Approved Petty Cash Paid Out', n(d.pettyCash.approved)]],
+      foot: [['CASH IN HAND', n(d.cashInHand)]], footStyles: foot([79, 70, 229], true),
+    })
+    doc.setFontSize(8); doc.setTextColor(150)
+    doc.text(`Generated ${format(new Date(), 'dd MMM yyyy HH:mm')} · tips Cashier Management`, 14, doc.internal.pageSize.getHeight() - 8)
+    return doc
+  }
+
+  const fileName = (d: ReportData) => `tips-daily-${d.outletName.replace(/\s+/g, '-')}-${format(new Date(d.date), 'yyyy-MM-dd')}.pdf`
+
+  // One-tap share via the phone's native share sheet (→ WhatsApp); falls back to download.
+  const shareReport = async () => {
+    if (!data) return
+    setBusy(true)
+    try {
+      const doc = await buildPdf(data)
+      const blob = doc.output('blob')
+      const file = new File([blob], fileName(data), { type: 'application/pdf' })
+      const nav = navigator as Navigator & { canShare?: (d?: ShareData) => boolean }
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await nav.share({ files: [file], title: 'tips Daily Report', text: `Daily Report — ${data.outletName}, ${format(new Date(data.date), 'dd MMM yyyy')}` })
+      } else {
+        doc.save(fileName(data))
+        toast.success('PDF downloaded — share it in WhatsApp')
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') return // user cancelled the share sheet
+      toast.error(err instanceof Error ? err.message : 'Could not share report')
+    } finally { setBusy(false) }
+  }
+
+  const downloadReport = async () => {
+    if (!data) return
+    setBusy(true)
+    try { (await buildPdf(data)).save(fileName(data)); toast.success('PDF downloaded') }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not build PDF') }
+    finally { setBusy(false) }
+  }
+
   const money = (n: number) => formatCurrency(n)
   const prettyDate = data ? format(new Date(data.date), 'EEEE, dd MMMM yyyy') : ''
 
@@ -82,15 +193,23 @@ export default function DailyReportPage() {
                 </select>
               </div>
             )}
+            <button onClick={shareReport} disabled={!data || busy}
+              className="px-5 py-2.5 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition shadow disabled:opacity-50">
+              {busy ? 'Preparing…' : '📲 Share to WhatsApp'}
+            </button>
+            <button onClick={downloadReport} disabled={!data || busy}
+              className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow disabled:opacity-50">
+              📥 PDF
+            </button>
             <button onClick={() => window.print()} disabled={!data}
-              className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow disabled:opacity-50">
-              📥 Download / Print
+              className="px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition disabled:opacity-50">
+              🖨 Print
             </button>
           </div>
         </div>
 
         <p className="no-print text-xs text-gray-400">
-          Tip: click <b>Download / Print</b> → choose <b>“Save as PDF”</b>, then share the PDF in the WhatsApp group.
+          Tap <b>📲 Share to WhatsApp</b> on your phone to send the PDF straight to the directors&apos; group. On a computer, use <b>📥 PDF</b> to download, or <b>🖨 Print</b> → “Save as PDF”.
         </p>
 
         {loading && <div className="py-16 text-center text-gray-400">Loading report…</div>}
