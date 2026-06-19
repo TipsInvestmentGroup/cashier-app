@@ -1,0 +1,412 @@
+'use client'
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter, useParams } from 'next/navigation'
+import { AppShell } from '@/components/Layout/AppShell'
+import { useAuth } from '@/contexts/AuthContext'
+
+const COUNTER_LABELS: Record<string, string> = {
+  MAIN: '🍹 Main', BAR: '🍺 Bar', SHISHA: '💨 Shisha', KITCHEN: '🍽 Kitchen',
+}
+const COUNTERS = Object.keys(COUNTER_LABELS)
+
+interface OrderItem {
+  id: string
+  productName: string
+  unitPrice: number
+  quantity: number
+  amount: number
+  extras: string | null
+  counterCode: string | null
+  status: string
+}
+
+interface Order {
+  id: string
+  orderNo: string
+  status: string
+  totalAmount: number
+  discount: number
+  table: { number: number; label: string | null } | null
+  waiter: { name: string }
+  shift: { name: string }
+  items: OrderItem[]
+}
+
+interface Product {
+  id: string
+  code: string
+  name: string
+  category: string | null
+  sellingPrice: number
+}
+
+export default function OrderPage() {
+  const { token } = useAuth()
+  const router = useRouter()
+  const { id: orderId } = useParams<{ id: string }>()
+
+  const [order, setOrder] = useState<Order | null>(null)
+  const [products, setProducts] = useState<Record<string, Product[]>>({})
+  const [extras, setExtras] = useState<string[]>([])
+  const [tab, setTab] = useState<'order' | 'menu'>('order')
+  const [activeCategory, setActiveCategory] = useState('')
+  const [search, setSearch] = useState('')
+
+  // Add-item state
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [selectedCounter, setSelectedCounter] = useState('BAR')
+  const [selectedExtras, setSelectedExtras] = useState<string[]>([])
+  const [qty, setQty] = useState(1)
+  const [busy, setBusy] = useState(false)
+
+  const loadOrder = useCallback(async () => {
+    if (!token) return
+    const res = await fetch(`/api/pos/orders/${orderId}`, { headers: { Authorization: `Bearer ${token}` } })
+    if (res.ok) setOrder(await res.json())
+  }, [token, orderId])
+
+  const loadMenu = useCallback(async () => {
+    if (!token) return
+    const res = await fetch('/api/pos/products', { headers: { Authorization: `Bearer ${token}` } })
+    if (res.ok) {
+      const data = await res.json()
+      setProducts(data.grouped)
+      const cats = Object.keys(data.grouped)
+      if (cats.length > 0) setActiveCategory(cats[0])
+    }
+  }, [token])
+
+  const loadExtras = useCallback(async () => {
+    if (!token) return
+    const res = await fetch('/api/pos/extras', { headers: { Authorization: `Bearer ${token}` } })
+    if (res.ok) {
+      const data: { name: string }[] = await res.json()
+      setExtras(data.map(e => e.name))
+    }
+  }, [token])
+
+  useEffect(() => {
+    loadOrder()
+    loadMenu()
+    loadExtras()
+  }, [loadOrder, loadMenu, loadExtras])
+
+  const addItem = async () => {
+    if (!selectedProduct || !token) return
+    setBusy(true)
+    const res = await fetch(`/api/pos/orders/${orderId}/items`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        productId: selectedProduct.id,
+        quantity: qty,
+        extras: selectedExtras,
+        counterCode: selectedCounter,
+      }),
+    })
+    if (res.ok) {
+      await loadOrder()
+      setSelectedProduct(null)
+      setSelectedExtras([])
+      setQty(1)
+      setTab('order')
+    }
+    setBusy(false)
+  }
+
+  const removeItem = async (itemId: string) => {
+    if (!token) return
+    await fetch(`/api/pos/orders/${orderId}/items?itemId=${itemId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    loadOrder()
+  }
+
+  const sendOrder = async () => {
+    if (!token) return
+    setBusy(true)
+    const res = await fetch(`/api/pos/orders/${orderId}/send`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (res.ok) {
+      await loadOrder()
+      alert('✅ Imetumwa kwa counter!')
+    } else {
+      const err = await res.json()
+      alert(err.error ?? 'Hitilafu')
+    }
+    setBusy(false)
+  }
+
+  const closeOrder = async (paymentMethod: string) => {
+    if (!token || !order) return
+    if (!confirm(`Funga meza na kulipa kwa ${paymentMethod}?\nJumla: TSh ${order.totalAmount.toLocaleString()}`)) return
+    setBusy(true)
+    const res = await fetch(`/api/pos/orders/${orderId}/close`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentMethod, paidAmount: order.totalAmount - order.discount }),
+    })
+    if (res.ok) {
+      alert('✅ Meza imefungwa!')
+      router.back()
+    }
+    setBusy(false)
+  }
+
+  const toggleExtra = (name: string) => {
+    setSelectedExtras(prev => prev.includes(name) ? prev.filter(e => e !== name) : [...prev, name])
+  }
+
+  const filteredProducts = (() => {
+    const source = activeCategory && products[activeCategory] ? products[activeCategory] : Object.values(products).flat()
+    if (!search.trim()) return source
+    const q = search.toLowerCase()
+    return source.filter(p => p.name.toLowerCase().includes(q))
+  })()
+
+  if (!order) {
+    return <AppShell><div className="text-center py-16 text-gray-400">Inapakia...</div></AppShell>
+  }
+
+  const pendingCount = order.items.filter(i => i.status === 'PENDING').length
+  const isClosed = order.status === 'CLOSED' || order.status === 'CANCELLED'
+
+  return (
+    <AppShell>
+      <div className="max-w-2xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={() => router.back()} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">←</button>
+          <div className="flex-1">
+            <h1 className="font-bold text-indigo-900 text-lg">
+              {order.table ? `Meza ${order.table.number}${order.table.label ? ` — ${order.table.label}` : ''}` : 'Order'}
+            </h1>
+            <p className="text-xs text-gray-500">{order.orderNo} · Shift {order.shift.name} · {order.waiter.name}</p>
+          </div>
+          <span className={`px-3 py-1 rounded-full text-xs font-bold ${isClosed ? 'bg-gray-100 text-gray-500' : pendingCount > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+            {isClosed ? 'Imefungwa' : pendingCount > 0 ? `${pendingCount} pending` : 'Imetumwa'}
+          </span>
+        </div>
+
+        {/* Tabs */}
+        {!isClosed && (
+          <div className="flex gap-2 mb-4">
+            <button onClick={() => setTab('order')} className={`flex-1 py-2 rounded-xl font-semibold text-sm transition-colors ${tab === 'order' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+              🧾 Order ({order.items.length})
+            </button>
+            <button onClick={() => setTab('menu')} className={`flex-1 py-2 rounded-xl font-semibold text-sm transition-colors ${tab === 'menu' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+              ➕ Ongeza Bidhaa
+            </button>
+          </div>
+        )}
+
+        {/* ORDER TAB */}
+        {tab === 'order' && (
+          <div>
+            {order.items.length === 0 ? (
+              <div className="text-center py-12 text-gray-400">
+                <div className="text-4xl mb-2">🛒</div>
+                <p>Hakuna bidhaa bado.</p>
+                {!isClosed && <button onClick={() => setTab('menu')} className="mt-3 text-indigo-600 text-sm font-medium">Ongeza bidhaa →</button>}
+              </div>
+            ) : (
+              <div className="space-y-2 mb-4">
+                {order.items.map(item => (
+                  <div key={item.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 flex gap-3 items-start">
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-800 text-sm">{item.productName}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {item.quantity} × TSh {item.unitPrice.toLocaleString()}
+                        {item.counterCode && <span className="ml-2 bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{COUNTER_LABELS[item.counterCode] ?? item.counterCode}</span>}
+                      </div>
+                      {item.extras && (
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          + {JSON.parse(item.extras).join(', ')}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-gray-800 text-sm">TSh {item.amount.toLocaleString()}</div>
+                      <span className={`text-xs ${item.status === 'SENT' ? 'text-green-600' : 'text-amber-600'}`}>
+                        {item.status === 'SENT' ? '✓ Sent' : '⏳ Pending'}
+                      </span>
+                    </div>
+                    {!isClosed && item.status === 'PENDING' && (
+                      <button onClick={() => removeItem(item.id)} className="text-rose-400 hover:text-rose-600 text-lg leading-none ml-1">×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Totals */}
+            <div className="bg-indigo-50 rounded-xl p-4 mb-4">
+              <div className="flex justify-between text-sm text-gray-600 mb-1">
+                <span>Jumla ya bidhaa</span>
+                <span>TSh {order.totalAmount.toLocaleString()}</span>
+              </div>
+              {order.discount > 0 && (
+                <div className="flex justify-between text-sm text-rose-600 mb-1">
+                  <span>Punguzo</span>
+                  <span>− TSh {order.discount.toLocaleString()}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold text-indigo-900 text-base border-t border-indigo-200 pt-2 mt-2">
+                <span>KULIPA</span>
+                <span>TSh {(order.totalAmount - order.discount).toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* Actions */}
+            {!isClosed && (
+              <div className="space-y-2">
+                {pendingCount > 0 && (
+                  <button
+                    onClick={sendOrder}
+                    disabled={busy}
+                    className="w-full bg-amber-500 text-white py-3.5 rounded-xl font-bold text-base hover:bg-amber-600 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    📤 Tuma kwa Counter ({pendingCount} bidhaa)
+                  </button>
+                )}
+                {order.items.length > 0 && pendingCount === 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 text-center mb-2 font-medium">Chagua jinsi ya malipo:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {['CASH', 'CRDB', 'MPESA', 'SIGNED'].map(method => (
+                        <button
+                          key={method}
+                          onClick={() => closeOrder(method)}
+                          disabled={busy}
+                          className="bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
+                        >
+                          {method === 'CASH' ? '💵 Cash' : method === 'CRDB' ? '🏧 CRDB' : method === 'MPESA' ? '📱 M-Pesa' : '✍️ Signed'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* MENU TAB */}
+        {tab === 'menu' && !isClosed && (
+          <div>
+            {/* Selected product form */}
+            {selectedProduct ? (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4">
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <h3 className="font-bold text-gray-800">{selectedProduct.name}</h3>
+                    <p className="text-indigo-600 font-semibold">TSh {selectedProduct.sellingPrice.toLocaleString()}</p>
+                  </div>
+                  <button onClick={() => setSelectedProduct(null)} className="text-gray-400 text-2xl">×</button>
+                </div>
+
+                {/* Counter selection */}
+                <p className="text-xs text-gray-500 font-medium mb-2">Tuma kwa counter:</p>
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  {COUNTERS.map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setSelectedCounter(c)}
+                      className={`py-2 rounded-xl text-sm font-medium border-2 transition-colors ${selectedCounter === c ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-200 text-gray-600'}`}
+                    >
+                      {COUNTER_LABELS[c]}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Extras */}
+                {extras.length > 0 && (
+                  <>
+                    <p className="text-xs text-gray-500 font-medium mb-2">Ongeza (optional):</p>
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {extras.map(e => (
+                        <button
+                          key={e}
+                          onClick={() => toggleExtra(e)}
+                          className={`px-3 py-1 rounded-full text-sm border transition-colors ${selectedExtras.includes(e) ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-600'}`}
+                        >
+                          {e}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {/* Quantity */}
+                <p className="text-xs text-gray-500 font-medium mb-2">Idadi:</p>
+                <div className="flex items-center gap-4 mb-4">
+                  <button onClick={() => setQty(q => Math.max(1, q - 1))} className="w-10 h-10 rounded-full bg-gray-100 text-xl font-bold hover:bg-gray-200">−</button>
+                  <span className="text-2xl font-bold w-10 text-center">{qty}</span>
+                  <button onClick={() => setQty(q => q + 1)} className="w-10 h-10 rounded-full bg-gray-100 text-xl font-bold hover:bg-gray-200">+</button>
+                  <span className="ml-auto font-bold text-indigo-900">
+                    = TSh {(selectedProduct.sellingPrice * qty).toLocaleString()}
+                  </span>
+                </div>
+
+                <button
+                  onClick={addItem}
+                  disabled={busy}
+                  className="w-full bg-indigo-600 text-white py-3.5 rounded-xl font-bold text-base hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
+                >
+                  ➕ Ongeza kwenye Order
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Search */}
+                <input
+                  type="text"
+                  placeholder="Tafuta bidhaa..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm mb-3 focus:outline-none focus:border-indigo-400"
+                />
+
+                {/* Category tabs */}
+                {!search && (
+                  <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-hide">
+                    {Object.keys(products).map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setActiveCategory(cat)}
+                        className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium flex-shrink-0 transition-colors ${activeCategory === cat ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Product grid */}
+                <div className="grid grid-cols-2 gap-2">
+                  {filteredProducts.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => { setSelectedProduct(p); setQty(1); setSelectedExtras([]) }}
+                      className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 text-left hover:border-indigo-300 hover:shadow-md transition-all active:scale-95"
+                    >
+                      <div className="text-sm font-medium text-gray-800 leading-tight mb-1">{p.name}</div>
+                      <div className="text-indigo-600 font-bold text-sm">TSh {p.sellingPrice.toLocaleString()}</div>
+                    </button>
+                  ))}
+                </div>
+
+                {filteredProducts.length === 0 && (
+                  <div className="text-center py-10 text-gray-400 text-sm">Hakuna bidhaa</div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </AppShell>
+  )
+}

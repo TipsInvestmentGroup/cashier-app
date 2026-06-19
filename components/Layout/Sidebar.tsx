@@ -7,30 +7,36 @@ import { useApi } from '@/hooks/useApi'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER']
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+const POS_ROLES = ['WAITER', 'MANAGER', 'ADMIN']
+const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
-const SECTIONS = ['Daily', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
+const SECTIONS = ['MyPos', 'Daily', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
 
 const navItems = [
-  { href: '/dashboard', icon: '📊', label: 'Dashboard', section: 'Daily', roles: ALL },
-  { href: '/collections', icon: '💰', label: 'Daily Collections', section: 'Daily', roles: ALL },
-  { href: '/daily-report', icon: '📑', label: 'Daily Report', section: 'Daily', roles: ALL },
+  { href: '/pos', icon: '🍽', label: 'Waiter App', section: 'MyPos', roles: POS_ROLES },
+  { href: '/pos/counter', icon: '🖨', label: 'Counter View', section: 'MyPos', roles: POS_ROLES },
+  { href: '/pos/manager', icon: '👁', label: 'All Orders', section: 'MyPos', roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
 
-  { href: '/signed-bills', icon: '📋', label: 'Signed Bills', section: 'Bills & Requests', roles: ALL },
-  { href: '/paid-bills', icon: '✅', label: 'Paid Bills', section: 'Bills & Requests', roles: ALL },
-  { href: '/customer-bills', icon: '👤', label: 'Customer Bills', section: 'Bills & Requests', roles: ALL },
-  { href: '/tips-dj-bills', icon: '🎁', label: 'Tips & DJ Bills', section: 'Bills & Requests', roles: ALL },
-  { href: '/cancellations', icon: '🚫', label: 'Cancellations', section: 'Bills & Requests', roles: ALL },
+  { href: '/dashboard', icon: '📊', label: 'Dashboard', section: 'Daily', roles: CASHIER_ROLES },
+  { href: '/collections', icon: '💰', label: 'Daily Collections', section: 'Daily', roles: CASHIER_ROLES },
+  { href: '/daily-report', icon: '📑', label: 'Daily Report', section: 'Daily', roles: CASHIER_ROLES },
 
-  { href: '/petty-cash', icon: '💵', label: 'Petty Cash', section: 'Petty Cash', roles: ALL },
-  { href: '/approvals', icon: '🗳️', label: 'Approval Requests', section: 'Petty Cash', roles: ALL },
+  { href: '/signed-bills', icon: '📋', label: 'Signed Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
+  { href: '/paid-bills', icon: '✅', label: 'Paid Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
+  { href: '/customer-bills', icon: '👤', label: 'Customer Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
+  { href: '/tips-dj-bills', icon: '🎁', label: 'Tips & DJ Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
+  { href: '/cancellations', icon: '🚫', label: 'Cancellations', section: 'Bills & Requests', roles: CASHIER_ROLES },
+
+  { href: '/petty-cash', icon: '💵', label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES },
+  { href: '/approvals', icon: '🗳️', label: 'Approval Requests', section: 'Petty Cash', roles: CASHIER_ROLES },
 
   { href: '/receivables', icon: '📈', label: 'Receivables', section: 'Finance', roles: MGMT },
   { href: '/payroll', icon: '🧾', label: 'Payroll Deductions', section: 'Finance', roles: MGMT },
   { href: '/reports', icon: '📄', label: 'Reports', section: 'Finance', roles: MGMT },
 
-  { href: '/products', icon: '📦', label: 'Products', section: 'Setup', roles: ALL },
+  { href: '/products', icon: '📦', label: 'Products', section: 'Setup', roles: CASHIER_ROLES },
   { href: '/departments', icon: '🗂️', label: 'Departments', section: 'Setup', roles: ALL },
   { href: '/person-categories', icon: '🏷️', label: 'Categories', section: 'Setup', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/payment-channels', icon: '💳', label: 'Payment Channels', section: 'Setup', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },

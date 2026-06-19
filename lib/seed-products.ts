@@ -29,6 +29,7 @@ export async function seedProducts(prisma: PrismaClient) {
         where: { code: p.code },
         data: {
           name: p.name,
+          category: p.category,
           buyingPrice: roundMoney(p.buyingPrice),
           sellingPrice: roundMoney(p.sellingPrice),
         },
@@ -39,6 +40,7 @@ export async function seedProducts(prisma: PrismaClient) {
         data: {
           code: p.code,
           name: p.name,
+          category: p.category,
           buyingPrice: roundMoney(p.buyingPrice),
           sellingPrice: roundMoney(p.sellingPrice),
           unitMeasure: 'unit',

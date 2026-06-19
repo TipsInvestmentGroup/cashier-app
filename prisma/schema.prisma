@@ -207,6 +207,7 @@ model Product {
   id           String   @id @default(cuid())
   code         String   @unique // auto-generated, human-readable e.g. COC-001
   name         String
+  category     String?           // e.g. "Beers", "Spirits", "Soft Drinks"
   buyingPrice  Float    @default(0)
   sellingPrice Float    @default(0)
   unitMeasure  String            // unit | kg | crate 24 bottle | crate 25 bottle | crate 6 bottle
