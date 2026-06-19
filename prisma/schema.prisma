@@ -25,10 +25,12 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  dailyCollections DailyCollection[]
-  signedBills      SignedBill[]
-  paidBills        PaidBill[]
-  auditLogs        AuditLog[]
+  dailyCollections  DailyCollection[]
+  signedBills       SignedBill[]
+  paidBills         PaidBill[]
+  auditLogs         AuditLog[]
+  posOrders         PosOrder[]
+  posWaiterSessions PosWaiterSession[]
 }
 
 model Outlet {
@@ -42,6 +44,10 @@ model Outlet {
   dailyCollections DailyCollection[]
   signedBills      SignedBill[]
   paidBills        PaidBill[]
+  posTables        PosTable[]
+  posShifts        PosShift[]
+  posCounters      PosCounter[]
+  posOrders        PosOrder[]
 }
 
 model DailyCollection {
@@ -209,6 +215,7 @@ model Product {
 
   cancellations Cancellation[]
   billItems     BillItem[]
+  posOrderItems PosOrderItem[]
 
   @@index([name])
 }
@@ -315,4 +322,154 @@ model AuditLog {
   @@index([userId])
   @@index([entity])
   @@index([createdAt])
+}
+
+// ─── MyPos Module ─────────────────────────────────────────────────────────────
+// NOTE: Status/type values are enforced at the application layer (no native enums in SQLite).
+//   PosOrder.status:      OPEN | SENT | CLOSED | CANCELLED | VOID
+//   PosOrderItem.status:  PENDING | SENT | CANCELLED
+//   PosShift.name:        KWANZA | PILI | TATU | NNE
+//   PosCounter.code:      MAIN | BAR | SHISHA | KITCHEN
+//   PosOrderItem.counterCode: MAIN | BAR | SHISHA | KITCHEN
+
+// Physical tables on the venue floor.
+model PosTable {
+  id        String   @id @default(cuid())
+  outletId  String
+  outlet    Outlet   @relation(fields: [outletId], references: [id])
+  number    Int
+  label     String?  // e.g. "VIP 1", "Outside 3"
+  capacity  Int      @default(4)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  orders    PosOrder[]
+
+  @@unique([outletId, number])
+  @@index([outletId])
+}
+
+// One shift per outlet per day — KWANZA, PILI, TATU, NNE.
+model PosShift {
+  id        String    @id @default(cuid())
+  outletId  String
+  outlet    Outlet    @relation(fields: [outletId], references: [id])
+  name      String    // KWANZA | PILI | TATU | NNE
+  date      DateTime
+  openedAt  DateTime  @default(now())
+  closedAt  DateTime?
+  openedBy  String    // userId
+  closedBy  String?   // userId
+
+  orders         PosOrder[]
+  waiterSessions PosWaiterSession[]
+
+  @@index([outletId])
+  @@index([date])
+}
+
+// One counter/station per outlet (matches the 4-counter setup).
+model PosCounter {
+  id          String   @id @default(cuid())
+  outletId    String
+  outlet      Outlet   @relation(fields: [outletId], references: [id])
+  code        String   // MAIN | BAR | SHISHA | KITCHEN
+  label       String   // "Main Counter" | "Bar" | "Shisha" | "Kitchen"
+  printerName String?  // default printer assigned to this counter
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@unique([outletId, code])
+  @@index([outletId])
+}
+
+// One bill per table per visit. Closing it feeds into DailyCollection.
+model PosOrder {
+  id            String    @id @default(cuid())
+  orderNo       String    @unique // ORD-20260619-001
+  outletId      String
+  outlet        Outlet    @relation(fields: [outletId], references: [id])
+  tableId       String?
+  table         PosTable? @relation(fields: [tableId], references: [id])
+  shiftId       String
+  shift         PosShift  @relation(fields: [shiftId], references: [id])
+  waiterId      String
+  waiter        User      @relation(fields: [waiterId], references: [id])
+  status        String    @default("OPEN") // OPEN | SENT | CLOSED | CANCELLED | VOID
+  discount      Float     @default(0)
+  totalAmount   Float     @default(0)
+  paidAmount    Float     @default(0)
+  paymentMethod String?   // CASH | CRDB | STANBIC | MPESA | SIGNED
+  signedBillId  String?   // set when paymentMethod = SIGNED → links to cashier SignedBill
+  closedAt      DateTime?
+  closedBy      String?   // userId
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  items     PosOrderItem[]
+  printLogs PosPrintLog[]
+
+  @@index([outletId])
+  @@index([shiftId])
+  @@index([waiterId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Individual items on an order. counterCode tells the system which printer to use.
+model PosOrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       PosOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  productName String   // snapshot at time of order (price may change later)
+  unitPrice   Float
+  quantity    Float    @default(1)
+  amount      Float    // unitPrice * quantity
+  extras      String?  // JSON array e.g. ["Barafu","Straw"]
+  counterCode String?  // MAIN | BAR | SHISHA | KITCHEN — which counter prints this
+  status      String   @default("PENDING") // PENDING | SENT | CANCELLED
+  sentAt      DateTime?
+  cancelledBy String?  // userId
+  createdAt   DateTime @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+// Tracks every receipt/ticket sent to a counter printer.
+model PosPrintLog {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       PosOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  counterCode String   // BAR | SHISHA | KITCHEN | CASHIER
+  printedAt   DateTime @default(now())
+  printedBy   String   // userId
+  items       String   // JSON snapshot of items on this print job
+
+  @@index([orderId])
+}
+
+// Waiter signs in/out per shift — matches POSTERMINAL SignInForm/SignOutForm.
+model PosWaiterSession {
+  id          String    @id @default(cuid())
+  waiterId    String
+  waiter      User      @relation(fields: [waiterId], references: [id])
+  shiftId     String
+  shift       PosShift  @relation(fields: [shiftId], references: [id])
+  signedInAt  DateTime  @default(now())
+  signedOutAt DateTime?
+
+  @@index([waiterId])
+  @@index([shiftId])
+}
+
+// Add-ons selectable per order item (e.g. Barafu, Straw, Lemon).
+model PosProductExtra {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 }
