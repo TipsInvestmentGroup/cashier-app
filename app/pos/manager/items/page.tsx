@@ -15,7 +15,7 @@ export default function ItemBlockerPage() {
   const [categories, setCategories] = useState<string[]>([])
   const [busy, setBusy] = useState<string | null>(null)
 
-  const outletId = user?.outletId ?? ''
+  const outletId = user?.outlet?.id ?? ''
 
   const load = useCallback(async () => {
     if (!token) return

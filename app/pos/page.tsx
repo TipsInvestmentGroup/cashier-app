@@ -21,13 +21,13 @@ export default function PosHomePage() {
   const [shifts, setShifts] = useState<Shift[]>([])
   const [activeShift, setActiveShift] = useState<Shift | null>(null)
   const [outlets, setOutlets] = useState<Outlet[]>([])
-  const [selectedOutletId, setSelectedOutletId] = useState(user?.outletId ?? '')
+  const [selectedOutletId, setSelectedOutletId] = useState(user?.outlet?.id ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
   // Fetch outlets list if user has no outletId
   useEffect(() => {
-    if (user?.outletId) { setSelectedOutletId(user.outletId); return }
+    if (user?.outlet?.id) { setSelectedOutletId(user.outlet.id); return }
     if (!token) return
     fetch('/api/outlets', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : [])
@@ -73,7 +73,7 @@ export default function PosHomePage() {
     if (activeShift) router.push(`/pos/tables?shiftId=${activeShift.id}&outletId=${selectedOutletId}`)
   }
 
-  const needsOutletPicker = !user?.outletId && outlets.length > 0
+  const needsOutletPicker = !user?.outlet?.id && outlets.length > 0
 
   return (
     <AppShell>
