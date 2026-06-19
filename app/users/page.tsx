@@ -9,9 +9,10 @@ import toast from 'react-hot-toast'
 interface User { id: string; name: string; email: string; role: string; outlet?: { name: string } | null; isActive: boolean; createdAt: string }
 interface Outlet { id: string; name: string }
 
-const ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+const ROLES = ['CASHIER', 'WAITER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const ROLE_COLORS: Record<string, string> = {
-  CASHIER: 'bg-blue-100 text-blue-700', ACCOUNTANT: 'bg-green-100 text-green-700',
+  CASHIER: 'bg-blue-100 text-blue-700', WAITER: 'bg-teal-100 text-teal-700',
+  ACCOUNTANT: 'bg-green-100 text-green-700',
   MANAGER: 'bg-purple-100 text-purple-700', DIRECTOR: 'bg-orange-100 text-orange-700', ADMIN: 'bg-red-100 text-red-700',
 }
 
