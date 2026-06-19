@@ -41,7 +41,7 @@ interface Product {
 }
 
 export default function OrderPage() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const router = useRouter()
   const { id: orderId } = useParams<{ id: string }>()
 
