@@ -58,6 +58,8 @@ export default function OrderPage() {
   const [selectedExtras, setSelectedExtras] = useState<string[]>([])
   const [qty, setQty] = useState(1)
   const [busy, setBusy] = useState(false)
+  const [discountModal, setDiscountModal] = useState(false)
+  const [discountInput, setDiscountInput] = useState('')
 
   const loadOrder = useCallback(async () => {
     if (!token) return
@@ -137,6 +139,22 @@ export default function OrderPage() {
       const err = await res.json()
       alert(err.error ?? 'Hitilafu')
     }
+    setBusy(false)
+  }
+
+  const applyDiscount = async () => {
+    if (!token || !order) return
+    const val = parseFloat(discountInput)
+    if (isNaN(val) || val < 0) return
+    setBusy(true)
+    await fetch(`/api/pos/orders/${orderId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ discount: val }),
+    })
+    await loadOrder()
+    setDiscountModal(false)
+    setDiscountInput('')
     setBusy(false)
   }
 
@@ -248,17 +266,46 @@ export default function OrderPage() {
                 <span>Jumla ya bidhaa</span>
                 <span>TSh {order.totalAmount.toLocaleString()}</span>
               </div>
-              {order.discount > 0 && (
-                <div className="flex justify-between text-sm text-rose-600 mb-1">
-                  <span>Punguzo</span>
-                  <span>− TSh {order.discount.toLocaleString()}</span>
+              <div className="flex justify-between text-sm text-rose-600 mb-1 items-center">
+                <span>Punguzo</span>
+                <div className="flex items-center gap-2">
+                  <span>{order.discount > 0 ? `− TSh ${order.discount.toLocaleString()}` : '—'}</span>
+                  {!isClosed && ['MANAGER', 'ADMIN'].includes(user?.role ?? '') && (
+                    <button onClick={() => { setDiscountInput(String(order.discount)); setDiscountModal(true) }} className="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full hover:bg-rose-200">
+                      {order.discount > 0 ? 'Badilisha' : '+ Weka'}
+                    </button>
+                  )}
                 </div>
-              )}
+              </div>
               <div className="flex justify-between font-bold text-indigo-900 text-base border-t border-indigo-200 pt-2 mt-2">
                 <span>KULIPA</span>
                 <span>TSh {(order.totalAmount - order.discount).toLocaleString()}</span>
               </div>
             </div>
+
+            {/* Discount modal */}
+            {discountModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDiscountModal(false)}>
+                <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                  <h3 className="font-bold text-gray-800 text-lg mb-1">Weka Punguzo</h3>
+                  <p className="text-sm text-gray-500 mb-4">Jumla ya order: TSh {order.totalAmount.toLocaleString()}</p>
+                  <input
+                    type="number"
+                    min="0"
+                    max={order.totalAmount}
+                    value={discountInput}
+                    onChange={e => setDiscountInput(e.target.value)}
+                    placeholder="Kiasi cha punguzo (TSh)"
+                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg mb-4 focus:outline-none focus:border-indigo-400"
+                    autoFocus
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => setDiscountModal(false)} className="border-2 border-gray-200 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50">Ghairi</button>
+                    <button onClick={applyDiscount} disabled={busy} className="bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 disabled:opacity-50">Weka</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Actions */}
             {!isClosed && (

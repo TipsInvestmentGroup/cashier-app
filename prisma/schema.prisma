@@ -48,6 +48,7 @@ model Outlet {
   posShifts        PosShift[]
   posCounters      PosCounter[]
   posOrders        PosOrder[]
+  posBlockedItems  PosBlockedItem[]
 }
 
 model DailyCollection {
@@ -214,9 +215,10 @@ model Product {
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
 
-  cancellations Cancellation[]
-  billItems     BillItem[]
-  posOrderItems PosOrderItem[]
+  cancellations   Cancellation[]
+  billItems       BillItem[]
+  posOrderItems   PosOrderItem[]
+  posBlockedItems PosBlockedItem[]
 
   @@index([name])
 }
@@ -473,4 +475,20 @@ model PosProductExtra {
   name      String   @unique
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+}
+
+// Items blocked per outlet by a manager (out of stock / not available today).
+// Does not affect the global product catalogue — only the POS menu for that outlet.
+model PosBlockedItem {
+  id        String   @id @default(cuid())
+  outletId  String
+  outlet    Outlet   @relation(fields: [outletId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  blockedBy String   // userId
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@unique([outletId, productId])
+  @@index([outletId])
 }

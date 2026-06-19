@@ -18,6 +18,8 @@ const navItems = [
   { href: '/pos', icon: '🍽', label: 'Waiter App', section: 'MyPos', roles: POS_ROLES },
   { href: '/pos/counter', icon: '🖨', label: 'Counter View', section: 'MyPos', roles: POS_ROLES },
   { href: '/pos/manager', icon: '👁', label: 'All Orders', section: 'MyPos', roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
+  { href: '/pos/manager/items', icon: '🚫', label: 'Item Blocker', section: 'MyPos', roles: ['MANAGER', 'ADMIN'] },
+  { href: '/pos/shift-report', icon: '📊', label: 'Shift Report', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
 
   { href: '/dashboard', icon: '📊', label: 'Dashboard', section: 'Daily', roles: CASHIER_ROLES },
   { href: '/collections', icon: '💰', label: 'Daily Collections', section: 'Daily', roles: CASHIER_ROLES },

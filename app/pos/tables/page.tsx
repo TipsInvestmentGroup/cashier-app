@@ -26,6 +26,7 @@ function TableFloor() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const shiftId = searchParams.get('shiftId') ?? ''
+  const outletId = searchParams.get('outletId') ?? ''
 
   const [tables, setTables] = useState<PosTable[]>([])
   const [loading, setLoading] = useState(true)
@@ -34,10 +35,11 @@ function TableFloor() {
   const loadTables = useCallback(async () => {
     if (!token) return
     setLoading(true)
-    const res = await fetch('/api/pos/tables', { headers: { Authorization: `Bearer ${token}` } })
+    const url = outletId ? `/api/pos/tables?outletId=${outletId}` : '/api/pos/tables'
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
     if (res.ok) setTables(await res.json())
     setLoading(false)
-  }, [token])
+  }, [token, outletId])
 
   useEffect(() => { loadTables() }, [loadTables])
 
@@ -150,6 +152,12 @@ function TableFloor() {
             ← Badilisha Shift
           </button>
         </div>
+
+        {tables.length === 0 && !loading && (
+          <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 text-center">
+            Hakuna meza. Wasiliana na Admin kupiga <strong>POST /api/pos/setup</strong> kwanza.
+          </div>
+        )}
       </div>
     </AppShell>
   )
