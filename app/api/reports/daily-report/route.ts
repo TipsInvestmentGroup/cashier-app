@@ -27,8 +27,9 @@ export async function GET(req: NextRequest) {
   const baseWhere: Record<string, unknown> = { date: range }
   if (outletId) baseWhere.outletId = outletId
 
-  // Approval gate: Customer/Tips/DJ count only when APPROVED; the rest always count.
-  const signedWhere = { ...baseWhere, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] }
+  // Approval gate: Tips/DJ are bill *requests* that count only when APPROVED.
+  // Customer signed bills are ordinary credit given — always shown, like Admin/Director/Staff Loss.
+  const signedWhere = { ...baseWhere, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['TIPS', 'DJ'] } }] }
 
   const [collections, signedBills, paidBills, cancellations, pettyCash, outletRec] = await Promise.all([
     prisma.dailyCollection.findMany({ where: baseWhere, include: { outlet: { select: { name: true } } } }),
