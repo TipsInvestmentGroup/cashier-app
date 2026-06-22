@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
@@ -31,9 +32,10 @@ const INIT = {
   amount: '', paymentMethod: 'CASH', payeeName: '', payeeAccount: '', paymentStatus: 'PAID', approvedBy: '',
 }
 
-export default function PettyCashPage() {
+function PettyCashPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const searchParams = useSearchParams()
   const isCashier = user?.role === 'CASHIER'
   const [items, setItems] = useState<PettyCash[]>([])
   const [loading, setLoading] = useState(true)
@@ -195,6 +197,15 @@ export default function PettyCashPage() {
       request('/api/users').then((u) => setVerifierUsers(u || [])).catch(() => {})
     }
   }
+
+  // Deep-link from the Close-Day wizard: ?recon=cash | digital auto-opens the modal (once).
+  const reconOpened = useRef(false)
+  useEffect(() => {
+    if (reconOpened.current) return
+    const r = searchParams.get('recon')
+    if (r === 'cash') { reconOpened.current = true; openRecon() }
+    else if (r === 'digital') { reconOpened.current = true; openBank() }
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveBank = async () => {
     // Every channel must have its required fields: cashier → opening & closing; officer → verified opening & closing.
@@ -858,5 +869,13 @@ export default function PettyCashPage() {
         </div>
       )}
     </AppShell>
+  )
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<AppShell><div className="py-12 text-center text-gray-400">Loading…</div></AppShell>}>
+      <PettyCashPage />
+    </Suspense>
   )
 }

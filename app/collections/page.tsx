@@ -73,6 +73,8 @@ export default function CollectionsPage() {
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [closedDays, setClosedDays] = useState<string[]>([]) // start-of-day ISO strings
   const [closingDay, setClosingDay] = useState(false)
+  const [closeWizard, setCloseWizard] = useState(false) // guided close-day flow
+  const [wizardStep, setWizardStep] = useState(0)
 
   const [form, setForm] = useState({
     cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '',
@@ -294,16 +296,22 @@ export default function CollectionsPage() {
     return ids
   })()
 
+  // Open the guided close-day wizard (Cash requests → Cash recon → Digital recon → confirm)
+  const openCloseWizard = () => {
+    if (targetOutletIds.length === 0) { toast.error('No collections found for this day to close.'); return }
+    setWizardStep(0); setCloseWizard(true)
+  }
+
   const closeDay = async () => {
     const label = format(targetCloseDate, 'dd MMM yyyy')
     if (targetOutletIds.length === 0) { toast.error('No collections found for this day to close.'); return }
-    if (!window.confirm(`Close the day for ${label}?\n\nAfter closing, this day's collections can no longer be added, edited or deleted. A supervisor can reopen it if needed.`)) return
     setClosingDay(true)
     try {
       for (const outletId of targetOutletIds) {
         await request('/api/collections/close-day', { method: 'POST', body: JSON.stringify({ date: targetDayStr, outletId }) })
       }
       toast.success(`Day closed — ${label} is now locked.`)
+      setCloseWizard(false)
       load()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not close the day')
@@ -797,7 +805,7 @@ export default function CollectionsPage() {
                 </span>
               ) : (
                 canAdd && (
-                  <button onClick={closeDay} disabled={closingDay}
+                  <button onClick={openCloseWizard} disabled={closingDay}
                     className="px-4 py-1.5 rounded-lg text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 shadow-sm">
                     {closingDay ? 'Closing…' : '🔒 Close the Day'}
                   </button>
@@ -889,6 +897,70 @@ export default function CollectionsPage() {
             </div>
           )}
         </div>
+
+        {/* Guided Close-Day wizard */}
+        {closeWizard && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setCloseWizard(false)}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-bold text-gray-900">🔒 Close the Day — {format(targetCloseDate, 'dd MMM yyyy')}</h3>
+                <button onClick={() => setCloseWizard(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+              </div>
+              <div className="flex gap-1.5 mb-5">
+                {[0, 1, 2, 3].map((s) => <div key={s} className={`h-1.5 flex-1 rounded-full ${s <= wizardStep ? 'bg-indigo-600' : 'bg-gray-200'}`} />)}
+              </div>
+
+              {wizardStep === 0 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 1 of 4 · Cash Requests</p>
+                  <p className="text-sm text-gray-500 mb-4">Make sure all petty cash / cash requests for today are filled.</p>
+                  <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
+                  <button onClick={() => setWizardStep(1)} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
+                </div>
+              )}
+
+              {wizardStep === 1 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 2 of 4 · Cash Reconciliation</p>
+                  <p className="text-sm text-gray-500 mb-4">Reconcile today&apos;s cash (deposits, verified amount).</p>
+                  <a href="/petty-cash?recon=cash" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Reconciliation ↗</a>
+                  <div className="flex gap-2">
+                    <button onClick={() => setWizardStep(0)} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">← Back</button>
+                    <button onClick={() => setWizardStep(2)} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === 2 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 3 of 4 · Digital Payment Reconciliation</p>
+                  <p className="text-sm text-gray-500 mb-4">Reconcile CRDB, Stanbic and M-PESA for today.</p>
+                  <a href="/petty-cash?recon=digital" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Digital Reconciliation ↗</a>
+                  <div className="flex gap-2">
+                    <button onClick={() => setWizardStep(1)} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">← Back</button>
+                    <button onClick={() => setWizardStep(3)} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
+                  </div>
+                </div>
+              )}
+
+              {wizardStep === 3 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 4 of 4 · Final Check</p>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-sm mb-4">
+                    Are you sure there are no other <strong>paid bills, signed bills, discounts or cancellations</strong> for today? Once closed, this day can&apos;t be edited (a supervisor can reopen it).
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button onClick={closeDay} disabled={closingDay} className="w-full py-3 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700 disabled:opacity-50">
+                      {closingDay ? 'Closing…' : '✅ Yes — Close the Day'}
+                    </button>
+                    <button onClick={() => setCloseWizard(false)} className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">✏️ No — let me fill what&apos;s missing</button>
+                    <button onClick={() => setWizardStep(2)} className="w-full py-2 text-gray-400 text-xs">← Back</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   )
