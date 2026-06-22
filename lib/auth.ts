@@ -43,3 +43,27 @@ export function requireRole(user: JWTPayload | null, roles: string[]): boolean {
   if (!user) return false
   return roles.includes(user.role)
 }
+
+// Sentinel that matches no real record id — used to hard-lock a cashier with no
+// outlet to an empty result set instead of silently exposing all outlets.
+export const NO_OUTLET = '__none__'
+
+/**
+ * Effective outlet filter for READS. Cashiers are strictly locked to their own
+ * outlet (any requested outletId is ignored); a cashier without an outlet sees
+ * nothing. Everyone else may filter by the requested outletId (or none = all).
+ */
+export function readOutletScope(user: JWTPayload, requestedOutletId: string | null): string | null {
+  if (user.role === 'CASHIER') return user.outletId || NO_OUTLET
+  return requestedOutletId
+}
+
+/**
+ * Effective outlet for WRITES. Cashiers always write to their own outlet (a
+ * body-supplied outletId is ignored). Returns null when it can't be resolved,
+ * so callers can reject with "Outlet required".
+ */
+export function writeOutletId(user: JWTPayload, bodyOutletId?: string | null): string | null {
+  if (user.role === 'CASHIER') return user.outletId || null
+  return bodyOutletId || user.outletId || null
+}

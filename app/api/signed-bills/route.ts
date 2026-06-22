@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, requireRole } from '@/lib/auth'
+import { getAuthUser, requireRole, readOutletScope, writeOutletId } from '@/lib/auth'
 import { generateVoucherNumber, roundMoney } from '@/lib/utils'
 
 const CAN_WRITE = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
@@ -10,8 +10,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  // Cashiers are locked to their own outlet.
-  const outletId = user.role === 'CASHIER' && user.outletId ? user.outletId : searchParams.get('outletId')
+  // Cashiers are strictly locked to their own outlet.
+  const outletId = readOutletScope(user, searchParams.get('outletId'))
   const billType = searchParams.get('billType')
   const status = searchParams.get('status')
   const startDate = searchParams.get('startDate')
@@ -19,9 +19,6 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = {}
   if (outletId) where.outletId = outletId
-  else if (user.outletId && !['ADMIN', 'DIRECTOR', 'MANAGER', 'ACCOUNTANT'].includes(user.role)) {
-    where.outletId = user.outletId
-  }
   if (billType) where.billType = billType
   if (status) where.status = status
   if (startDate && endDate) {
@@ -69,7 +66,7 @@ export async function POST(req: NextRequest) {
     description, dueDate, outletId, date,
   } = body
 
-  const usedOutletId = outletId || user.outletId
+  const usedOutletId = writeOutletId(user, outletId)
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
 
   // Optional product line items. When present, the bill amount is their sum.

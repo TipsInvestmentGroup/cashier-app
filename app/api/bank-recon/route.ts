@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
@@ -38,7 +38,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const outletId = searchParams.get('outletId')
+  // Cashiers are strictly locked to their own outlet.
+  const outletId = readOutletScope(user, searchParams.get('outletId'))
   const dateParam = searchParams.get('date')
 
   if (dateParam) {
@@ -76,7 +77,8 @@ export async function POST(req: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const channels: any[] = Array.isArray(body.channels) ? body.channels : []
   const day = date ? new Date(date) : new Date()
-  const usedOutletId = outletId || user.outletId || null
+  // Cashiers always reconcile their own outlet.
+  const usedOutletId = writeOutletId(user, outletId)
   const canVerify = await canVerifyCash(user.email)
   const num = (v: unknown) => (v === undefined || v === null || v === '' ? undefined : roundMoney(v as number))
 

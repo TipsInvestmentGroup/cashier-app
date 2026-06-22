@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, format } from 'date-fns'
@@ -10,17 +10,15 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  // Cashiers are locked to their own outlet.
-  const outletId = user.role === 'CASHIER' && user.outletId ? user.outletId : (searchParams.get('outletId') || user.outletId)
+  // Cashiers are strictly locked to their own outlet (no outlet = see nothing).
+  const outletId = user.role === 'CASHIER'
+    ? (user.outletId || NO_OUTLET)
+    : (searchParams.get('outletId') || user.outletId)
   const startDate = searchParams.get('startDate')
   const endDate = searchParams.get('endDate')
 
   const where: Record<string, unknown> = {}
-  if (outletId && user.role !== 'ADMIN' && user.role !== 'DIRECTOR') {
-    where.outletId = outletId
-  } else if (outletId) {
-    where.outletId = outletId
-  }
+  if (outletId) where.outletId = outletId
   if (startDate && endDate) {
     where.date = { gte: new Date(startDate), lte: new Date(endDate) }
   }
@@ -51,7 +49,7 @@ export async function POST(req: NextRequest) {
   const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 
   const total = roundMoney(Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa))
-  const usedOutletId = outletId || user.outletId
+  const usedOutletId = writeOutletId(user, outletId)
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
 
   // Prevent duplicates: one collection per staff, per outlet, per day.

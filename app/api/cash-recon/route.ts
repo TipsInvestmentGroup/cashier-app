@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
@@ -39,7 +39,8 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  const outletId = searchParams.get('outletId')
+  // Cashiers are strictly locked to their own outlet.
+  const outletId = readOutletScope(user, searchParams.get('outletId'))
   const dateParam = searchParams.get('date')
 
   // Single-day computed view (for the reconciliation form)
@@ -71,7 +72,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { date, outletId, cashDeposited = 0, notes } = body
   const day = date ? new Date(date) : new Date()
-  const usedOutletId = outletId || user.outletId || null
+  // Cashiers always reconcile their own outlet.
+  const usedOutletId = writeOutletId(user, outletId)
 
   // Opening = previous closing (auto). Closing computed & stored.
   const opening = await previousClosing(day, usedOutletId)

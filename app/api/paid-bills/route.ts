@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, requireRole } from '@/lib/auth'
+import { getAuthUser, requireRole, readOutletScope, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 
 const CAN_WRITE = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
@@ -10,16 +10,13 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
-  // Cashiers are locked to their own outlet.
-  const outletId = user.role === 'CASHIER' && user.outletId ? user.outletId : searchParams.get('outletId')
+  // Cashiers are strictly locked to their own outlet.
+  const outletId = readOutletScope(user, searchParams.get('outletId'))
   const startDate = searchParams.get('startDate')
   const endDate = searchParams.get('endDate')
 
   const where: Record<string, unknown> = {}
   if (outletId) where.outletId = outletId
-  else if (user.outletId && !['ADMIN', 'DIRECTOR', 'MANAGER', 'ACCOUNTANT'].includes(user.role)) {
-    where.outletId = user.outletId
-  }
   if (startDate && endDate) {
     where.date = { gte: new Date(startDate), lte: new Date(endDate) }
   }
@@ -48,7 +45,7 @@ export async function POST(req: NextRequest) {
   const { signedBillId, personId, payerName, payerCategory, categoryBillType, amountPaid, paymentMethod, notes, outletId, date, billRef } = body
   const selectedBillIds: string[] = Array.isArray(body.selectedBillIds) ? body.selectedBillIds : (signedBillId ? [signedBillId] : [])
 
-  const usedOutletId = outletId || user.outletId
+  const usedOutletId = writeOutletId(user, outletId)
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
   if (!payerName) return NextResponse.json({ error: 'Payer name required' }, { status: 400 })
   if (!amountPaid || Number(amountPaid) <= 0) return NextResponse.json({ error: 'Amount must be > 0' }, { status: 400 })

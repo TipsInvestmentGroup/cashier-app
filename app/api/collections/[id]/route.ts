@@ -39,7 +39,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json()
   const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
   const total = roundMoney(Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa))
-  const usedOutletId = outletId || existing.outletId
+  // Cashiers can never move a collection to another outlet.
+  const usedOutletId = user.role === 'CASHIER' ? existing.outletId : (outletId || existing.outletId)
   const collDate = date ? new Date(date) : existing.date
 
   // Duplicate guard (exclude this record)
