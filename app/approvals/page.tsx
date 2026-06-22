@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
@@ -54,6 +55,7 @@ export default function ApprovalsPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={PETTY_TABS} />
       <div className="space-y-6">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>

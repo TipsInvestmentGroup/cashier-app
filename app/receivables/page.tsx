@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, FINANCE_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
@@ -82,6 +83,7 @@ export default function ReceivablesPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={FINANCE_TABS} />
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Receivables</h1>

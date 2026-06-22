@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -328,6 +329,7 @@ function PettyCashPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={PETTY_TABS} />
       <div className="space-y-6">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>

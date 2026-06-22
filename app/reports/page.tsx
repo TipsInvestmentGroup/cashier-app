@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, FINANCE_TABS } from '@/components/Layout/SectionTabs'
 import { DailyCashierReport } from '@/components/DailyCashierReport'
 import { CashReconReport } from '@/components/CashReconReport'
 import { BankReconReport } from '@/components/BankReconReport'
@@ -117,6 +118,7 @@ export default function ReportsPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={FINANCE_TABS} />
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Reports</h1>

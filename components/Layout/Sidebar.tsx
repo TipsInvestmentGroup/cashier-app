@@ -34,14 +34,11 @@ const navItems = [
   { href: '/tips-dj-bills', icon: '🎁', label: 'Tips & DJ Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
   { href: '/cancellations', icon: '🚫', label: 'Cancellations', section: 'Bills & Requests', roles: CASHIER_ROLES },
 
-  { href: '/petty-cash', icon: '💵', label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES },
-  { href: '/approvals', icon: '🗳️', label: 'Approval Requests', section: 'Petty Cash', roles: CASHIER_ROLES },
+  { href: '/petty-cash', icon: '💵', label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals'] },
 
-  { href: '/receivables', icon: '📈', label: 'Receivables', section: 'Finance', roles: MGMT },
-  { href: '/payroll', icon: '🧾', label: 'Payroll Deductions', section: 'Finance', roles: MGMT },
-  { href: '/reports', icon: '📄', label: 'Reports', section: 'Finance', roles: MGMT },
+  { href: '/receivables', icon: '💼', label: 'Finance', section: 'Finance', roles: MGMT, match: ['/receivables', '/payroll', '/reports'] },
 
-  { href: '/setup', icon: '⚙️', label: 'Setup', section: 'Setup', roles: ALL },
+  { href: '/setup', icon: '⚙️', label: 'Setup', section: 'Setup', roles: ALL, match: ['/setup', ...SETUP_TABS.map((t) => t.href)] },
 ]
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
@@ -93,8 +90,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-indigo-400">{sec}</p>
               <div className="space-y-1">
                 {items.map((item) => {
-                  const active = item.href === '/setup'
-                    ? (pathname === '/setup' || SETUP_TABS.some((t) => pathname === t.href || pathname.startsWith(t.href + '/')))
+                  const m = (item as { match?: string[] }).match
+                  const active = m
+                    ? m.some((h) => pathname === h || pathname.startsWith(h + '/'))
                     : pathname.startsWith(item.href)
                   return (
             <Link
