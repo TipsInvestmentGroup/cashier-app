@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { Button } from '@/components/ui/Button'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatDate } from '@/lib/utils'
@@ -100,10 +101,7 @@ export default function UsersPage() {
             <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
             <p className="text-gray-500 text-sm">Create and manage system users</p>
           </div>
-          <button onClick={newUser}
-            className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
-            <span>+</span> New User
-          </button>
+          <Button onClick={newUser} size="lg"><span>+</span> New User</Button>
         </div>
 
         {showForm && (

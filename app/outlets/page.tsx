@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import toast from 'react-hot-toast'
@@ -49,10 +51,7 @@ export default function OutletsPage() {
             <p className="text-gray-500 text-sm">Manage lounge branches and locations</p>
           </div>
           {canManage && (
-            <button onClick={() => setShowForm(!showForm)}
-              className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
-              <span>+</span> New Outlet
-            </button>
+            <Button onClick={() => setShowForm(!showForm)} size="lg"><span>+</span> New Outlet</Button>
           )}
         </div>
 
@@ -105,7 +104,7 @@ export default function OutletsPage() {
               </div>
             ))}
             {outlets.length === 0 && (
-              <div className="col-span-3 text-center py-12 text-gray-400">No outlets configured yet</div>
+              <div className="col-span-3"><EmptyState icon="🏢" title="No outlets configured yet" hint="Add your first outlet/branch." /></div>
             )}
           </div>
         )}

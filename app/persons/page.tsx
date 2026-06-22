@@ -3,6 +3,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
@@ -126,10 +128,7 @@ export default function PersonsPage() {
               </button>
             )}
             {canManage && (
-              <button onClick={newPerson}
-                className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
-                <span className="text-lg">+</span> Add Person
-              </button>
+              <Button onClick={newPerson} size="lg"><span className="text-lg">+</span> Add Person</Button>
             )}
           </div>
         </div>
@@ -213,7 +212,7 @@ export default function PersonsPage() {
           {loading ? (
             <div className="col-span-4 text-center py-12 text-gray-400">Loading...</div>
           ) : filtered.length === 0 ? (
-            <div className="col-span-4 text-center py-12 text-gray-400">No persons found</div>
+            <div className="col-span-4"><EmptyState icon="👥" title="No persons found" hint="Add a person to use them on bills and payments." /></div>
           ) : filtered.map((p) => (
             <div key={p.id} className="bg-white rounded-2xl border-2 border-gray-100 p-5 hover:border-indigo-200 transition">
               <div className="flex items-start gap-3 mb-3">

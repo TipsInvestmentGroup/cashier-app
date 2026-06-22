@@ -3,6 +3,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
@@ -93,10 +95,7 @@ export default function ProductsPage() {
             <p className="text-gray-500 text-sm">Catalogue with codes, prices and unit measures</p>
           </div>
           {canManage && (
-            <button onClick={openNew}
-              className="px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
-              ➕ Create Product
-            </button>
+            <Button onClick={openNew} size="lg">➕ Create Product</Button>
           )}
         </div>
 
@@ -185,7 +184,7 @@ export default function ProductsPage() {
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={canManage ? 7 : 6} className="text-center py-12 text-gray-400">No products yet</td></tr>
+                    <tr><td colSpan={canManage ? 7 : 6}><EmptyState icon="📦" title="No products yet" hint="Add your first product to the catalogue." /></td></tr>
                   )}
                 </tbody>
               </table>
