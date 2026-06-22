@@ -10,9 +10,11 @@ const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-a
 const CAN_CLOSE = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
 const CAN_REOPEN = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
-/** Resolve which outlet the action applies to. Cashiers are locked to their own. */
+/** Resolve which outlet the action applies to. Cashiers prefer their own token
+ *  outlet, but fall back to the supplied one (derived from their own records)
+ *  when the token has none. */
 function resolveOutletId(user: { role: string; outletId?: string }, bodyOutletId?: string) {
-  if (user.role === 'CASHIER') return user.outletId || null
+  if (user.role === 'CASHIER') return user.outletId || bodyOutletId || null
   return bodyOutletId || user.outletId || null
 }
 

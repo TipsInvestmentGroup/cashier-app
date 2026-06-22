@@ -24,7 +24,7 @@ interface Cancellation {
 interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
   staffName?: string; systemSales?: number; creditSales?: number; paymentsReceived?: number
-  notes: string; outlet: { name: string }; cashier: { name: string }; cancellations?: Cancellation[]
+  notes: string; outletId?: string; outlet: { id?: string; name: string }; cashier: { name: string }; cancellations?: Cancellation[]
 }
 interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean }
 interface SignedBill { id: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
@@ -280,12 +280,24 @@ export default function CollectionsPage() {
   const targetClosed = isDayClosed(targetCloseDate)
   const canReopen = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
 
+  // Outlets that have records on the target day (so we close the right one even
+  // when the logged-in account has no fixed outlet, e.g. an admin / all-outlets).
+  const targetDayStr = format(targetCloseDate, 'yyyy-MM-dd')
+  const targetOutletIds = (() => {
+    const ids = [...new Set(filtered.filter((c) => dayKey(c.date) === targetDayStr).map((c) => c.outletId).filter(Boolean) as string[])]
+    if (ids.length === 0 && user?.outlet?.id) ids.push(user.outlet.id)
+    return ids
+  })()
+
   const closeDay = async () => {
     const label = format(targetCloseDate, 'dd MMM yyyy')
+    if (targetOutletIds.length === 0) { toast.error('No collections found for this day to close.'); return }
     if (!window.confirm(`Close the day for ${label}?\n\nAfter closing, this day's collections can no longer be added, edited or deleted. A supervisor can reopen it if needed.`)) return
     setClosingDay(true)
     try {
-      await request('/api/collections/close-day', { method: 'POST', body: JSON.stringify({ date: format(targetCloseDate, 'yyyy-MM-dd') }) })
+      for (const outletId of targetOutletIds) {
+        await request('/api/collections/close-day', { method: 'POST', body: JSON.stringify({ date: targetDayStr, outletId }) })
+      }
       toast.success(`Day closed — ${label} is now locked.`)
       load()
     } catch (err: unknown) {
@@ -295,10 +307,14 @@ export default function CollectionsPage() {
 
   const reopenDay = async () => {
     const label = format(targetCloseDate, 'dd MMM yyyy')
+    const ids = targetOutletIds.length ? targetOutletIds : (user?.outlet?.id ? [user.outlet.id] : [])
+    if (ids.length === 0) { toast.error('No outlet to reopen for this day.'); return }
     if (!window.confirm(`Reopen ${label}? Cashiers will be able to edit this day's collections again.`)) return
     setClosingDay(true)
     try {
-      await request(`/api/collections/close-day?date=${format(targetCloseDate, 'yyyy-MM-dd')}`, { method: 'DELETE' })
+      for (const outletId of ids) {
+        await request(`/api/collections/close-day?date=${targetDayStr}&outletId=${outletId}`, { method: 'DELETE' })
+      }
       toast.success(`Day reopened — ${label}.`)
       load()
     } catch (err: unknown) {
