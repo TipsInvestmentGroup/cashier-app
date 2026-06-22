@@ -24,6 +24,8 @@ const navItems = [
   { href: '/dashboard', icon: '📊', label: 'Dashboard', section: 'Daily', roles: CASHIER_ROLES },
   { href: '/collections', icon: '💰', label: 'Daily Collections', section: 'Daily', roles: CASHIER_ROLES },
   { href: '/daily-report', icon: '📑', label: 'Daily Report', section: 'Daily', roles: CASHIER_ROLES },
+  { href: '/excess-loss?view=excess', icon: '🔺', label: 'Excess Report', section: 'Daily', roles: CASHIER_ROLES },
+  { href: '/excess-loss?view=loss', icon: '🔻', label: 'Loss Report', section: 'Daily', roles: CASHIER_ROLES },
 
   { href: '/signed-bills', icon: '📋', label: 'Signed Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
   { href: '/paid-bills', icon: '✅', label: 'Paid Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
