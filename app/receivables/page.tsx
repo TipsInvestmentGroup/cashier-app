@@ -126,7 +126,7 @@ export default function ReceivablesPage() {
               <BarChart data={agingData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
                 <XAxis dataKey="bucket" tickLine={false} axisLine={false} fontSize={12} />
                 <YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} fontSize={11} tickLine={false} axisLine={false} />
-                <Tooltip formatter={(v: number) => formatCurrency(v)} cursor={{ fill: '#f8fafc' }} />
+                <Tooltip formatter={(v) => formatCurrency(Number(v))} cursor={{ fill: '#f8fafc' }} />
                 <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
                   {agingData.map((d) => <Cell key={d.key} fill={AGING_FILL[d.key]} />)}
                 </Bar>

@@ -115,7 +115,7 @@ export default function MonthEndPage() {
                     <BarChart data={byMethod} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
                       <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
                       <YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} fontSize={11} tickLine={false} axisLine={false} />
-                      <Tooltip formatter={(v: number) => formatCurrency(v)} cursor={{ fill: '#f8fafc' }} />
+                      <Tooltip formatter={(v) => formatCurrency(Number(v))} cursor={{ fill: '#f8fafc' }} />
                       <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
                         {byMethod.map((_, i) => <Cell key={i} fill={FILL[i % FILL.length]} />)}
                       </Bar>
@@ -130,7 +130,7 @@ export default function MonthEndPage() {
                     <BarChart data={byType} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
                       <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
                       <YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} fontSize={11} tickLine={false} axisLine={false} />
-                      <Tooltip formatter={(v: number) => formatCurrency(v)} cursor={{ fill: '#f8fafc' }} />
+                      <Tooltip formatter={(v) => formatCurrency(Number(v))} cursor={{ fill: '#f8fafc' }} />
                       <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
                         {byType.map((_, i) => <Cell key={i} fill={FILL[i % FILL.length]} />)}
                       </Bar>
