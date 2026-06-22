@@ -266,6 +266,63 @@ export default function CollectionsPage() {
   // Cancellations recorded in the period
   const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).filter((x) => x.status === 'APPROVED').reduce((a, x) => a + (x.amount || 0), 0), 0)
 
+  // ---- Exports (always include Outlet & By, regardless of on-screen columns) ----
+  const rangeLabel = RANGE_OPTIONS.find((r) => r.key === range)?.label || 'Collections'
+  const exportName = `tips-collections-${range}-${format(new Date(), 'yyyy-MM-dd')}`
+  const reqCash = (c: { systemSales?: number; crdb: number; stanbic: number; mpesa: number }) => cashRequired(c)
+
+  const exportCsv = () => {
+    if (!filtered.length) return toast.error('Nothing to export')
+    const headers = ['Date', 'Outlet', 'Staff', 'Cash', 'CRDB', 'Stanbic', 'M-PESA', 'Total', 'System', 'Cash Req', 'Variance', 'By']
+    const dataRows = filtered.map((c) => {
+      const v = rowLoss(c)
+      return [formatDateTime(c.date), c.outlet.name, c.staffName || '', c.cash, c.crdb, c.stanbic, c.mpesa, c.total, c.systemSales || 0, reqCash(c), v, c.cashier.name]
+    })
+    dataRows.push(['TOTAL', '', '', totals.cash, totals.crdb, totals.stanbic, totals.mpesa, totals.total, totals.systemSales, totals.systemSales - totals.crdb - totals.stanbic - totals.mpesa, variance, ''])
+    const csv = [headers, ...dataRows]
+      .map((r) => r.map((cell) => { const s = String(cell ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }).join(','))
+      .join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = `${exportName}.csv`; a.click()
+    URL.revokeObjectURL(url)
+    toast.success('CSV downloaded')
+  }
+
+  const exportPdf = async () => {
+    if (!filtered.length) return toast.error('Nothing to export')
+    try {
+      const { jsPDF } = await import('jspdf')
+      const autoTable = (await import('jspdf-autotable')).default
+      const doc = new jsPDF({ orientation: 'landscape' })
+      const W = doc.internal.pageSize.getWidth()
+      const n = (x: number) => Number(x || 0).toLocaleString('en-US')
+      doc.setFillColor(79, 70, 229); doc.rect(0, 0, W, 24, 'F')
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.text('tips — Daily Collections', 14, 12)
+      doc.setFontSize(10); doc.setFont('helvetica', 'normal')
+      doc.text(`${rangeLabel} · Generated ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 14, 19)
+      doc.setTextColor(31, 41, 55)
+      autoTable(doc, {
+        startY: 30,
+        head: [['Date', 'Outlet', 'Staff', 'Cash', 'CRDB', 'Stanbic', 'M-PESA', 'Total', 'System', 'Cash Req', 'Variance', 'By']],
+        body: filtered.map((c) => {
+          const v = rowLoss(c)
+          return [formatDateTime(c.date), c.outlet.name, c.staffName || '-', n(c.cash), n(c.crdb), n(c.stanbic), n(c.mpesa), n(c.total), n(c.systemSales || 0), n(reqCash(c)), `${v > 0 ? '-' : v < 0 ? '+' : ''}${n(Math.abs(v))}`, c.cashier.name]
+        }),
+        foot: [['TOTAL', '', '', n(totals.cash), n(totals.crdb), n(totals.stanbic), n(totals.mpesa), n(totals.total), n(totals.systemSales), n(totals.systemSales - totals.crdb - totals.stanbic - totals.mpesa), n(Math.abs(variance)), '']],
+        headStyles: { fillColor: [79, 70, 229] },
+        footStyles: { fillColor: [238, 242, 255], textColor: [31, 41, 55], fontStyle: 'bold' },
+        styles: { fontSize: 8 },
+        margin: { left: 10, right: 10 },
+      })
+      doc.save(`${exportName}.pdf`)
+      toast.success('PDF downloaded')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not build PDF')
+    }
+  }
+
   return (
     <AppShell>
       <div className="space-y-6">
@@ -619,9 +676,19 @@ export default function CollectionsPage() {
                 </p>
               )}
             </div>
-            <span className="text-sm text-gray-500">
-              {RANGE_OPTIONS.find((r) => r.key === range)?.label} · Total <strong className="text-gray-800">{formatCurrency(totals.total)}</strong>
-            </span>
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm text-gray-500">
+                {rangeLabel} · Total <strong className="text-gray-800">{formatCurrency(totals.total)}</strong>
+              </span>
+              <button onClick={exportCsv} disabled={!filtered.length}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                ⬇ CSV
+              </button>
+              <button onClick={exportPdf} disabled={!filtered.length}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
+                📄 PDF
+              </button>
+            </div>
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-16 text-gray-400">Loading...</div>
