@@ -6,8 +6,12 @@ export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Cashiers only ever deal with their own outlet — never expose others.
+  const where: Record<string, unknown> = { isActive: true }
+  if (user.role === 'CASHIER') where.id = user.outletId || '__none__'
+
   const outlets = await prisma.outlet.findMany({
-    where: { isActive: true },
+    where,
     orderBy: { name: 'asc' },
   })
 

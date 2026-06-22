@@ -34,6 +34,7 @@ const INIT = {
 export default function PettyCashPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const isCashier = user?.role === 'CASHIER'
   const [items, setItems] = useState<PettyCash[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -109,8 +110,9 @@ export default function PettyCashPage() {
   }, [request])
 
   const openRecon = () => {
-    setReconForm({ date: format(new Date(), 'yyyy-MM-dd'), outletId: '', cashDeposited: '', notes: '', verifiedAmount: '' })
-    setReconComputed(null); setAutoOpening(0); setReconOpen(true); loadRecon(format(new Date(), 'yyyy-MM-dd'), '')
+    const oid = isCashier ? (outlets[0]?.id || '') : ''
+    setReconForm({ date: format(new Date(), 'yyyy-MM-dd'), outletId: oid, cashDeposited: '', notes: '', verifiedAmount: '' })
+    setReconComputed(null); setAutoOpening(0); setReconOpen(true); loadRecon(format(new Date(), 'yyyy-MM-dd'), oid)
     if (isOwner) {
       request('/api/cash-verifiers').then((r) => setVerifierEmail((r?.verifierEmail || '').toLowerCase())).catch(() => {})
       request('/api/users').then((u) => setVerifierUsers(u || [])).catch(() => {})
@@ -186,7 +188,8 @@ export default function PettyCashPage() {
   }, [request])
 
   const openBank = () => {
-    setBankDate(format(new Date(), 'yyyy-MM-dd')); setBankOutletId(''); setBankRows([]); setBankEntries({}); setBankOpen(true); loadBank(format(new Date(), 'yyyy-MM-dd'), '')
+    const oid = isCashier ? (outlets[0]?.id || '') : ''
+    setBankDate(format(new Date(), 'yyyy-MM-dd')); setBankOutletId(oid); setBankRows([]); setBankEntries({}); setBankOpen(true); loadBank(format(new Date(), 'yyyy-MM-dd'), oid)
     if (isOwner) {
       request('/api/cash-verifiers').then((r) => setVerifierEmail((r?.verifierEmail || '').toLowerCase())).catch(() => {})
       request('/api/users').then((u) => setVerifierUsers(u || [])).catch(() => {})
@@ -603,8 +606,9 @@ export default function PettyCashPage() {
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet</label>
                     <select value={reconForm.outletId} onChange={(e) => { setReconForm({ ...reconForm, outletId: e.target.value }); loadRecon(reconForm.date, e.target.value) }}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
-                      <option value="">All Outlets</option>
+                      disabled={isCashier}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-100">
+                      {!isCashier && <option value="">All Outlets</option>}
                       {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                     </select>
                   </div>
@@ -707,8 +711,9 @@ export default function PettyCashPage() {
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet</label>
                   <select value={bankOutletId} onChange={(e) => { setBankOutletId(e.target.value); loadBank(bankDate, e.target.value) }}
-                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
-                    <option value="">All Outlets</option>
+                    disabled={isCashier}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-100">
+                    {!isCashier && <option value="">All Outlets</option>}
                     {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </select>
                 </div>
