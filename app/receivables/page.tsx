@@ -3,9 +3,12 @@ import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, FINANCE_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
-import { formatCurrency, formatDate, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
+import { formatCurrency, formatDate, BILL_TYPE_LABELS } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
 import { PaymentStoryModal } from '@/components/PaymentStoryModal'
+import { StatCard } from '@/components/ui/StatCard'
+import { Badge } from '@/components/ui/Badge'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 interface Receivable {
   id: string; date: string; voucherNumber: string; billType: string; personName: string
@@ -92,23 +95,15 @@ export default function ReceivablesPage() {
 
         {summary && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="bg-gradient-to-br from-red-500 to-red-600 text-white rounded-2xl p-5 shadow-sm">
-              <p className="text-sm opacity-80">Total Outstanding</p>
-              <p className="text-2xl font-bold mt-1">{formatCurrency(summary.total)}</p>
-              <p className="text-xs opacity-70 mt-1">{summary.count} bills</p>
-            </div>
-            <div className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-2xl p-5 shadow-sm">
-              <p className="text-sm opacity-80">Overdue</p>
-              <p className="text-2xl font-bold mt-1">{formatCurrency(summary.overdue)}</p>
-              <p className="text-xs opacity-70 mt-1">Past due date</p>
-            </div>
+            <StatCard icon="📉" label="Total Outstanding" value={formatCurrency(summary.total)} sub={`${summary.count} bills`}
+              color="bg-gradient-to-br from-red-500 to-red-600 text-white" />
+            <StatCard icon="⏰" label="Overdue" value={formatCurrency(summary.overdue)} sub="Past due date"
+              color="bg-gradient-to-br from-orange-500 to-orange-600 text-white" />
             {types.map((t) => (
               summary.byType[t] ? (
-                <div key={t} className="bg-white rounded-2xl border-2 border-gray-100 p-5 shadow-sm">
-                  <p className="text-xs font-semibold text-gray-500 mb-1">
-                    <span className={`inline-block px-2 py-0.5 rounded-lg ${BILL_TYPE_COLORS[t]} text-xs`}>{BILL_TYPE_LABELS[t]}</span>
-                  </p>
-                  <p className="text-xl font-bold text-gray-800">{formatCurrency(summary.byType[t])}</p>
+                <div key={t} className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
+                  <Badge billType={t}>{BILL_TYPE_LABELS[t]}</Badge>
+                  <p className="text-xl font-bold text-gray-800 mt-2">{formatCurrency(summary.byType[t])}</p>
                 </div>
               ) : null
             ))}
@@ -198,9 +193,7 @@ export default function ReceivablesPage() {
                       className={`cursor-pointer hover:bg-indigo-50/60 ${r.isOverdue ? 'bg-red-50/40' : ''}`}>
                       <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDate(r.date)} · <span className="font-semibold">#{r.seq ?? '—'}</span></td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${BILL_TYPE_COLORS[r.billType]}`}>
-                          {BILL_TYPE_LABELS[r.billType]}
-                        </span>
+                        <Badge billType={r.billType}>{BILL_TYPE_LABELS[r.billType]}</Badge>
                       </td>
                       <td className="px-4 py-3 font-medium text-gray-800">
                         {r.personName}
@@ -217,8 +210,10 @@ export default function ReceivablesPage() {
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={9} className="text-center py-12 text-gray-400">
-                      {filterType || filterAging ? 'No receivables match your filters' : 'No outstanding receivables 🎉'}
+                    <tr><td colSpan={9}>
+                      {filterType || filterAging || q
+                        ? <EmptyState icon="🔍" title="No receivables match your filters" hint="Try clearing the type, aging, or search filters." />
+                        : <EmptyState icon="🎉" title="No outstanding receivables" hint="Everyone is settled up." />}
                     </td></tr>
                   )}
                 </tbody>
@@ -261,9 +256,7 @@ export default function ReceivablesPage() {
                       <tr key={`${a.personName}-${a.billType}`} className={`hover:bg-gray-50 ${a.exceeded ? 'bg-red-50/50' : ''}`}>
                         <td className="px-4 py-3 font-medium text-gray-800">{a.personName}</td>
                         <td className="px-4 py-3">
-                          <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${BILL_TYPE_COLORS[a.billType]}`}>
-                            {BILL_TYPE_LABELS[a.billType]}
-                          </span>
+                          <Badge billType={a.billType}>{BILL_TYPE_LABELS[a.billType]}</Badge>
                         </td>
                         <td className="px-4 py-3 text-gray-600">{formatCurrency(a.creditLimit)}</td>
                         <td className="px-4 py-3 font-semibold text-gray-800">{formatCurrency(a.spent)}</td>
@@ -273,9 +266,9 @@ export default function ReceivablesPage() {
                         <td className="px-4 py-3 font-bold text-red-600">{a.overLimit > 0 ? formatCurrency(a.overLimit) : '-'}</td>
                         <td className="px-4 py-3">
                           {a.exceeded ? (
-                            <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-red-100 text-red-700">⚠️ EXCEEDED LIMIT</span>
+                            <Badge tone="red">⚠️ EXCEEDED LIMIT</Badge>
                           ) : (
-                            <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-100 text-green-700">Within Limit</span>
+                            <Badge tone="green">Within Limit</Badge>
                           )}
                         </td>
                       </tr>

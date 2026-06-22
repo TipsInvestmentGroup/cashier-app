@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
@@ -435,11 +437,10 @@ export default function CollectionsPage() {
             <p className="text-gray-500 text-sm">Record cash, bank & M-PESA collections</p>
           </div>
           {canAdd && (
-            <button onClick={newCollection} disabled={isCashier && isDayClosed(new Date())}
-              title={isCashier && isDayClosed(new Date()) ? 'Today is closed — ask a supervisor to reopen it' : ''}
-              className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow disabled:opacity-50">
+            <Button onClick={newCollection} size="lg" disabled={isCashier && isDayClosed(new Date())}
+              title={isCashier && isDayClosed(new Date()) ? 'Today is closed — ask a supervisor to reopen it' : ''}>
               <span className="text-lg">+</span> New Collection
-            </button>
+            </Button>
           )}
         </div>
 
@@ -728,14 +729,13 @@ export default function CollectionsPage() {
               )}
 
               <div className="flex gap-3">
-                <button type="submit" disabled={submitting || !reconciled}
-                  className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
+                <Button type="submit" size="lg" disabled={submitting || !reconciled} className="flex-1">
                   {submitting ? 'Saving...' : editingId ? 'Update Collection' : 'Save Collection'}
-                </button>
-                <button type="button" onClick={() => { setShowForm(false); setEditingId(null); setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false) }}
-                  className="px-6 py-3 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition">
+                </Button>
+                <Button type="button" variant="outline" size="lg" className="px-6"
+                  onClick={() => { setShowForm(false); setEditingId(null); setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false) }}>
                   Cancel
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -902,7 +902,9 @@ export default function CollectionsPage() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={(isCashier ? 10 : 12) + (canAdd ? 1 : 0)} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
+                    <tr><td colSpan={(isCashier ? 10 : 12) + (canAdd ? 1 : 0)}>
+                      <EmptyState icon="🧾" title="No collections in this period" hint="Record a staff collection to get started." />
+                    </td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (

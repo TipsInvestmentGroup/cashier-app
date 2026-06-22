@@ -3,6 +3,9 @@ import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
+import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -437,21 +440,21 @@ function PettyCashPage() {
                           <td className="px-4 py-3 font-bold text-gray-900">{formatCurrency(i.amount)}</td>
                           <td className="px-4 py-3 text-gray-500">{i.paymentMethod}</td>
                           <td className="px-4 py-3">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${(i.paymentStatus || 'PAID') === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            <Badge tone={(i.paymentStatus || 'PAID') === 'PAID' ? 'green' : 'amber'}>
                               {(i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Unpaid'}
-                            </span>
+                            </Badge>
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${i.status === 'APPROVED' ? 'bg-green-100 text-green-700' : i.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                            <Badge tone={i.status === 'APPROVED' ? 'green' : i.status === 'REJECTED' ? 'red' : 'amber'}>
                               {i.status === 'APPROVED' ? `✓ ${i.approvedBy || 'Approved'}` : i.status === 'REJECTED' ? `✕ Rejected` : 'Pending'}
-                            </span>
+                            </Badge>
                           </td>
                           {canApprove && (
                             <td className="px-4 py-3 text-right whitespace-nowrap">
                               {i.status === 'PENDING' ? (
                                 <>
-                                  <button onClick={() => act(i.id, 'approve')} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 mr-1">Approve</button>
-                                  <button onClick={() => act(i.id, 'reject')} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Reject</button>
+                                  <Button onClick={() => act(i.id, 'approve')} variant="success" size="sm" className="mr-1">Approve</Button>
+                                  <Button onClick={() => act(i.id, 'reject')} variant="danger" size="sm">Reject</Button>
                                 </>
                               ) : <span className="text-gray-300 text-xs">—</span>}
                             </td>
@@ -459,7 +462,9 @@ function PettyCashPage() {
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={canApprove ? 10 : 9} className="text-center py-12 text-gray-400">No cash requests in this period</td></tr>
+                        <tr><td colSpan={canApprove ? 10 : 9}>
+                          <EmptyState icon="💵" title="No cash requests in this period" hint="Record an expense with “New Cash Request”." />
+                        </td></tr>
                       )}
                     </tbody>
                     {filtered.length > 0 && (
@@ -583,10 +588,9 @@ function PettyCashPage() {
                       {approvers.map((a) => <option key={a.email} value={a.name}>{a.name}</option>)}
                     </select>
                   </div>
-                  <button type="submit" disabled={submitting}
-                    className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
+                  <Button type="submit" size="lg" disabled={submitting} className="w-full">
                     {submitting ? 'Submitting…' : 'Submit Cash Request'}
-                  </button>
+                  </Button>
                 </form>
               </div>
             </div>
