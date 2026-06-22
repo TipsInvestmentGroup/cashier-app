@@ -7,18 +7,20 @@ import { useApi } from '@/hooks/useApi'
 import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, type LucideIcon } from 'lucide-react'
+import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, type LucideIcon } from 'lucide-react'
 
 const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER']
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
-const SECTIONS = ['MyPos', 'Daily', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
+const SECTIONS = ['MyPos', 'Daily', 'Targets', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
 
 const navItems: { href: string; icon: LucideIcon; label: string; section: string; roles: string[]; match?: string[] }[] = [
   { href: '/mypos', icon: UtensilsCrossed, label: 'MyPos', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'], match: ['/mypos', '/pos'] },
 
   { href: '/dashboard', icon: LayoutDashboard, label: 'Daily', section: 'Daily', roles: CASHIER_ROLES, match: ['/dashboard', '/collections', '/daily-report', '/excess-loss'] },
+
+  { href: '/targets', icon: Target, label: 'Targets', section: 'Targets', roles: ALL, match: ['/targets'] },
 
   { href: '/signed-bills', icon: Receipt, label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 
