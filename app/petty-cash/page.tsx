@@ -672,11 +672,14 @@ function PettyCashPage() {
                   )}
                 </div>
                 {vVar != null && (
-                  <div className={`rounded-xl p-3 flex items-center justify-between ${vVar === 0 ? 'bg-gray-50' : vVar > 0 ? 'bg-green-50' : 'bg-red-50'}`}>
-                    <span className={`font-semibold ${vVar === 0 ? 'text-gray-700' : vVar > 0 ? 'text-green-800' : 'text-red-800'}`}>
-                      {vVar === 0 ? '✅ Verified matches closing' : vVar > 0 ? '🔺 Excess cash' : '🔻 Cash shortage'}
-                    </span>
-                    <span className={`text-lg font-bold ${vVar === 0 ? 'text-gray-700' : vVar > 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(vVar))}</span>
+                  <div className={`rounded-xl p-3 border-2 ${vVar === 0 ? 'bg-gray-50 border-gray-100' : vVar > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className="flex items-center justify-between">
+                      <span className={`font-semibold ${vVar === 0 ? 'text-gray-700' : vVar > 0 ? 'text-green-800' : 'text-red-800'}`}>
+                        {vVar === 0 ? '✅ Verified matches closing' : vVar > 0 ? '🔺 Excess cash' : '🔻 Cash shortage'}
+                      </span>
+                      <span className={`text-lg font-bold ${vVar === 0 ? 'text-gray-700' : vVar > 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(vVar))}</span>
+                    </div>
+                    {vVar !== 0 && <p className="text-xs mt-1 text-gray-500">Verified {formatCurrency(verified || 0)} vs expected closing {formatCurrency(closing)} — please investigate before closing the day.</p>}
                   </div>
                 )}
 

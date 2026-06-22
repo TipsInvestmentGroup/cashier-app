@@ -38,12 +38,14 @@ export default function DashboardPage() {
   const { request } = useApi()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [variances, setVariances] = useState<{ outlet: string; kind: string; expected: number; actual: number; variance: number }[]>([])
 
   useEffect(() => {
     request('/api/dashboard')
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false))
+    request('/api/reports/variance-alerts').then((r) => setVariances(r.items || [])).catch(() => {})
   }, [request])
 
   if (loading) return (
@@ -108,6 +110,23 @@ export default function DashboardPage() {
           </div>
           <ExportBar rows={exportRows} filename="dashboard-summary" title="Dashboard Summary" />
         </div>
+
+        {/* Reconciliation variance alerts (today) */}
+        {variances.length > 0 && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+              <span className="font-bold text-red-800">⚠️ {variances.length} reconciliation variance{variances.length > 1 ? 's' : ''} today</span>
+              <a href="/excess-loss" className="text-xs font-semibold text-red-700 underline">View excess & loss →</a>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {variances.slice(0, 8).map((v, i) => (
+                <span key={i} className="text-xs bg-white border border-red-200 rounded-lg px-2 py-1 text-red-700">
+                  {v.outlet} · {v.kind}: <strong>{v.variance > 0 ? '+' : ''}{formatCurrency(v.variance)}</strong>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
