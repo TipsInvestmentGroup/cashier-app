@@ -7,7 +7,8 @@ import { useApi } from '@/hooks/useApi'
 import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, type LucideIcon } from 'lucide-react'
+import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, type LucideIcon } from 'lucide-react'
+import { UploadSalesModal } from '@/components/UploadSalesModal'
 
 const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER']
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -41,6 +42,8 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const [pwOpen, setPwOpen] = useState(false)
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
   const [pwBusy, setPwBusy] = useState(false)
+  const [uploadOpen, setUploadOpen] = useState(false)
+  const canUpload = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'].includes(user?.role || '')
 
   const changePassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -66,6 +69,15 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         <h1 className="text-lg font-bold leading-tight">Cashier Manager</h1>
         <p className="text-indigo-300 text-xs mt-1">{user?.outlet?.name || 'All Outlets'}</p>
       </div>
+
+      {canUpload && (
+        <div className="px-3 pt-3">
+          <button onClick={() => setUploadOpen(true)}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-white text-indigo-900 hover:bg-indigo-50 shadow-sm transition">
+            <Upload className="w-4 h-4" /> Upload Sales
+          </button>
+        </div>
+      )}
 
       <div className="px-3 py-2 border-b border-indigo-700">
         <div className="bg-indigo-700/50 rounded-xl p-3">
@@ -160,6 +172,8 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           </form>
         </div>
       )}
+
+      <UploadSalesModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
     </div>
   )
 }

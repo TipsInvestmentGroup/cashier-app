@@ -50,6 +50,26 @@ model Outlet {
   posOrders        PosOrder[]
   posBlockedItems  PosBlockedItem[]
   dayClosures      DayClosure[]
+  salesMetrics     SalesMetric[]
+}
+
+/// Uploaded per-staff sales figures that the POS/collections don't capture
+/// directly — Shisha (count) for Mikocheni and Food (TZS) for Coco. Used to
+/// measure actuals against the Targets.
+model SalesMetric {
+  id          String   @id @default(cuid())
+  date        DateTime
+  outletId    String?
+  outlet      Outlet?  @relation(fields: [outletId], references: [id])
+  department  String   // SHISHA | FOOD
+  staffName   String
+  value       Float    @default(0) // shisha count, or food sales amount (TZS)
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+  @@index([department])
+  @@index([outletId])
 }
 
 /// Locks a single outlet's day. Once a (outlet, date) is closed, cashiers can no
