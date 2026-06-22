@@ -193,6 +193,7 @@ model PettyCash {
   paymentMethod String                       // CASH | CRDB | STANBIC | MPESA
   payeeName     String?
   payeeAccount  String?
+  paymentStatus String?  @default("PAID")     // PAID | PENDING — has the cash actually been paid out
   approvedBy    String?
   status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
   outletId      String?

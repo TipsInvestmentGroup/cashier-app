@@ -13,7 +13,7 @@ import { format } from 'date-fns'
 
 interface PettyCash {
   id: string; date: string; requestedBy: string; department?: string; functionName?: string; purpose: string
-  amount: number; paymentMethod: string; payeeName?: string; payeeAccount?: string
+  amount: number; paymentMethod: string; payeeName?: string; payeeAccount?: string; paymentStatus?: string
   approvedBy?: string; status: string
 }
 interface Person { id: string; name: string; type: string }
@@ -27,7 +27,7 @@ interface Channel { code: string; label: string; isActive: boolean }
 
 const INIT = {
   date: format(new Date(), 'yyyy-MM-dd'), requestedBy: '', department: '', functionName: '', purpose: '',
-  amount: '', paymentMethod: 'CASH', payeeName: '', payeeAccount: '', approvedBy: '',
+  amount: '', paymentMethod: 'CASH', payeeName: '', payeeAccount: '', paymentStatus: 'PAID', approvedBy: '',
 }
 
 export default function PettyCashPage() {
@@ -261,7 +261,7 @@ export default function PettyCashPage() {
   const exportRows = () => filtered.map((i) => ({
     Date: formatDate(i.date), 'Requested By': i.requestedBy, Department: i.department || '', Function: i.functionName || '',
     Purpose: i.purpose, Amount: i.amount, 'Payment Method': i.paymentMethod,
-    Payee: i.payeeName || '', 'Payee Account': i.payeeAccount || '', Status: i.status, 'Approved By': i.approvedBy || '',
+    'Payment Status': (i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Pending', 'Payee Account': i.payeeAccount || '', Status: i.status, 'Approved By': i.approvedBy || '',
   }))
   const fileBase = `petty-cash-${format(new Date(), 'yyyy-MM-dd')}`
 
@@ -378,7 +378,7 @@ export default function PettyCashPage() {
                         <th className="px-4 py-3 font-semibold">Purpose</th>
                         <th className="px-4 py-3 font-semibold">Amount</th>
                         <th className="px-4 py-3 font-semibold">Method</th>
-                        <th className="px-4 py-3 font-semibold">Payee</th>
+                        <th className="px-4 py-3 font-semibold">Payment</th>
                         <th className="px-4 py-3 font-semibold">Status</th>
                         {canApprove && <th className="px-4 py-3 font-semibold text-right">Action</th>}
                       </tr>
@@ -393,7 +393,11 @@ export default function PettyCashPage() {
                           <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" title={i.purpose}>{i.purpose}</td>
                           <td className="px-4 py-3 font-bold text-gray-900">{formatCurrency(i.amount)}</td>
                           <td className="px-4 py-3 text-gray-500">{i.paymentMethod}</td>
-                          <td className="px-4 py-3 text-gray-500">{i.payeeName || '-'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${(i.paymentStatus || 'PAID') === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {(i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Pending'}
+                            </span>
+                          </td>
                           <td className="px-4 py-3">
                             <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${i.status === 'APPROVED' ? 'bg-green-100 text-green-700' : i.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
                               {i.status === 'APPROVED' ? `✓ ${i.approvedBy || 'Approved'}` : i.status === 'REJECTED' ? `✕ Rejected` : 'Pending'}
@@ -488,11 +492,11 @@ export default function PettyCashPage() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Payee Name <span className="text-gray-400 font-normal">(if applicable)</span></label>
-                    <select value={form.payeeName} onChange={(e) => setForm({ ...form, payeeName: e.target.value })}
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Status</label>
+                    <select value={form.paymentStatus} onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })}
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
-                      <option value="">Select payee…</option>
-                      {persons.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                      <option value="PAID">Paid</option>
+                      <option value="PENDING">Pending</option>
                     </select>
                   </div>
                   <div>

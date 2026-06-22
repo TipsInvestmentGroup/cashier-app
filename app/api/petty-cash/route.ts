@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   if (!(await canRequestPetty(user.email))) return NextResponse.json({ error: 'You are not authorized to submit petty cash requests' }, { status: 403 })
 
   const body = await req.json()
-  const { date, requestedBy, department, functionName, purpose, amount, paymentMethod, payeeName, payeeAccount, approvedBy, outletId } = body
+  const { date, requestedBy, department, functionName, purpose, amount, paymentMethod, payeeName, payeeAccount, paymentStatus, approvedBy, outletId } = body
 
   if (!requestedBy) return NextResponse.json({ error: 'Requested by is required' }, { status: 400 })
   if (!purpose) return NextResponse.json({ error: 'Purpose is required' }, { status: 400 })
@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
       paymentMethod: method,
       payeeName: payeeName || null,
       payeeAccount: payeeAccount || null,
+      paymentStatus: String(paymentStatus || 'PAID').toUpperCase() === 'PENDING' ? 'PENDING' : 'PAID',
       approvedBy: approvedBy || null,
       status: approvedBy ? 'APPROVED' : 'PENDING',
       outletId: outletId || user.outletId || null,
