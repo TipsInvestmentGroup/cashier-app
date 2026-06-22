@@ -9,6 +9,10 @@ import { PaymentStoryModal } from '@/components/PaymentStoryModal'
 import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Card, CardHeader } from '@/components/ui/Card'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+
+const AGING_FILL: Record<string, string> = { '0-30': '#16a34a', '31-60': '#d97706', '61-90': '#ea580c', '90+': '#dc2626' }
 
 interface Receivable {
   id: string; date: string; voucherNumber: string; billType: string; personName: string
@@ -70,6 +74,10 @@ export default function ReceivablesPage() {
   })
 
   const types = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'STAFF_LOSS', 'TIPS', 'DJ']
+  const agingData = ['0-30', '31-60', '61-90', '90+'].map((b) => ({
+    bucket: `${b} days`, key: b,
+    amount: receivables.filter((r) => r.aging === b).reduce((s, r) => s + r.balance, 0),
+  }))
 
   const exportRows = filtered.map((r) => ({
     Date: formatDate(r.date),
@@ -108,6 +116,23 @@ export default function ReceivablesPage() {
               ) : null
             ))}
           </div>
+        )}
+
+        {/* Aging distribution */}
+        {receivables.length > 0 && (
+          <Card>
+            <CardHeader title="Aging distribution" subtitle="Outstanding balance by age bucket" />
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={agingData} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
+                <XAxis dataKey="bucket" tickLine={false} axisLine={false} fontSize={12} />
+                <YAxis tickFormatter={(v) => `${Math.round(v / 1000)}k`} width={44} fontSize={11} tickLine={false} axisLine={false} />
+                <Tooltip formatter={(v: number) => formatCurrency(v)} cursor={{ fill: '#f8fafc' }} />
+                <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
+                  {agingData.map((d) => <Cell key={d.key} fill={AGING_FILL[d.key]} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
         )}
 
         {/* Search */}

@@ -127,7 +127,7 @@ export default function ReportsPage() {
 
         {/* Report type switcher */}
         <div className="flex flex-wrap gap-2">
-          {[{ k: 'summary', label: '📊 Financial Summary' }, { k: 'daily-cashier', label: '🧾 Daily Cashier Report' }, { k: 'cash-recon', label: '💰 Cash Reconciliation' }, { k: 'bank-recon', label: '📲 Digital Payment Reconciliation' }].map((v) => (
+          {[{ k: 'summary', label: '📊 Financial Summary' }, { k: 'daily-cashier', label: '🧾 Cashier Breakdown' }, { k: 'cash-recon', label: '💰 Cash Reconciliation' }, { k: 'bank-recon', label: '📲 Digital Payment Reconciliation' }].map((v) => (
             <button key={v.k} onClick={() => setReportView(v.k)}
               className={`px-5 py-2.5 rounded-xl text-sm font-semibold transition ${reportView === v.k ? 'bg-indigo-600 text-white shadow' : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-gray-300'}`}>
               {v.label}
@@ -135,7 +135,15 @@ export default function ReportsPage() {
           ))}
         </div>
 
-        {reportView === 'daily-cashier' && <DailyCashierReport outlets={outlets} request={request} />}
+        {reportView === 'daily-cashier' && (
+          <div className="space-y-3">
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-sm text-indigo-800">
+              This is the analytical breakdown (group by staff / outlet / person, any period). For the printable one-day summary to share on WhatsApp, use the{' '}
+              <a href="/daily-report" className="font-semibold underline">Daily Report</a> page.
+            </div>
+            <DailyCashierReport outlets={outlets} request={request} />
+          </div>
+        )}
         {reportView === 'cash-recon' && <CashReconReport outlets={outlets} request={request} />}
         {reportView === 'bank-recon' && <BankReconReport outlets={outlets} request={request} />}
 
