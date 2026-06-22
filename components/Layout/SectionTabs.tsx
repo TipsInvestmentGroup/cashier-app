@@ -27,6 +27,7 @@ export const DAILY_TABS: Tab[] = [
 // Groups per section, in the order they appear (role-gated per group).
 export const FINANCE_TABS: Tab[] = [
   { href: '/receivables', label: 'Receivables', icon: '📈', roles: MGMT },
+  { href: '/month-end', label: 'Month-End', icon: '📅', roles: MGMT },
   { href: '/payroll', label: 'Payroll Deductions', icon: '🧾', roles: MGMT },
   { href: '/reports', label: 'Reports', icon: '📄', roles: MGMT },
   { href: '/audit', label: 'Audit Log', icon: '🛡️', roles: MGMT },

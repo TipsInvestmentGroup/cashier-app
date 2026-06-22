@@ -23,7 +23,7 @@ const navItems = [
 
   { href: '/petty-cash', icon: '💵', label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals'] },
 
-  { href: '/receivables', icon: '💼', label: 'Finance', section: 'Finance', roles: MGMT, match: ['/receivables', '/payroll', '/reports', '/audit'] },
+  { href: '/receivables', icon: '💼', label: 'Finance', section: 'Finance', roles: MGMT, match: ['/receivables', '/month-end', '/payroll', '/reports', '/audit'] },
 
   { href: '/setup', icon: '⚙️', label: 'Setup', section: 'Setup', roles: ALL, match: ['/setup', ...SETUP_TABS.map((t) => t.href)] },
 ]
