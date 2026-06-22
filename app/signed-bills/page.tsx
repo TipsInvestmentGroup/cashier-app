@@ -4,7 +4,9 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, BILLS_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
-import { formatCurrency, formatDate, BILL_TYPE_COLORS, BILL_TYPE_LABELS, STATUS_COLORS } from '@/lib/utils'
+import { formatCurrency, formatDate, BILL_TYPE_LABELS } from '@/lib/utils'
+import { Badge } from '@/components/ui/Badge'
+import { EmptyState } from '@/components/ui/EmptyState'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
@@ -60,7 +62,6 @@ export default function SignedBillsPage() {
   const hasItems = itemRows.some((r) => r.productName && Number(r.quantity) > 0)
   const BILL_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: TYPE_COLOR[c.code] || 'bg-gray-600' }))
   const typeLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
-  const typeColor = (code: string) => BILL_TYPE_COLORS[code] || 'bg-gray-100 text-gray-700'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -374,23 +375,19 @@ export default function SignedBillsPage() {
                       <td className="px-4 py-3 font-semibold text-gray-600">#{b.seq ?? '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{formatDate(b.date)}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${typeColor(b.billType)}`}>
-                          {typeLabel(b.billType)}
-                        </span>
+                        <Badge billType={b.billType}>{typeLabel(b.billType)}</Badge>
                       </td>
                       <td className="px-4 py-3 font-medium text-gray-800">{b.personName}</td>
                       <td className="px-4 py-3 font-bold text-gray-900">{formatCurrency(b.amount)}</td>
                       <td className="px-4 py-3 text-gray-500">{b.serviceStaff || '-'}</td>
                       <td className="px-4 py-3 text-gray-500">{b.outlet.name}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${STATUS_COLORS[b.status]}`}>
-                          {b.status}
-                        </span>
+                        <Badge status={b.status}>{b.status}</Badge>
                       </td>
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={8} className="text-center py-12 text-gray-400">No bills found</td></tr>
+                    <tr><td colSpan={8}><EmptyState icon="📋" title="No bills found" hint="Record a signed bill or adjust your filters." /></td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (

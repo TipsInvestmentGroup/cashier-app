@@ -2,6 +2,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, BILLS_TABS } from '@/components/Layout/SectionTabs'
+import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -277,7 +279,7 @@ export default function TipsDjBillsPage() {
                       <td className="px-4 py-3 text-right text-xs"><span className="text-green-600">{g.approved}</span> / <span className="text-orange-600">{g.pending}</span> / <span className="text-red-600">{g.rejected}</span></td>
                     </tr>
                   ))}
-                  {grouped.length === 0 && <tr><td colSpan={4} className="text-center py-12 text-gray-400">No Tips/DJ bills in this period</td></tr>}
+                  {grouped.length === 0 && <tr><td colSpan={4}><EmptyState icon="🎁" title="No Tips/DJ bills in this period" /></td></tr>}
                 </tbody>
               </table>
             </div>
@@ -312,8 +314,8 @@ export default function TipsDjBillsPage() {
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           {b.status === 'PENDING' ? (
                             <>
-                              <button onClick={() => act(b.id, 'approve')} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100 mr-1">Approve</button>
-                              <button onClick={() => act(b.id, 'reject')} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Reject</button>
+                              <Button onClick={() => act(b.id, 'approve')} variant="success" size="sm" className="mr-1">Approve</Button>
+                              <Button onClick={() => act(b.id, 'reject')} variant="danger" size="sm">Reject</Button>
                             </>
                           ) : <span className="text-gray-300 text-xs">—</span>}
                         </td>
@@ -321,7 +323,7 @@ export default function TipsDjBillsPage() {
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={canApprove ? 7 : 6} className="text-center py-12 text-gray-400">No Tips/DJ bills in this period</td></tr>
+                    <tr><td colSpan={canApprove ? 7 : 6}><EmptyState icon="🎁" title="No Tips/DJ bills in this period" hint="Filed Tips & DJ bills will appear here for approval." /></td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (

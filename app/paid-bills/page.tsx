@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, BILLS_TABS } from '@/components/Layout/SectionTabs'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -401,7 +402,7 @@ export default function PaidBillsPage() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={9} className="text-center py-12 text-gray-400">No payments in this period</td></tr>
+                    <tr><td colSpan={9}><EmptyState icon="✅" title="No payments in this period" hint="Recorded debt payments will appear here." /></td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (

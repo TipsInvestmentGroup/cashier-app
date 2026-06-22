@@ -730,7 +730,7 @@ export default function CollectionsPage() {
                 </label>
               )}
 
-              <div className="flex gap-3">
+              <div className="flex gap-3 sticky bottom-0 -mx-6 px-6 pt-3 pb-1 bg-white border-t border-gray-100 z-10">
                 <Button type="submit" size="lg" disabled={submitting || !reconciled} className="flex-1">
                   {submitting ? 'Saving...' : editingId ? 'Update Collection' : 'Save Collection'}
                 </Button>
