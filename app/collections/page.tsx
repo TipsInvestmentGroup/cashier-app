@@ -170,6 +170,8 @@ export default function CollectionsPage() {
   }
 
   const canAdd = ['CASHIER', 'ACCOUNTANT', 'ADMIN'].includes(user?.role || '')
+  // Cashiers work one outlet and report as themselves — hide the redundant Outlet/By columns on screen.
+  const isCashier = user?.role === 'CASHIER'
 
   const startEdit = (c: Collection & { outletId?: string }) => {
     setEditingId(c.id)
@@ -608,8 +610,15 @@ export default function CollectionsPage() {
 
         {/* List */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-800">Collection Records</h2>
+          <div className="p-5 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h2 className="font-semibold text-gray-800">Collection Records</h2>
+              {isCashier && (
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {user?.outlet?.name || 'Outlet'} · By {user?.name || '—'}
+                </p>
+              )}
+            </div>
             <span className="text-sm text-gray-500">
               {RANGE_OPTIONS.find((r) => r.key === range)?.label} · Total <strong className="text-gray-800">{formatCurrency(totals.total)}</strong>
             </span>
@@ -622,7 +631,7 @@ export default function CollectionsPage() {
                 <thead className="bg-gray-50">
                   <tr className="text-left text-gray-600">
                     <th className="px-5 py-3 font-semibold">Date</th>
-                    <th className="px-5 py-3 font-semibold">Outlet</th>
+                    {!isCashier && <th className="px-5 py-3 font-semibold">Outlet</th>}
                     <th className="px-5 py-3 font-semibold">Staff</th>
                     <th className="px-5 py-3 font-semibold">Cash</th>
                     <th className="px-5 py-3 font-semibold">CRDB</th>
@@ -632,22 +641,18 @@ export default function CollectionsPage() {
                     <th className="px-5 py-3 font-semibold">System</th>
                     <th className="px-5 py-3 font-semibold">Cash Req</th>
                     <th className="px-5 py-3 font-semibold">Variance</th>
-                    <th className="px-5 py-3 font-semibold">By</th>
+                    {!isCashier && <th className="px-5 py-3 font-semibold">By</th>}
                     {canAdd && <th className="px-5 py-3 font-semibold text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filtered.map((c, i) => {
+                  {filtered.map((c) => {
                     const sys = c.systemSales || 0
                     const v = rowLoss(c) // + = staff loss, − = overage
-                    const prev = i > 0 ? filtered[i - 1] : null
-                    // Collapse repeated values — only show outlet / cashier when it changes from the row above
-                    const showOutlet = !prev || prev.outlet.name !== c.outlet.name
-                    const showBy = !prev || prev.cashier.name !== c.cashier.name
                     return (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-5 py-4 text-gray-700">{formatDateTime(c.date)}</td>
-                      <td className="px-5 py-4 font-medium text-gray-800">{showOutlet ? c.outlet.name : ''}</td>
+                      {!isCashier && <td className="px-5 py-4 font-medium text-gray-800">{c.outlet.name}</td>}
                       <td className="px-5 py-4 text-gray-700">{c.staffName || '-'}</td>
                       <td className="px-5 py-4 text-green-700">{c.cash > 0 ? formatCurrency(c.cash) : '-'}</td>
                       <td className="px-5 py-4 text-blue-700">{c.crdb > 0 ? formatCurrency(c.crdb) : '-'}</td>
@@ -659,7 +664,7 @@ export default function CollectionsPage() {
                       <td className={`px-5 py-4 font-semibold ${sys === 0 ? 'text-gray-300' : v > 0 ? 'text-red-600' : v < 0 ? 'text-green-600' : 'text-gray-500'}`}>
                         {sys === 0 ? '-' : `${v > 0 ? '▼ ' : v < 0 ? '▲ ' : ''}${formatCurrency(Math.abs(v))}`}
                       </td>
-                      <td className="px-5 py-4 text-gray-500">{showBy ? c.cashier.name : ''}</td>
+                      {!isCashier && <td className="px-5 py-4 text-gray-500">{c.cashier.name}</td>}
                       {canAdd && (
                         <td className="px-5 py-4 text-right whitespace-nowrap">
                           <button onClick={() => startEdit(c)} title="Edit"
@@ -672,13 +677,13 @@ export default function CollectionsPage() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={canAdd ? 13 : 12} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
+                    <tr><td colSpan={(isCashier ? 10 : 12) + (canAdd ? 1 : 0)} className="text-center py-12 text-gray-400">No collections in this period</td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr className="font-bold text-gray-900">
-                      <td className="px-5 py-4" colSpan={3}>TOTAL ({filtered.length})</td>
+                      <td className="px-5 py-4" colSpan={isCashier ? 2 : 3}>TOTAL ({filtered.length})</td>
                       <td className="px-5 py-4 text-green-700">{formatCurrency(totals.cash)}</td>
                       <td className="px-5 py-4 text-blue-700">{formatCurrency(totals.crdb)}</td>
                       <td className="px-5 py-4 text-purple-700">{formatCurrency(totals.stanbic)}</td>
@@ -687,7 +692,7 @@ export default function CollectionsPage() {
                       <td className="px-5 py-4 text-gray-700">{formatCurrency(totals.systemSales)}</td>
                       <td className="px-5 py-4 text-amber-700">{formatCurrency(totals.systemSales - totals.crdb - totals.stanbic - totals.mpesa)}</td>
                       <td className={`px-5 py-4 ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(variance))}</td>
-                      <td className="px-5 py-4"></td>
+                      {!isCashier && <td className="px-5 py-4"></td>}
                       {canAdd && <td className="px-5 py-4"></td>}
                     </tr>
                   </tfoot>
