@@ -71,6 +71,8 @@ export default function CollectionsPage() {
   const [range, setRange] = useState<RangeKey>('today')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [closedDays, setClosedDays] = useState<string[]>([]) // start-of-day ISO strings
+  const [closingDay, setClosingDay] = useState(false)
 
   const [form, setForm] = useState({
     cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '',
@@ -96,7 +98,7 @@ export default function CollectionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [cols, outs, persons, prods, sbs, cats, chs] = await Promise.all([
+    const [cols, outs, persons, prods, sbs, cats, chs, closures] = await Promise.all([
       request('/api/collections'),
       request('/api/outlets'),
       request('/api/persons'),
@@ -104,8 +106,10 @@ export default function CollectionsPage() {
       request('/api/signed-bills?status=UNPAID'),
       request('/api/person-categories'),
       request('/api/payment-channels'),
+      request('/api/collections/close-day').catch(() => ({ closedDays: [] })),
     ])
     setCollections(cols)
+    setClosedDays(closures?.closedDays || [])
     setOutlets(outs)
     setProducts((prods || []).filter((p: Product) => p.isActive))
     setSignedBillsList((sbs || []).filter((b: SignedBill) => b.status !== 'PAID'))
@@ -266,6 +270,42 @@ export default function CollectionsPage() {
   // Cancellations recorded in the period
   const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).filter((x) => x.status === 'APPROVED').reduce((a, x) => a + (x.amount || 0), 0), 0)
 
+  // ---- Close the Day (lock a day so it can't be edited/deleted) ----
+  // Key by calendar date (yyyy-MM-dd). Stored timestamps are UTC-anchored to the
+  // form date, so slicing a record's ISO string matches a user-picked local date.
+  const dayKey = (d: string | Date) => typeof d === 'string' ? d.slice(0, 10) : format(d, 'yyyy-MM-dd')
+  const isDayClosed = (d: string | Date) => closedDays.includes(dayKey(d))
+  // The day the button acts on: the chosen single day (custom) or today.
+  const targetCloseDate = range === 'custom' && customFrom === customTo ? parseISO(customFrom) : new Date()
+  const targetClosed = isDayClosed(targetCloseDate)
+  const canReopen = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
+
+  const closeDay = async () => {
+    const label = format(targetCloseDate, 'dd MMM yyyy')
+    if (!window.confirm(`Close the day for ${label}?\n\nAfter closing, this day's collections can no longer be added, edited or deleted. A supervisor can reopen it if needed.`)) return
+    setClosingDay(true)
+    try {
+      await request('/api/collections/close-day', { method: 'POST', body: JSON.stringify({ date: format(targetCloseDate, 'yyyy-MM-dd') }) })
+      toast.success(`Day closed — ${label} is now locked.`)
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not close the day')
+    } finally { setClosingDay(false) }
+  }
+
+  const reopenDay = async () => {
+    const label = format(targetCloseDate, 'dd MMM yyyy')
+    if (!window.confirm(`Reopen ${label}? Cashiers will be able to edit this day's collections again.`)) return
+    setClosingDay(true)
+    try {
+      await request(`/api/collections/close-day?date=${format(targetCloseDate, 'yyyy-MM-dd')}`, { method: 'DELETE' })
+      toast.success(`Day reopened — ${label}.`)
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not reopen the day')
+    } finally { setClosingDay(false) }
+  }
+
   // Header summary (cashier view): derive real outlet/reporter from the records,
   // falling back to the logged-in user when the period has no rows yet.
   const headerOutlet = [...new Set(filtered.map((c) => c.outlet?.name).filter(Boolean))].join(', ') || user?.outlet?.name || 'Outlet'
@@ -337,8 +377,9 @@ export default function CollectionsPage() {
             <p className="text-gray-500 text-sm">Record cash, bank & M-PESA collections</p>
           </div>
           {canAdd && (
-            <button onClick={newCollection}
-              className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
+            <button onClick={newCollection} disabled={isCashier && isDayClosed(new Date())}
+              title={isCashier && isDayClosed(new Date()) ? 'Today is closed — ask a supervisor to reopen it' : ''}
+              className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow disabled:opacity-50">
               <span className="text-lg">+</span> New Collection
             </button>
           )}
@@ -693,6 +734,24 @@ export default function CollectionsPage() {
                 className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
                 📄 PDF
               </button>
+              {targetClosed ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="px-3 py-1.5 rounded-lg text-xs font-bold bg-gray-200 text-gray-700">🔒 Day Closed</span>
+                  {canReopen && (
+                    <button onClick={reopenDay} disabled={closingDay}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50">
+                      Reopen
+                    </button>
+                  )}
+                </span>
+              ) : (
+                canAdd && (
+                  <button onClick={closeDay} disabled={closingDay}
+                    className="px-4 py-1.5 rounded-lg text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 shadow-sm">
+                    {closingDay ? 'Closing…' : '🔒 Close the Day'}
+                  </button>
+                )
+              )}
             </div>
           </div>
           {loading ? (
@@ -739,10 +798,16 @@ export default function CollectionsPage() {
                       {!isCashier && <td className="px-5 py-4 text-gray-500">{c.cashier.name}</td>}
                       {canAdd && (
                         <td className="px-5 py-4 text-right whitespace-nowrap">
-                          <button onClick={() => startEdit(c)} title="Edit"
-                            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>
-                          <button onClick={() => deleteCollection(c)} title="Delete"
-                            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>
+                          {isDayClosed(c.date) && isCashier ? (
+                            <span className="text-xs text-gray-400">🔒 Closed</span>
+                          ) : (
+                            <>
+                              <button onClick={() => startEdit(c)} title="Edit"
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>
+                              <button onClick={() => deleteCollection(c)} title="Delete"
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>
+                            </>
+                          )}
                         </td>
                       )}
                     </tr>

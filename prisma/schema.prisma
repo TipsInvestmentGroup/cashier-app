@@ -49,6 +49,22 @@ model Outlet {
   posCounters      PosCounter[]
   posOrders        PosOrder[]
   posBlockedItems  PosBlockedItem[]
+  dayClosures      DayClosure[]
+}
+
+/// Locks a single outlet's day. Once a (outlet, date) is closed, cashiers can no
+/// longer create/edit/delete that day's collections. Reopening is supervisor-only.
+model DayClosure {
+  id         String   @id @default(cuid())
+  outletId   String
+  outlet     Outlet   @relation(fields: [outletId], references: [id])
+  date       DateTime
+  closedBy   String
+  closedById String?
+  closedAt   DateTime @default(now())
+
+  @@unique([outletId, date])
+  @@index([outletId])
 }
 
 model DailyCollection {

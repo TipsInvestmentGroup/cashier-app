@@ -8,6 +8,18 @@ const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
 // Roles allowed to edit/delete collections of ANY outlet; others are limited to their own.
 const CROSS_OUTLET = ['ADMIN', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR']
 
+// DayClosure types are generated on deploy; assert to avoid local type drift.
+const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/** True if the given outlet's day is locked. Cashiers cannot touch a closed day. */
+async function isDayClosed(outletId: string, date: Date) {
+  const closure = await db.dayClosure.findUnique({
+    where: { outletId_date: { outletId, date: startOfDay(date) } },
+    select: { id: true },
+  })
+  return !!closure
+}
+
 /** Update a collection and keep its auto staff-loss (voucher SL-<id>) in sync. */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
@@ -19,6 +31,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!existing) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
   if (!CROSS_OUTLET.includes(user.role) && user.outletId && existing.outletId !== user.outletId) {
     return NextResponse.json({ error: 'You can only edit collections from your own outlet' }, { status: 403 })
+  }
+  if (user.role === 'CASHIER' && await isDayClosed(existing.outletId, existing.date)) {
+    return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before editing.' }, { status: 423 })
   }
 
   const body = await req.json()
@@ -132,6 +147,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!existing) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
   if (!CROSS_OUTLET.includes(user.role) && user.outletId && existing.outletId !== user.outletId) {
     return NextResponse.json({ error: 'You can only delete collections from your own outlet' }, { status: 403 })
+  }
+  if (user.role === 'CASHIER' && await isDayClosed(existing.outletId, existing.date)) {
+    return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before deleting.' }, { status: 423 })
   }
 
   // Remove linked auto staff-loss (and its payments) first

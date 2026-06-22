@@ -56,6 +56,13 @@ export async function POST(req: NextRequest) {
 
   // Prevent duplicates: one collection per staff, per outlet, per day.
   const collDate = date ? new Date(date) : new Date()
+
+  // A closed day is locked for cashiers — no new collections.
+  if (user.role === 'CASHIER') {
+    const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
+    const closed = await db.dayClosure.findUnique({ where: { outletId_date: { outletId: usedOutletId, date: startOfDay(collDate) } }, select: { id: true } })
+    if (closed) return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before adding collections.' }, { status: 423 })
+  }
   if (staffName) {
     const dup = await prisma.dailyCollection.findFirst({
       where: {
