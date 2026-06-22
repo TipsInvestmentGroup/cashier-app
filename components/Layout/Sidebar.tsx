@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useApi } from '@/hooks/useApi'
+import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
@@ -40,13 +41,7 @@ const navItems = [
   { href: '/payroll', icon: '🧾', label: 'Payroll Deductions', section: 'Finance', roles: MGMT },
   { href: '/reports', icon: '📄', label: 'Reports', section: 'Finance', roles: MGMT },
 
-  { href: '/products', icon: '📦', label: 'Products', section: 'Setup', roles: CASHIER_ROLES },
-  { href: '/departments', icon: '🗂️', label: 'Departments', section: 'Setup', roles: ALL },
-  { href: '/person-categories', icon: '🏷️', label: 'Categories', section: 'Setup', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
-  { href: '/payment-channels', icon: '💳', label: 'Payment Channels', section: 'Setup', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
-  { href: '/persons', icon: '👥', label: 'Persons', section: 'Setup', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
-  { href: '/outlets', icon: '🏢', label: 'Outlets', section: 'Setup', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
-  { href: '/users', icon: '⚙️', label: 'Users', section: 'Setup', roles: ['ADMIN'] },
+  { href: '/setup', icon: '⚙️', label: 'Setup', section: 'Setup', roles: ALL },
 ]
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
@@ -98,7 +93,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-indigo-400">{sec}</p>
               <div className="space-y-1">
                 {items.map((item) => {
-                  const active = pathname.startsWith(item.href)
+                  const active = item.href === '/setup'
+                    ? (pathname === '/setup' || SETUP_TABS.some((t) => pathname === t.href || pathname.startsWith(t.href + '/')))
+                    : pathname.startsWith(item.href)
                   return (
             <Link
               key={item.href}

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import toast from 'react-hot-toast'
 
@@ -49,6 +50,7 @@ export default function PersonCategoriesPage() {
 
   return (
     <AppShell>
+      <SetupTabs />
       <div className="space-y-6 max-w-2xl">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Categories</h1>

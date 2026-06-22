@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatDate } from '@/lib/utils'
@@ -90,6 +91,7 @@ export default function UsersPage() {
 
   return (
     <AppShell>
+      <SetupTabs />
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>

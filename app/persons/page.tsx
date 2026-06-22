@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
@@ -108,6 +109,7 @@ export default function PersonsPage() {
 
   return (
     <AppShell>
+      <SetupTabs />
       <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>

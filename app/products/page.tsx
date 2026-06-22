@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
@@ -82,6 +83,7 @@ export default function ProductsPage() {
 
   return (
     <AppShell>
+      <SetupTabs />
       <div className="space-y-6">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
