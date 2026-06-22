@@ -200,8 +200,25 @@ model PettyCash {
   cashierId     String
   createdAt     DateTime @default(now())
 
+  items         PettyCashItem[]
+
   @@index([date])
   @@index([status])
+}
+
+/// Optional line-item breakdown of a cash request (Detail · Unit · Unit Cost · Total).
+/// A request with no items is a simple single-amount request.
+model PettyCashItem {
+  id          String    @id @default(cuid())
+  pettyCashId String
+  pettyCash   PettyCash @relation(fields: [pettyCashId], references: [id], onDelete: Cascade)
+  detail      String
+  unit        Float     @default(1)
+  unitCost    Float     @default(0)
+  amount      Float     @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([pettyCashId])
 }
 
 // Departments selectable on the cash-request form (managed in /departments).

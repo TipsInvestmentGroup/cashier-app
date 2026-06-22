@@ -11,10 +11,11 @@ import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 
+interface PettyCashItem { id?: string; detail: string; unit: number; unitCost: number; amount: number }
 interface PettyCash {
   id: string; date: string; requestedBy: string; department?: string; functionName?: string; purpose: string
   amount: number; paymentMethod: string; payeeName?: string; payeeAccount?: string; paymentStatus?: string
-  approvedBy?: string; status: string
+  approvedBy?: string; status: string; items?: PettyCashItem[]
 }
 interface Person { id: string; name: string; type: string }
 interface NamedItem { id: string; name: string; isActive: boolean }
@@ -42,6 +43,14 @@ export default function PettyCashPage() {
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({ ...INIT })
+  // Optional itemized breakdown (Detail · Unit · Unit Cost). Empty = simple single amount.
+  const [lineItems, setLineItems] = useState<{ detail: string; unit: string; unitCost: string }[]>([])
+  const itemRowAmount = (r: { unit: string; unitCost: string }) => (Number(r.unit) || 0) * (Number(r.unitCost) || 0)
+  const itemsTotal = lineItems.reduce((s, r) => s + itemRowAmount(r), 0)
+  const hasItems = lineItems.some((r) => r.detail.trim() || Number(r.unitCost) > 0)
+  const addItem = () => setLineItems([...lineItems, { detail: '', unit: '1', unitCost: '' }])
+  const updItem = (i: number, patch: Partial<{ detail: string; unit: string; unitCost: string }>) => setLineItems(lineItems.map((r, x) => (x === i ? { ...r, ...patch } : r)))
+  const rmItem = (i: number) => setLineItems(lineItems.filter((_, x) => x !== i))
   const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([])
   const [persons, setPersons] = useState<Person[]>([])
   const [departments, setDepartments] = useState<NamedItem[]>([])
@@ -225,12 +234,18 @@ export default function PettyCashPage() {
     e.preventDefault()
     if (!form.requestedBy) return toast.error('Requested by is required')
     if (!form.purpose) return toast.error('Purpose is required')
-    if (!form.amount || Number(form.amount) <= 0) return toast.error('Amount must be > 0')
+    // Build the itemized breakdown (if any); the grand total drives the amount.
+    const cleanItems = lineItems
+      .filter((r) => r.detail.trim() || Number(r.unitCost) > 0)
+      .map((r) => ({ detail: r.detail.trim() || 'Item', unit: Number(r.unit) || 1, unitCost: Number(r.unitCost) || 0, amount: itemRowAmount(r) }))
+    const amount = cleanItems.length ? cleanItems.reduce((s, i) => s + i.amount, 0) : Number(form.amount)
+    if (!amount || amount <= 0) return toast.error('Amount must be > 0 (enter an amount or add items)')
     setSubmitting(true)
     try {
-      await request('/api/petty-cash', { method: 'POST', body: JSON.stringify({ ...form, amount: Number(form.amount) }) })
+      await request('/api/petty-cash', { method: 'POST', body: JSON.stringify({ ...form, amount, items: cleanItems }) })
       toast.success('Cash request submitted!')
       setForm({ ...INIT })
+      setLineItems([])
       load()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error submitting request')
@@ -260,7 +275,7 @@ export default function PettyCashPage() {
 
   const exportRows = () => filtered.map((i) => ({
     Date: formatDate(i.date), 'Requested By': i.requestedBy, Department: i.department || '', Function: i.functionName || '',
-    Purpose: i.purpose, Amount: i.amount, 'Payment Method': i.paymentMethod,
+    Purpose: i.purpose, Items: (i.items || []).map((it) => `${it.detail} (${it.unit}x${it.unitCost})`).join('; '), Amount: i.amount, 'Payment Method': i.paymentMethod,
     'Payment Status': (i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Pending', 'Payee Account': i.payeeAccount || '', Status: i.status, 'Approved By': i.approvedBy || '',
   }))
   const fileBase = `petty-cash-${format(new Date(), 'yyyy-MM-dd')}`
@@ -390,7 +405,16 @@ export default function PettyCashPage() {
                           <td className="px-4 py-3 font-medium text-gray-800">{i.requestedBy}</td>
                           <td className="px-4 py-3 text-gray-500">{i.department || '-'}</td>
                           <td className="px-4 py-3 text-gray-500">{i.functionName || '-'}</td>
-                          <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate" title={i.purpose}>{i.purpose}</td>
+                          <td className="px-4 py-3 text-gray-700 max-w-[240px]">
+                            <div className="truncate" title={i.purpose}>{i.purpose}</div>
+                            {i.items && i.items.length > 0 && (
+                              <ul className="mt-1 text-[11px] text-gray-400 space-y-0.5">
+                                {i.items.map((it, x) => (
+                                  <li key={x}>• {it.detail} — {it.unit}×{formatCurrency(it.unitCost)} = {formatCurrency(it.amount)}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
                           <td className="px-4 py-3 font-bold text-gray-900">{formatCurrency(i.amount)}</td>
                           <td className="px-4 py-3 text-gray-500">{i.paymentMethod}</td>
                           <td className="px-4 py-3">
@@ -475,10 +499,46 @@ export default function PettyCashPage() {
                     <textarea value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })}
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" rows={2} placeholder="What is the cash for?" required />
                   </div>
+                  {/* Itemized breakdown — leave empty for a single amount, or add items for multiple needs */}
+                  <div className="border-2 border-gray-100 rounded-xl p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-gray-700">📋 Breakdown <span className="font-normal text-gray-400">(for multiple needs)</span></span>
+                      <button type="button" onClick={addItem}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100">➕ Add item</button>
+                    </div>
+                    {lineItems.length === 0 && (
+                      <p className="text-xs text-gray-400">Leave empty and just enter the amount below for a single need, or add items (Detail · Unit · Unit Cost) to itemize.</p>
+                    )}
+                    {lineItems.length > 0 && (
+                      <div className="hidden sm:grid grid-cols-12 gap-2 text-[11px] font-semibold text-gray-400 mb-1">
+                        <span className="col-span-5">Detail</span><span className="col-span-2">Unit</span><span className="col-span-3">Unit Cost</span><span className="col-span-2 text-right">Total</span>
+                      </div>
+                    )}
+                    {lineItems.map((r, i) => (
+                      <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
+                        <input value={r.detail} onChange={(e) => updItem(i, { detail: e.target.value })} placeholder="Detail"
+                          className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <input type="number" min="1" value={r.unit} onChange={(e) => updItem(i, { unit: e.target.value })} placeholder="1"
+                          className="col-span-2 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <MoneyInput value={r.unitCost} onChange={(v) => updItem(i, { unitCost: v })} placeholder="0"
+                          className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <span className="col-span-1 text-xs font-semibold text-gray-700 text-right">{formatCurrency(itemRowAmount(r))}</span>
+                        <button type="button" onClick={() => rmItem(i)} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>
+                      </div>
+                    ))}
+                  </div>
+
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Amount Requested (TZS) *</label>
-                    <MoneyInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" required />
+                    {hasItems ? (
+                      <div className="w-full px-3 py-2.5 border-2 border-indigo-200 bg-indigo-50 rounded-xl text-lg font-bold text-indigo-800">
+                        {formatCurrency(itemsTotal)}
+                        <span className="ml-2 text-xs font-normal text-indigo-500">auto from {lineItems.filter((r) => r.detail.trim() || Number(r.unitCost) > 0).length} item(s)</span>
+                      </div>
+                    ) : (
+                      <MoneyInput value={form.amount} onChange={(v) => setForm({ ...form, amount: v })}
+                        className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Method</label>
