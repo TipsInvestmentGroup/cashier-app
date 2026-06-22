@@ -5,6 +5,8 @@ import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
+import { StatCard } from '@/components/ui/StatCard'
+import { Skeleton, StatCardsSkeleton } from '@/components/ui/Skeleton'
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -33,21 +35,6 @@ const STATUS_BG: Record<string, string> = {
   UNPAID: 'bg-red-100 text-red-700', PARTIAL: 'bg-yellow-100 text-yellow-700', PAID: 'bg-green-100 text-green-700',
 }
 
-function KPICard({ icon, label, value, sub, color }: { icon: string; label: string; value: string; sub?: string; color: string }) {
-  return (
-    <div className={`rounded-2xl p-5 ${color} shadow-sm`}>
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium opacity-80">{label}</p>
-          <p className="text-2xl font-bold mt-1">{value}</p>
-          {sub && <p className="text-xs opacity-70 mt-1">{sub}</p>}
-        </div>
-        <span className="text-3xl">{icon}</span>
-      </div>
-    </div>
-  )
-}
-
 export default function DashboardPage() {
   const { request } = useApi()
   const [data, setData] = useState<DashboardData | null>(null)
@@ -62,8 +49,12 @@ export default function DashboardPage() {
 
   if (loading) return (
     <AppShell>
-      <div className="flex items-center justify-center h-64">
-        <div className="text-4xl animate-bounce">🍹</div>
+      <SectionTabs tabs={DAILY_TABS} />
+      <div className="space-y-6">
+        <Skeleton className="h-9 w-48" />
+        <StatCardsSkeleton count={4} />
+        <Skeleton className="h-24 rounded-2xl" />
+        <Skeleton className="h-64 rounded-2xl" />
       </div>
     </AppShell>
   )
@@ -115,14 +106,14 @@ export default function DashboardPage() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          <KPICard icon="💰" label="Today's Collections" value={formatCurrency(data.today.total)}
-            sub="Cash + Bank + M-PESA" color="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white" />
-          <KPICard icon="📅" label="This Week" value={formatCurrency(data.week.total)}
-            sub="Weekly total" color="bg-gradient-to-br from-purple-500 to-purple-600 text-white" />
-          <KPICard icon="🗓️" label="This Month" value={formatCurrency(data.month.total)}
-            sub="Monthly total" color="bg-gradient-to-br from-pink-500 to-pink-600 text-white" />
-          <KPICard icon="⚠️" label="Outstanding Receivables" value={formatCurrency(data.unpaidBills.total)}
-            sub={`${data.unpaidBills.count} unpaid bills`} color="bg-gradient-to-br from-amber-500 to-orange-500 text-white" />
+          <StatCard icon="💰" label="Today's Collections" value={formatCurrency(data.today.total)}
+            sub="Cash + Bank + M-PESA" href="/collections" color="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white" />
+          <StatCard icon="📅" label="This Week" value={formatCurrency(data.week.total)}
+            sub="Weekly total" href="/reports" color="bg-gradient-to-br from-purple-500 to-purple-600 text-white" />
+          <StatCard icon="🗓️" label="This Month" value={formatCurrency(data.month.total)}
+            sub="Monthly total" href="/reports" color="bg-gradient-to-br from-pink-500 to-pink-600 text-white" />
+          <StatCard icon="⚠️" label="Outstanding Receivables" value={formatCurrency(data.unpaidBills.total)}
+            sub={`${data.unpaidBills.count} unpaid bills`} href="/receivables" color="bg-gradient-to-br from-amber-500 to-orange-500 text-white" />
         </div>
 
         {/* Today breakdown */}
