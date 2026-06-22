@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 
 interface Product { id: string; name: string; code: string; category: string | null; sellingPrice: number; blocked: boolean }
@@ -65,6 +66,7 @@ export default function ItemBlockerPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={MYPOS_TABS} />
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>

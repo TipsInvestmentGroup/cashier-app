@@ -10,23 +10,14 @@ import toast from 'react-hot-toast'
 
 const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER']
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
-const POS_ROLES = ['WAITER', 'MANAGER', 'ADMIN']
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
 const SECTIONS = ['MyPos', 'Daily', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
 
 const navItems = [
-  { href: '/pos', icon: '🍽', label: 'Waiter App', section: 'MyPos', roles: POS_ROLES },
-  { href: '/pos/counter', icon: '🖨', label: 'Counter View', section: 'MyPos', roles: POS_ROLES },
-  { href: '/pos/manager', icon: '👁', label: 'All Orders', section: 'MyPos', roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
-  { href: '/pos/manager/items', icon: '🚫', label: 'Item Blocker', section: 'MyPos', roles: ['MANAGER', 'ADMIN'] },
-  { href: '/pos/shift-report', icon: '📊', label: 'Shift Report', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
+  { href: '/mypos', icon: '🍽', label: 'MyPos', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'], match: ['/mypos', '/pos'] },
 
-  { href: '/dashboard', icon: '📊', label: 'Dashboard', section: 'Daily', roles: CASHIER_ROLES },
-  { href: '/collections', icon: '💰', label: 'Daily Collections', section: 'Daily', roles: CASHIER_ROLES },
-  { href: '/daily-report', icon: '📑', label: 'Daily Report', section: 'Daily', roles: CASHIER_ROLES },
-  { href: '/excess-loss?view=excess', icon: '🔺', label: 'Excess Report', section: 'Daily', roles: CASHIER_ROLES },
-  { href: '/excess-loss?view=loss', icon: '🔻', label: 'Loss Report', section: 'Daily', roles: CASHIER_ROLES },
+  { href: '/dashboard', icon: '📊', label: 'Daily', section: 'Daily', roles: CASHIER_ROLES, match: ['/dashboard', '/collections', '/daily-report', '/excess-loss'] },
 
   { href: '/signed-bills', icon: '📋', label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 

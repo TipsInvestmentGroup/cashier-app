@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -140,6 +141,7 @@ export default function ShiftReportPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={MYPOS_TABS} />
       <div className="max-w-2xl mx-auto">
         <div className="mb-6">
           <h1 className="text-xl font-bold text-indigo-900">Shift Report</h1>

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -53,6 +54,7 @@ export default function ManagerPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={MYPOS_TABS} />
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>

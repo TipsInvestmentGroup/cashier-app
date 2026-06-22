@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
@@ -102,6 +103,7 @@ export default function DashboardPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={DAILY_TABS} />
       <div className="space-y-6">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>

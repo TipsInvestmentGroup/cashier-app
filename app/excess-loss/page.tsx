@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -78,6 +79,7 @@ function ExcessLossPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={DAILY_TABS} />
       <div className="space-y-5">
         <div className="flex items-end justify-between flex-wrap gap-3">
           <div>

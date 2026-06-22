@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
@@ -170,6 +171,7 @@ export default function DailyReportPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={DAILY_TABS} />
       <div className="space-y-5">
         {/* Controls (hidden when printing) */}
         <div className="no-print flex items-end justify-between flex-wrap gap-3">

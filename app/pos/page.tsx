@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 
 const SHIFTS = [
@@ -77,6 +78,7 @@ export default function PosHomePage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={MYPOS_TABS} />
       <div className="max-w-md mx-auto">
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">🍹</div>

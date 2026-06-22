@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 
 const COUNTERS = [
@@ -58,6 +59,7 @@ function CounterView() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={MYPOS_TABS} />
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-bold text-indigo-900">Counter View</h1>
