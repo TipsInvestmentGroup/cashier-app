@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { startOfDay } from 'date-fns'
+import { startOfDay, endOfDay } from 'date-fns'
 
 // Prisma client types for DayClosure are generated on deploy (vercel-build runs
 // `prisma db push` + `prisma generate`); assert to avoid local type drift.
@@ -45,6 +45,15 @@ export async function POST(req: NextRequest) {
   if (!outletId) return NextResponse.json({ error: 'Outlet required to close the day' }, { status: 400 })
 
   const day = startOfDay(body.date ? new Date(body.date) : new Date())
+
+  // Validation: a day cannot be closed until both reconciliations are done.
+  const range = { gte: startOfDay(day), lte: endOfDay(day) }
+  const [cashRecon, digitalCount] = await Promise.all([
+    prisma.cashRecon.findFirst({ where: { outletId, date: range }, select: { id: true } }),
+    prisma.bankRecon.count({ where: { outletId, date: range, channel: { not: null } } }),
+  ])
+  if (!cashRecon) return NextResponse.json({ error: 'Cash Reconciliation must be completed before closing the day.' }, { status: 400 })
+  if (digitalCount === 0) return NextResponse.json({ error: 'Digital Reconciliation must be completed before closing the day.' }, { status: 400 })
 
   const closure = await db.dayClosure.upsert({
     where: { outletId_date: { outletId, date: day } },

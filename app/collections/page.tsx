@@ -76,6 +76,8 @@ export default function CollectionsPage() {
   const [closingDay, setClosingDay] = useState(false)
   const [closeWizard, setCloseWizard] = useState(false) // guided close-day flow
   const [wizardStep, setWizardStep] = useState(0)
+  const [dayStatus, setDayStatus] = useState({ cashDone: false, digitalDone: false })
+  const [statusLoading, setStatusLoading] = useState(false)
 
   const [form, setForm] = useState({
     cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '',
@@ -303,9 +305,34 @@ export default function CollectionsPage() {
     setWizardStep(0); setCloseWizard(true)
   }
 
+  // Live readiness — is Cash Recon + Digital Recon done for the target day?
+  const loadDayStatus = async () => {
+    if (targetOutletIds.length === 0) { setDayStatus({ cashDone: false, digitalDone: false }); return }
+    setStatusLoading(true)
+    try {
+      const results = await Promise.all(targetOutletIds.map((oid) =>
+        request(`/api/collections/day-status?date=${targetDayStr}&outletId=${oid}`).catch(() => null)))
+      const ok = results.filter(Boolean) as { cashReconDone: boolean; digitalReconDone: boolean }[]
+      setDayStatus({
+        cashDone: ok.length > 0 && ok.every((r) => r.cashReconDone),
+        digitalDone: ok.length > 0 && ok.every((r) => r.digitalReconDone),
+      })
+    } finally { setStatusLoading(false) }
+  }
+
+  // Refresh status when the wizard opens and whenever the cashier returns to this tab.
+  useEffect(() => {
+    if (!closeWizard) return
+    loadDayStatus()
+    const onFocus = () => loadDayStatus()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [closeWizard]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const closeDay = async () => {
     const label = format(targetCloseDate, 'dd MMM yyyy')
     if (targetOutletIds.length === 0) { toast.error('No collections found for this day to close.'); return }
+    if (!dayStatus.cashDone || !dayStatus.digitalDone) { toast.error('Complete Cash and Digital reconciliation first.'); return }
     setClosingDay(true)
     try {
       for (const outletId of targetOutletIds) {
@@ -914,8 +941,8 @@ export default function CollectionsPage() {
 
               {wizardStep === 0 && (
                 <div>
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 1 of 4 · Cash Requests</p>
-                  <p className="text-sm text-gray-500 mb-4">Make sure all petty cash / cash requests for today are filled.</p>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 1 of 4 · Cash Requests <span className="text-gray-400 font-normal">(optional)</span></p>
+                  <p className="text-sm text-gray-500 mb-4">If there were any cash expenses today, record them. If none, you can skip this step.</p>
                   <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
                   <button onClick={() => setWizardStep(1)} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
                 </div>
@@ -923,9 +950,13 @@ export default function CollectionsPage() {
 
               {wizardStep === 1 && (
                 <div>
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 2 of 4 · Cash Reconciliation</p>
-                  <p className="text-sm text-gray-500 mb-4">Reconcile today&apos;s cash (deposits, verified amount).</p>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 2 of 4 · Cash Reconciliation <span className="text-rose-500 font-normal">(required)</span></p>
+                  <p className="text-sm text-gray-500 mb-3">Reconcile today&apos;s cash (deposits, verified amount).</p>
+                  <div className={`flex items-center gap-2 text-sm font-semibold mb-3 ${dayStatus.cashDone ? 'text-green-700' : 'text-amber-600'}`}>
+                    {statusLoading ? '⏳ Checking…' : dayStatus.cashDone ? '✓ Cash reconciliation completed' : '⚠️ Not completed yet'}
+                  </div>
                   <a href="/petty-cash?recon=cash" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Reconciliation ↗</a>
+                  <button onClick={loadDayStatus} className="w-full py-2 mb-2 rounded-xl border-2 border-gray-200 text-gray-600 text-xs font-medium">↻ Refresh status</button>
                   <div className="flex gap-2">
                     <button onClick={() => setWizardStep(0)} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">← Back</button>
                     <button onClick={() => setWizardStep(2)} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
@@ -935,9 +966,13 @@ export default function CollectionsPage() {
 
               {wizardStep === 2 && (
                 <div>
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 3 of 4 · Digital Payment Reconciliation</p>
-                  <p className="text-sm text-gray-500 mb-4">Reconcile CRDB, Stanbic and M-PESA for today.</p>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 3 of 4 · Digital Payment Reconciliation <span className="text-rose-500 font-normal">(required)</span></p>
+                  <p className="text-sm text-gray-500 mb-3">Reconcile CRDB, Stanbic and M-PESA against your bank statements.</p>
+                  <div className={`flex items-center gap-2 text-sm font-semibold mb-3 ${dayStatus.digitalDone ? 'text-green-700' : 'text-amber-600'}`}>
+                    {statusLoading ? '⏳ Checking…' : dayStatus.digitalDone ? '✓ Digital reconciliation completed' : '⚠️ Not completed yet'}
+                  </div>
                   <a href="/petty-cash?recon=digital" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Digital Reconciliation ↗</a>
+                  <button onClick={loadDayStatus} className="w-full py-2 mb-2 rounded-xl border-2 border-gray-200 text-gray-600 text-xs font-medium">↻ Refresh status</button>
                   <div className="flex gap-2">
                     <button onClick={() => setWizardStep(1)} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">← Back</button>
                     <button onClick={() => setWizardStep(3)} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
@@ -947,15 +982,29 @@ export default function CollectionsPage() {
 
               {wizardStep === 3 && (
                 <div>
-                  <p className="text-sm font-semibold text-gray-800 mb-1">Step 4 of 4 · Final Check</p>
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-sm mb-4">
-                    Are you sure there are no other <strong>paid bills, signed bills, discounts or cancellations</strong> for today? Once closed, this day can&apos;t be edited (a supervisor can reopen it).
+                  <p className="text-sm font-semibold text-gray-800 mb-2">Step 4 of 4 · End-of-Day Closing</p>
+                  {/* Readiness checklist */}
+                  <div className="space-y-1.5 mb-3">
+                    <div className={`flex items-center gap-2 text-sm ${dayStatus.cashDone ? 'text-green-700' : 'text-rose-600'}`}>
+                      <span>{dayStatus.cashDone ? '✓' : '✕'}</span> Cash Reconciliation
+                    </div>
+                    <div className={`flex items-center gap-2 text-sm ${dayStatus.digitalDone ? 'text-green-700' : 'text-rose-600'}`}>
+                      <span>{dayStatus.digitalDone ? '✓' : '✕'}</span> Digital Reconciliation
+                    </div>
                   </div>
+                  <button onClick={loadDayStatus} className="w-full py-2 mb-3 rounded-xl border-2 border-gray-200 text-gray-600 text-xs font-medium">↻ Refresh status</button>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-sm mb-4">
+                    Have all <strong>paid bills, signed bills, discounts, cancellations, cash requests</strong> and other transactions been properly recorded and reconciled? Once closed, this day can&apos;t be edited (a supervisor can reopen it).
+                  </div>
+                  {!(dayStatus.cashDone && dayStatus.digitalDone) && (
+                    <p className="text-xs text-rose-600 mb-2">Complete Cash and Digital reconciliation before you can close the day.</p>
+                  )}
                   <div className="flex flex-col gap-2">
-                    <button onClick={closeDay} disabled={closingDay} className="w-full py-3 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700 disabled:opacity-50">
+                    <button onClick={closeDay} disabled={closingDay || !dayStatus.cashDone || !dayStatus.digitalDone}
+                      className="w-full py-3 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
                       {closingDay ? 'Closing…' : '✅ Yes — Close the Day'}
                     </button>
-                    <button onClick={() => setCloseWizard(false)} className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">✏️ No — let me fill what&apos;s missing</button>
+                    <button onClick={() => setCloseWizard(false)} className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">✏️ No — let me fix what&apos;s missing</button>
                     <button onClick={() => setWizardStep(2)} className="w-full py-2 text-gray-400 text-xs">← Back</button>
                   </div>
                 </div>
