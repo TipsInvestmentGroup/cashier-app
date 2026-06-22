@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { recomputeStaffLoss } from '@/lib/staff-loss'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -98,39 +99,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   }
 
-  // Reconcile linked auto staff-loss using the full formula with the
-  // credit-sales / payments totals recorded with this collection.
-  const shortfall = roundMoney((Number(systemSales) || 0) - total - (existing.creditSales || 0) - (existing.paymentsReceived || 0) - discount)
-  const voucher = `SL-${id}`
-  const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: voucher } })
-  let staffLoss: { amount: number; staffName: string } | null = null
-
-  if (staffName && shortfall > 0) {
-    const person = await prisma.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
-    if (sl) {
-      const agg = await prisma.paidBill.aggregate({ where: { signedBillId: sl.id }, _sum: { amountPaid: true } })
-      const paid = agg._sum.amountPaid || 0
-      const status = paid >= shortfall ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID'
-      await prisma.signedBill.update({
-        where: { id: sl.id },
-        data: { amount: shortfall, personName: staffName, personId: person?.id ?? null, serviceStaff: staffName, outletId: usedOutletId, date: collDate, status },
-      })
-    } else {
-      await prisma.signedBill.create({
-        data: {
-          voucherNumber: voucher, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: staffName,
-          amount: shortfall, serviceStaff: staffName,
-          description: `Auto staff loss (edited): System ${Number(systemSales)} − collected ${total} (collection ${id})`,
-          status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
-        },
-      })
-    }
-    staffLoss = { amount: shortfall, staffName }
-  } else if (sl) {
-    // No longer a shortfall → remove the auto loss and any payments against it
-    await prisma.paidBill.deleteMany({ where: { signedBillId: sl.id } })
-    await prisma.signedBill.delete({ where: { id: sl.id } })
-  }
+  // Reconcile linked auto staff-loss — now also nets off approved cancellations.
+  const shortfall = await recomputeStaffLoss(prisma, id)
+  const staffLoss = staffName && shortfall > 0 ? { amount: shortfall, staffName } : null
 
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'UPDATE', entity: 'DailyCollection', entityId: id, details: `Total ${total}, staffLoss ${shortfall > 0 ? shortfall : 0}` },

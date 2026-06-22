@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
+import { recomputeStaffLoss } from '@/lib/staff-loss'
 
 const APPROVERS = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
@@ -19,6 +20,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const status = action === 'approve' ? 'APPROVED' : 'REJECTED'
   const item = await prisma.cancellation.update({ where: { id }, data: { status, approvedBy: user.name } })
+
+  // Approving/rejecting a cancellation linked to a collection changes the
+  // staff-loss formula (approved cancellations reduce the loss) — recompute it.
+  if (existing.collectionId) await recomputeStaffLoss(prisma, existing.collectionId)
 
   await prisma.auditLog.create({
     data: { userId: user.userId, action: status, entity: 'Cancellation', entityId: id, details: `${status} cancellation of ${existing.productName} by ${user.name}` },

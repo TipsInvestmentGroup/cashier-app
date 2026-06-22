@@ -656,8 +656,13 @@ export default function CollectionsPage() {
                     <span className={`text-2xl font-bold ${lossPreview > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(lossPreview))}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid·Staff-Loss {formatCurrency(paidStaffLossForm)} − Discount {formatCurrency(discountForm)}
+                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid·Staff-Loss {formatCurrency(paidStaffLossForm)} − Discount {formatCurrency(discountForm)} − Approved Cancellations
                   </p>
+                  {cancelTotalForm > 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      Cancellations {formatCurrency(cancelTotalForm)} are pending — they will reduce this staff loss once approved.
+                    </p>
+                  )}
                 </div>
               )}
               {editingId && (
