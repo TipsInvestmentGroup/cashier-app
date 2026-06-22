@@ -1,13 +1,14 @@
 import { cn } from '@/lib/utils'
 
 // One source of truth for buttons. Locked tokens: rounded-xl, active:scale-95.
-type Variant = 'primary' | 'outline' | 'danger' | 'ghost' | 'success'
+type Variant = 'primary' | 'outline' | 'danger' | 'destructive' | 'ghost' | 'success'
 type Size = 'sm' | 'md' | 'lg'
 
 const VARIANTS: Record<Variant, string> = {
   primary: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm',
   outline: 'border-2 border-gray-200 text-gray-700 hover:bg-gray-50',
   danger: 'bg-red-50 text-red-700 hover:bg-red-100',
+  destructive: 'bg-red-600 text-white hover:bg-red-700 shadow-sm',
   ghost: 'text-gray-600 hover:bg-gray-100',
   success: 'bg-green-600 text-white hover:bg-green-700 shadow-sm',
 }

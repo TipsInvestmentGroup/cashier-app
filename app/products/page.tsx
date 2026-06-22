@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
@@ -20,6 +21,7 @@ const INIT = { name: '', buyingPrice: '', sellingPrice: '', unitMeasure: 'unit',
 export default function ProductsPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const confirm = useConfirm()
   const [items, setItems] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -73,7 +75,7 @@ export default function ProductsPage() {
   }
 
   const remove = async (p: Product) => {
-    if (!window.confirm(`Delete "${p.name}" (${p.code})?`)) return
+    if (!(await confirm({ title: 'Delete product', message: `Delete "${p.name}" (${p.code})?`, danger: true, confirmLabel: 'Delete' }))) return
     try { await request(`/api/products/${p.id}`, { method: 'DELETE' }); toast.success('Deleted'); load() }
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not delete') }
   }

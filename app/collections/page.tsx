@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
@@ -48,6 +49,7 @@ interface NamedCode { code: string; label: string; isActive: boolean }
 export default function CollectionsPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const confirm = useConfirm()
   const [collections, setCollections] = useState<Collection[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [staff, setStaff] = useState<Person[]>([])
@@ -218,7 +220,7 @@ export default function CollectionsPage() {
   }
 
   const deleteCollection = async (c: Collection) => {
-    if (!window.confirm(`Delete this collection${c.staffName ? ` for ${c.staffName}` : ''}? Any auto staff-loss linked to it will also be removed.`)) return
+    if (!(await confirm({ title: 'Delete collection', message: `Delete this collection${c.staffName ? ` for ${c.staffName}` : ''}? Any auto staff-loss linked to it will also be removed.`, danger: true, confirmLabel: 'Delete' }))) return
     try {
       const res = await request(`/api/collections/${c.id}`, { method: 'DELETE' })
       toast.success(res?.removedStaffLoss ? 'Collection + linked staff loss deleted' : 'Collection deleted')
@@ -352,7 +354,7 @@ export default function CollectionsPage() {
     const label = format(targetCloseDate, 'dd MMM yyyy')
     const ids = targetOutletIds.length ? targetOutletIds : (user?.outlet?.id ? [user.outlet.id] : [])
     if (ids.length === 0) { toast.error('No outlet to reopen for this day.'); return }
-    if (!window.confirm(`Reopen ${label}? Cashiers will be able to edit this day's collections again.`)) return
+    if (!(await confirm({ title: 'Reopen day', message: `Reopen ${label}? Cashiers will be able to edit this day's collections again.`, confirmLabel: 'Reopen' }))) return
     setClosingDay(true)
     try {
       for (const outletId of ids) {

@@ -8,7 +8,7 @@ import { ExportBar } from '@/components/ExportBar'
 import { StatCard } from '@/components/ui/StatCard'
 import { Skeleton, StatCardsSkeleton } from '@/components/ui/Skeleton'
 import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  ComposedChart, Area, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import { format } from 'date-fns'
@@ -26,7 +26,6 @@ interface DashboardData {
   dailyTrend: { date: string; total: number }[]
 }
 
-const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6']
 const BILL_TYPE_COLORS: Record<string, string> = {
   ADMIN: '#3b82f6', DIRECTOR: '#8b5cf6', CUSTOMER: '#10b981',
   TIPS: '#f59e0b', DJ: '#ec4899', STAFF_LOSS: '#ef4444',
@@ -61,15 +60,21 @@ export default function DashboardPage() {
 
   if (!data) return <AppShell><div className="text-center text-red-500 mt-10">Failed to load dashboard</div></AppShell>
 
-  const trendData = data.dailyTrend.map((d) => ({
-    date: format(new Date(d.date), 'dd MMM'),
-    total: d.total,
-  }))
+  // 30-day trend with a 7-day moving average overlay (smooths daily spikes).
+  const trendData = data.dailyTrend.map((d, i, arr) => {
+    const window = arr.slice(Math.max(0, i - 6), i + 1)
+    const ma = window.reduce((s, x) => s + x.total, 0) / window.length
+    return { date: format(new Date(d.date), 'dd MMM'), total: d.total, ma: Math.round(ma) }
+  })
 
   const paymentPieData = data.paymentMethodBreakdown.map((p) => ({
     name: p.paymentMethod,
     value: p._sum.amountPaid || 0,
   }))
+  const pmTotal = paymentPieData.reduce((s, p) => s + p.value, 0)
+  // Brand-consistent channel colors (match the table semantics).
+  const PM_COLOR: Record<string, string> = { CASH: '#16a34a', CRDB: '#2563eb', STANBIC: '#7c3aed', MPESA: '#d97706', 'M-PESA': '#d97706' }
+  const pmFill = (name: string) => PM_COLOR[(name || '').toUpperCase()] || '#94a3b8'
 
   const CAT_LABELS: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', TIPS: 'Tips', DJ: 'DJ', STAFF_LOSS: 'Staff Loss' }
   const exportRows = [
@@ -172,7 +177,7 @@ export default function DashboardPage() {
           <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
             <h3 className="font-semibold text-gray-800 mb-4">30-Day Collection Trend</h3>
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={trendData}>
+              <ComposedChart data={trendData}>
                 <defs>
                   <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
@@ -182,9 +187,11 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(v: unknown) => formatCurrency(v as number)} />
-                <Area type="monotone" dataKey="total" stroke="#6366f1" fill="url(#colorTotal)" strokeWidth={2} />
-              </AreaChart>
+                <Tooltip formatter={(v) => formatCurrency(Number(v))} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Area type="monotone" name="Daily" dataKey="total" stroke="#6366f1" fill="url(#colorTotal)" strokeWidth={2} />
+                <Line type="monotone" name="7-day avg" dataKey="ma" stroke="#0f766e" strokeWidth={2} dot={false} />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
 
@@ -192,17 +199,23 @@ export default function DashboardPage() {
           <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
             <h3 className="font-semibold text-gray-800 mb-4">Payment Methods (Month)</h3>
             {paymentPieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie data={paymentPieData} cx="50%" cy="50%" innerRadius={55} outerRadius={90}
-                    dataKey="value" // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    label={({ name, percent }: any) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                    labelLine={false} fontSize={11}>
-                    {paymentPieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip formatter={(v: unknown) => formatCurrency(v as number)} />
-                </PieChart>
-              </ResponsiveContainer>
+              <div className="relative">
+                <ResponsiveContainer width="100%" height={220}>
+                  <PieChart>
+                    <Pie data={paymentPieData} cx="50%" cy="50%" innerRadius={60} outerRadius={92}
+                      dataKey="value" paddingAngle={2} // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      label={({ name, percent }: any) => `${name ?? ''} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                      labelLine={false} fontSize={11}>
+                      {paymentPieData.map((p, i) => <Cell key={i} fill={pmFill(p.name)} />)}
+                    </Pie>
+                    <Tooltip formatter={(v) => formatCurrency(Number(v))} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-400">Total</span>
+                  <span className="text-base font-bold text-gray-800">{formatCurrency(pmTotal)}</span>
+                </div>
+              </div>
             ) : (
               <div className="flex items-center justify-center h-48 text-gray-400 text-sm">No data yet</div>
             )}

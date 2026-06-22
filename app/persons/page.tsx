@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
@@ -16,6 +17,7 @@ interface Category { code: string; label: string; isActive: boolean }
 export default function PersonsPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const confirm = useConfirm()
   const [persons, setPersons] = useState<Person[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -90,7 +92,7 @@ export default function PersonsPage() {
   }
   const newPerson = () => { setEditingId(null); resetForm(); setShowForm((s) => !s) }
   const deletePerson = async (p: Person) => {
-    if (!window.confirm(`Delete "${p.name}"? This cannot be undone.`)) return
+    if (!(await confirm({ title: 'Delete person', message: `Delete "${p.name}"? This cannot be undone.`, danger: true, confirmLabel: 'Delete' }))) return
     try {
       await request(`/api/persons/${p.id}`, { method: 'DELETE' })
       toast.success('Person deleted'); load()

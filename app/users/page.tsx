@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatDate } from '@/lib/utils'
@@ -20,6 +21,7 @@ const ROLE_COLORS: Record<string, string> = {
 export default function UsersPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const confirm = useConfirm()
   const [users, setUsers] = useState<User[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [loading, setLoading] = useState(true)
@@ -79,7 +81,7 @@ export default function UsersPage() {
   }
   const newUser = () => { setEditingId(null); setShowPw(false); resetForm(); setShowForm((s) => !s) }
   const deleteUser = async (u: User) => {
-    if (!window.confirm(`Delete user "${u.name}" (${u.email})? This cannot be undone.`)) return
+    if (!(await confirm({ title: 'Delete user', message: `Delete user "${u.name}" (${u.email})? This cannot be undone.`, danger: true, confirmLabel: 'Delete' }))) return
     try {
       await request(`/api/users/${u.id}`, { method: 'DELETE' })
       toast.success('User deleted')

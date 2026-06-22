@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, FINANCE_TABS } from '@/components/Layout/SectionTabs'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
@@ -28,6 +29,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 export default function PayrollPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const confirm = useConfirm()
   const [running, setRunning] = useState(false)
   const [emailing, setEmailing] = useState(false)
   const [rows, setRows] = useState<Row[]>([])
@@ -70,11 +72,11 @@ export default function PayrollPage() {
 
   const runDeduction = async () => {
     if (!totals || totals.total <= 0) return toast.error('Nothing to deduct')
-    const ok = window.confirm(
-      `Run payroll deduction for ${periodLabel}?\n\n` +
-      `This will settle ${formatCurrency(totals.total)} across ${rows.length} people by recording PAYROLL payments. ` +
-      `These amounts will then clear from receivables.\n\nProceed?`
-    )
+    const ok = await confirm({
+      title: 'Run payroll deduction',
+      message: `Run payroll deduction for ${periodLabel}?\n\nThis will settle ${formatCurrency(totals.total)} across ${rows.length} people by recording PAYROLL payments. These amounts will then clear from receivables.`,
+      confirmLabel: 'Run deduction',
+    })
     if (!ok) return
     setRunning(true)
     try {
