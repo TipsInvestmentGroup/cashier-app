@@ -54,7 +54,6 @@ export default function PettyCashPage() {
   const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([])
   const [persons, setPersons] = useState<Person[]>([])
   const [departments, setDepartments] = useState<NamedItem[]>([])
-  const [functions, setFunctions] = useState<NamedItem[]>([])
   const [approvers, setApprovers] = useState<Approver[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
   const METHODS = channels.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label }))
@@ -80,16 +79,15 @@ export default function PettyCashPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [its, outs, ppl, depts, fns, access, chs] = await Promise.all([
+      const [its, outs, ppl, depts, access, chs] = await Promise.all([
         request('/api/petty-cash'), request('/api/outlets'), request('/api/persons'),
-        request('/api/departments'), request('/api/functions'), request('/api/petty-access'),
+        request('/api/departments'), request('/api/petty-access'),
         request('/api/payment-channels'),
       ])
       setItems(its); setOutlets(outs || [])
       setChannels(chs || [])
       setPersons((ppl || []).filter((p: Person) => !PERSON_EXCLUDE.includes(p.type)))
       setDepartments((depts || []).filter((d: NamedItem) => d.isActive))
-      setFunctions((fns || []).filter((f: NamedItem) => f.isActive))
       setApprovers(access?.approvers || [])
       setCanApprove(!!access?.canApprove)
       setCanRequest(!!access?.canRequest)
@@ -276,7 +274,7 @@ export default function PettyCashPage() {
   }
 
   const exportRows = () => filtered.map((i) => ({
-    Date: formatDate(i.date), 'Requested By': i.requestedBy, Department: i.department || '', Function: i.functionName || '',
+    Date: formatDate(i.date), 'Requested By': i.requestedBy, Department: i.department || '',
     Purpose: i.purpose, Items: (i.items || []).map((it) => `${it.detail} (${it.unit}x${it.unitCost})`).join('; '), Amount: i.amount, 'Payment Method': i.paymentMethod,
     'Payment Status': (i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Unpaid', 'Payee Account': i.payeeAccount || '', Status: i.status, 'Approved By': i.approvedBy || '',
   }))
@@ -396,7 +394,6 @@ export default function PettyCashPage() {
                         <th className="px-4 py-3 font-semibold">Date</th>
                         <th className="px-4 py-3 font-semibold">Requested By</th>
                         <th className="px-4 py-3 font-semibold">Department</th>
-                        <th className="px-4 py-3 font-semibold">Function</th>
                         <th className="px-4 py-3 font-semibold">Purpose</th>
                         <th className="px-4 py-3 font-semibold">Amount</th>
                         <th className="px-4 py-3 font-semibold">Method</th>
@@ -411,7 +408,6 @@ export default function PettyCashPage() {
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(i.date)}</td>
                           <td className="px-4 py-3 font-medium text-gray-800">{i.requestedBy}</td>
                           <td className="px-4 py-3 text-gray-500">{i.department || '-'}</td>
-                          <td className="px-4 py-3 text-gray-500">{i.functionName || '-'}</td>
                           <td className="px-4 py-3 text-gray-700 max-w-[240px]">
                             <div className="truncate" title={i.purpose}>{i.purpose}</div>
                             {i.items && i.items.length > 0 && (
@@ -491,14 +487,6 @@ export default function PettyCashPage() {
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
                       <option value="">Select department…</option>
                       {departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Function</label>
-                    <select value={form.functionName} onChange={(e) => setForm({ ...form, functionName: e.target.value })}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
-                      <option value="">Select function…</option>
-                      {functions.map((f) => <option key={f.id} value={f.name}>{f.name}</option>)}
                     </select>
                   </div>
                   <div>
