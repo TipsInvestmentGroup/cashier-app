@@ -266,6 +266,11 @@ export default function CollectionsPage() {
   // Cancellations recorded in the period
   const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).filter((x) => x.status === 'APPROVED').reduce((a, x) => a + (x.amount || 0), 0), 0)
 
+  // Header summary (cashier view): derive real outlet/reporter from the records,
+  // falling back to the logged-in user when the period has no rows yet.
+  const headerOutlet = [...new Set(filtered.map((c) => c.outlet?.name).filter(Boolean))].join(', ') || user?.outlet?.name || 'Outlet'
+  const headerBy = [...new Set(filtered.map((c) => c.cashier?.name).filter(Boolean))].join(', ') || user?.name || '—'
+
   // ---- Exports (always include Outlet & By, regardless of on-screen columns) ----
   const rangeLabel = RANGE_OPTIONS.find((r) => r.key === range)?.label || 'Collections'
   const exportName = `tips-collections-${range}-${format(new Date(), 'yyyy-MM-dd')}`
@@ -672,7 +677,7 @@ export default function CollectionsPage() {
               <h2 className="font-semibold text-gray-800">Collection Records</h2>
               {isCashier && (
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {user?.outlet?.name || 'Outlet'} · By {user?.name || '—'}
+                  Outlet: {headerOutlet} · By {headerBy}
                 </p>
               )}
             </div>
