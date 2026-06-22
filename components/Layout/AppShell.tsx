@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { Sidebar } from './Sidebar'
+import { GlobalSearch } from './GlobalSearch'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth()
@@ -62,9 +63,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             ☰
           </button>
-          <div className="flex-1" />
+          <GlobalSearch />
           <div className="flex items-center gap-2 text-sm text-gray-600">
-            <span className="hidden sm:inline">
+            <span className="hidden lg:inline">
               {new Date().toLocaleDateString('en-TZ', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </span>
           </div>
