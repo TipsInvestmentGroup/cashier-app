@@ -564,7 +564,7 @@ export default function CollectionsPage() {
                           className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
                           {SIGNED_TYPE_OPTS.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
                         </select>
-                        <input list="personNames" placeholder="Name" value={r.name} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, name: e.target.value }; setSignedRows(n) }}
+                        <input list={`persons-${r.billType}`} placeholder="Name" value={r.name} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, name: e.target.value }; setSignedRows(n) }}
                           className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
                         <MoneyInput placeholder="Amount" value={r.amount} onChange={(v) => { const n = [...signedRows]; n[i] = { ...r, amount: v }; setSignedRows(n) }}
                           className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
@@ -614,7 +614,7 @@ export default function CollectionsPage() {
                             className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
                             {PAID_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                           </select>
-                          <input list="personNames" placeholder="Payer" value={r.payerName} onChange={(e) => {
+                          <input list={`persons-${labelToCode(r.category)}`} placeholder="Payer" value={r.payerName} onChange={(e) => {
                             const name = e.target.value
                             const person = allPersons.find((p) => p.name.toLowerCase() === name.trim().toLowerCase())
                             const n = [...paidRows]; n[i] = { ...r, payerName: name, ...(person ? { category: codeToLabelCat(person.type) } : {}) }; setPaidRows(n)
@@ -643,6 +643,12 @@ export default function CollectionsPage() {
                     {paidTotalForm > 0 && <p className="text-xs text-gray-500 mt-1">Paid total: <strong>{formatCurrency(paidTotalForm)}</strong></p>}
                   </div>
                   <datalist id="personNames">{personNames.map((n) => <option key={n} value={n} />)}</datalist>
+                  {/* Per-type person suggestions — a signed bill of type X only lists X persons */}
+                  {SIGNED_TYPE_OPTS.map((t) => (
+                    <datalist key={t.code} id={`persons-${t.code}`}>
+                      {allPersons.filter((p) => p.type === t.code).map((p) => <option key={p.id} value={p.name} />)}
+                    </datalist>
+                  ))}
                 </div>
               )}
 
