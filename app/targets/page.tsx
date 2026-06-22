@@ -1,7 +1,6 @@
 'use client'
 import { useState } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
-import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { TARGETS, targetLevels, fmtTarget, type TargetDef } from '@/lib/targets'
 import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown } from 'lucide-react'
@@ -65,7 +64,7 @@ export default function TargetsPage() {
           return (
             <div key={g}>
               <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400 mb-3">{g} Outlet</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {items.map((t, i) => <TargetCard key={i} t={t} period={period} daysInMonth={daysInMonth} />)}
               </div>
             </div>
@@ -81,34 +80,34 @@ function TargetCard({ t, period, daysInMonth }: { t: TargetDef; period: 'weekly'
   const DeptIcon = deptIcon(t.department)
   const ScopeIcon = scopeIcon(t.scope)
   return (
-    <Card>
-      <div className="flex items-start justify-between gap-2 mb-3">
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+      <div className="flex items-start justify-between gap-2 mb-2">
         <div>
           <Badge tone={t.department === 'Shisha Sales' ? 'purple' : t.department === 'Food Sales' ? 'amber' : 'indigo'}>{t.department}</Badge>
-          <div className="flex items-center gap-1.5 mt-2 text-gray-600 text-sm font-medium">
-            <ScopeIcon className="w-4 h-4" /> {t.scope}
+          <div className="flex items-center gap-1.5 mt-1.5 text-gray-600 text-xs font-medium">
+            <ScopeIcon className="w-3.5 h-3.5" /> {t.scope}
           </div>
         </div>
-        <span className="w-9 h-9 rounded-xl bg-gray-50 text-gray-500 flex items-center justify-center"><DeptIcon className="w-5 h-5" /></span>
+        <span className="w-8 h-8 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center flex-shrink-0"><DeptIcon className="w-4 h-4" /></span>
       </div>
 
-      <p className="text-xs text-gray-400 flex items-center gap-1"><Target className="w-3.5 h-3.5" /> {period === 'weekly' ? 'Weekly' : 'Monthly'} target</p>
-      <p className="text-2xl font-bold text-indigo-700 tracking-tight">{fmtTarget(target, t.unit)}</p>
+      <p className="text-[11px] text-gray-400">{period === 'weekly' ? 'Weekly' : 'Monthly'} target</p>
+      <p className="text-xl font-bold text-indigo-700 tracking-tight leading-tight">{fmtTarget(target, t.unit)}</p>
 
-      <div className="mt-3 space-y-1.5 text-sm">
-        <div className="flex items-center justify-between">
-          <span className="text-green-700">🎯 Reward considered</span>
-          <span className="font-semibold text-green-700">≥ {fmtTarget(rewardFrom, t.unit)}</span>
+      <div className="mt-2.5 space-y-1 text-xs">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-green-700">🎯 Reward ≥</span>
+          <span className="font-semibold text-green-700">{fmtTarget(rewardFrom, t.unit)}</span>
         </div>
-        <div className="flex items-center justify-between">
-          <span className="text-red-600">⚠️ Warning letter</span>
-          <span className="font-semibold text-red-600">&lt; {fmtTarget(letterBelow, t.unit)}</span>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-red-600">⚠️ Letter &lt;</span>
+          <span className="font-semibold text-red-600">{fmtTarget(letterBelow, t.unit)}</span>
         </div>
-        <div className="flex items-center justify-between border-t border-gray-100 pt-1.5">
-          <span className="text-gray-500">Reward amount</span>
-          <span className="text-gray-400 italic text-xs">To be defined by management</span>
+        <div className="flex items-center justify-between border-t border-gray-100 pt-1 text-[11px]">
+          <span className="text-gray-500">Reward</span>
+          <span className="text-gray-400 italic">Set by management</span>
         </div>
       </div>
-    </Card>
+    </div>
   )
 }
