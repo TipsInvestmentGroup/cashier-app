@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { Sidebar } from './Sidebar'
 import { GlobalSearch } from './GlobalSearch'
+import { PendingBell } from './PendingBell'
+import { Menu } from 'lucide-react'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth()
@@ -61,9 +63,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             onClick={() => setSidebarOpen(true)}
             className="lg:hidden p-2 rounded-lg text-gray-600 hover:bg-gray-100"
           >
-            ☰
+            <Menu className="w-5 h-5" />
           </button>
           <GlobalSearch />
+          <PendingBell />
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <span className="hidden lg:inline">
               {new Date().toLocaleDateString('en-TZ', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}

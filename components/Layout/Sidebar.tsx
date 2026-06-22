@@ -7,6 +7,7 @@ import { useApi } from '@/hooks/useApi'
 import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
+import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, Wine, KeyRound, LogOut, type LucideIcon } from 'lucide-react'
 
 const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER']
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -14,18 +15,18 @@ const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
 const SECTIONS = ['MyPos', 'Daily', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
 
-const navItems = [
-  { href: '/mypos', icon: '🍽', label: 'MyPos', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'], match: ['/mypos', '/pos'] },
+const navItems: { href: string; icon: LucideIcon; label: string; section: string; roles: string[]; match?: string[] }[] = [
+  { href: '/mypos', icon: UtensilsCrossed, label: 'MyPos', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'], match: ['/mypos', '/pos'] },
 
-  { href: '/dashboard', icon: '📊', label: 'Daily', section: 'Daily', roles: CASHIER_ROLES, match: ['/dashboard', '/collections', '/daily-report', '/excess-loss'] },
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Daily', section: 'Daily', roles: CASHIER_ROLES, match: ['/dashboard', '/collections', '/daily-report', '/excess-loss'] },
 
-  { href: '/signed-bills', icon: '📋', label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
+  { href: '/signed-bills', icon: Receipt, label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 
-  { href: '/petty-cash', icon: '💵', label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals'] },
+  { href: '/petty-cash', icon: Wallet, label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals'] },
 
-  { href: '/receivables', icon: '💼', label: 'Finance', section: 'Finance', roles: MGMT, match: ['/receivables', '/month-end', '/payroll', '/reports', '/audit'] },
+  { href: '/receivables', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/receivables', '/month-end', '/payroll', '/reports', '/audit'] },
 
-  { href: '/setup', icon: '⚙️', label: 'Setup', section: 'Setup', roles: ALL, match: ['/setup', ...SETUP_TABS.map((t) => t.href)] },
+  { href: '/setup', icon: Settings, label: 'Setup', section: 'Setup', roles: ALL, match: ['/setup', ...SETUP_TABS.map((t) => t.href)] },
 ]
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
@@ -56,7 +57,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-indigo-900 to-indigo-800 text-white w-64">
       <div className="p-6 border-b border-indigo-700">
-        <div className="text-3xl mb-1">🍹</div>
+        <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center mb-2"><Wine className="w-6 h-6 text-white" /></div>
         <h1 className="text-lg font-bold leading-tight">Cashier Manager</h1>
         <p className="text-indigo-300 text-xs mt-1">{user?.outlet?.name || 'All Outlets'}</p>
       </div>
@@ -77,10 +78,11 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-indigo-400">{sec}</p>
               <div className="space-y-1">
                 {items.map((item) => {
-                  const m = (item as { match?: string[] }).match
+                  const m = item.match
                   const active = m
                     ? m.some((h) => pathname === h || pathname.startsWith(h + '/'))
                     : pathname.startsWith(item.href)
+                  const Icon = item.icon
                   return (
             <Link
               key={item.href}
@@ -93,7 +95,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                   : 'text-indigo-200 hover:bg-indigo-700/60 hover:text-white'
               )}
             >
-              <span className="text-xl">{item.icon}</span>
+              <Icon className="w-5 h-5 flex-shrink-0" />
               <span>{item.label}</span>
             </Link>
                   )
@@ -109,14 +111,14 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           onClick={() => setPwOpen(true)}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-indigo-200 hover:bg-indigo-700/60 hover:text-white transition-all"
         >
-          <span className="text-xl">🔑</span>
+          <KeyRound className="w-5 h-5" />
           <span>Change Password</span>
         </button>
         <button
           onClick={logout}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-indigo-200 hover:bg-red-600 hover:text-white transition-all"
         >
-          <span className="text-xl">🚪</span>
+          <LogOut className="w-5 h-5" />
           <span>Sign Out</span>
         </button>
       </div>

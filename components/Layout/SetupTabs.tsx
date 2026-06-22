@@ -2,16 +2,17 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { Package, FolderTree, Tag, CreditCard, Users, Building2, UserCog, type LucideIcon } from 'lucide-react'
 
 // The Setup groups, in the order they appear. Role-gated per group.
-export const SETUP_TABS = [
-  { href: '/products', label: 'Products', icon: '📦', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
-  { href: '/departments', label: 'Departments', icon: '🗂️', roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER'] },
-  { href: '/person-categories', label: 'Categories', icon: '🏷️', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
-  { href: '/payment-channels', label: 'Payment Channels', icon: '💳', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
-  { href: '/persons', label: 'Persons', icon: '👥', roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
-  { href: '/outlets', label: 'Outlets', icon: '🏢', roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
-  { href: '/users', label: 'Users', icon: '⚙️', roles: ['ADMIN'] },
+export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles: string[] }[] = [
+  { href: '/products', label: 'Products', icon: Package, roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
+  { href: '/departments', label: 'Departments', icon: FolderTree, roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER'] },
+  { href: '/person-categories', label: 'Categories', icon: Tag, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
+  { href: '/payment-channels', label: 'Payment Channels', icon: CreditCard, roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
+  { href: '/persons', label: 'Persons', icon: Users, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
+  { href: '/outlets', label: 'Outlets', icon: Building2, roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
+  { href: '/users', label: 'Users', icon: UserCog, roles: ['ADMIN'] },
 ]
 
 /** Horizontal tab bar shown at the top of every Setup page. */
@@ -25,10 +26,11 @@ export function SetupTabs() {
       <div className="flex gap-2 min-w-max">
         {tabs.map((t) => {
           const active = pathname === t.href || pathname.startsWith(t.href + '/')
+          const Icon = t.icon
           return (
             <Link key={t.href} href={t.href}
               className={`whitespace-nowrap flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition ${active ? 'bg-indigo-600 text-white shadow' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-              <span>{t.icon}</span>{t.label}
+              <Icon className="w-4 h-4" />{t.label}
             </Link>
           )
         })}
