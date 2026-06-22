@@ -11,8 +11,13 @@ const deptIcon = (d: string) => (d === 'Shisha Sales' ? Cigarette : d === 'Food 
 const scopeIcon = (s: string) => (s === 'Per Outlet' ? Building2 : s === 'Per Manager' ? Crown : User)
 
 export default function TargetsPage() {
+  const now = new Date()
   const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly')
+  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [outlet, setOutlet] = useState<(typeof OUTLETS)[number]>('All')
+
+  const [my, mm] = month.split('-').map(Number)
+  const daysInMonth = new Date(my, mm, 0).getDate()
 
   const visible = TARGETS.filter((t) => outlet === 'All' || t.outlet === outlet)
   const groups = ['Mikocheni', 'Coco'].filter((o) => outlet === 'All' || o === outlet)
@@ -25,11 +30,17 @@ export default function TargetsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Sales Targets</h1>
             <p className="text-gray-500 text-sm">Revenue targets, warning thresholds and reward levels per outlet, role and department</p>
           </div>
-          <div className="flex gap-2 bg-white border border-gray-200 rounded-xl p-1">
-            {(['weekly', 'monthly'] as const).map((p) => (
-              <button key={p} onClick={() => setPeriod(p)}
-                className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition ${period === p ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>{p}</button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            {period === 'monthly' && (
+              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
+                className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
+            )}
+            <div className="flex gap-2 bg-white border border-gray-200 rounded-xl p-1">
+              {(['weekly', 'monthly'] as const).map((p) => (
+                <button key={p} onClick={() => setPeriod(p)}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition ${period === p ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>{p}</button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -45,7 +56,7 @@ export default function TargetsPage() {
         <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-sm text-indigo-900 flex flex-wrap gap-x-6 gap-y-1">
           <span><strong>Reward considered</strong> at ≥ 80% of target</span>
           <span><strong>Warning letter</strong> issued below ⅓ of target</span>
-          <span className="text-indigo-500">Monthly = Weekly × 4 · Reward amount set by management</span>
+          <span className="text-indigo-500">{period === 'monthly' ? `Monthly = (Weekly ÷ 7) × ${daysInMonth} days` : 'Weekly = 7 days'} · Reward amount set by management</span>
         </div>
 
         {groups.map((g) => {
@@ -55,7 +66,7 @@ export default function TargetsPage() {
             <div key={g}>
               <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400 mb-3">{g} Outlet</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {items.map((t, i) => <TargetCard key={i} t={t} period={period} />)}
+                {items.map((t, i) => <TargetCard key={i} t={t} period={period} daysInMonth={daysInMonth} />)}
               </div>
             </div>
           )
@@ -65,8 +76,8 @@ export default function TargetsPage() {
   )
 }
 
-function TargetCard({ t, period }: { t: TargetDef; period: 'weekly' | 'monthly' }) {
-  const { target, letterBelow, rewardFrom } = targetLevels(t, period)
+function TargetCard({ t, period, daysInMonth }: { t: TargetDef; period: 'weekly' | 'monthly'; daysInMonth: number }) {
+  const { target, letterBelow, rewardFrom } = targetLevels(t, period, daysInMonth)
   const DeptIcon = deptIcon(t.department)
   const ScopeIcon = scopeIcon(t.scope)
   return (

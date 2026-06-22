@@ -1,8 +1,9 @@
 // Standardized sales-target reference data (from management's TARGET SYSTEM).
 //
 // Every target follows a consistent rule set, so we store only the weekly
-// target and derive the rest:
-//   • Monthly target          = Weekly × 4
+// target (a 7-day figure) and derive the rest:
+//   • Daily rate              = Weekly ÷ 7
+//   • Monthly target          = Daily rate × days in the respective month (28/29/30/31)
 //   • Issue-letter threshold  = Target ÷ 3   (≈ 33% — performance below this earns a warning letter)
 //   • Reward consideration    = Target × 0.8 (80% — at/above this the staff/outlet is considered for a reward)
 //   • Reward amount           = To be defined by management
@@ -31,9 +32,14 @@ export const TARGETS: TargetDef[] = [
 export const LETTER_RATIO = 1 / 3
 export const REWARD_RATIO = 0.8
 
-/** Derive the four standardized levels for a target at a given period. */
-export function targetLevels(t: TargetDef, period: 'weekly' | 'monthly') {
-  const target = t.weeklyTarget * (period === 'monthly' ? 4 : 1)
+/**
+ * Derive the standardized levels for a target at a given period.
+ * Weekly = the stored 7-day figure. Monthly = daily rate × daysInMonth
+ * (defaults to 30 if not supplied).
+ */
+export function targetLevels(t: TargetDef, period: 'weekly' | 'monthly', daysInMonth = 30) {
+  const days = period === 'monthly' ? daysInMonth : 7
+  const target = Math.round((t.weeklyTarget / 7) * days)
   return {
     target,
     letterBelow: Math.round(target * LETTER_RATIO),
