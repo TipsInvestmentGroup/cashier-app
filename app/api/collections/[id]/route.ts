@@ -37,7 +37,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const body = await req.json()
-  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
+  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0, discountReason } = body
+  const discount = roundMoney(Number(body.discount) || 0)
   const total = roundMoney(Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa))
   // Cashiers can never move a collection to another outlet.
   const usedOutletId = user.role === 'CASHIER' ? existing.outletId : (outletId || existing.outletId)
@@ -66,6 +67,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     data: {
       cash: roundMoney(cash), crdb: roundMoney(crdb), stanbic: roundMoney(stanbic), mpesa: roundMoney(mpesa),
       total, staffName: staffName || null, systemSales: roundMoney(systemSales),
+      discount, discountReason: discountReason || null,
       notes, outletId: usedOutletId, date: collDate,
     },
     include: { outlet: true },
@@ -98,7 +100,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Reconcile linked auto staff-loss using the full formula with the
   // credit-sales / payments totals recorded with this collection.
-  const shortfall = roundMoney((Number(systemSales) || 0) - total - (existing.creditSales || 0) - (existing.paymentsReceived || 0))
+  const shortfall = roundMoney((Number(systemSales) || 0) - total - (existing.creditSales || 0) - (existing.paymentsReceived || 0) - discount)
   const voucher = `SL-${id}`
   const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: voucher } })
   let staffLoss: { amount: number; staffName: string } | null = null

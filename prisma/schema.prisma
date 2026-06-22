@@ -79,6 +79,8 @@ model DailyCollection {
   systemSales      Float         @default(0)
   creditSales      Float         @default(0)
   paymentsReceived Float         @default(0)
+  discount         Float         @default(0)     // authorized discount — reduces staff loss
+  discountReason   String?
   notes      String?
   outletId   String
   outlet     Outlet        @relation(fields: [outletId], references: [id])

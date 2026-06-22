@@ -41,7 +41,8 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0 } = body
+  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0, discountReason } = body
+  const discount = roundMoney(Number(body.discount) || 0)
   // Reconciliation inputs entered during the collection flow
   const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
   const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; categoryBillType?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
@@ -84,6 +85,7 @@ export async function POST(req: NextRequest) {
       data: {
         cash: roundMoney(cash), crdb: roundMoney(crdb), stanbic: roundMoney(stanbic), mpesa: roundMoney(mpesa),
         total, staffName: staffName || null, systemSales: roundMoney(systemSales),
+        discount, discountReason: discountReason || null,
         notes, outletId: usedOutletId, cashierId: user.userId, date: date ? new Date(date) : new Date(),
       },
       include: { outlet: true },
@@ -152,8 +154,8 @@ export async function POST(req: NextRequest) {
       data: { creditSales: roundMoney(signedTotal), paymentsReceived: roundMoney(paidStaffLoss) },
     })
 
-    // 3) Staff Loss = System − Collection − SignedBills − PaidBills (Staff Loss only)
-    const lossAmount = roundMoney((Number(systemSales) || 0) - total - signedTotal - paidStaffLoss)
+    // 3) Staff Loss = System − Collection − SignedBills − PaidBills (Staff Loss only) − Discount
+    const lossAmount = roundMoney((Number(systemSales) || 0) - total - signedTotal - paidStaffLoss - discount)
     let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
     if (staffName && lossAmount > 0) {
       const person = await tx.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
@@ -162,7 +164,7 @@ export async function POST(req: NextRequest) {
         data: {
           voucherNumber, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: staffName,
           amount: lossAmount, serviceStaff: staffName,
-          description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid·staffloss ${paidStaffLoss} (collection ${collection.id})`,
+          description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid·staffloss ${paidStaffLoss} − discount ${discount} (collection ${collection.id})`,
           status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
         },
       })

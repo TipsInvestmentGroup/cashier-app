@@ -23,7 +23,7 @@ interface Cancellation {
 }
 interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
-  staffName?: string; systemSales?: number; creditSales?: number; paymentsReceived?: number
+  staffName?: string; systemSales?: number; creditSales?: number; paymentsReceived?: number; discount?: number; discountReason?: string
   notes: string; outletId?: string; outlet: { id?: string; name: string }; cashier: { name: string }; cancellations?: Cancellation[]
 }
 interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean }
@@ -76,6 +76,7 @@ export default function CollectionsPage() {
 
   const [form, setForm] = useState({
     cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '',
+    discount: '', discountReason: '',
     outletId: user?.outlet?.id || '', date: format(new Date(), 'yyyy-MM-dd'),
   })
 
@@ -86,11 +87,12 @@ export default function CollectionsPage() {
   const cashRequiredForm = (Number(form.systemSales) || 0) - (Number(form.crdb) || 0) - (Number(form.stanbic) || 0) - (Number(form.mpesa) || 0)
   const cancelTotalForm = cancelRows.reduce((s, r) => s + (r.sellingPrice * (Number(r.quantity) || 0)), 0)
 
-  // Reconciliation: Staff Loss = System − Collection − Signed Bills − Paid Bills (Staff Loss only)
+  // Reconciliation: Staff Loss = System − Collection − Signed Bills − Paid Bills (Staff Loss only) − Discount
   const signedTotalForm = signedRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
   const paidTotalForm = paidRows.reduce((s, r) => s + (Number(r.amount) || 0), 0)
   const paidStaffLossForm = paidRows.reduce((s, r) => s + (r.category === 'Staff Loss' ? (Number(r.amount) || 0) : 0), 0)
-  const lossPreview = (Number(form.systemSales) || 0) - total - signedTotalForm - paidStaffLossForm
+  const discountForm = Number(form.discount) || 0
+  const lossPreview = (Number(form.systemSales) || 0) - total - signedTotalForm - paidStaffLossForm - discountForm
   const hasSigned = signedRows.some((r) => r.name && Number(r.amount) > 0)
   const hasPaid = paidRows.some((r) => r.payerName && Number(r.amount) > 0)
   // Save gate: for a new collection the cashier must record signed/paid bills OR confirm there are none.
@@ -161,7 +163,7 @@ export default function CollectionsPage() {
       } else {
         toast.success(editingId ? 'Collection updated!' : 'Collection saved — balanced, no loss.')
       }
-      setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+      setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
       setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
       setEditingId(null)
       setShowForm(false)
@@ -187,6 +189,8 @@ export default function CollectionsPage() {
       notes: c.notes || '',
       staffName: c.staffName || '',
       systemSales: c.systemSales ? String(c.systemSales) : '',
+      discount: c.discount ? String(c.discount) : '',
+      discountReason: c.discountReason || '',
       outletId: c.outletId || outlets.find((o) => o.name === c.outlet.name)?.id || form.outletId,
       date: format(parseISO(c.date), 'yyyy-MM-dd'),
     })
@@ -201,7 +205,7 @@ export default function CollectionsPage() {
 
   const newCollection = () => {
     setEditingId(null)
-    setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+    setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
     setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
     setShowForm((s) => !s)
   }
@@ -524,6 +528,25 @@ export default function CollectionsPage() {
                 {products.length === 0 && <p className="text-xs text-amber-600 mt-1">No products yet — add some under <strong>Products</strong> to select them here.</p>}
               </div>
 
+              {/* Discount — an authorized reduction that lowers the staff loss */}
+              <div className="border-2 border-gray-100 rounded-xl p-4">
+                <span className="font-semibold text-gray-700 text-sm">🏷️ Discount <span className="font-normal text-gray-400">(authorized — reduces staff loss)</span></span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Discount amount (TZS)</label>
+                    <MoneyInput placeholder="0" value={form.discount} onChange={(v) => setForm({ ...form, discount: v })}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-semibold" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Reason</label>
+                    <input type="text" value={form.discountReason} onChange={(e) => setForm({ ...form, discountReason: e.target.value })}
+                      placeholder="e.g. Customer promo, manager approval"
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
+                  </div>
+                </div>
+                {discountForm > 0 && <p className="text-xs text-gray-500 mt-2">Discount: <strong>{formatCurrency(discountForm)}</strong> — will reduce the staff loss.</p>}
+              </div>
+
               {/* Signed bills + paid bills for this staff (new entries only) */}
               {!editingId && (
                 <div className="space-y-4">
@@ -633,7 +656,7 @@ export default function CollectionsPage() {
                     <span className={`text-2xl font-bold ${lossPreview > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(lossPreview))}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid·Staff-Loss {formatCurrency(paidStaffLossForm)}
+                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid·Staff-Loss {formatCurrency(paidStaffLossForm)} − Discount {formatCurrency(discountForm)}
                   </p>
                 </div>
               )}
