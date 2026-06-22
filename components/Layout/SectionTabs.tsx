@@ -46,6 +46,7 @@ export const PETTY_TABS: Tab[] = [
 export const FINANCE_TABS: Tab[] = [
   { href: '/receivables', label: 'Receivables', icon: TrendingUp, roles: MGMT },
   { href: '/month-end', label: 'Month-End', icon: CalendarDays, roles: MGMT },
+  { href: '/staff-scorecard', label: 'Staff Scorecard', icon: BarChart3, roles: MGMT },
   { href: '/payroll', label: 'Payroll Deductions', icon: Receipt, roles: MGMT },
   { href: '/reports', label: 'Reports', icon: FileBarChart, roles: MGMT },
   { href: '/audit', label: 'Audit Log', icon: ShieldCheck, roles: MGMT },
