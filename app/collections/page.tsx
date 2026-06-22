@@ -267,8 +267,9 @@ export default function CollectionsPage() {
     },
     { shortfall: 0, overage: 0 }
   )
-  // Cancellations recorded in the period
-  const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).filter((x) => x.status === 'APPROVED').reduce((a, x) => a + (x.amount || 0), 0), 0)
+  // Cancellations recorded in the period — count everything except rejected,
+  // matching the Cashier Daily Report (which includes pending cancellations).
+  const cancelTotalPeriod = filtered.reduce((s, c) => s + (c.cancellations || []).filter((x) => x.status !== 'REJECTED').reduce((a, x) => a + (x.amount || 0), 0), 0)
 
   // ---- Close the Day (lock a day so it can't be edited/deleted) ----
   // Key by calendar date (yyyy-MM-dd). Stored timestamps are UTC-anchored to the
