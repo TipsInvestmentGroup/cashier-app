@@ -166,6 +166,19 @@ export default function DailyReportPage() {
     finally { setBusy(false) }
   }
 
+  const [emailing, setEmailing] = useState(false)
+  const emailSummary = async () => {
+    setEmailing(true)
+    try {
+      const qs = new URLSearchParams({ date })
+      if (!isCashier && outletId) qs.set('outletId', outletId)
+      const r = await request(`/api/daily-summary/send?${qs}`, { method: 'POST' })
+      toast.success(`Summary emailed to ${r.recipients?.length || 0} director(s)${r.mode === 'ethereal' ? ' (test inbox)' : ''}.`)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not email summary')
+    } finally { setEmailing(false) }
+  }
+
   const money = (n: number) => formatCurrency(n)
   const prettyDate = data ? format(new Date(data.date), 'EEEE, dd MMMM yyyy') : ''
 
@@ -207,6 +220,12 @@ export default function DailyReportPage() {
               className="px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition disabled:opacity-50">
               🖨 Print
             </button>
+            {!isCashier && (
+              <button onClick={emailSummary} disabled={!data || emailing}
+                className="px-4 py-2.5 bg-amber-500 text-white rounded-xl font-medium hover:bg-amber-600 transition shadow disabled:opacity-50">
+                {emailing ? 'Sending…' : '📧 Email Directors'}
+              </button>
+            )}
           </div>
         </div>
 
