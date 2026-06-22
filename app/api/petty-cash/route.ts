@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       paymentMethod: method,
       payeeName: payeeName || null,
       payeeAccount: payeeAccount || null,
-      paymentStatus: String(paymentStatus || 'PAID').toUpperCase() === 'PENDING' ? 'PENDING' : 'PAID',
+      paymentStatus: String(paymentStatus || 'PAID').toUpperCase() === 'UNPAID' ? 'UNPAID' : 'PAID',
       approvedBy: approvedBy || null,
       status: approvedBy ? 'APPROVED' : 'PENDING',
       outletId: outletId || user.outletId || null,

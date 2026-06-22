@@ -257,7 +257,9 @@ export default function PettyCashPage() {
   const q = search.trim().toLowerCase()
   const filtered = items.filter((i) => {
     if (!inRange(i.date, range, customFrom, customTo)) return false
-    if (statusFilter && i.status !== statusFilter) return false
+    if (statusFilter === 'PAID' || statusFilter === 'UNPAID') {
+      if ((i.paymentStatus || 'PAID') !== statusFilter) return false
+    } else if (statusFilter && i.status !== statusFilter) return false
     if (q && !`${i.requestedBy} ${i.purpose} ${i.department || ''} ${i.payeeName || ''}`.toLowerCase().includes(q)) return false
     return true
   })
@@ -276,7 +278,7 @@ export default function PettyCashPage() {
   const exportRows = () => filtered.map((i) => ({
     Date: formatDate(i.date), 'Requested By': i.requestedBy, Department: i.department || '', Function: i.functionName || '',
     Purpose: i.purpose, Items: (i.items || []).map((it) => `${it.detail} (${it.unit}x${it.unitCost})`).join('; '), Amount: i.amount, 'Payment Method': i.paymentMethod,
-    'Payment Status': (i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Pending', 'Payee Account': i.payeeAccount || '', Status: i.status, 'Approved By': i.approvedBy || '',
+    'Payment Status': (i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Unpaid', 'Payee Account': i.payeeAccount || '', Status: i.status, 'Approved By': i.approvedBy || '',
   }))
   const fileBase = `petty-cash-${format(new Date(), 'yyyy-MM-dd')}`
 
@@ -359,11 +361,16 @@ export default function PettyCashPage() {
 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-gray-600 mr-1">Status:</span>
-              {[['', 'All'], ['PENDING', 'Pending'], ['APPROVED', 'Approved'], ['REJECTED', 'Rejected']].map(([s, label]) => {
-                const count = s ? items.filter((i) => i.status === s && inRange(i.date, range, customFrom, customTo)).length : null
+              {[['', 'All'], ['PENDING', 'Pending'], ['APPROVED', 'Approved'], ['REJECTED', 'Rejected'], ['PAID', 'Paid'], ['UNPAID', 'Unpaid']].map(([s, label]) => {
+                const isPay = s === 'PAID' || s === 'UNPAID'
+                const count = s ? items.filter((i) => (isPay ? (i.paymentStatus || 'PAID') === s : i.status === s) && inRange(i.date, range, customFrom, customTo)).length : null
+                const activeColor = s === 'APPROVED' || s === 'PAID' ? 'bg-green-600 text-white'
+                  : s === 'REJECTED' ? 'bg-red-600 text-white'
+                  : s === 'PENDING' || s === 'UNPAID' ? 'bg-orange-500 text-white'
+                  : 'bg-indigo-600 text-white'
                 return (
                   <button key={s || 'all'} onClick={() => setStatusFilter(s)}
-                    className={`px-4 py-2 rounded-xl text-sm font-medium transition ${statusFilter === s ? (s === 'APPROVED' ? 'bg-green-600 text-white' : s === 'REJECTED' ? 'bg-red-600 text-white' : s === 'PENDING' ? 'bg-orange-500 text-white' : 'bg-indigo-600 text-white') + ' shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition ${statusFilter === s ? activeColor + ' shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                     {label}{count != null ? ` (${count})` : ''}
                   </button>
                 )
@@ -419,7 +426,7 @@ export default function PettyCashPage() {
                           <td className="px-4 py-3 text-gray-500">{i.paymentMethod}</td>
                           <td className="px-4 py-3">
                             <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${(i.paymentStatus || 'PAID') === 'PAID' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {(i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Pending'}
+                              {(i.paymentStatus || 'PAID') === 'PAID' ? 'Paid' : 'Unpaid'}
                             </span>
                           </td>
                           <td className="px-4 py-3">
@@ -556,7 +563,7 @@ export default function PettyCashPage() {
                     <select value={form.paymentStatus} onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })}
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
                       <option value="PAID">Paid</option>
-                      <option value="PENDING">Pending</option>
+                      <option value="UNPAID">Unpaid</option>
                     </select>
                   </div>
                   <div>
