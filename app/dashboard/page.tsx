@@ -7,6 +7,7 @@ import { formatCurrency } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
 import { StatCard } from '@/components/ui/StatCard'
 import { Skeleton, StatCardsSkeleton } from '@/components/ui/Skeleton'
+import { Wallet, CalendarDays, Calendar, AlertTriangle, Banknote, Landmark, Building2, Smartphone } from 'lucide-react'
 import {
   ComposedChart, Area, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -130,48 +131,44 @@ export default function DashboardPage() {
 
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          <StatCard icon="💰" label="Today's Collections" value={formatCurrency(data.today.total)}
-            sub="Cash + Bank + M-PESA" href="/collections" color="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white" />
-          <StatCard icon="📅" label="This Week" value={formatCurrency(data.week.total)}
-            sub="Weekly total" href="/reports" color="bg-gradient-to-br from-purple-500 to-purple-600 text-white" />
-          <StatCard icon="🗓️" label="This Month" value={formatCurrency(data.month.total)}
-            sub="Monthly total" href="/reports" color="bg-gradient-to-br from-pink-500 to-pink-600 text-white" />
-          <StatCard icon="⚠️" label="Outstanding Receivables" value={formatCurrency(data.unpaidBills.total)}
-            sub={`${data.unpaidBills.count} unpaid bills`} href="/receivables" color="bg-gradient-to-br from-amber-500 to-orange-500 text-white" />
+          <StatCard icon={Wallet} tone="indigo" label="Today's Collections" value={formatCurrency(data.today.total)} sub="Cash + Bank + M-PESA" href="/collections" />
+          <StatCard icon={CalendarDays} tone="purple" label="This Week" value={formatCurrency(data.week.total)} sub="Weekly total" href="/reports" />
+          <StatCard icon={Calendar} tone="blue" label="This Month" value={formatCurrency(data.month.total)} sub="Monthly total" href="/reports" />
+          <StatCard icon={AlertTriangle} tone="amber" label="Outstanding Receivables" value={formatCurrency(data.unpaidBills.total)} sub={`${data.unpaidBills.count} unpaid bills`} href="/receivables" />
         </div>
 
         {/* Today breakdown */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: 'Cash', value: data.today.cash, icon: '💵', bg: 'bg-green-50 border-green-200' },
-            { label: 'CRDB Bank', value: data.today.crdb, icon: '🏦', bg: 'bg-blue-50 border-blue-200' },
-            { label: 'Stanbic', value: data.today.stanbic, icon: '🏛️', bg: 'bg-purple-50 border-purple-200' },
-            { label: 'M-PESA', value: data.today.mpesa, icon: '📱', bg: 'bg-yellow-50 border-yellow-200' },
+            { label: 'Cash', value: data.today.cash, Icon: Banknote, chip: 'bg-green-50 text-green-600' },
+            { label: 'CRDB Bank', value: data.today.crdb, Icon: Landmark, chip: 'bg-blue-50 text-blue-600' },
+            { label: 'Stanbic', value: data.today.stanbic, Icon: Building2, chip: 'bg-purple-50 text-purple-600' },
+            { label: 'M-PESA', value: data.today.mpesa, Icon: Smartphone, chip: 'bg-amber-50 text-amber-600' },
           ].map((item) => (
-            <div key={item.label} className={`rounded-xl border-2 p-4 ${item.bg}`}>
-              <div className="flex items-center gap-2 mb-1">
-                <span>{item.icon}</span>
-                <span className="text-xs font-semibold text-gray-600">{item.label}</span>
+            <div key={item.label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${item.chip}`}><item.Icon className="w-4 h-4" /></span>
+                <span className="text-xs font-semibold text-gray-500">{item.label}</span>
               </div>
-              <p className="text-lg font-bold text-gray-800">{formatCurrency(item.value)}</p>
+              <p className="text-lg font-bold text-gray-900">{formatCurrency(item.value)}</p>
             </div>
           ))}
         </div>
 
         {/* Outstanding Receivables by Category (incl. Tips & DJ) + by Outlet */}
         <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
-          <h3 className="font-semibold text-gray-800 mb-4">📂 Outstanding Receivables by Category</h3>
+          <h3 className="font-semibold text-gray-800 mb-4">Outstanding Receivables by Category</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {[
               { k: 'ADMIN', label: 'Admin' }, { k: 'DIRECTOR', label: 'Director' }, { k: 'CUSTOMER', label: 'Customer' },
               { k: 'TIPS', label: 'Tips' }, { k: 'DJ', label: 'DJ' }, { k: 'STAFF_LOSS', label: 'Staff Loss' },
             ].map((c) => (
-              <div key={c.k} className="rounded-xl border-2 p-4" style={{ borderColor: (BILL_TYPE_COLORS[c.k] || '#e5e7eb') + '55' }}>
+              <div key={c.k} className="rounded-xl bg-gray-50 p-4">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: BILL_TYPE_COLORS[c.k] || '#9ca3af' }} />
-                  <span className="text-xs font-semibold text-gray-600">{c.label}</span>
+                  <span className="text-xs font-semibold text-gray-500">{c.label}</span>
                 </div>
-                <p className="text-lg font-bold text-gray-800">{formatCurrency(data.byBillType[c.k] || 0)}</p>
+                <p className="text-lg font-bold text-gray-900">{formatCurrency(data.byBillType[c.k] || 0)}</p>
               </div>
             ))}
           </div>
@@ -180,9 +177,9 @@ export default function DashboardPage() {
               <h4 className="text-sm font-semibold text-gray-500 mt-5 mb-2">By Outlet</h4>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {data.outletPerformance.map((o, i) => (
-                  <div key={i} className="rounded-xl border-2 border-gray-100 p-4">
-                    <div className="flex items-center gap-2 mb-1"><span>🏢</span><span className="text-xs font-semibold text-gray-600 truncate">{o.name}</span></div>
-                    <p className="text-lg font-bold text-gray-800">{formatCurrency(o.outstanding)}</p>
+                  <div key={i} className="rounded-xl bg-gray-50 p-4">
+                    <div className="flex items-center gap-2 mb-1"><Building2 className="w-4 h-4 text-gray-400" /><span className="text-xs font-semibold text-gray-500 truncate">{o.name}</span></div>
+                    <p className="text-lg font-bold text-gray-900">{formatCurrency(o.outstanding)}</p>
                   </div>
                 ))}
               </div>

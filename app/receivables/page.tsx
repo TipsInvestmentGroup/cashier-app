@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { TrendingDown, Clock } from 'lucide-react'
 
 const AGING_FILL: Record<string, string> = { '0-30': '#16a34a', '31-60': '#d97706', '61-90': '#ea580c', '90+': '#dc2626' }
 
@@ -103,10 +104,8 @@ export default function ReceivablesPage() {
 
         {summary && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <StatCard icon="📉" label="Total Outstanding" value={formatCurrency(summary.total)} sub={`${summary.count} bills`}
-              color="bg-gradient-to-br from-red-500 to-red-600 text-white" />
-            <StatCard icon="⏰" label="Overdue" value={formatCurrency(summary.overdue)} sub="Past due date"
-              color="bg-gradient-to-br from-orange-500 to-orange-600 text-white" />
+            <StatCard icon={TrendingDown} tone="red" label="Total Outstanding" value={formatCurrency(summary.total)} sub={`${summary.count} bills`} />
+            <StatCard icon={Clock} tone="amber" label="Overdue" value={formatCurrency(summary.overdue)} sub="Past due date" />
             {types.map((t) => (
               summary.byType[t] ? (
                 <div key={t} className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">

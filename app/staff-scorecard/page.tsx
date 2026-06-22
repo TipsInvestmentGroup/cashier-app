@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { StatCardsSkeleton, Skeleton } from '@/components/ui/Skeleton'
 import { ExportBar } from '@/components/ExportBar'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
+import { Receipt, Wallet, TrendingDown, TrendingUp } from 'lucide-react'
 
 type RangeKey = 'today' | 'week' | 'month' | 'custom'
 const RANGES: { key: RangeKey; label: string }[] = [
@@ -104,10 +105,10 @@ export default function StaffScorecardPage() {
         ) : (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              <StatCard icon="🧾" label="System Sales" value={formatCurrency(totals.systemSales)} />
-              <StatCard icon="💰" label="Collected" value={formatCurrency(totals.collected)} sub={totals.systemSales > 0 ? `${Math.round((totals.collected / totals.systemSales) * 100)}% of system` : undefined} />
-              <StatCard icon="🔻" label="Total Loss" value={formatCurrency(totals.loss)} color="bg-gradient-to-br from-red-500 to-red-600 text-white" />
-              <StatCard icon="🔺" label="Total Excess" value={formatCurrency(totals.excess)} color="bg-gradient-to-br from-green-500 to-green-600 text-white" />
+              <StatCard icon={Receipt} tone="blue" label="System Sales" value={formatCurrency(totals.systemSales)} />
+              <StatCard icon={Wallet} tone="indigo" label="Collected" value={formatCurrency(totals.collected)} sub={totals.systemSales > 0 ? `${Math.round((totals.collected / totals.systemSales) * 100)}% of system` : undefined} />
+              <StatCard icon={TrendingDown} tone="red" label="Total Loss" value={formatCurrency(totals.loss)} />
+              <StatCard icon={TrendingUp} tone="green" label="Total Excess" value={formatCurrency(totals.excess)} />
             </div>
 
             <Card className="p-0 overflow-hidden">

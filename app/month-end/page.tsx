@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { StatCardsSkeleton, Skeleton } from '@/components/ui/Skeleton'
 import { ExportBar } from '@/components/ExportBar'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { Wallet, Receipt, FileSignature, CheckCircle2 } from 'lucide-react'
 import { format, startOfMonth, endOfMonth } from 'date-fns'
 
 interface Outlet { id: string; name: string }
@@ -98,12 +99,10 @@ export default function MonthEndPage() {
           <>
             {/* KPI row */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              <StatCard icon="💰" label="Total Collected" value={formatCurrency(sum.totalCollected)} sub="Cash + bank + M-PESA"
-                color="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white" />
-              <StatCard icon="🧾" label="System Sales" value={formatCurrency(systemSales)} sub="Per POS" />
-              <StatCard icon="📋" label="Credit Issued" value={formatCurrency(sum.totalSigned)} sub="Signed bills" />
-              <StatCard icon="✅" label="Debt Recovered" value={formatCurrency(sum.totalPaid)} sub={`${recoveryRate}% of credit issued`}
-                color="bg-gradient-to-br from-green-500 to-green-600 text-white" />
+              <StatCard icon={Wallet} tone="indigo" label="Total Collected" value={formatCurrency(sum.totalCollected)} sub="Cash + bank + M-PESA" />
+              <StatCard icon={Receipt} tone="blue" label="System Sales" value={formatCurrency(systemSales)} sub="Per POS" />
+              <StatCard icon={FileSignature} tone="purple" label="Credit Issued" value={formatCurrency(sum.totalSigned)} sub="Signed bills" />
+              <StatCard icon={CheckCircle2} tone="green" label="Debt Recovered" value={formatCurrency(sum.totalPaid)} sub={`${recoveryRate}% of credit issued`} />
             </div>
 
             {/* Charts */}
