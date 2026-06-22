@@ -7,7 +7,7 @@ import { useApi } from '@/hooks/useApi'
 import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
-import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, Wine, KeyRound, LogOut, type LucideIcon } from 'lucide-react'
+import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, type LucideIcon } from 'lucide-react'
 
 const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER']
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -57,7 +57,10 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-indigo-900 to-indigo-800 text-white w-64">
       <div className="p-6 border-b border-indigo-700">
-        <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center mb-2"><Wine className="w-6 h-6 text-white" /></div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <div className="w-12 h-12 rounded-xl bg-black flex items-center justify-center mb-2 overflow-hidden">
+          <img src="/tips-logo.png" alt="Tips" className="w-full h-full object-contain p-1" />
+        </div>
         <h1 className="text-lg font-bold leading-tight">Cashier Manager</h1>
         <p className="text-indigo-300 text-xs mt-1">{user?.outlet?.name || 'All Outlets'}</p>
       </div>
