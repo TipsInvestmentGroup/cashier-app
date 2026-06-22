@@ -637,13 +637,17 @@ export default function CollectionsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filtered.map((c) => {
+                  {filtered.map((c, i) => {
                     const sys = c.systemSales || 0
                     const v = rowLoss(c) // + = staff loss, − = overage
+                    const prev = i > 0 ? filtered[i - 1] : null
+                    // Collapse repeated values — only show outlet / cashier when it changes from the row above
+                    const showOutlet = !prev || prev.outlet.name !== c.outlet.name
+                    const showBy = !prev || prev.cashier.name !== c.cashier.name
                     return (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-5 py-4 text-gray-700">{formatDateTime(c.date)}</td>
-                      <td className="px-5 py-4 font-medium text-gray-800">{c.outlet.name}</td>
+                      <td className="px-5 py-4 font-medium text-gray-800">{showOutlet ? c.outlet.name : ''}</td>
                       <td className="px-5 py-4 text-gray-700">{c.staffName || '-'}</td>
                       <td className="px-5 py-4 text-green-700">{c.cash > 0 ? formatCurrency(c.cash) : '-'}</td>
                       <td className="px-5 py-4 text-blue-700">{c.crdb > 0 ? formatCurrency(c.crdb) : '-'}</td>
@@ -655,7 +659,7 @@ export default function CollectionsPage() {
                       <td className={`px-5 py-4 font-semibold ${sys === 0 ? 'text-gray-300' : v > 0 ? 'text-red-600' : v < 0 ? 'text-green-600' : 'text-gray-500'}`}>
                         {sys === 0 ? '-' : `${v > 0 ? '▼ ' : v < 0 ? '▲ ' : ''}${formatCurrency(Math.abs(v))}`}
                       </td>
-                      <td className="px-5 py-4 text-gray-500">{c.cashier.name}</td>
+                      <td className="px-5 py-4 text-gray-500">{showBy ? c.cashier.name : ''}</td>
                       {canAdd && (
                         <td className="px-5 py-4 text-right whitespace-nowrap">
                           <button onClick={() => startEdit(c)} title="Edit"
