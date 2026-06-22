@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
+import { SectionTabs, BILLS_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -174,6 +175,7 @@ export default function PaidBillsPage() {
 
   return (
     <AppShell>
+      <SectionTabs tabs={BILLS_TABS} />
       <div className="space-y-6">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>

@@ -28,11 +28,7 @@ const navItems = [
   { href: '/excess-loss?view=excess', icon: '🔺', label: 'Excess Report', section: 'Daily', roles: CASHIER_ROLES },
   { href: '/excess-loss?view=loss', icon: '🔻', label: 'Loss Report', section: 'Daily', roles: CASHIER_ROLES },
 
-  { href: '/signed-bills', icon: '📋', label: 'Signed Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
-  { href: '/paid-bills', icon: '✅', label: 'Paid Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
-  { href: '/customer-bills', icon: '👤', label: 'Customer Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
-  { href: '/tips-dj-bills', icon: '🎁', label: 'Tips & DJ Bills', section: 'Bills & Requests', roles: CASHIER_ROLES },
-  { href: '/cancellations', icon: '🚫', label: 'Cancellations', section: 'Bills & Requests', roles: CASHIER_ROLES },
+  { href: '/signed-bills', icon: '📋', label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 
   { href: '/petty-cash', icon: '💵', label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals'] },
 

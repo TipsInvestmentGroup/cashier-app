@@ -15,6 +15,14 @@ export const FINANCE_TABS: Tab[] = [
   { href: '/reports', label: 'Reports', icon: '📄', roles: MGMT },
 ]
 
+export const BILLS_TABS: Tab[] = [
+  { href: '/signed-bills', label: 'Signed Bills', icon: '📋', roles: CASHIER_ROLES },
+  { href: '/paid-bills', label: 'Paid Bills', icon: '✅', roles: CASHIER_ROLES },
+  { href: '/customer-bills', label: 'Customer Bills', icon: '👤', roles: CASHIER_ROLES },
+  { href: '/tips-dj-bills', label: 'Tips & DJ Bills', icon: '🎁', roles: CASHIER_ROLES },
+  { href: '/cancellations', label: 'Cancellations', icon: '🚫', roles: CASHIER_ROLES },
+]
+
 export const PETTY_TABS: Tab[] = [
   { href: '/petty-cash', label: 'Petty Cash', icon: '💵', roles: CASHIER_ROLES },
   { href: '/approvals', label: 'Approval Requests', icon: '🗳️', roles: CASHIER_ROLES },
