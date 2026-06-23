@@ -3,12 +3,14 @@ import { useState, useEffect, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { TARGETS, targetLevels, fmtTarget, type TargetDef } from '@/lib/targets'
 import { formatDate } from '@/lib/utils'
 import { generateWarningLetters, type FlaggedItem } from '@/lib/warning-letter-pdf'
+import { generateRewardLetters } from '@/lib/reward-letter-pdf'
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns'
 import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2, Lock, Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -23,6 +25,8 @@ interface StaffRow { staffName: string; collection: number; shisha: number; food
 interface Perf { outlets: OutletRow[]; byOutlet: Record<string, { collection: number; shisha: number; food: number }>; byStaff: Record<string, StaffRow[]> }
 
 interface UploadRow { id: string; date: string; staffName: string; value: number; outletId?: string; outlet?: { name: string } }
+interface LbMetric { department: string; unit: string; actual: number; target: number; pct: number }
+interface LbRow { rank: number; staff: string; outlet: string; overallPct: number; status: 'reward' | 'ontrack' | 'letter'; metrics: LbMetric[] }
 
 export default function TargetsPage() {
   const { request } = useApi()
@@ -30,7 +34,7 @@ export default function TargetsPage() {
   const confirm = useConfirm()
   const isAdmin = user?.role === 'ADMIN'
   const now = new Date()
-  const [view, setView] = useState<'targets' | 'performance' | 'uploads'>('targets')
+  const [view, setView] = useState<'targets' | 'performance' | 'leaderboard' | 'uploads'>('targets')
   const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly')
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [outlet, setOutlet] = useState<(typeof OUTLETS)[number]>('All')
@@ -40,6 +44,7 @@ export default function TargetsPage() {
   const [uploadDept, setUploadDept] = useState<'SHISHA' | 'FOOD'>('SHISHA')
   const [uploads, setUploads] = useState<UploadRow[]>([])
   const [lockedDays, setLockedDays] = useState<Set<string>>(new Set())
+  const [leaderboard, setLeaderboard] = useState<LbRow[]>([])
 
   const [my, mm] = month.split('-').map(Number)
   const daysInMonth = new Date(my, mm, 0).getDate()
@@ -75,6 +80,17 @@ export default function TargetsPage() {
   }, [request, uploadDept, period, month]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (view === 'uploads') loadUploads() }, [view, loadUploads])
+
+  const loadLeaderboard = useCallback(async () => {
+    setLoading(true)
+    try {
+      const qs = new URLSearchParams({ from: format(win.from, 'yyyy-MM-dd'), to: format(win.to, 'yyyy-MM-dd'), period, days: String(daysInMonth) })
+      const r = await request(`/api/targets/leaderboard?${qs}`)
+      setLeaderboard(r.rows || [])
+    } finally { setLoading(false) }
+  }, [request, period, month]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { if (view === 'leaderboard') loadLeaderboard() }, [view, loadLeaderboard])
 
   const dayOf = (iso: string) => iso.slice(0, 10)
   const lockDate = async (date: string, outletId?: string) => {
@@ -171,7 +187,7 @@ export default function TargetsPage() {
         {/* View + outlet filters */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex gap-2 bg-white border border-gray-200 rounded-xl p-1">
-            {(['targets', 'performance', 'uploads'] as const).map((v) => (
+            {(['targets', 'performance', 'leaderboard', 'uploads'] as const).map((v) => (
               <button key={v} onClick={() => setView(v)}
                 className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition ${view === v ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>{v}</button>
             ))}
@@ -238,6 +254,59 @@ export default function TargetsPage() {
             ))}
           </>
         ))}
+
+        {view === 'leaderboard' && (() => {
+          const shown = leaderboard.filter((r) => outlet === 'All' || r.outlet.toLowerCase().includes(outlet.toLowerCase()))
+          const pctOf = (r: LbRow, dept: string) => r.metrics.find((m) => m.department === dept)?.pct
+          const eligible = shown.filter((r) => r.status === 'reward')
+          const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`)
+          const rewardItems = eligible.map((r) => {
+            const ach = r.metrics.filter((m) => m.pct >= 80)
+            return { staff: r.staff, outlet: r.outlet, achievements: (ach.length ? ach : r.metrics) }
+          })
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold bg-green-50 text-green-700">🏆 {eligible.length} reward-eligible</span>
+                {eligible.length > 0 && (
+                  <Button variant="success" size="sm" onClick={() => generateRewardLetters(rewardItems, period === 'weekly' ? `${format(win.from, 'dd MMM')} – ${format(win.to, 'dd MMM yyyy')}` : format(win.from, 'MMMM yyyy'))}>🏆 Reward letters ({eligible.length})</Button>
+                )}
+              </div>
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                {loading ? <p className="px-4 py-10 text-center text-gray-400">Loading…</p> : shown.length === 0 ? (
+                  <EmptyState icon="🏆" title="No staff activity in this window" hint="Record collections and upload shisha/food sales to rank staff." />
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600 text-[11px] uppercase tracking-wide">
+                        <tr><th className="px-3 py-2 text-left w-12">#</th><th className="px-3 py-2 text-left">Staff</th><th className="px-3 py-2 text-left">Outlet</th><th className="px-3 py-2 text-right">Collection</th><th className="px-3 py-2 text-right">Shisha</th><th className="px-3 py-2 text-right">Food</th><th className="px-3 py-2 text-right">Overall</th><th className="px-3 py-2 text-right">Status</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {shown.map((r) => {
+                          const col = pctOf(r, 'Total Collection'); const sh = pctOf(r, 'Shisha Sales'); const fd = pctOf(r, 'Food Sales')
+                          const cell = (v?: number) => v == null ? <span className="text-gray-300">—</span> : <span className={v >= 80 ? 'text-green-700 font-semibold' : v < 34 ? 'text-red-600 font-semibold' : 'text-gray-700'}>{v}%</span>
+                          return (
+                            <tr key={r.rank} className="hover:bg-gray-50">
+                              <td className="px-3 py-2 font-bold text-gray-500">{medal(r.rank)}</td>
+                              <td className="px-3 py-2 font-medium text-gray-800">{r.staff}</td>
+                              <td className="px-3 py-2 text-gray-500">{r.outlet}</td>
+                              <td className="px-3 py-2 text-right">{cell(col)}</td>
+                              <td className="px-3 py-2 text-right">{cell(sh)}</td>
+                              <td className="px-3 py-2 text-right">{cell(fd)}</td>
+                              <td className="px-3 py-2 text-right font-bold text-gray-900">{r.overallPct}%</td>
+                              <td className="px-3 py-2 text-right"><Badge tone={r.status === 'reward' ? 'green' : r.status === 'letter' ? 'red' : 'amber'}>{r.status === 'reward' ? 'Reward' : r.status === 'letter' ? 'Letter' : 'On track'}</Badge></td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-gray-400">Overall = average of each staff&apos;s applicable target achievements. Reward-eligible at ≥ 80% overall.</p>
+            </div>
+          )
+        })()}
 
         {view === 'uploads' && (() => {
           const unit = uploadDept === 'SHISHA' ? 'COUNT' as const : 'TZS' as const
