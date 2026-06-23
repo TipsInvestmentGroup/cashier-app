@@ -16,6 +16,35 @@ const DATASETS: { key: Dataset; label: string; outletMatch: string; unit: string
   { key: 'FOOD', label: 'Food — Coco', outletMatch: 'coco', unit: 'amount (TZS)' },
 ]
 
+// Levenshtein-based similarity (0..1) for fuzzy name matching.
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length
+  const d: number[][] = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)])
+  for (let j = 0; j <= n; j++) d[0][j] = j
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) {
+    const cost = a[i - 1] === b[j - 1] ? 0 : 1
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+  }
+  return d[m][n]
+}
+function similarity(a: string, b: string): number {
+  const la = a.trim().toLowerCase(), lb = b.trim().toLowerCase()
+  if (!la || !lb) return 0
+  const dist = levenshtein(la, lb)
+  let s = 1 - dist / (Math.max(la.length, lb.length) || 1)
+  if (la.includes(lb) || lb.includes(la)) s = Math.max(s, 0.85) // partial / token containment
+  return s
+}
+/** Best canonical-name suggestion for an unmatched name (≥ 0.55 similarity). */
+function suggest(name: string, candidates: string[]): { name: string; score: number } | null {
+  let best: { name: string; score: number } | null = null
+  for (const c of candidates) {
+    const score = similarity(name, c)
+    if (!best || score > best.score) best = { name: c, score }
+  }
+  return best && best.score >= 0.55 ? best : null
+}
+
 export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { request } = useApi()
   const [dataset, setDataset] = useState<Dataset>('SHISHA')
@@ -120,6 +149,22 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
     } finally { setParsing(false) }
   }, [dataset, staffMap])
 
+  // Apply a fuzzy suggestion: rename the row to the canonical staff name.
+  const applyMatch = (idx: number, canonical: string) =>
+    setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, staffName: canonical, matched: true } : r)))
+
+  // Create a brand-new staff record from the uploaded name.
+  const createStaff = async (idx: number, name: string) => {
+    try {
+      await request('/api/persons', { method: 'POST', body: JSON.stringify({ name, type: 'STAFF_LOSS' }) })
+      setStaffMap((m) => ({ ...m, [name.trim().toLowerCase()]: name }))
+      setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, matched: true } : r)))
+      toast.success(`${name} added to staff`)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not create staff (managers only)')
+    }
+  }
+
   const save = async () => {
     if (!rows.length) return
     if (!outletId) return toast.error('Select the outlet.')
@@ -189,9 +234,33 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
               <span className="font-semibold text-gray-700">{rows.length} staff</span>
               <span className="text-gray-500">Total: <strong>{dataset === 'FOOD' ? formatCurrency(total) : `${total.toLocaleString()} shisha`}</strong></span>
             </div>
-            {rows.some((r) => !r.matched) && (
-              <p className="text-[11px] text-amber-600 mb-1">⚠️ {rows.filter((r) => !r.matched).length} name(s) marked <strong>new</strong> aren&apos;t in your staff list — they won&apos;t line up with collections until added/renamed in Persons.</p>
-            )}
+            {rows.some((r) => !r.matched) && (() => {
+              const candidates = Object.values(staffMap)
+              return (
+                <div className="mb-2 border-2 border-amber-100 bg-amber-50/60 rounded-xl p-3 space-y-2">
+                  <p className="text-xs font-semibold text-amber-700">Resolve {rows.filter((r) => !r.matched).length} unmatched name(s) so they line up with collections:</p>
+                  {rows.map((r, i) => {
+                    if (r.matched) return null
+                    const s = suggest(r.staffName, candidates)
+                    return (
+                      <div key={i} className="flex items-center justify-between gap-2 flex-wrap text-sm">
+                        <span className="font-medium text-gray-800">{r.staffName}</span>
+                        <div className="flex items-center gap-1.5">
+                          {s && (
+                            <button onClick={() => applyMatch(i, s.name)}
+                              className="px-2 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+                              Use “{s.name}” ({Math.round(s.score * 100)}%)
+                            </button>
+                          )}
+                          <button onClick={() => createStaff(i, r.staffName)}
+                            className="px-2 py-1 rounded-lg text-xs font-semibold bg-green-50 text-green-700 hover:bg-green-100">+ Create staff</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
             <div className="border border-gray-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-100 text-gray-600 text-[11px] uppercase tracking-wide sticky top-0">
