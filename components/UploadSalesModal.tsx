@@ -169,16 +169,22 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
               <span className="font-semibold text-gray-700">{rows.length} rows</span>
               <span className="text-gray-500">Total: <strong>{dataset === 'FOOD' ? formatCurrency(total) : `${total.toLocaleString()} shisha`}</strong></span>
             </div>
-            <div className="border border-gray-100 rounded-xl overflow-hidden max-h-40 overflow-y-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left">Date</th><th className="px-2 py-1.5 text-left">Staff</th><th className="px-2 py-1.5 text-right">{dataset === 'SHISHA' ? 'Qty' : 'Amount'}</th></tr></thead>
-                <tbody className="divide-y divide-gray-50">
-                  {rows.slice(0, 8).map((r, i) => (
-                    <tr key={i}><td className="px-2 py-1.5">{r.date || assignDate}</td><td className="px-2 py-1.5">{r.staffName}</td><td className="px-2 py-1.5 text-right">{dataset === 'FOOD' ? formatCurrency(r.value) : r.value}</td></tr>
+            <div className="border border-gray-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100 text-gray-600 text-[11px] uppercase tracking-wide sticky top-0">
+                  <tr><th className="px-3 py-2 text-left font-semibold">Date</th><th className="px-3 py-2 text-left font-semibold">Staff</th><th className="px-3 py-2 text-right font-semibold">{dataset === 'SHISHA' ? 'Qty' : 'Amount'}</th></tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {rows.slice(0, 12).map((r, i) => (
+                    <tr key={i} className="even:bg-gray-50">
+                      <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.date || assignDate}</td>
+                      <td className="px-3 py-2 font-medium text-gray-800">{r.staffName}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-gray-900">{dataset === 'FOOD' ? formatCurrency(r.value) : r.value}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
-              {rows.length > 8 && <p className="text-[11px] text-gray-400 text-center py-1">+ {rows.length - 8} more</p>}
+              {rows.length > 12 && <p className="text-xs text-gray-500 text-center py-2 bg-gray-50">+ {rows.length - 12} more rows</p>}
             </div>
           </div>
         )}
