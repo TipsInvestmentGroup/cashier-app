@@ -5,6 +5,8 @@ import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { CashReconForm } from '@/components/recon/CashReconForm'
+import { DigitalReconForm } from '@/components/recon/DigitalReconForm'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
@@ -934,36 +936,44 @@ export default function CollectionsPage() {
         {/* Guided Close-Day wizard */}
         {closeWizard && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setCloseWizard(false)}>
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-2">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[92vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
                 <h3 className="font-bold text-gray-900">🔒 Close the Day — {format(targetCloseDate, 'dd MMM yyyy')}</h3>
                 <button onClick={() => setCloseWizard(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
               </div>
-              <div className="flex gap-1.5 mb-5">
-                {[0, 1, 2, 3].map((s) => <div key={s} className={`h-1.5 flex-1 rounded-full ${s <= wizardStep ? 'bg-indigo-600' : 'bg-gray-200'}`} />)}
+              {/* Step tracker */}
+              <div className="flex items-center mb-5">
+                {['Cash Requests', 'Cash Recon', 'Digital Recon', 'Confirm'].map((label, i) => {
+                  const stepIdx = Math.min(wizardStep, 3)
+                  const done = i === 1 ? dayStatus.cashDone : i === 2 ? dayStatus.digitalDone : i < stepIdx
+                  const current = stepIdx === i
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center relative">
+                      {i > 0 && <div className={`absolute top-3.5 right-1/2 w-full h-0.5 ${done || current ? 'bg-indigo-300' : 'bg-gray-200'}`} />}
+                      <div className={`relative z-10 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${done ? 'bg-green-500 text-white' : current ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-500'}`}>{done ? '✓' : i + 1}</div>
+                      <span className={`text-[10px] mt-1 text-center leading-tight ${current ? 'text-indigo-700 font-semibold' : 'text-gray-400'}`}>{label}</span>
+                    </div>
+                  )
+                })}
               </div>
 
               {wizardStep === 0 && (
                 <div>
                   <p className="text-sm font-semibold text-gray-800 mb-1">Step 1 of 4 · Cash Requests <span className="text-gray-400 font-normal">(optional)</span></p>
-                  <p className="text-sm text-gray-500 mb-4">If there were any cash expenses today, record them. If none, you can skip this step.</p>
+                  <p className="text-sm text-gray-500 mb-4">If there were any cash expenses today, record them first. If none, continue.</p>
                   <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
-                  <button onClick={() => setWizardStep(1)} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
+                  <button onClick={() => setWizardStep(1)} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Continue to Cash Reconciliation →</button>
                 </div>
               )}
 
               {wizardStep === 1 && (
                 <div>
                   <p className="text-sm font-semibold text-gray-800 mb-1">Step 2 of 4 · Cash Reconciliation <span className="text-rose-500 font-normal">(required)</span></p>
-                  <p className="text-sm text-gray-500 mb-3">Reconcile today&apos;s cash (deposits, verified amount).</p>
-                  <div className={`flex items-center gap-2 text-sm font-semibold mb-3 ${dayStatus.cashDone ? 'text-green-700' : 'text-amber-600'}`}>
-                    {statusLoading ? '⏳ Checking…' : dayStatus.cashDone ? '✓ Cash reconciliation completed' : '⚠️ Not completed yet'}
-                  </div>
-                  <a href="/petty-cash?recon=cash" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Reconciliation ↗</a>
-                  <button onClick={loadDayStatus} className="w-full py-2 mb-2 rounded-xl border-2 border-gray-200 text-gray-600 text-xs font-medium">↻ Refresh status</button>
-                  <div className="flex gap-2">
-                    <button onClick={() => setWizardStep(0)} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">← Back</button>
-                    <button onClick={() => setWizardStep(2)} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
+                  <p className="text-sm text-gray-500 mb-3">Complete the cash reconciliation below — saving moves you to the next step.</p>
+                  <CashReconForm outletId={targetOutletIds[0] || ''} date={targetDayStr} onSaved={() => { loadDayStatus(); setWizardStep(2) }} />
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => setWizardStep(0)} className="flex-1 py-2 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">← Back</button>
+                    {dayStatus.cashDone && <button onClick={() => setWizardStep(2)} className="flex-1 py-2 rounded-xl bg-gray-100 text-gray-700 font-medium text-sm">Already done — skip →</button>}
                   </div>
                 </div>
               )}
@@ -971,15 +981,11 @@ export default function CollectionsPage() {
               {wizardStep === 2 && (
                 <div>
                   <p className="text-sm font-semibold text-gray-800 mb-1">Step 3 of 4 · Digital Payment Reconciliation <span className="text-rose-500 font-normal">(required)</span></p>
-                  <p className="text-sm text-gray-500 mb-3">Reconcile CRDB, Stanbic and M-PESA against your bank statements.</p>
-                  <div className={`flex items-center gap-2 text-sm font-semibold mb-3 ${dayStatus.digitalDone ? 'text-green-700' : 'text-amber-600'}`}>
-                    {statusLoading ? '⏳ Checking…' : dayStatus.digitalDone ? '✓ Digital reconciliation completed' : '⚠️ Not completed yet'}
-                  </div>
-                  <a href="/petty-cash?recon=digital" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Digital Reconciliation ↗</a>
-                  <button onClick={loadDayStatus} className="w-full py-2 mb-2 rounded-xl border-2 border-gray-200 text-gray-600 text-xs font-medium">↻ Refresh status</button>
-                  <div className="flex gap-2">
-                    <button onClick={() => setWizardStep(1)} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">← Back</button>
-                    <button onClick={() => setWizardStep(3)} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Next →</button>
+                  <p className="text-sm text-gray-500 mb-3">Reconcile each digital channel below — saving moves you to the confirmation.</p>
+                  <DigitalReconForm outletId={targetOutletIds[0] || ''} date={targetDayStr} onSaved={() => { loadDayStatus(); setWizardStep(3) }} />
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => setWizardStep(1)} className="flex-1 py-2 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">← Back</button>
+                    {dayStatus.digitalDone && <button onClick={() => setWizardStep(3)} className="flex-1 py-2 rounded-xl bg-gray-100 text-gray-700 font-medium text-sm">Already done — skip →</button>}
                   </div>
                 </div>
               )}
