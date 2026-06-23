@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
+import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
 import { StatCard } from '@/components/ui/StatCard'
@@ -38,8 +39,16 @@ const STATUS_BG: Record<string, string> = {
 
 export default function DashboardPage() {
   const { request } = useApi()
+  const { user } = useAuth()
+  // Role → persona, which tailors the dashboard content.
+  const role = user?.role || ''
+  const persona: 'exec' | 'manager' | 'auditor' | 'cashier' = role === 'ADMIN' || role === 'DIRECTOR' ? 'exec'
+    : role === 'MANAGER' ? 'manager' : role === 'ACCOUNTANT' ? 'auditor' : 'cashier'
+  const analytics = persona !== 'cashier' // heavy management charts hidden from cashiers
+  const personaLabel = { exec: 'Executive overview', manager: 'Manager overview', auditor: 'Audit & compliance', cashier: 'Cashier workspace' }[persona]
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [dayReady, setDayReady] = useState<{ cashReconDone: boolean; digitalReconDone: boolean; closed: boolean } | null>(null)
   const [variances, setVariances] = useState<{ outlet: string; kind: string; expected: number; actual: number; variance: number }[]>([])
   const [warnings, setWarnings] = useState<{ staffCount: number; flagged: FlaggedItem[] } | null>(null)
   type Growth = { current: number; previous: number; deltaPct: number; spark: number[] }
@@ -53,6 +62,7 @@ export default function DashboardPage() {
     request('/api/reports/variance-alerts').then((r) => setVariances(r.items || [])).catch(() => {})
     request('/api/targets/warning-letters').then((r) => setWarnings(r)).catch(() => {})
     request('/api/dashboard/growth').then((r) => setGrowth(r)).catch(() => {})
+    request('/api/collections/day-status').then((r) => setDayReady(r)).catch(() => {})
   }, [request])
 
   if (loading) return (
@@ -113,10 +123,60 @@ export default function DashboardPage() {
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-            <p className="text-gray-500 text-sm">Real-time overview of sales and receivables</p>
+            <p className="text-gray-500 text-sm">{personaLabel} · {user?.name}</p>
           </div>
-          <ExportBar rows={exportRows} filename="dashboard-summary" title="Dashboard Summary" />
+          {analytics && <ExportBar rows={exportRows} filename="dashboard-summary" title="Dashboard Summary" />}
         </div>
+
+        {/* Role-tailored quick actions */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {(persona === 'cashier'
+            ? [
+              { href: '/collections', icon: '💰', label: 'Collections' },
+              { href: '/signed-bills', icon: '📋', label: 'Bills' },
+              { href: '/paid-bills', icon: '✅', label: 'Payments' },
+              { href: '/petty-cash', icon: '💵', label: 'Petty Cash' },
+              { href: '/daily-report', icon: '📄', label: 'Daily Report' },
+              { href: '/collections', icon: '🔒', label: 'Close Day' },
+            ]
+            : persona === 'auditor'
+            ? [
+              { href: '/audit', icon: '🛡️', label: 'Audit Log' },
+              { href: '/reports', icon: '📄', label: 'Reports' },
+              { href: '/receivables', icon: '📈', label: 'Receivables' },
+              { href: '/excess-loss', icon: '🔻', label: 'Excess & Loss' },
+              { href: '/payroll', icon: '🧾', label: 'Payroll' },
+              { href: '/month-end', icon: '📅', label: 'Month-End' },
+            ]
+            : [
+              { href: '/outlet-comparison', icon: '🏢', label: 'Outlets' },
+              { href: '/targets', icon: '🎯', label: 'Targets' },
+              { href: '/staff-scorecard', icon: '🧑‍💼', label: 'Staff' },
+              { href: '/receivables', icon: '📈', label: 'Receivables' },
+              { href: '/month-end', icon: '📅', label: 'Month-End' },
+              { href: '/reports', icon: '📄', label: 'Reports' },
+            ]
+          ).map((a) => (
+            <a key={a.label + a.href} href={a.href} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 text-center hover:shadow-md hover:-translate-y-0.5 transition">
+              <div className="text-xl">{a.icon}</div>
+              <div className="text-xs font-semibold text-gray-700 mt-1">{a.label}</div>
+            </a>
+          ))}
+        </div>
+
+        {/* Cashier: today's reconciliation readiness + close-day CTA */}
+        {persona === 'cashier' && dayReady && (
+          <div className={`rounded-2xl border-2 p-4 ${dayReady.closed ? 'bg-gray-50 border-gray-200' : 'bg-indigo-50 border-indigo-200'}`}>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-4 text-sm">
+                <span className="font-bold text-gray-800">{dayReady.closed ? '🔒 Today is closed' : '🟢 Today is open'}</span>
+                <span className={dayReady.cashReconDone ? 'text-green-700' : 'text-amber-600'}>{dayReady.cashReconDone ? '✓' : '○'} Cash recon</span>
+                <span className={dayReady.digitalReconDone ? 'text-green-700' : 'text-amber-600'}>{dayReady.digitalReconDone ? '✓' : '○'} Digital recon</span>
+              </div>
+              {!dayReady.closed && <a href="/collections" className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700">Close the Day →</a>}
+            </div>
+          </div>
+        )}
 
         {/* Reconciliation variance alerts (today) */}
         {variances.length > 0 && (
@@ -136,7 +196,7 @@ export default function DashboardPage() {
         )}
 
         {/* Staff due warning letters this week */}
-        {warnings && warnings.staffCount > 0 && (
+        {(persona === 'exec' || persona === 'manager') && warnings && warnings.staffCount > 0 && (
           <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4">
             <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
               <span className="font-bold text-amber-800">⚠️ {warnings.staffCount} staff due warning letters this week</span>
@@ -187,6 +247,7 @@ export default function DashboardPage() {
           </div>
         )}
 
+        {analytics && (<>
         {/* Outstanding Receivables by Category (incl. Tips & DJ) + by Outlet */}
         <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
           <h3 className="font-semibold text-gray-800 mb-4">Outstanding Receivables by Category</h3>
@@ -393,6 +454,7 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+        </>)}
       </div>
     </AppShell>
   )
