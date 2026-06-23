@@ -60,3 +60,26 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true, inserted: data.length })
 }
+
+/** DELETE — remove one row (?id=) or many (body { ids: [...] }). Cashiers limited to their outlet. */
+export async function DELETE(req: NextRequest) {
+  const user = getAuthUser(req)
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!requireRole(user, ALLOWED)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { searchParams } = new URL(req.url)
+  const id = searchParams.get('id')
+  const body = id ? null : await req.json().catch(() => ({}))
+  const ids: string[] = id ? [id] : (Array.isArray(body?.ids) ? body.ids : [])
+  if (!ids.length) return NextResponse.json({ error: 'Nothing to delete' }, { status: 400 })
+
+  // Cashiers may only delete rows from their own outlet.
+  const where: Record<string, unknown> = { id: { in: ids } }
+  if (user.role === 'CASHIER') where.outletId = user.outletId || '__none__'
+
+  const res = await db.salesMetric.deleteMany({ where })
+  await prisma.auditLog.create({
+    data: { userId: user.userId, action: 'DELETE', entity: 'SalesMetric', details: `Deleted ${res.count} uploaded sales row(s)` },
+  })
+  return NextResponse.json({ ok: true, deleted: res.count })
+}

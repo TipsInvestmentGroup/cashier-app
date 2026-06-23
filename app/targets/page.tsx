@@ -2,10 +2,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
 import { useApi } from '@/hooks/useApi'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { TARGETS, targetLevels, fmtTarget, type TargetDef } from '@/lib/targets'
+import { formatDate } from '@/lib/utils'
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
-import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown } from 'lucide-react'
+import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2 } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 const OUTLETS = ['All', 'Mikocheni', 'Coco'] as const
 const deptIcon = (d: string) => (d === 'Shisha Sales' ? Cigarette : d === 'Food Sales' ? UtensilsCrossed : Wallet)
@@ -16,15 +20,20 @@ interface OutletRow { id: string; name: string }
 interface StaffRow { staffName: string; collection: number; shisha: number; food: number }
 interface Perf { outlets: OutletRow[]; byOutlet: Record<string, { collection: number; shisha: number; food: number }>; byStaff: Record<string, StaffRow[]> }
 
+interface UploadRow { id: string; date: string; staffName: string; value: number; outlet?: { name: string } }
+
 export default function TargetsPage() {
   const { request } = useApi()
+  const confirm = useConfirm()
   const now = new Date()
-  const [view, setView] = useState<'targets' | 'performance'>('targets')
+  const [view, setView] = useState<'targets' | 'performance' | 'uploads'>('targets')
   const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly')
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [outlet, setOutlet] = useState<(typeof OUTLETS)[number]>('All')
   const [perf, setPerf] = useState<Perf | null>(null)
   const [loading, setLoading] = useState(false)
+  const [uploadDept, setUploadDept] = useState<'SHISHA' | 'FOOD'>('SHISHA')
+  const [uploads, setUploads] = useState<UploadRow[]>([])
 
   const [my, mm] = month.split('-').map(Number)
   const daysInMonth = new Date(my, mm, 0).getDate()
@@ -41,6 +50,29 @@ export default function TargetsPage() {
   }, [request, period, month]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (view === 'performance') loadPerf() }, [view, loadPerf])
+
+  const loadUploads = useCallback(async () => {
+    setLoading(true)
+    try {
+      const qs = new URLSearchParams({ department: uploadDept, from: format(win.from, 'yyyy-MM-dd'), to: format(win.to, 'yyyy-MM-dd') })
+      const r = await request(`/api/sales-metrics?${qs}`)
+      setUploads(r.rows || [])
+    } finally { setLoading(false) }
+  }, [request, uploadDept, period, month]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { if (view === 'uploads') loadUploads() }, [view, loadUploads])
+
+  const deleteRow = async (id: string) => {
+    if (!(await confirm({ title: 'Delete row', message: 'Remove this uploaded sales row?', danger: true, confirmLabel: 'Delete' }))) return
+    try { await request(`/api/sales-metrics?id=${id}`, { method: 'DELETE' }); toast.success('Row deleted'); loadUploads() }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not delete') }
+  }
+  const clearShown = async (ids: string[]) => {
+    if (!ids.length) return
+    if (!(await confirm({ title: 'Clear rows', message: `Delete all ${ids.length} shown rows? This cannot be undone.`, danger: true, confirmLabel: 'Delete all' }))) return
+    try { await request('/api/sales-metrics', { method: 'DELETE', body: JSON.stringify({ ids }) }); toast.success('Rows cleared'); loadUploads() }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not clear') }
+  }
 
   const groups = ['Mikocheni', 'Coco'].filter((o) => outlet === 'All' || o === outlet)
   const dbOutlet = (g: string) => perf?.outlets.find((o) => o.name.toLowerCase().includes(g.toLowerCase()))
@@ -70,7 +102,7 @@ export default function TargetsPage() {
         {/* View + outlet filters */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex gap-2 bg-white border border-gray-200 rounded-xl p-1">
-            {(['targets', 'performance'] as const).map((v) => (
+            {(['targets', 'performance', 'uploads'] as const).map((v) => (
               <button key={v} onClick={() => setView(v)}
                 className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition ${view === v ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>{v}</button>
             ))}
@@ -135,6 +167,63 @@ export default function TargetsPage() {
             )
           })
         )}
+
+        {view === 'uploads' && (() => {
+          const unit = uploadDept === 'SHISHA' ? 'COUNT' as const : 'TZS' as const
+          const shown = uploads.filter((r) => outlet === 'All' || (r.outlet?.name || '').toLowerCase().includes(outlet.toLowerCase()))
+          const total = shown.reduce((s, r) => s + r.value, 0)
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex gap-2">
+                  {(['SHISHA', 'FOOD'] as const).map((d) => (
+                    <button key={d} onClick={() => setUploadDept(d)}
+                      className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${uploadDept === d ? 'bg-indigo-600 text-white shadow' : 'bg-white border-2 border-gray-200 text-gray-700'}`}>
+                      {d === 'SHISHA' ? 'Shisha (Mikocheni)' : 'Food (Coco)'}
+                    </button>
+                  ))}
+                </div>
+                {shown.length > 0 && (
+                  <Button variant="danger" size="sm" onClick={() => clearShown(shown.map((r) => r.id))}>Clear all shown ({shown.length})</Button>
+                )}
+              </div>
+
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between text-sm">
+                  <span className="font-semibold text-gray-800">{shown.length} uploaded rows</span>
+                  <span className="text-gray-500">Total: <strong>{fmtTarget(total, unit)}</strong></span>
+                </div>
+                {loading ? (
+                  <p className="px-4 py-10 text-center text-gray-400">Loading…</p>
+                ) : shown.length === 0 ? (
+                  <p className="px-4 py-10 text-center text-gray-400">No uploads in this window. Use <strong>Upload Sales</strong> to add them.</p>
+                ) : (
+                  <div className="overflow-x-auto max-h-[28rem] overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600 text-[11px] uppercase tracking-wide sticky top-0">
+                        <tr><th className="px-4 py-2 text-left">Date</th><th className="px-4 py-2 text-left">Outlet</th><th className="px-4 py-2 text-left">Staff</th><th className="px-4 py-2 text-right">{uploadDept === 'SHISHA' ? 'Qty' : 'Amount'}</th><th className="px-4 py-2"></th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {shown.map((r) => (
+                          <tr key={r.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2 text-gray-600 whitespace-nowrap">{formatDate(r.date)}</td>
+                            <td className="px-4 py-2 text-gray-500">{r.outlet?.name || '—'}</td>
+                            <td className="px-4 py-2 font-medium text-gray-800">{r.staffName}</td>
+                            <td className="px-4 py-2 text-right font-semibold text-gray-900">{fmtTarget(r.value, unit)}</td>
+                            <td className="px-4 py-2 text-right">
+                              <button onClick={() => deleteRow(r.id)} title="Delete" className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <p className="text-xs text-gray-400">To fix a mistake: delete the wrong rows here, then re-upload the corrected file via <strong>Upload Sales</strong>.</p>
+            </div>
+          )
+        })()}
       </div>
     </AppShell>
   )
