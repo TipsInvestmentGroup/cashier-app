@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { TARGETS, targetLevels, fmtTarget, type TargetDef } from '@/lib/targets'
 import { formatDate } from '@/lib/utils'
-import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns'
 import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2, Lock, Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -34,6 +34,7 @@ export default function TargetsPage() {
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [outlet, setOutlet] = useState<(typeof OUTLETS)[number]>('All')
   const [perf, setPerf] = useState<Perf | null>(null)
+  const [perfPrev, setPerfPrev] = useState<Perf | null>(null)
   const [loading, setLoading] = useState(false)
   const [uploadDept, setUploadDept] = useState<'SHISHA' | 'FOOD'>('SHISHA')
   const [uploads, setUploads] = useState<UploadRow[]>([])
@@ -44,12 +45,19 @@ export default function TargetsPage() {
   const win = period === 'weekly'
     ? { from: startOfWeek(now, { weekStartsOn: 1 }), to: endOfWeek(now, { weekStartsOn: 1 }) }
     : { from: startOfMonth(new Date(my, mm - 1, 1)), to: endOfMonth(new Date(my, mm - 1, 1)) }
+  const prevWin = period === 'weekly'
+    ? { from: startOfWeek(subWeeks(win.from, 1), { weekStartsOn: 1 }), to: endOfWeek(subWeeks(win.from, 1), { weekStartsOn: 1 }) }
+    : { from: startOfMonth(subMonths(win.from, 1)), to: endOfMonth(subMonths(win.from, 1)) }
 
   const loadPerf = useCallback(async () => {
     setLoading(true)
     try {
-      const qs = new URLSearchParams({ from: format(win.from, 'yyyy-MM-dd'), to: format(win.to, 'yyyy-MM-dd') })
-      setPerf(await request(`/api/targets/performance?${qs}`))
+      const q = (w: { from: Date; to: Date }) => new URLSearchParams({ from: format(w.from, 'yyyy-MM-dd'), to: format(w.to, 'yyyy-MM-dd') })
+      const [cur, prev] = await Promise.all([
+        request(`/api/targets/performance?${q(win)}`),
+        request(`/api/targets/performance?${q(prevWin)}`).catch(() => null),
+      ])
+      setPerf(cur); setPerfPrev(prev)
     } finally { setLoading(false) }
   }, [request, period, month]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -94,6 +102,43 @@ export default function TargetsPage() {
 
   const groups = ['Mikocheni', 'Coco'].filter((o) => outlet === 'All' || o === outlet)
   const dbOutlet = (g: string) => perf?.outlets.find((o) => o.name.toLowerCase().includes(g.toLowerCase()))
+
+  // Build the performance model once (drives summary, CSV and the tables).
+  const model = (view === 'performance' && perf) ? groups.map((g) => {
+    const o = dbOutlet(g)
+    const totals = (o && perf.byOutlet[o.id]) || { collection: 0, shisha: 0, food: 0 }
+    const staff = (o && perf.byStaff[o.id]) || []
+    const prevStaff = (o && perfPrev?.byStaff[o.id]) || []
+    const items = TARGETS.filter((t) => t.outlet === g)
+    const outletTargets = items.filter((t) => t.scope !== 'Per Staff').map((t) => ({ t, lv: targetLevels(t, period, daysInMonth), actual: totals[deptKey(t.department)] }))
+    const staffTargets = items.filter((t) => t.scope === 'Per Staff').map((t) => {
+      const dk = deptKey(t.department); const lv = targetLevels(t, period, daysInMonth)
+      const prevMap: Record<string, number> = {}; prevStaff.forEach((s) => { prevMap[s.staffName.toLowerCase()] = s[dk] })
+      const rows = staff.map((s) => ({ name: s.staffName, actual: s[dk], prev: prevMap[s.staffName.toLowerCase()] ?? 0 }))
+        .filter((r) => r.actual > 0).sort((a, b) => b.actual - a.actual).map((r, i) => ({ ...r, rank: i + 1 }))
+      return { t, lv, rows }
+    })
+    return { g, o, outletTargets, staffTargets }
+  }) : []
+
+  const flags = { reward: 0, letter: 0, onTrack: 0 }
+  model.forEach((m) => m.staffTargets.forEach((st) => st.rows.forEach((r) => {
+    const lab = statusOf(r.actual, st.lv).label
+    if (lab === 'Reward') flags.reward++; else if (lab === 'Letter') flags.letter++; else flags.onTrack++
+  })))
+
+  const exportPerfCsv = () => {
+    const rows: Record<string, unknown>[] = []
+    model.forEach((m) => m.staffTargets.forEach((st) => st.rows.forEach((r) => {
+      rows.push({ Outlet: m.g, Department: st.t.department, Rank: r.rank, Staff: r.name, Actual: r.actual, Target: st.lv.target, Pct: st.lv.target > 0 ? Math.round((r.actual / st.lv.target) * 100) : 0, Status: statusOf(r.actual, st.lv).label, Previous: r.prev })
+    })))
+    if (!rows.length) return toast.error('Nothing to export')
+    const headers = Object.keys(rows[0])
+    const csv = [headers, ...rows.map((r) => headers.map((h) => { const s = String(r[h] ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }))].map((r) => r.join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
+    const a = document.createElement('a'); a.href = url; a.download = `staff-performance-${period}.csv`; a.click(); URL.revokeObjectURL(url)
+    toast.success('CSV downloaded')
+  }
 
   return (
     <AppShell>
@@ -156,35 +201,32 @@ export default function TargetsPage() {
           )
         })}
 
-        {view === 'performance' && (
-          loading ? <div className="py-12 text-center text-gray-400">Loading performance…</div> : groups.map((g) => {
-            const o = dbOutlet(g)
-            const totals = (o && perf?.byOutlet[o.id]) || { collection: 0, shisha: 0, food: 0 }
-            const staff = (o && perf?.byStaff[o.id]) || []
-            const items = TARGETS.filter((t) => t.outlet === g)
-            const outletTargets = items.filter((t) => t.scope !== 'Per Staff')
-            const staffTargets = items.filter((t) => t.scope === 'Per Staff')
-            return (
-              <div key={g} className="space-y-3">
-                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400">{g} Outlet</h2>
-                {!o && <p className="text-sm text-gray-400">No matching outlet found.</p>}
-                {/* Outlet / manager level */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {outletTargets.map((t, i) => {
-                    const lv = targetLevels(t, period, daysInMonth)
-                    return <ProgressCard key={i} t={t} actual={totals[deptKey(t.department)]} levels={lv} />
-                  })}
-                </div>
-                {/* Per staff */}
-                {staffTargets.map((t, i) => {
-                  const lv = targetLevels(t, period, daysInMonth)
-                  const rows = staff.map((s) => ({ name: s.staffName, actual: s[deptKey(t.department)] })).filter((r) => r.actual > 0).sort((a, b) => b.actual - a.actual)
-                  return <StaffTable key={i} t={t} levels={lv} rows={rows} />
-                })}
+        {view === 'performance' && (loading ? (
+          <div className="py-12 text-center text-gray-400">Loading performance…</div>
+        ) : (
+          <>
+            {/* Flag summary + export */}
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold bg-green-50 text-green-700">🎯 {flags.reward} for reward</span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700">• {flags.onTrack} on track</span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold bg-red-50 text-red-700">⚠️ {flags.letter} warning letters</span>
               </div>
-            )
-          })
-        )}
+              <Button variant="outline" size="sm" onClick={exportPerfCsv}>⬇ Export CSV</Button>
+            </div>
+
+            {model.map((m) => (
+              <div key={m.g} className="space-y-3">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400">{m.g} Outlet</h2>
+                {!m.o && <p className="text-sm text-gray-400">No matching outlet found.</p>}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {m.outletTargets.map((x, i) => <ProgressCard key={i} t={x.t} actual={x.actual} levels={x.lv} />)}
+                </div>
+                {m.staffTargets.map((x, i) => <StaffTable key={i} t={x.t} levels={x.lv} rows={x.rows} />)}
+              </div>
+            ))}
+          </>
+        ))}
 
         {view === 'uploads' && (() => {
           const unit = uploadDept === 'SHISHA' ? 'COUNT' as const : 'TZS' as const
@@ -298,7 +340,7 @@ function ProgressCard({ t, actual, levels }: { t: TargetDef; actual: number; lev
   )
 }
 
-function StaffTable({ t, levels, rows }: { t: TargetDef; levels: { target: number; rewardFrom: number; letterBelow: number }; rows: { name: string; actual: number }[] }) {
+function StaffTable({ t, levels, rows }: { t: TargetDef; levels: { target: number; rewardFrom: number; letterBelow: number }; rows: { name: string; actual: number; prev: number; rank: number }[] }) {
   const DeptIcon = deptIcon(t.department)
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -310,15 +352,22 @@ function StaffTable({ t, levels, rows }: { t: TargetDef; levels: { target: numbe
         <p className="px-4 py-6 text-center text-sm text-gray-400">No staff activity in this window.</p>
       ) : (
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500"><tr><th className="px-4 py-2 text-left">Staff</th><th className="px-4 py-2 text-right">Actual</th><th className="px-4 py-2 text-right w-28">%</th><th className="px-4 py-2 text-right">Status</th></tr></thead>
+          <thead className="bg-gray-50 text-gray-500"><tr><th className="px-4 py-2 text-left w-10">#</th><th className="px-4 py-2 text-left">Staff</th><th className="px-4 py-2 text-right">Actual</th><th className="px-4 py-2 text-right">vs last</th><th className="px-4 py-2 text-right w-28">%</th><th className="px-4 py-2 text-right">Status</th></tr></thead>
           <tbody className="divide-y divide-gray-50">
             {rows.map((r, i) => {
               const pct = levels.target > 0 ? Math.round((r.actual / levels.target) * 100) : 0
               const st = statusOf(r.actual, levels)
+              const delta = r.actual - r.prev
               return (
                 <tr key={i} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 text-gray-400 font-semibold">{r.rank}</td>
                   <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
                   <td className="px-4 py-2 text-right text-gray-700">{fmtTarget(r.actual, t.unit)}</td>
+                  <td className="px-4 py-2 text-right text-xs">
+                    {r.prev === 0 && delta === 0
+                      ? <span className="text-gray-300">—</span>
+                      : <span className={delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}>{delta > 0 ? '▲' : delta < 0 ? '▼' : '–'} {fmtTarget(Math.abs(delta), t.unit)}</span>}
+                  </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2 justify-end">
                       <div className="h-1.5 w-14 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${st.bar}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>
