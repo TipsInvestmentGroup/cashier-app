@@ -10,11 +10,9 @@ import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ExportBar } from '@/components/ExportBar'
 import { MoneyInput } from '@/components/MoneyInput'
+import { PayModal } from '@/components/petty/PayModal'
 import { format, subDays } from 'date-fns'
 import toast from 'react-hot-toast'
-
-const METHODS = [{ value: 'CASH', label: 'Cash' }, { value: 'CRDB', label: 'CRDB' }, { value: 'STANBIC', label: 'Stanbic' }, { value: 'MPESA', label: 'M-PESA' }]
-const MAX_RECEIPT = 2 * 1024 * 1024 // 2MB
 
 interface Item {
   id: string; date: string; requestedBy: string; department?: string; functionName?: string; purpose: string
@@ -50,34 +48,6 @@ export default function PettyPaymentsPage() {
 
   // ---- Payment modal ----
   const [paying, setPaying] = useState<Item | null>(null)
-  const [payForm, setPayForm] = useState({ pettyType: 'CASHIER', method: 'CASH', payerName: '', paidAt: format(new Date(), 'yyyy-MM-dd'), fundId: '', receiptUrl: '' })
-  const [payBusy, setPayBusy] = useState(false)
-
-  const openPay = (i: Item) => {
-    setPaying(i)
-    setPayForm({ pettyType: i.pettyType || 'CASHIER', method: i.paymentMethod || 'CASH', payerName: user?.name || '', paidAt: format(new Date(), 'yyyy-MM-dd'), fundId: funds[0]?.id || '', receiptUrl: '' })
-  }
-
-  const onReceipt = (file?: File) => {
-    if (!file) return setPayForm((f) => ({ ...f, receiptUrl: '' }))
-    if (file.size > MAX_RECEIPT) return toast.error('Receipt must be under 2MB')
-    const reader = new FileReader()
-    reader.onload = () => setPayForm((f) => ({ ...f, receiptUrl: String(reader.result || '') }))
-    reader.readAsDataURL(file)
-  }
-
-  const submitPay = async () => {
-    if (!paying) return
-    if (payForm.pettyType === 'ACCOUNTANT' && !payForm.fundId) return toast.error('Select an accountant fund')
-    setPayBusy(true)
-    try {
-      await request(`/api/petty-cash/${paying.id}/pay`, { method: 'POST', body: JSON.stringify(payForm) })
-      toast.success('Payment recorded')
-      setPaying(null); load()
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Payment failed')
-    } finally { setPayBusy(false) }
-  }
 
   // ---- Fund create / replenish ----
   const [fundForm, setFundForm] = useState({ name: '', ownerName: '', openingBalance: '' })
@@ -147,7 +117,7 @@ export default function PettyPaymentsPage() {
                           <td className="px-4 py-2 text-gray-600 max-w-[240px] truncate" title={i.purpose}>{i.purpose}</td>
                           <td className="px-4 py-2"><Badge tone={i.pettyType === 'ACCOUNTANT' ? 'purple' : 'blue'}>{i.pettyType === 'ACCOUNTANT' ? 'Accountant' : 'Cashier'}</Badge></td>
                           <td className="px-4 py-2 text-right font-bold text-gray-900">{formatCurrency(i.amount)}</td>
-                          <td className="px-4 py-2 text-right"><button onClick={() => openPay(i)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700">Pay →</button></td>
+                          <td className="px-4 py-2 text-right"><button onClick={() => setPaying(i)} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700">Pay →</button></td>
                         </tr>
                       ))}
                     </tbody>
@@ -294,70 +264,8 @@ export default function PettyPaymentsPage() {
 
       {/* Payment modal */}
       {paying && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPaying(null)}>
-          <div onClick={(e) => e.stopPropagation()} className="bg-white w-full max-w-md rounded-2xl shadow-xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-gray-900">💳 Process Payment</h3>
-              <button onClick={() => setPaying(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
-            </div>
-            <div className="bg-gray-50 rounded-xl p-3 text-sm">
-              <div className="font-semibold text-gray-800">{paying.purpose}</div>
-              <div className="text-gray-500">{paying.requestedBy} · {paying.department || '—'}</div>
-              <div className="text-xl font-bold text-indigo-700 mt-1">{formatCurrency(paying.amount)}</div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Pay from</label>
-              <div className="grid grid-cols-2 gap-2">
-                {[{ v: 'CASHIER', l: '🧾 Cashier drawer' }, { v: 'ACCOUNTANT', l: '🏦 Accountant fund' }].map((t) => (
-                  <button key={t.v} type="button" onClick={() => setPayForm({ ...payForm, pettyType: t.v })}
-                    className={`py-2 rounded-xl text-sm font-medium transition ${payForm.pettyType === t.v ? 'bg-indigo-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>{t.l}</button>
-                ))}
-              </div>
-            </div>
-
-            {payForm.pettyType === 'ACCOUNTANT' && (
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Fund</label>
-                <select value={payForm.fundId} onChange={(e) => setPayForm({ ...payForm, fundId: e.target.value })} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
-                  <option value="">Select fund…</option>
-                  {funds.map((f) => <option key={f.id} value={f.id}>{f.name} — {formatCurrency(f.balance)} available</option>)}
-                </select>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Method</label>
-              <div className="grid grid-cols-4 gap-2">
-                {METHODS.map((m) => (
-                  <button key={m.value} type="button" onClick={() => setPayForm({ ...payForm, method: m.value })}
-                    className={`py-2 rounded-xl text-xs font-medium transition ${payForm.method === m.value ? 'bg-indigo-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>{m.label}</button>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Payer</label>
-                <input value={payForm.payerName} onChange={(e) => setPayForm({ ...payForm, payerName: e.target.value })} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
-                <input type="date" value={payForm.paidAt} onChange={(e) => setPayForm({ ...payForm, paidAt: e.target.value })} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Receipt <span className="text-gray-400 font-normal">(image/PDF, optional)</span></label>
-              <input type="file" accept="image/*,application/pdf" onChange={(e) => onReceipt(e.target.files?.[0])} className="w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 file:font-medium" />
-              {payForm.receiptUrl && <p className="text-[11px] text-green-600 mt-1">✓ Receipt attached</p>}
-            </div>
-
-            <button onClick={submitPay} disabled={payBusy} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
-              {payBusy ? 'Processing…' : `Pay ${formatCurrency(paying.amount)}`}
-            </button>
-          </div>
-        </div>
+        <PayModal item={paying} funds={funds} defaultPayer={user?.name || ''}
+          onClose={() => setPaying(null)} onPaid={() => { setPaying(null); load() }} />
       )}
 
       {/* Replenish modal */}

@@ -4,32 +4,40 @@ import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
+import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
+import { PayModal, type PayFund } from '@/components/petty/PayModal'
 import toast from 'react-hot-toast'
 
 interface PettyCash {
   id: string; date: string; requestedBy: string; department?: string; functionName?: string; purpose: string
   amount: number; paymentMethod: string; payeeName?: string; payeeAccount?: string
-  approvedBy?: string; status: string; paymentStatus?: string
+  approvedBy?: string; status: string; paymentStatus?: string; pettyType?: string
 }
 
 export default function ApprovalsPage() {
   const { request } = useApi()
+  const { user } = useAuth()
+  // Cashier or accountant (or above) may disburse approved requests.
+  const canDisburse = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN'].includes(user?.role || '')
   const [items, setItems] = useState<PettyCash[]>([])
+  const [funds, setFunds] = useState<PayFund[]>([])
   const [loading, setLoading] = useState(true)
   const [canApprove, setCanApprove] = useState(false)
   const [approverEmails, setApproverEmails] = useState<string[]>([])
   const [tab, setTab] = useState<'pending' | 'decided'>('pending')
   const [search, setSearch] = useState('')
+  const [paying, setPaying] = useState<PettyCash | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [its, access] = await Promise.all([request('/api/petty-cash'), request('/api/petty-access')])
+      const [its, access, fds] = await Promise.all([request('/api/petty-cash'), request('/api/petty-access'), request('/api/petty-funds').catch(() => [])])
       setItems(its || [])
       setCanApprove(!!access?.canApprove)
       setApproverEmails(access?.approverEmails || [])
+      setFunds(fds || [])
     } finally { setLoading(false) }
   }, [request])
 
@@ -114,7 +122,7 @@ export default function ApprovalsPage() {
                     <th className="px-4 py-3 font-semibold">Amount</th>
                     <th className="px-4 py-3 font-semibold">Payee</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
-                    {tab === 'pending' && canApprove && <th className="px-4 py-3 font-semibold text-right">Action</th>}
+                    {((tab === 'pending' && canApprove) || (tab === 'decided' && canDisburse)) && <th className="px-4 py-3 font-semibold text-right">Action</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -142,10 +150,17 @@ export default function ApprovalsPage() {
                           <button onClick={() => act(i.id, 'reject')} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Reject</button>
                         </td>
                       )}
+                      {tab === 'decided' && canDisburse && (
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          {i.status === 'APPROVED' && i.paymentStatus !== 'PAID'
+                            ? <button onClick={() => setPaying(i)} className="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700">💵 Pay</button>
+                            : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {list.length === 0 && (
-                    <tr><td colSpan={tab === 'pending' && canApprove ? 9 : 8} className="text-center py-12 text-gray-400">
+                    <tr><td colSpan={(tab === 'pending' && canApprove) || (tab === 'decided' && canDisburse) ? 9 : 8} className="text-center py-12 text-gray-400">
                       {tab === 'pending' ? 'No pending requests 🎉' : 'No decided requests yet'}
                     </td></tr>
                   )}
@@ -155,6 +170,11 @@ export default function ApprovalsPage() {
           )}
         </div>
       </div>
+
+      {paying && (
+        <PayModal item={paying} funds={funds} defaultPayer={user?.name || ''}
+          onClose={() => setPaying(null)} onPaid={() => { setPaying(null); load() }} />
+      )}
     </AppShell>
   )
 }
