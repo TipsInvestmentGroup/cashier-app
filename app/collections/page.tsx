@@ -343,7 +343,7 @@ export default function CollectionsPage() {
         await request('/api/collections/close-day', { method: 'POST', body: JSON.stringify({ date: targetDayStr, outletId }) })
       }
       toast.success(`Day closed — ${label} is now locked.`)
-      setCloseWizard(false)
+      setWizardStep(5) // → end-of-day reports step
       load()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not close the day')
@@ -998,7 +998,7 @@ export default function CollectionsPage() {
                   </div>
                   <button onClick={loadDayStatus} className="w-full py-2 mb-3 rounded-xl border-2 border-gray-200 text-gray-600 text-xs font-medium">↻ Refresh status</button>
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-sm mb-4">
-                    Have all <strong>paid bills, signed bills, discounts, cancellations, cash requests</strong> and other transactions been properly recorded and reconciled? Once closed, this day can&apos;t be edited (a supervisor can reopen it).
+                    Are you sure all <strong>paid bills, signed bills, discounts, cancellations, cash requests</strong> and other transactions have been properly recorded and reconciled? Once closed, this day can&apos;t be edited (a supervisor can reopen it).
                   </div>
                   {!(dayStatus.cashDone && dayStatus.digitalDone) && (
                     <p className="text-xs text-rose-600 mb-2">Complete Cash and Digital reconciliation before you can close the day.</p>
@@ -1008,9 +1008,35 @@ export default function CollectionsPage() {
                       className="w-full py-3 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
                       {closingDay ? 'Closing…' : '✅ Yes — Close the Day'}
                     </button>
-                    <button onClick={() => setCloseWizard(false)} className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">✏️ No — let me fix what&apos;s missing</button>
+                    <button onClick={() => setWizardStep(4)} className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">✏️ No — something needs fixing</button>
                     <button onClick={() => setWizardStep(2)} className="w-full py-2 text-gray-400 text-xs">← Back</button>
                   </div>
+                </div>
+              )}
+
+              {/* No → go fix the relevant section(s), then return to confirm */}
+              {wizardStep === 4 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-800 mb-1">Complete or correct, then reconfirm</p>
+                  <p className="text-sm text-gray-500 mb-3">Open the section that needs work (opens in a new tab), then come back and reconfirm.</p>
+                  <div className="grid grid-cols-1 gap-2">
+                    <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💵 Cash Requests ↗</a>
+                    <a href="/petty-cash?recon=cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💰 Cash Reconciliation ↗</a>
+                    <a href="/petty-cash?recon=digital" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📲 Digital Reconciliation ↗</a>
+                    <a href="/signed-bills" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📋 Bills &amp; Transactions Review ↗</a>
+                  </div>
+                  <button onClick={() => { loadDayStatus(); setWizardStep(3) }} className="w-full py-3 mt-3 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Back to confirmation →</button>
+                </div>
+              )}
+
+              {/* Closed → end-of-day reports */}
+              {wizardStep === 5 && (
+                <div className="text-center">
+                  <div className="text-4xl mb-2">✅</div>
+                  <p className="font-bold text-gray-900">Day closed &amp; locked</p>
+                  <p className="text-sm text-gray-500 mb-4">{format(targetCloseDate, 'EEEE, dd MMM yyyy')} is now locked. Generate the end-of-day report to share with management.</p>
+                  <a href="/daily-report" target="_blank" rel="noopener noreferrer" className="block w-full py-3 mb-2 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">📄 Generate end-of-day report ↗</a>
+                  <button onClick={() => setCloseWizard(false)} className="w-full py-2.5 rounded-xl border-2 border-gray-200 text-gray-700 font-medium text-sm">Done</button>
                 </div>
               )}
             </div>
