@@ -91,6 +91,7 @@ export default function TargetsPage() {
               ? `Window: ${format(win.from, 'dd MMM')} – ${format(win.to, 'dd MMM yyyy')}`
               : period === 'monthly' ? `Monthly = (Weekly ÷ 7) × ${daysInMonth} days` : 'Weekly = 7 days'}
           </span>
+          {view === 'performance' && <span className="text-indigo-500 basis-full">Shisha &amp; Food actuals are net — signed bills (credit) and approved cancellations are subtracted.</span>}
         </div>
 
         {view === 'targets' && groups.map((g) => {
