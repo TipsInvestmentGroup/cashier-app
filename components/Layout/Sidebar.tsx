@@ -70,15 +70,6 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         <p className="text-indigo-300 text-xs mt-1">{user?.outlet?.name || 'All Outlets'}</p>
       </div>
 
-      {canUpload && (
-        <div className="px-3 pt-3">
-          <button onClick={() => setUploadOpen(true)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-white text-indigo-900 hover:bg-indigo-50 shadow-sm transition">
-            <Upload className="w-4 h-4" /> Upload Sales
-          </button>
-        </div>
-      )}
-
       <div className="px-3 py-2 border-b border-indigo-700">
         <div className="bg-indigo-700/50 rounded-xl p-3">
           <p className="font-semibold text-sm truncate">{user?.name}</p>
@@ -117,6 +108,13 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
             </Link>
                   )
                 })}
+                {sec === 'Targets' && canUpload && (
+                  <button onClick={() => setUploadOpen(true)}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-indigo-200 hover:bg-indigo-700/60 hover:text-white transition-all">
+                    <Upload className="w-5 h-5 flex-shrink-0" />
+                    <span>Upload Sales</span>
+                  </button>
+                )}
               </div>
             </div>
           )

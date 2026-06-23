@@ -1,25 +1,49 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { Badge } from '@/components/ui/Badge'
+import { useApi } from '@/hooks/useApi'
 import { TARGETS, targetLevels, fmtTarget, type TargetDef } from '@/lib/targets'
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
 import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown } from 'lucide-react'
 
 const OUTLETS = ['All', 'Mikocheni', 'Coco'] as const
 const deptIcon = (d: string) => (d === 'Shisha Sales' ? Cigarette : d === 'Food Sales' ? UtensilsCrossed : Wallet)
 const scopeIcon = (s: string) => (s === 'Per Outlet' ? Building2 : s === 'Per Manager' ? Crown : User)
+const deptKey = (d: string): 'collection' | 'shisha' | 'food' => (d === 'Shisha Sales' ? 'shisha' : d === 'Food Sales' ? 'food' : 'collection')
+
+interface OutletRow { id: string; name: string }
+interface StaffRow { staffName: string; collection: number; shisha: number; food: number }
+interface Perf { outlets: OutletRow[]; byOutlet: Record<string, { collection: number; shisha: number; food: number }>; byStaff: Record<string, StaffRow[]> }
 
 export default function TargetsPage() {
+  const { request } = useApi()
   const now = new Date()
+  const [view, setView] = useState<'targets' | 'performance'>('targets')
   const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly')
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [outlet, setOutlet] = useState<(typeof OUTLETS)[number]>('All')
+  const [perf, setPerf] = useState<Perf | null>(null)
+  const [loading, setLoading] = useState(false)
 
   const [my, mm] = month.split('-').map(Number)
   const daysInMonth = new Date(my, mm, 0).getDate()
+  const win = period === 'weekly'
+    ? { from: startOfWeek(now, { weekStartsOn: 1 }), to: endOfWeek(now, { weekStartsOn: 1 }) }
+    : { from: startOfMonth(new Date(my, mm - 1, 1)), to: endOfMonth(new Date(my, mm - 1, 1)) }
 
-  const visible = TARGETS.filter((t) => outlet === 'All' || t.outlet === outlet)
+  const loadPerf = useCallback(async () => {
+    setLoading(true)
+    try {
+      const qs = new URLSearchParams({ from: format(win.from, 'yyyy-MM-dd'), to: format(win.to, 'yyyy-MM-dd') })
+      setPerf(await request(`/api/targets/performance?${qs}`))
+    } finally { setLoading(false) }
+  }, [request, period, month]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { if (view === 'performance') loadPerf() }, [view, loadPerf])
+
   const groups = ['Mikocheni', 'Coco'].filter((o) => outlet === 'All' || o === outlet)
+  const dbOutlet = (g: string) => perf?.outlets.find((o) => o.name.toLowerCase().includes(g.toLowerCase()))
 
   return (
     <AppShell>
@@ -27,7 +51,7 @@ export default function TargetsPage() {
         <div className="flex items-end justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Sales Targets</h1>
-            <p className="text-gray-500 text-sm">Revenue targets, warning thresholds and reward levels per outlet, role and department</p>
+            <p className="text-gray-500 text-sm">Targets, thresholds and live performance per outlet, role and department</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {period === 'monthly' && (
@@ -43,24 +67,34 @@ export default function TargetsPage() {
           </div>
         </div>
 
-        {/* Outlet filter */}
-        <div className="flex flex-wrap gap-2">
-          {OUTLETS.map((o) => (
-            <button key={o} onClick={() => setOutlet(o)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition ${outlet === o ? 'bg-indigo-600 text-white shadow' : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-gray-300'}`}>{o}</button>
-          ))}
+        {/* View + outlet filters */}
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex gap-2 bg-white border border-gray-200 rounded-xl p-1">
+            {(['targets', 'performance'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition ${view === v ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>{v}</button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {OUTLETS.map((o) => (
+              <button key={o} onClick={() => setOutlet(o)}
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition ${outlet === o ? 'bg-indigo-600 text-white shadow' : 'bg-white border-2 border-gray-200 text-gray-700 hover:border-gray-300'}`}>{o}</button>
+            ))}
+          </div>
         </div>
 
-        {/* Rules explainer */}
         <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-sm text-indigo-900 flex flex-wrap gap-x-6 gap-y-1">
           <span><strong>Reward considered</strong> at ≥ 80% of target</span>
-          <span><strong>Warning letter</strong> issued below ⅓ of target</span>
-          <span className="text-indigo-500">{period === 'monthly' ? `Monthly = (Weekly ÷ 7) × ${daysInMonth} days` : 'Weekly = 7 days'} · Reward amount set by management</span>
+          <span><strong>Warning letter</strong> below ⅓ of target</span>
+          <span className="text-indigo-500">
+            {view === 'performance'
+              ? `Window: ${format(win.from, 'dd MMM')} – ${format(win.to, 'dd MMM yyyy')}`
+              : period === 'monthly' ? `Monthly = (Weekly ÷ 7) × ${daysInMonth} days` : 'Weekly = 7 days'}
+          </span>
         </div>
 
-        {groups.map((g) => {
-          const items = visible.filter((t) => t.outlet === g)
-          if (!items.length) return null
+        {view === 'targets' && groups.map((g) => {
+          const items = TARGETS.filter((t) => t.outlet === g)
           return (
             <div key={g}>
               <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400 mb-3">{g} Outlet</h2>
@@ -70,8 +104,101 @@ export default function TargetsPage() {
             </div>
           )
         })}
+
+        {view === 'performance' && (
+          loading ? <div className="py-12 text-center text-gray-400">Loading performance…</div> : groups.map((g) => {
+            const o = dbOutlet(g)
+            const totals = (o && perf?.byOutlet[o.id]) || { collection: 0, shisha: 0, food: 0 }
+            const staff = (o && perf?.byStaff[o.id]) || []
+            const items = TARGETS.filter((t) => t.outlet === g)
+            const outletTargets = items.filter((t) => t.scope !== 'Per Staff')
+            const staffTargets = items.filter((t) => t.scope === 'Per Staff')
+            return (
+              <div key={g} className="space-y-3">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400">{g} Outlet</h2>
+                {!o && <p className="text-sm text-gray-400">No matching outlet found.</p>}
+                {/* Outlet / manager level */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {outletTargets.map((t, i) => {
+                    const lv = targetLevels(t, period, daysInMonth)
+                    return <ProgressCard key={i} t={t} actual={totals[deptKey(t.department)]} levels={lv} />
+                  })}
+                </div>
+                {/* Per staff */}
+                {staffTargets.map((t, i) => {
+                  const lv = targetLevels(t, period, daysInMonth)
+                  const rows = staff.map((s) => ({ name: s.staffName, actual: s[deptKey(t.department)] })).filter((r) => r.actual > 0).sort((a, b) => b.actual - a.actual)
+                  return <StaffTable key={i} t={t} levels={lv} rows={rows} />
+                })}
+              </div>
+            )
+          })
+        )}
       </div>
     </AppShell>
+  )
+}
+
+function statusOf(actual: number, levels: { rewardFrom: number; letterBelow: number }) {
+  if (actual >= levels.rewardFrom) return { tone: 'green' as const, label: 'Reward', bar: 'bg-green-500' }
+  if (actual < levels.letterBelow) return { tone: 'red' as const, label: 'Letter', bar: 'bg-red-500' }
+  return { tone: 'amber' as const, label: 'On track', bar: 'bg-amber-500' }
+}
+
+function ProgressCard({ t, actual, levels }: { t: TargetDef; actual: number; levels: { target: number; rewardFrom: number; letterBelow: number } }) {
+  const pct = levels.target > 0 ? Math.min(100, Math.round((actual / levels.target) * 100)) : 0
+  const st = statusOf(actual, levels)
+  const ScopeIcon = scopeIcon(t.scope)
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+      <div className="flex items-center justify-between mb-1">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700"><ScopeIcon className="w-4 h-4" /> {t.department} · {t.scope}</span>
+        <Badge tone={st.tone}>{st.label}</Badge>
+      </div>
+      <div className="flex items-end justify-between">
+        <p className="text-xl font-bold text-gray-900">{fmtTarget(actual, t.unit)}</p>
+        <p className="text-xs text-gray-400">of {fmtTarget(levels.target, t.unit)} · {pct}%</p>
+      </div>
+      <div className="h-2 bg-gray-100 rounded-full mt-2 overflow-hidden"><div className={`h-full ${st.bar}`} style={{ width: `${pct}%` }} /></div>
+    </div>
+  )
+}
+
+function StaffTable({ t, levels, rows }: { t: TargetDef; levels: { target: number; rewardFrom: number; letterBelow: number }; rows: { name: string; actual: number }[] }) {
+  const DeptIcon = deptIcon(t.department)
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <span className="flex items-center gap-1.5 font-semibold text-gray-800 text-sm"><DeptIcon className="w-4 h-4 text-gray-400" /> {t.department} — per staff</span>
+        <span className="text-xs text-gray-400">Target {fmtTarget(levels.target, t.unit)}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-6 text-center text-sm text-gray-400">No staff activity in this window.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-gray-500"><tr><th className="px-4 py-2 text-left">Staff</th><th className="px-4 py-2 text-right">Actual</th><th className="px-4 py-2 text-right w-28">%</th><th className="px-4 py-2 text-right">Status</th></tr></thead>
+          <tbody className="divide-y divide-gray-50">
+            {rows.map((r, i) => {
+              const pct = levels.target > 0 ? Math.round((r.actual / levels.target) * 100) : 0
+              const st = statusOf(r.actual, levels)
+              return (
+                <tr key={i} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
+                  <td className="px-4 py-2 text-right text-gray-700">{fmtTarget(r.actual, t.unit)}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2 justify-end">
+                      <div className="h-1.5 w-14 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${st.bar}`} style={{ width: `${Math.min(100, pct)}%` }} /></div>
+                      <span className="text-xs text-gray-500 w-9 text-right">{pct}%</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 text-right"><Badge tone={st.tone}>{st.label}</Badge></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
   )
 }
 
@@ -84,29 +211,16 @@ function TargetCard({ t, period, daysInMonth }: { t: TargetDef; period: 'weekly'
       <div className="flex items-start justify-between gap-2 mb-2">
         <div>
           <Badge tone={t.department === 'Shisha Sales' ? 'purple' : t.department === 'Food Sales' ? 'amber' : 'indigo'}>{t.department}</Badge>
-          <div className="flex items-center gap-1.5 mt-1.5 text-gray-600 text-xs font-medium">
-            <ScopeIcon className="w-3.5 h-3.5" /> {t.scope}
-          </div>
+          <div className="flex items-center gap-1.5 mt-1.5 text-gray-600 text-xs font-medium"><ScopeIcon className="w-3.5 h-3.5" /> {t.scope}</div>
         </div>
         <span className="w-8 h-8 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center flex-shrink-0"><DeptIcon className="w-4 h-4" /></span>
       </div>
-
       <p className="text-[11px] text-gray-400">{period === 'weekly' ? 'Weekly' : 'Monthly'} target</p>
       <p className="text-xl font-bold text-indigo-700 tracking-tight leading-tight">{fmtTarget(target, t.unit)}</p>
-
       <div className="mt-2.5 space-y-1 text-xs">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-green-700">🎯 Reward ≥</span>
-          <span className="font-semibold text-green-700">{fmtTarget(rewardFrom, t.unit)}</span>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-red-600">⚠️ Letter &lt;</span>
-          <span className="font-semibold text-red-600">{fmtTarget(letterBelow, t.unit)}</span>
-        </div>
-        <div className="flex items-center justify-between border-t border-gray-100 pt-1 text-[11px]">
-          <span className="text-gray-500">Reward</span>
-          <span className="text-gray-400 italic">Set by management</span>
-        </div>
+        <div className="flex items-center justify-between gap-2"><span className="text-green-700">🎯 Reward ≥</span><span className="font-semibold text-green-700">{fmtTarget(rewardFrom, t.unit)}</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-red-600">⚠️ Letter &lt;</span><span className="font-semibold text-red-600">{fmtTarget(letterBelow, t.unit)}</span></div>
+        <div className="flex items-center justify-between border-t border-gray-100 pt-1 text-[11px]"><span className="text-gray-500">Reward</span><span className="text-gray-400 italic">Set by management</span></div>
       </div>
     </div>
   )
