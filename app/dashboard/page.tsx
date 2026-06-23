@@ -8,6 +8,7 @@ import { ExportBar } from '@/components/ExportBar'
 import { StatCard } from '@/components/ui/StatCard'
 import { Skeleton, StatCardsSkeleton } from '@/components/ui/Skeleton'
 import { Wallet, CalendarDays, Calendar, AlertTriangle, Banknote, Landmark, Building2, Smartphone } from 'lucide-react'
+import { generateWarningLetters, type FlaggedItem } from '@/lib/warning-letter-pdf'
 import {
   ComposedChart, Area, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -40,6 +41,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [variances, setVariances] = useState<{ outlet: string; kind: string; expected: number; actual: number; variance: number }[]>([])
+  const [warnings, setWarnings] = useState<{ staffCount: number; flagged: FlaggedItem[] } | null>(null)
 
   useEffect(() => {
     request('/api/dashboard')
@@ -47,6 +49,7 @@ export default function DashboardPage() {
       .catch(console.error)
       .finally(() => setLoading(false))
     request('/api/reports/variance-alerts').then((r) => setVariances(r.items || [])).catch(() => {})
+    request('/api/targets/warning-letters').then((r) => setWarnings(r)).catch(() => {})
   }, [request])
 
   if (loading) return (
@@ -124,6 +127,24 @@ export default function DashboardPage() {
                 <span key={i} className="text-xs bg-white border border-red-200 rounded-lg px-2 py-1 text-red-700">
                   {v.outlet} · {v.kind}: <strong>{v.variance > 0 ? '+' : ''}{formatCurrency(v.variance)}</strong>
                 </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Staff due warning letters this week */}
+        {warnings && warnings.staffCount > 0 && (
+          <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+              <span className="font-bold text-amber-800">⚠️ {warnings.staffCount} staff due warning letters this week</span>
+              <div className="flex gap-3">
+                <button onClick={() => generateWarningLetters(warnings.flagged, 'this week')} className="text-xs font-semibold text-amber-700 underline">Download letters</button>
+                <a href="/targets" className="text-xs font-semibold text-amber-700 underline">Open Targets →</a>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[...new Set(warnings.flagged.map((f) => f.staff))].slice(0, 12).map((s, i) => (
+                <span key={i} className="text-xs bg-white border border-amber-200 rounded-lg px-2 py-1 text-amber-700">{s}</span>
               ))}
             </div>
           </div>

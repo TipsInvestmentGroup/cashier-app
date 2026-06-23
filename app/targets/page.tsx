@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { TARGETS, targetLevels, fmtTarget, type TargetDef } from '@/lib/targets'
 import { formatDate } from '@/lib/utils'
+import { generateWarningLetters, type FlaggedItem } from '@/lib/warning-letter-pdf'
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns'
 import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2, Lock, Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -122,10 +123,15 @@ export default function TargetsPage() {
   }) : []
 
   const flags = { reward: 0, letter: 0, onTrack: 0 }
+  const flaggedItems: FlaggedItem[] = []
   model.forEach((m) => m.staffTargets.forEach((st) => st.rows.forEach((r) => {
     const lab = statusOf(r.actual, st.lv).label
-    if (lab === 'Reward') flags.reward++; else if (lab === 'Letter') flags.letter++; else flags.onTrack++
+    if (lab === 'Reward') flags.reward++
+    else if (lab === 'Letter') { flags.letter++; flaggedItems.push({ staff: r.name, outlet: m.g, department: st.t.department, unit: st.t.unit, actual: r.actual, target: st.lv.target, threshold: st.lv.letterBelow }) }
+    else flags.onTrack++
   })))
+  const periodLabel = period === 'weekly' ? `${format(win.from, 'dd MMM')} – ${format(win.to, 'dd MMM yyyy')}` : format(win.from, 'MMMM yyyy')
+  const flaggedStaffCount = new Set(flaggedItems.map((f) => f.staff.toLowerCase())).size
 
   const exportPerfCsv = () => {
     const rows: Record<string, unknown>[] = []
@@ -212,7 +218,12 @@ export default function TargetsPage() {
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700">• {flags.onTrack} on track</span>
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-semibold bg-red-50 text-red-700">⚠️ {flags.letter} warning letters</span>
               </div>
-              <Button variant="outline" size="sm" onClick={exportPerfCsv}>⬇ Export CSV</Button>
+              <div className="flex gap-2">
+                {flaggedStaffCount > 0 && (
+                  <Button variant="danger" size="sm" onClick={() => generateWarningLetters(flaggedItems, periodLabel)}>⚠️ Warning letters ({flaggedStaffCount})</Button>
+                )}
+                <Button variant="outline" size="sm" onClick={exportPerfCsv}>⬇ Export CSV</Button>
+              </div>
             </div>
 
             {model.map((m) => (
