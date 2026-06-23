@@ -53,6 +53,22 @@ export async function POST(req: NextRequest) {
 
   if (!data.length) return NextResponse.json({ error: 'No valid rows found. Each row needs a date, staff name and a value > 0.' }, { status: 400 })
 
+  // Duplicate guard — reject if this outlet+department already has an upload for
+  // any of the dates in this file (prevents double counting). Delete the day in
+  // the Uploads view first to re-upload.
+  const dayKey = (d: Date) => startOfDay(d).toISOString().slice(0, 10)
+  const incomingDays = [...new Set(data.map((d) => dayKey(d.date)))]
+  const times = data.map((d) => d.date.getTime())
+  const existing = await db.salesMetric.findMany({
+    where: { outletId, department, date: { gte: startOfDay(new Date(Math.min(...times))), lte: endOfDay(new Date(Math.max(...times))) } },
+    select: { date: true },
+  })
+  const existingDays = new Set((existing as { date: Date }[]).map((e) => dayKey(e.date)))
+  const clash = incomingDays.filter((d) => existingDays.has(d))
+  if (clash.length) {
+    return NextResponse.json({ error: `${department === 'SHISHA' ? 'Shisha' : 'Food'} sales for ${clash.join(', ')} are already uploaded for this outlet. Delete them in the Uploads view first, then re-upload.` }, { status: 409 })
+  }
+
   await db.salesMetric.createMany({ data })
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'UPLOAD', entity: 'SalesMetric', details: `Uploaded ${data.length} ${department} sales rows` },
