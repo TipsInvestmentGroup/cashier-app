@@ -49,6 +49,7 @@ export const FINANCE_TABS: Tab[] = [
   { href: '/staff-scorecard', label: 'Staff Scorecard', icon: BarChart3, roles: MGMT },
   { href: '/outlet-comparison', label: 'Outlet Comparison', icon: Building2, roles: MGMT },
   { href: '/peak-hours', label: 'Peak Hours', icon: Clock, roles: MGMT },
+  { href: '/trends', label: 'Trends', icon: TrendingUp, roles: MGMT },
   { href: '/payroll', label: 'Payroll Deductions', icon: Receipt, roles: MGMT },
   { href: '/reports', label: 'Reports', icon: FileBarChart, roles: MGMT },
   { href: '/audit', label: 'Audit Log', icon: ShieldCheck, roles: MGMT },
