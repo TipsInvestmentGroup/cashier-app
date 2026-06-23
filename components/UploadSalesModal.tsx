@@ -8,7 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
-interface Row { date: string; staffName: string; value: number }
+interface Row { date: string; staffName: string; value: number; matched?: boolean }
 type Dataset = 'SHISHA' | 'FOOD'
 
 const DATASETS: { key: Dataset; label: string; outletMatch: string; unit: string }[] = [
@@ -26,10 +26,21 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
   const [parsing, setParsing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [assignDate, setAssignDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [staffMap, setStaffMap] = useState<Record<string, string>>({}) // lowercased name -> canonical Person name
 
   const cfg = DATASETS.find((d) => d.key === dataset)!
 
-  useEffect(() => { if (open) request('/api/outlets').then((o) => setOutlets(o || [])).catch(() => {}) }, [open, request])
+  useEffect(() => {
+    if (!open) return
+    request('/api/outlets').then((o) => setOutlets(o || [])).catch(() => {})
+    // Build a lookup so uploaded attendant names match the canonical staff name
+    // used by collections (case-insensitive).
+    request('/api/persons').then((p: { name: string }[]) => {
+      const m: Record<string, string> = {}
+      ;(p || []).forEach((x) => { if (x.name) m[x.name.trim().toLowerCase()] = x.name })
+      setStaffMap(m)
+    }).catch(() => {})
+  }, [open, request])
 
   // Auto-pick the matching outlet for the chosen dataset.
   useEffect(() => {
@@ -79,26 +90,35 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
         if (cell instanceof Date) return format(cell, 'yyyy-MM-dd')
         const d = new Date(String(cell)); return isNaN(d.getTime()) ? '' : format(d, 'yyyy-MM-dd')
       }
-      // Forward-fill the attendant name down its item rows; skip per-staff TOTAL rows.
+      // Forward-fill the attendant name down its item rows; skip per-staff TOTAL
+      // rows; then GROUP by staff (+ date) into one total per staff, matching the
+      // name to the canonical staff list.
       let lastStaff = ''
-      const parsed: Row[] = []
+      const agg = new Map<string, Row>()
       for (const r of aoa.slice(hi + 1)) {
         const raw = String(r[si] ?? '').trim()
         if (raw) lastStaff = raw
-        const staffName = raw || lastStaff
+        const name = raw || lastStaff
         const label = li >= 0 ? String(r[li] ?? '').trim().toLowerCase() : ''
         if (label === 'total') continue
-        if (!staffName || staffName.toLowerCase() === 'total') continue
+        if (!name || name.toLowerCase() === 'total') continue
         const value = Number(String(r[vi] ?? '').replace(/[, ]/g, '')) || 0
         if (value <= 0) continue
-        parsed.push({ date: di >= 0 && r[di] ? toISO(r[di]) : '', staffName, value })
+        const date = di >= 0 && r[di] ? toISO(r[di]) : ''
+        const lc = name.toLowerCase()
+        const canonical = staffMap[lc] || name
+        const key = `${date}|${lc}`
+        const cur = agg.get(key) || { date, staffName: canonical, value: 0, matched: !!staffMap[lc] }
+        cur.value += value
+        agg.set(key, cur)
       }
-      if (!parsed.length) { toast.error('No valid rows found (need a staff name and a value > 0).'); reset(); return }
-      setRows(parsed)
+      const grouped = [...agg.values()].sort((a, b) => b.value - a.value)
+      if (!grouped.length) { toast.error('No valid rows found (need a staff name and a value > 0).'); reset(); return }
+      setRows(grouped)
     } catch {
       toast.error('Could not read the file. Use .xlsx or .csv.'); reset()
     } finally { setParsing(false) }
-  }, [dataset])
+  }, [dataset, staffMap])
 
   const save = async () => {
     if (!rows.length) return
@@ -166,9 +186,12 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
         {rows.length > 0 && (
           <div className="mt-4">
             <div className="flex items-center justify-between text-sm mb-1">
-              <span className="font-semibold text-gray-700">{rows.length} rows</span>
+              <span className="font-semibold text-gray-700">{rows.length} staff</span>
               <span className="text-gray-500">Total: <strong>{dataset === 'FOOD' ? formatCurrency(total) : `${total.toLocaleString()} shisha`}</strong></span>
             </div>
+            {rows.some((r) => !r.matched) && (
+              <p className="text-[11px] text-amber-600 mb-1">⚠️ {rows.filter((r) => !r.matched).length} name(s) marked <strong>new</strong> aren&apos;t in your staff list — they won&apos;t line up with collections until added/renamed in Persons.</p>
+            )}
             <div className="border border-gray-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-100 text-gray-600 text-[11px] uppercase tracking-wide sticky top-0">
@@ -178,7 +201,7 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
                   {rows.slice(0, 12).map((r, i) => (
                     <tr key={i} className="even:bg-gray-50">
                       <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{r.date || assignDate}</td>
-                      <td className="px-3 py-2 font-medium text-gray-800">{r.staffName}</td>
+                      <td className="px-3 py-2 font-medium text-gray-800">{r.staffName}{!r.matched && <span className="ml-1.5 text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">new</span>}</td>
                       <td className="px-3 py-2 text-right font-semibold text-gray-900">{dataset === 'FOOD' ? formatCurrency(r.value) : r.value}</td>
                     </tr>
                   ))}

@@ -49,10 +49,13 @@ export async function GET(req: NextRequest) {
   const byOutlet: Record<string, { collection: number; shisha: number; food: number }> = {}
   const staffMaps: Record<string, Map<string, { staffName: string; collection: number; shisha: number; food: number }>> = {}
   const outletBucket = (id: string) => (byOutlet[id] ||= { collection: 0, shisha: 0, food: 0 })
+  // Group staff case-insensitively so an uploaded "JAZILA" lines up with the
+  // collection "Jazila" (display keeps the first-seen spelling).
   const staffBucket = (oid: string, name: string) => {
     const m = (staffMaps[oid] ||= new Map())
-    let s = m.get(name)
-    if (!s) { s = { staffName: name, collection: 0, shisha: 0, food: 0 }; m.set(name, s) }
+    const k = name.trim().toLowerCase()
+    let s = m.get(k)
+    if (!s) { s = { staffName: name.trim(), collection: 0, shisha: 0, food: 0 }; m.set(k, s) }
     return s
   }
 
