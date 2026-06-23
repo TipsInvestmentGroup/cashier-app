@@ -25,6 +25,7 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
   const [fileName, setFileName] = useState('')
   const [parsing, setParsing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [assignDate, setAssignDate] = useState(format(new Date(), 'yyyy-MM-dd'))
 
   const cfg = DATASETS.find((d) => d.key === dataset)!
 
@@ -48,31 +49,65 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
       const wb = XLSX.read(buf, { type: 'array', cellDates: true })
       const ws = wb.Sheets[wb.SheetNames[0]]
       const aoa: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
-      const headers = (aoa[0] || []).map((h) => String(h).toLowerCase().trim())
+
+      const STAFF_KEYS = ['attendant', 'staff', 'name', 'waiter', 'server']
+      // Shisha is counted (Qty); Food is money (Amount).
+      const VAL_KEYS = dataset === 'SHISHA' ? ['qty', 'quant', 'shisha', 'count'] : ['amount', 'sales', 'food', 'value']
+      const ANY_VAL = ['qty', 'quant', 'amount', 'sales', 'value', 'shisha', 'food', 'count']
+      const row = (i: number) => (aoa[i] || []).map((c) => String(c).toLowerCase().trim())
+
+      // Find the header row (the file may have a title row above it).
+      let hi = -1
+      for (let i = 0; i < Math.min(aoa.length, 8); i++) {
+        const r = row(i)
+        if (r.some((h) => STAFF_KEYS.some((k) => h.includes(k))) && r.some((h) => ANY_VAL.some((k) => h.includes(k)))) { hi = i; break }
+      }
+      if (hi < 0) { toast.error('Could not find a header row with a Staff/Attendant column and a value column.'); reset(); return }
+
+      const headers = row(hi)
+      // "Attendant" wins over "Item Name" for staff (item-name also contains 'name').
+      const si = headers.findIndex((h) => h.includes('attendant') || h.includes('staff') || h.includes('waiter') || h.includes('server')) >= 0
+        ? headers.findIndex((h) => h.includes('attendant') || h.includes('staff') || h.includes('waiter') || h.includes('server'))
+        : headers.findIndex((h) => STAFF_KEYS.some((k) => h.includes(k)))
+      let vi = headers.findIndex((h) => VAL_KEYS.some((k) => h.includes(k)))
+      if (vi < 0) vi = headers.findIndex((h) => ANY_VAL.some((k) => h.includes(k)))
       const di = headers.findIndex((h) => h.includes('date'))
-      const si = headers.findIndex((h) => h.includes('staff') || h.includes('name') || h.includes('waiter'))
-      const vi = headers.findIndex((h) => ['value', 'qty', 'quant', 'amount', 'shisha', 'food', 'sales'].some((k) => h.includes(k)))
-      if (di < 0 || si < 0 || vi < 0) { toast.error('Could not find Date / Staff / Value columns in the file.'); reset(); return }
+      const li = headers.findIndex((h) => h.includes('item') || h.includes('desc') || h.includes('product')) // line/item column
+      if (si < 0 || vi < 0) { toast.error('Could not find the Staff and value columns.'); reset(); return }
+
       const toISO = (cell: unknown) => {
         if (cell instanceof Date) return format(cell, 'yyyy-MM-dd')
         const d = new Date(String(cell)); return isNaN(d.getTime()) ? '' : format(d, 'yyyy-MM-dd')
       }
-      const parsed = aoa.slice(1).map((r) => ({
-        date: toISO(r[di]), staffName: String(r[si] ?? '').trim(), value: Number(String(r[vi] ?? '').replace(/[, ]/g, '')) || 0,
-      })).filter((r) => r.date && r.staffName && r.value > 0)
-      if (!parsed.length) { toast.error('No valid rows (need date, staff and a value > 0).'); reset(); return }
+      // Forward-fill the attendant name down its item rows; skip per-staff TOTAL rows.
+      let lastStaff = ''
+      const parsed: Row[] = []
+      for (const r of aoa.slice(hi + 1)) {
+        const raw = String(r[si] ?? '').trim()
+        if (raw) lastStaff = raw
+        const staffName = raw || lastStaff
+        const label = li >= 0 ? String(r[li] ?? '').trim().toLowerCase() : ''
+        if (label === 'total') continue
+        if (!staffName || staffName.toLowerCase() === 'total') continue
+        const value = Number(String(r[vi] ?? '').replace(/[, ]/g, '')) || 0
+        if (value <= 0) continue
+        parsed.push({ date: di >= 0 && r[di] ? toISO(r[di]) : '', staffName, value })
+      }
+      if (!parsed.length) { toast.error('No valid rows found (need a staff name and a value > 0).'); reset(); return }
       setRows(parsed)
     } catch {
       toast.error('Could not read the file. Use .xlsx or .csv.'); reset()
     } finally { setParsing(false) }
-  }, [])
+  }, [dataset])
 
   const save = async () => {
     if (!rows.length) return
     if (!outletId) return toast.error('Select the outlet.')
+    if (!assignDate) return toast.error('Choose the sales date.')
     setSaving(true)
     try {
-      const r = await request('/api/sales-metrics', { method: 'POST', body: JSON.stringify({ department: dataset, outletId, rows }) })
+      const payload = rows.map((r) => ({ date: r.date || assignDate, staffName: r.staffName, value: r.value }))
+      const r = await request('/api/sales-metrics', { method: 'POST', body: JSON.stringify({ department: dataset, outletId, rows: payload }) })
       toast.success(`Uploaded ${r.inserted} ${dataset === 'SHISHA' ? 'shisha' : 'food'} sales rows.`)
       reset(); onClose()
     } catch (err: unknown) {
@@ -101,12 +136,21 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
           ))}
         </div>
 
-        {/* Outlet */}
-        <label className="block text-xs font-semibold text-gray-600 mb-1">Outlet</label>
-        <select value={outletId} onChange={(e) => setOutletId(e.target.value)}
-          className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white mb-4">
-          {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
+        {/* Outlet + sales date */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Outlet</label>
+            <select value={outletId} onChange={(e) => setOutletId(e.target.value)}
+              className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+              {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Sales date</label>
+            <input type="date" value={assignDate} onChange={(e) => setAssignDate(e.target.value)}
+              className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
+          </div>
+        </div>
 
         {/* File input */}
         <label className="block border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-300 transition">
@@ -115,7 +159,7 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
           <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
         </label>
-        <p className="text-[11px] text-gray-400 mt-2">Required columns: <strong>Date</strong>, <strong>Staff</strong>, <strong>{dataset === 'SHISHA' ? 'Quantity' : 'Amount'}</strong> ({cfg.unit}).</p>
+        <p className="text-[11px] text-gray-400 mt-2">Needs a <strong>Staff/Attendant</strong> column and a <strong>{dataset === 'SHISHA' ? 'Qty' : 'Amount'}</strong> column ({cfg.unit}). A title row above the headers is fine. No date column? The <strong>Sales date</strong> above is used.</p>
 
         {/* Preview */}
         {parsing && <p className="text-sm text-gray-400 mt-3">Reading file…</p>}
@@ -130,7 +174,7 @@ export function UploadSalesModal({ open, onClose }: { open: boolean; onClose: ()
                 <thead className="bg-gray-50 text-gray-500"><tr><th className="px-2 py-1.5 text-left">Date</th><th className="px-2 py-1.5 text-left">Staff</th><th className="px-2 py-1.5 text-right">{dataset === 'SHISHA' ? 'Qty' : 'Amount'}</th></tr></thead>
                 <tbody className="divide-y divide-gray-50">
                   {rows.slice(0, 8).map((r, i) => (
-                    <tr key={i}><td className="px-2 py-1.5">{r.date}</td><td className="px-2 py-1.5">{r.staffName}</td><td className="px-2 py-1.5 text-right">{dataset === 'FOOD' ? formatCurrency(r.value) : r.value}</td></tr>
+                    <tr key={i}><td className="px-2 py-1.5">{r.date || assignDate}</td><td className="px-2 py-1.5">{r.staffName}</td><td className="px-2 py-1.5 text-right">{dataset === 'FOOD' ? formatCurrency(r.value) : r.value}</td></tr>
                   ))}
                 </tbody>
               </table>
