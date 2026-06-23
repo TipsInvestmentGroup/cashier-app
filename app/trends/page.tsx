@@ -35,7 +35,11 @@ function DeltaPill({ pct }: { pct: number }) {
 
 export default function TrendsPage() {
   const { request } = useApi()
-  const [grain, setGrain] = useState<Grain>('quarter')
+  // Honor an incoming scope from the Analytics hub (?grain&outletId).
+  const initial = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const urlGrain = (['month', 'quarter', 'year'].includes(initial?.get('grain') || '') ? initial!.get('grain') : 'quarter') as Grain
+  const urlOutlet = initial?.get('outletId') || ''
+  const [grain, setGrain] = useState<Grain>(urlGrain)
   const [compareMode, setCompareMode] = useState<CompareMode>('sequential')
   const [data, setData] = useState<Data | null>(null)
   const [loading, setLoading] = useState(true)
@@ -44,9 +48,10 @@ export default function TrendsPage() {
     setLoading(true)
     try {
       const qs = new URLSearchParams({ grain, compare: compareMode })
+      if (urlOutlet) qs.set('outletId', urlOutlet)
       setData(await request(`/api/reports/trends?${qs}`))
     } finally { setLoading(false) }
-  }, [request, grain, compareMode])
+  }, [request, grain, compareMode, urlOutlet])
 
   useEffect(() => { load() }, [load])
 

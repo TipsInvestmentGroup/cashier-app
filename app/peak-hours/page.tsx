@@ -33,10 +33,15 @@ const hourLabel = (h: number) => `${((h + 11) % 12) + 1}${h < 12 ? 'a' : 'p'}`
 
 export default function PeakHoursPage() {
   const { request } = useApi()
-  const [range, setRange] = useState<RangeKey>('30d')
+  // Honor an incoming scope from the Analytics hub (?from&to&outletId).
+  const initial = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const urlFrom = initial?.get('from') || null
+  const urlTo = initial?.get('to') || null
+  const urlOutlet = initial?.get('outletId') || ''
+  const [range, setRange] = useState<RangeKey>(urlFrom && urlTo ? 'custom' : '30d')
   const [metric, setMetric] = useState<Metric>('orders')
-  const [customFrom, setCustomFrom] = useState(format(subDays(new Date(), 29), 'yyyy-MM-dd'))
-  const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [customFrom, setCustomFrom] = useState(urlFrom || format(subDays(new Date(), 29), 'yyyy-MM-dd'))
+  const [customTo, setCustomTo] = useState(urlTo || format(new Date(), 'yyyy-MM-dd'))
   const [data, setData] = useState<Data | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -54,6 +59,7 @@ export default function PeakHoursPage() {
     setLoading(true)
     try {
       const qs = new URLSearchParams({ from: format(interval.start, 'yyyy-MM-dd'), to: format(interval.end, 'yyyy-MM-dd') })
+      if (urlOutlet) qs.set('outletId', urlOutlet)
       const r = await request(`/api/reports/peak-heatmap?${qs}`)
       setData(r)
     } finally { setLoading(false) }

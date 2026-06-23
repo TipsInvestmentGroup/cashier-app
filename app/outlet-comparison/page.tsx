@@ -23,9 +23,13 @@ interface Row {
 
 export default function OutletComparisonPage() {
   const { request } = useApi()
-  const [range, setRange] = useState<RangeKey>('month')
-  const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
+  // Honor an incoming scope from the Analytics hub (?from&to) as a custom range.
+  const initial = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const urlFrom = initial?.get('from') || null
+  const urlTo = initial?.get('to') || null
+  const [range, setRange] = useState<RangeKey>(urlFrom && urlTo ? 'custom' : 'month')
+  const [customFrom, setCustomFrom] = useState(urlFrom || format(new Date(), 'yyyy-MM-dd'))
+  const [customTo, setCustomTo] = useState(urlTo || format(new Date(), 'yyyy-MM-dd'))
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
 
