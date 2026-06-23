@@ -228,20 +228,65 @@ model PettyCash {
   functionName  String?                      // e.g. Purchases of | Allowance | Transport
   purpose       String
   amount        Float    @default(0)
-  paymentMethod String                       // CASH | CRDB | STANBIC | MPESA
+  paymentMethod String                       // CASH | CRDB | STANBIC | MPESA (actual disbursement method)
   payeeName     String?
   payeeAccount  String?
-  paymentStatus String?  @default("PAID")     // PAID | UNPAID — has the cash actually been paid out
+  paymentStatus String?  @default("UNPAID")   // PAID | UNPAID — has the cash actually been paid out
   approvedBy    String?
   status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
   outletId      String?
   cashierId     String
   createdAt     DateTime @default(now())
 
+  // Payment module — which fund disburses and the disbursement record.
+  pettyType     String   @default("CASHIER") // CASHIER (drawer) | ACCOUNTANT (allocated fund)
+  fundId        String?                      // set when paid from an accountant PettyFund
+  paidAt        DateTime?
+  paidById      String?
+  paidByName    String?
+  receiptUrl    String?                      // payment receipt (image/pdf data URL or link)
+
   items         PettyCashItem[]
 
   @@index([date])
   @@index([status])
+  @@index([paymentStatus])
+  @@index([pettyType])
+}
+
+// A management-allocated petty-cash fund operated by an Accountant. Payments
+// against approved requests draw down this fund; replenishments top it up.
+model PettyFund {
+  id             String   @id @default(cuid())
+  name           String                       // e.g. "Accountant Fund — HQ"
+  ownerId        String?                      // accountant who operates the fund
+  ownerName      String?
+  outletId       String?
+  openingBalance Float    @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  txns           PettyFundTxn[]
+
+  @@index([outletId])
+}
+
+// Every movement on a PettyFund. amount is signed: + adds (opening/replenish),
+// - reduces (payment/adjustment). currentBalance = openingBalance + sum(amount).
+model PettyFundTxn {
+  id            String    @id @default(cuid())
+  fundId        String
+  fund          PettyFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  type          String                         // REPLENISH | PAYMENT | ADJUST
+  amount        Float                          // signed delta
+  pettyCashId   String?                        // links a PAYMENT to the request it settled
+  note          String?
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+
+  @@index([fundId])
+  @@index([pettyCashId])
 }
 
 /// Optional line-item breakdown of a cash request (Detail · Unit · Unit Cost · Total).

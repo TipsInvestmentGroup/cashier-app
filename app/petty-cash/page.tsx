@@ -33,7 +33,8 @@ interface Channel { code: string; label: string; isActive: boolean }
 
 const INIT = {
   date: format(new Date(), 'yyyy-MM-dd'), requestedBy: '', department: '', functionName: '', purpose: '',
-  amount: '', paymentMethod: 'CASH', payeeName: '', payeeAccount: '', paymentStatus: 'PAID', approvedBy: '',
+  amount: '', paymentMethod: 'CASH', payeeName: '', payeeAccount: '', paymentStatus: 'UNPAID', approvedBy: '',
+  pettyType: 'CASHIER',
 }
 
 function PettyCashPage() {
@@ -557,6 +558,18 @@ function PettyCashPage() {
                     )}
                   </div>
                   <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Petty Cash Type</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[{ v: 'CASHIER', l: '🧾 Cashier (drawer)' }, { v: 'ACCOUNTANT', l: '🏦 Accountant (fund)' }].map((t) => (
+                        <button key={t.v} type="button" onClick={() => setForm({ ...form, pettyType: t.v })}
+                          className={`py-2 rounded-xl text-sm font-medium transition ${form.pettyType === t.v ? 'bg-indigo-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                          {t.l}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">Cashier = paid from daily collections; Accountant = paid from the allocated fund.</p>
+                  </div>
+                  <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Method</label>
                     <div className="grid grid-cols-2 gap-2">
                       {METHODS.map((m) => (
@@ -571,8 +584,8 @@ function PettyCashPage() {
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Status</label>
                     <select value={form.paymentStatus} onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })}
                       className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
-                      <option value="PAID">Paid</option>
-                      <option value="UNPAID">Unpaid</option>
+                      <option value="UNPAID">Unpaid — disburse later via Payments</option>
+                      <option value="PAID">Paid — record as already disbursed</option>
                     </select>
                   </div>
                   <div>

@@ -25,7 +25,9 @@ async function computeCash(dayStart: Date, dayEnd: Date, outletId?: string | nul
   const [coll, paid, petty] = await Promise.all([
     prisma.dailyCollection.aggregate({ where: f, _sum: { cash: true } }),
     prisma.paidBill.aggregate({ where: { ...f, paymentMethod: 'CASH' }, _sum: { amountPaid: true } }),
-    prisma.pettyCash.aggregate({ where: { ...f, paymentMethod: 'CASH' }, _sum: { amount: true } }),
+    // Only cash actually disbursed from the cashier's drawer reduces it — paid,
+    // CASH, and drawn from the cashier fund (accountant-fund payments don't count).
+    prisma.pettyCash.aggregate({ where: { ...f, paymentMethod: 'CASH', paymentStatus: 'PAID', pettyType: 'CASHIER' }, _sum: { amount: true } }),
   ])
   return {
     cashCollected: coll._sum.cash || 0,

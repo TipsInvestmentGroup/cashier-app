@@ -53,6 +53,16 @@ export function canApprovePetty(email?: string): boolean {
   return PETTY_APPROVERS.includes(e)
 }
 
+/** Who may disburse (pay out) approved petty-cash requests: cashier or accountant. */
+export function canDisbursePetty(role?: string): boolean {
+  return ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN'].includes((role || '').toUpperCase())
+}
+
+/** Who may create/replenish accountant petty-cash funds. */
+export function canManageFunds(role?: string): boolean {
+  return ['ACCOUNTANT', 'ADMIN', 'DIRECTOR'].includes((role || '').toUpperCase())
+}
+
 /** The owner-managed list of petty-cash requester emails (falls back to defaults). */
 export async function getPettyRequesters(): Promise<string[]> {
   const s = await prisma.setting.findUnique({ where: { key: REQUESTERS_KEY } })

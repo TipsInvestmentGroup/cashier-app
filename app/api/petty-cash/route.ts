@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   if (!(await canRequestPetty(user.email))) return NextResponse.json({ error: 'You are not authorized to submit petty cash requests' }, { status: 403 })
 
   const body = await req.json()
-  const { date, requestedBy, department, functionName, purpose, amount, paymentMethod, payeeName, payeeAccount, paymentStatus, approvedBy, outletId } = body
+  const { date, requestedBy, department, functionName, purpose, amount, paymentMethod, payeeName, payeeAccount, paymentStatus, approvedBy, outletId, pettyType } = body
 
   // Optional itemized breakdown — one request can hold many needs.
   const rawItems: { detail?: string; unit?: number; unitCost?: number; amount?: number }[] = Array.isArray(body.items) ? body.items : []
@@ -41,6 +41,10 @@ export async function POST(req: NextRequest) {
   if (!purpose) return NextResponse.json({ error: 'Purpose is required' }, { status: 400 })
   if (!grandTotal || grandTotal <= 0) return NextResponse.json({ error: 'Amount must be > 0' }, { status: 400 })
   const method = String(paymentMethod || 'CASH').toUpperCase()
+  const type = String(pettyType || 'CASHIER').toUpperCase() === 'ACCOUNTANT' ? 'ACCOUNTANT' : 'CASHIER'
+  // New requests default to UNPAID and go through the payment screen; a direct
+  // record (paymentStatus=PAID) stamps the payer immediately.
+  const isPaid = String(paymentStatus || 'UNPAID').toUpperCase() === 'PAID'
 
   const item = await prisma.pettyCash.create({
     data: {
@@ -53,11 +57,13 @@ export async function POST(req: NextRequest) {
       paymentMethod: method,
       payeeName: payeeName || null,
       payeeAccount: payeeAccount || null,
-      paymentStatus: String(paymentStatus || 'PAID').toUpperCase() === 'UNPAID' ? 'UNPAID' : 'PAID',
+      paymentStatus: isPaid ? 'PAID' : 'UNPAID',
+      pettyType: type,
       approvedBy: approvedBy || null,
       status: approvedBy ? 'APPROVED' : 'PENDING',
       outletId: outletId || user.outletId || null,
       cashierId: user.userId,
+      ...(isPaid ? { paidAt: new Date(), paidById: user.userId, paidByName: user.name } : {}),
       ...(lineItems.length ? { items: { create: lineItems } } : {}),
     },
     include: { items: true },

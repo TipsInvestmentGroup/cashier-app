@@ -11,7 +11,7 @@ import toast from 'react-hot-toast'
 interface PettyCash {
   id: string; date: string; requestedBy: string; department?: string; functionName?: string; purpose: string
   amount: number; paymentMethod: string; payeeName?: string; payeeAccount?: string
-  approvedBy?: string; status: string
+  approvedBy?: string; status: string; paymentStatus?: string
 }
 
 export default function ApprovalsPage() {
@@ -128,9 +128,13 @@ export default function ApprovalsPage() {
                       <td className="px-4 py-3 font-bold text-gray-900">{formatCurrency(i.amount)}</td>
                       <td className="px-4 py-3 text-gray-500">{i.payeeName || '-'}</td>
                       <td className="px-4 py-3">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${i.status === 'APPROVED' ? 'bg-green-100 text-green-700' : i.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
-                          {i.status === 'APPROVED' ? `✓ ${i.approvedBy || 'Approved'}` : i.status === 'REJECTED' ? '✕ Rejected' : 'Pending'}
-                        </span>
+                        {i.paymentStatus === 'PAID' ? (
+                          <span className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-100 text-green-700">💵 Paid</span>
+                        ) : (
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${i.status === 'APPROVED' ? 'bg-blue-100 text-blue-700' : i.status === 'REJECTED' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                            {i.status === 'APPROVED' ? `✓ ${i.approvedBy || 'Approved'}` : i.status === 'REJECTED' ? '✕ Rejected' : 'Pending'}
+                          </span>
+                        )}
                       </td>
                       {tab === 'pending' && canApprove && (
                         <td className="px-4 py-3 text-right whitespace-nowrap">
