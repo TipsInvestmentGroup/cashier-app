@@ -26,7 +26,16 @@ export async function GET(req: NextRequest) {
   if (from && to) where.date = { gte: startOfDay(from), lte: endOfDay(to) }
 
   const rows = await db.salesMetric.findMany({ where, orderBy: { date: 'desc' }, take: 500, include: { outlet: { select: { name: true } } } })
-  return NextResponse.json({ rows })
+
+  // Locked days (so the UI can show 🔒 and disable delete)
+  const lockWhere: Record<string, unknown> = {}
+  if (department) lockWhere.department = department
+  if (outletId) lockWhere.outletId = outletId
+  if (from && to) lockWhere.date = { gte: startOfDay(from), lte: endOfDay(to) }
+  const locks = await db.salesMetricLock.findMany({ where: lockWhere, select: { date: true } })
+  const lockedDays = [...new Set((locks as { date: Date }[]).map((l) => startOfDay(l.date).toISOString().slice(0, 10)))]
+
+  return NextResponse.json({ rows, lockedDays })
 }
 
 /** POST — bulk upload. Body: { department, outletId, rows: [{date, staffName, value}] } */
@@ -92,6 +101,17 @@ export async function DELETE(req: NextRequest) {
   // Cashiers may only delete rows from their own outlet.
   const where: Record<string, unknown> = { id: { in: ids } }
   if (user.role === 'CASHIER') where.outletId = user.outletId || '__none__'
+
+  // Block deletion of rows whose day is locked.
+  const dayKey = (oid: string | null, dep: string, d: Date) => `${oid}|${dep}|${startOfDay(d).toISOString().slice(0, 10)}`
+  const targets = await db.salesMetric.findMany({ where, select: { outletId: true, department: true, date: true } }) as { outletId: string | null; department: string; date: Date }[]
+  if (targets.length) {
+    const locks = await db.salesMetricLock.findMany({ select: { outletId: true, department: true, date: true } }) as { outletId: string | null; department: string; date: Date }[]
+    const lockedSet = new Set(locks.map((l) => dayKey(l.outletId, l.department, l.date)))
+    if (targets.some((t) => lockedSet.has(dayKey(t.outletId, t.department, t.date)))) {
+      return NextResponse.json({ error: 'These rows are in a locked upload. Ask a super user (Admin) to unlock the day first.' }, { status: 423 })
+    }
+  }
 
   const res = await db.salesMetric.deleteMany({ where })
   await prisma.auditLog.create({

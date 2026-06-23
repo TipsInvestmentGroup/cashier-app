@@ -72,6 +72,22 @@ model SalesMetric {
   @@index([outletId])
 }
 
+/// Locks an uploaded sales day (outlet + department + date) so its SalesMetric
+/// rows can't be deleted/re-uploaded. Any uploader can lock; only an Admin
+/// (super user) can unlock.
+model SalesMetricLock {
+  id          String   @id @default(cuid())
+  outletId    String?
+  department  String
+  date        DateTime
+  lockedBy    String
+  lockedById  String?
+  lockedAt    DateTime @default(now())
+
+  @@unique([outletId, department, date])
+  @@index([department])
+}
+
 /// Locks a single outlet's day. Once a (outlet, date) is closed, cashiers can no
 /// longer create/edit/delete that day's collections. Reopening is supervisor-only.
 model DayClosure {

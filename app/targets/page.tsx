@@ -4,11 +4,12 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { useApi } from '@/hooks/useApi'
+import { useAuth } from '@/contexts/AuthContext'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { TARGETS, targetLevels, fmtTarget, type TargetDef } from '@/lib/targets'
 import { formatDate } from '@/lib/utils'
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
-import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2 } from 'lucide-react'
+import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2, Lock, Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const OUTLETS = ['All', 'Mikocheni', 'Coco'] as const
@@ -20,11 +21,13 @@ interface OutletRow { id: string; name: string }
 interface StaffRow { staffName: string; collection: number; shisha: number; food: number }
 interface Perf { outlets: OutletRow[]; byOutlet: Record<string, { collection: number; shisha: number; food: number }>; byStaff: Record<string, StaffRow[]> }
 
-interface UploadRow { id: string; date: string; staffName: string; value: number; outlet?: { name: string } }
+interface UploadRow { id: string; date: string; staffName: string; value: number; outletId?: string; outlet?: { name: string } }
 
 export default function TargetsPage() {
   const { request } = useApi()
+  const { user } = useAuth()
   const confirm = useConfirm()
+  const isAdmin = user?.role === 'ADMIN'
   const now = new Date()
   const [view, setView] = useState<'targets' | 'performance' | 'uploads'>('targets')
   const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly')
@@ -34,6 +37,7 @@ export default function TargetsPage() {
   const [loading, setLoading] = useState(false)
   const [uploadDept, setUploadDept] = useState<'SHISHA' | 'FOOD'>('SHISHA')
   const [uploads, setUploads] = useState<UploadRow[]>([])
+  const [lockedDays, setLockedDays] = useState<Set<string>>(new Set())
 
   const [my, mm] = month.split('-').map(Number)
   const daysInMonth = new Date(my, mm, 0).getDate()
@@ -57,10 +61,24 @@ export default function TargetsPage() {
       const qs = new URLSearchParams({ department: uploadDept, from: format(win.from, 'yyyy-MM-dd'), to: format(win.to, 'yyyy-MM-dd') })
       const r = await request(`/api/sales-metrics?${qs}`)
       setUploads(r.rows || [])
+      setLockedDays(new Set(r.lockedDays || []))
     } finally { setLoading(false) }
   }, [request, uploadDept, period, month]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (view === 'uploads') loadUploads() }, [view, loadUploads])
+
+  const dayOf = (iso: string) => iso.slice(0, 10)
+  const lockDate = async (date: string, outletId?: string) => {
+    if (!outletId) return toast.error('No outlet for this date.')
+    try { await request('/api/sales-metrics/lock', { method: 'POST', body: JSON.stringify({ department: uploadDept, date, outletId }) }); toast.success('Day locked'); loadUploads() }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not lock') }
+  }
+  const unlockDate = async (date: string, outletId?: string) => {
+    if (!outletId) return
+    if (!(await confirm({ title: 'Unlock day', message: `Unlock ${formatDate(date)}? It will be editable again.`, confirmLabel: 'Unlock' }))) return
+    try { await request(`/api/sales-metrics/lock?department=${uploadDept}&date=${date}&outletId=${outletId}`, { method: 'DELETE' }); toast.success('Day unlocked'); loadUploads() }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not unlock') }
+  }
 
   const deleteRow = async (id: string) => {
     if (!(await confirm({ title: 'Delete row', message: 'Remove this uploaded sales row?', danger: true, confirmLabel: 'Delete' }))) return
@@ -172,6 +190,11 @@ export default function TargetsPage() {
           const unit = uploadDept === 'SHISHA' ? 'COUNT' as const : 'TZS' as const
           const shown = uploads.filter((r) => outlet === 'All' || (r.outlet?.name || '').toLowerCase().includes(outlet.toLowerCase()))
           const total = shown.reduce((s, r) => s + r.value, 0)
+          const isLocked = (r: UploadRow) => lockedDays.has(dayOf(r.date))
+          const unlockedIds = shown.filter((r) => !isLocked(r)).map((r) => r.id)
+          // distinct day -> a representative outletId
+          const dayMap = new Map<string, string | undefined>()
+          shown.forEach((r) => { if (!dayMap.has(dayOf(r.date))) dayMap.set(dayOf(r.date), r.outletId) })
           return (
             <div className="space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
@@ -183,10 +206,29 @@ export default function TargetsPage() {
                     </button>
                   ))}
                 </div>
-                {shown.length > 0 && (
-                  <Button variant="danger" size="sm" onClick={() => clearShown(shown.map((r) => r.id))}>Clear all shown ({shown.length})</Button>
+                {unlockedIds.length > 0 && (
+                  <Button variant="danger" size="sm" onClick={() => clearShown(unlockedIds)}>Clear unlocked ({unlockedIds.length})</Button>
                 )}
               </div>
+
+              {/* Lock / unlock per day */}
+              {dayMap.size > 0 && (
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-wrap gap-2 items-center">
+                  <span className="text-xs font-semibold text-gray-500 mr-1">Days:</span>
+                  {[...dayMap.entries()].map(([day, oid]) => {
+                    const locked = lockedDays.has(day)
+                    return (
+                      <span key={day} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium ${locked ? 'bg-gray-100 text-gray-700' : 'bg-indigo-50 text-indigo-700'}`}>
+                        {locked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}{formatDate(day)}
+                        {locked
+                          ? (isAdmin && <button onClick={() => unlockDate(day, oid)} className="ml-1 text-amber-600 hover:underline">Unlock</button>)
+                          : <button onClick={() => lockDate(day, oid)} className="ml-1 text-indigo-600 hover:underline">Lock</button>}
+                      </span>
+                    )
+                  })}
+                  {!isAdmin && [...dayMap.keys()].some((d) => lockedDays.has(d)) && <span className="text-[11px] text-gray-400">Locked days can only be unlocked by a super user (Admin).</span>}
+                </div>
+              )}
 
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between text-sm">
@@ -211,7 +253,9 @@ export default function TargetsPage() {
                             <td className="px-4 py-2 font-medium text-gray-800">{r.staffName}</td>
                             <td className="px-4 py-2 text-right font-semibold text-gray-900">{fmtTarget(r.value, unit)}</td>
                             <td className="px-4 py-2 text-right">
-                              <button onClick={() => deleteRow(r.id)} title="Delete" className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>
+                              {isLocked(r)
+                                ? <Lock className="w-4 h-4 text-gray-400 inline" />
+                                : <button onClick={() => deleteRow(r.id)} title="Delete" className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button>}
                             </td>
                           </tr>
                         ))}
