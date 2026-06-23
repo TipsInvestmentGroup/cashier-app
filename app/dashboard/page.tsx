@@ -42,6 +42,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [variances, setVariances] = useState<{ outlet: string; kind: string; expected: number; actual: number; variance: number }[]>([])
   const [warnings, setWarnings] = useState<{ staffCount: number; flagged: FlaggedItem[] } | null>(null)
+  type Growth = { current: number; previous: number; deltaPct: number; spark: number[] }
+  const [growth, setGrowth] = useState<{ weekly: Growth; monthly: Growth } | null>(null)
 
   useEffect(() => {
     request('/api/dashboard')
@@ -50,6 +52,7 @@ export default function DashboardPage() {
       .finally(() => setLoading(false))
     request('/api/reports/variance-alerts').then((r) => setVariances(r.items || [])).catch(() => {})
     request('/api/targets/warning-letters').then((r) => setWarnings(r)).catch(() => {})
+    request('/api/dashboard/growth').then((r) => setGrowth(r)).catch(() => {})
   }, [request])
 
   if (loading) return (
@@ -175,6 +178,14 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+
+        {/* Growth — collections WoW & MoM */}
+        {growth && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <GrowthCard label="Collections · This Week" value={growth.weekly.current} deltaPct={growth.weekly.deltaPct} spark={growth.weekly.spark} compareLabel="vs last week" />
+            <GrowthCard label="Collections · This Month" value={growth.monthly.current} deltaPct={growth.monthly.deltaPct} spark={growth.monthly.spark} compareLabel="vs last month" />
+          </div>
+        )}
 
         {/* Outstanding Receivables by Category (incl. Tips & DJ) + by Outlet */}
         <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
@@ -384,5 +395,35 @@ export default function DashboardPage() {
         </div>
       </div>
     </AppShell>
+  )
+}
+
+function GrowthCard({ label, value, deltaPct, spark, compareLabel }: { label: string; value: number; deltaPct: number; spark: number[]; compareLabel: string }) {
+  const up = deltaPct >= 0
+  const color = up ? '#16a34a' : '#dc2626'
+  const data = spark.map((v, i) => ({ i, v }))
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium text-gray-500">{label}</p>
+        <span className={`text-xs font-bold px-2 py-0.5 rounded-lg ${up ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{up ? '▲' : '▼'} {Math.abs(deltaPct)}%</span>
+      </div>
+      <p className="text-2xl font-bold text-gray-900 mt-2 tracking-tight">{formatCurrency(value)}</p>
+      <p className="text-xs text-gray-400">{compareLabel}</p>
+      <div className="h-10 mt-1 -mx-1">
+        <ResponsiveContainer width="100%" height={40}>
+          <ComposedChart data={data} margin={{ top: 2, bottom: 0, left: 0, right: 0 }}>
+            <defs>
+              <linearGradient id={`g-${label.replace(/\W/g, '')}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity={0.25} />
+                <stop offset="100%" stopColor={color} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <Tooltip formatter={(v) => formatCurrency(Number(v))} labelFormatter={() => ''} cursor={{ stroke: '#e5e7eb' }} />
+            <Area type="monotone" dataKey="v" stroke={color} strokeWidth={2} fill={`url(#g-${label.replace(/\W/g, '')})`} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   )
 }
