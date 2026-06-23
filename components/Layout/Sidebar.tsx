@@ -27,7 +27,7 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 
   { href: '/petty-cash', icon: Wallet, label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals'] },
 
-  { href: '/receivables', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/receivables', '/month-end', '/staff-scorecard', '/outlet-comparison', '/payroll', '/reports', '/audit'] },
+  { href: '/receivables', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/receivables', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/payroll', '/reports', '/audit'] },
 
   { href: '/setup', icon: Settings, label: 'Setup', section: 'Setup', roles: ALL, match: ['/setup', ...SETUP_TABS.map((t) => t.href)] },
 ]
