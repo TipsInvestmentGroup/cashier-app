@@ -248,8 +248,8 @@ export default function OrderPage() {
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-gray-800 text-sm">TSh {item.amount.toLocaleString()}</div>
-                      <span className={`text-xs ${item.status === 'SENT' ? 'text-green-600' : 'text-amber-600'}`}>
-                        {item.status === 'SENT' ? '✓ Sent' : '⏳ Pending'}
+                      <span className={`text-xs ${item.status === 'PENDING' ? 'text-amber-600' : 'text-green-600'}`}>
+                        {item.status === 'PREPARED' ? '✓ Tayari' : item.status === 'SENT' ? '✓ Sent' : '⏳ Pending'}
                       </span>
                     </div>
                     {!isClosed && item.status === 'PENDING' && (

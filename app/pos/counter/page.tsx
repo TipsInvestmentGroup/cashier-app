@@ -31,6 +31,8 @@ function CounterView() {
   const [activeCounter, setActiveCounter] = useState(searchParams.get('code') ?? 'BAR')
   const [items, setItems] = useState<OrderItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [doneToday, setDoneToday] = useState(0)
+  const [marking, setMarking] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!token) return
@@ -41,6 +43,20 @@ function CounterView() {
     if (res.ok) setItems(await res.json())
     setLoading(false)
   }, [token, activeCounter])
+
+  const markPrepared = useCallback(async (itemId: string) => {
+    if (!token) return
+    setMarking(itemId)
+    // Optimistically drop it from the queue.
+    setItems(prev => prev.filter(i => i.id !== itemId))
+    const res = await fetch('/api/pos/counter', {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId }),
+    })
+    if (res.ok) { setDoneToday(n => n + 1) } else { load() } // restore on failure
+    setMarking(null)
+  }, [token, load])
 
   useEffect(() => { load() }, [load])
 
@@ -63,7 +79,10 @@ function CounterView() {
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-bold text-indigo-900">Counter View</h1>
-          <button onClick={load} className="text-sm text-indigo-600 hover:underline">↻ Refresh</button>
+          <div className="flex items-center gap-3">
+            {doneToday > 0 && <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium">✓ Tayari: {doneToday}</span>}
+            <button onClick={load} className="text-sm text-indigo-600 hover:underline">↻ Refresh</button>
+          </div>
         </div>
 
         {/* Counter tabs */}
@@ -111,8 +130,15 @@ function CounterView() {
                     + {JSON.parse(item.extras).join(', ')}
                   </div>
                 )}
-                <div className="text-xs text-gray-400 mt-2">
-                  Waiter: {item.order.waiter.name}
+                <div className="flex items-center justify-between mt-3">
+                  <span className="text-xs text-gray-400">Waiter: {item.order.waiter.name}</span>
+                  <button
+                    onClick={() => markPrepared(item.id)}
+                    disabled={marking === item.id}
+                    className="bg-green-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-green-700 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {marking === item.id ? '...' : '✓ Tayari'}
+                  </button>
                 </div>
               </div>
             ))}

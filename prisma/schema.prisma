@@ -564,8 +564,10 @@ model PosOrderItem {
   amount      Float    // unitPrice * quantity
   extras      String?  // JSON array e.g. ["Barafu","Straw"]
   counterCode String?  // MAIN | BAR | SHISHA | KITCHEN — which counter prints this
-  status      String   @default("PENDING") // PENDING | SENT | CANCELLED
+  status      String   @default("PENDING") // PENDING | SENT | PREPARED | CANCELLED
   sentAt      DateTime?
+  preparedAt  DateTime? // when the counter marked it ready/served
+  preparedBy  String?   // userId of counter staff who marked it ready
   cancelledBy String?  // userId
   createdAt   DateTime @default(now())
 
