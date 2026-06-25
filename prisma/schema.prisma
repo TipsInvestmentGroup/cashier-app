@@ -8,10 +8,14 @@ datasource db {
 
 // NOTE: SQLite does not support native enums. The following values are
 // enforced at the application layer:
-//   Role:          CASHIER | ACCOUNTANT | MANAGER | DIRECTOR | ADMIN
+//   Role:          CASHIER | ACCOUNTANT | MANAGER | DIRECTOR | ADMIN | WAITER
 //   PaymentMethod: CASH | CRDB | STANBIC | MPESA
 //   BillType:      ADMIN | DIRECTOR | CUSTOMER | TIPS | DJ | STAFF_LOSS
 //   BillStatus:    UNPAID | PARTIAL | PAID
+//   ShiftType:     MORNING (09:00–16:00) | EVENING (16:00–05:00)
+//   ScheduleRole:  WAITER | SUPERVISOR | BARTENDER | CASHIER | HOSTESS
+//   AssignSource:  AUTO | MANUAL
+//   AbsenceReason: LEAVE | ABSENT | OTHER
 
 model User {
   id          String   @id @default(cuid())
@@ -31,14 +35,19 @@ model User {
   auditLogs         AuditLog[]
   posOrders         PosOrder[]
   posWaiterSessions PosWaiterSession[]
+  scheduleAssignments ScheduleAssignment[]
+  unavailabilities    StaffUnavailability[]
 }
 
 model Outlet {
-  id          String   @id @default(cuid())
-  name        String   @unique
-  location    String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  name         String   @unique
+  location     String?
+  isActive     Boolean  @default(true)
+  // Events-only outlets (e.g. "Tips Events") are NOT included in the automatic
+  // weekly roster — staff are only assigned temporarily when an event is created.
+  isEventsOnly Boolean  @default(false)
+  createdAt    DateTime @default(now())
 
   users            User[]
   dailyCollections DailyCollection[]
@@ -51,6 +60,8 @@ model Outlet {
   posBlockedItems  PosBlockedItem[]
   dayClosures      DayClosure[]
   salesMetrics     SalesMetric[]
+  scheduleAssignments ScheduleAssignment[]
+  scheduleConfig      OutletScheduleConfig?
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -609,4 +620,62 @@ model PosBlockedItem {
 
   @@unique([outletId, productId])
   @@index([outletId])
+}
+
+/// Staff scheduling: a rostered shift assignment for one staff member on one
+/// day at one outlet. This is the planning layer — distinct from PosShift,
+/// which is the operational till-open record. Two scheduling shifts per day:
+/// MORNING (09:00–16:00) and EVENING (16:00–05:00 next day).
+model ScheduleAssignment {
+  id          String   @id @default(cuid())
+  date        DateTime // the calendar day the shift starts
+  shiftType   String   // MORNING | EVENING
+  outletId    String
+  outlet      Outlet   @relation(fields: [outletId], references: [id])
+  staffId     String
+  staff       User     @relation(fields: [staffId], references: [id])
+  staffName   String   // denormalized for fast display & export
+  role        String   @default("WAITER") // WAITER | SUPERVISOR | BARTENDER | CASHIER | HOSTESS
+  source      String   @default("AUTO")   // AUTO | MANUAL (manager override)
+  note        String?  // e.g. auto-scheduler reasoning, or override note
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // A staff member can hold only one slot per shift per day (prevents double-booking).
+  @@unique([date, shiftType, staffId])
+  @@index([outletId])
+  @@index([date])
+  @@index([staffId])
+}
+
+/// Exception to the default "every active service staff is available" rule.
+/// shiftType null = unavailable the whole day; otherwise only that shift.
+model StaffUnavailability {
+  id          String   @id @default(cuid())
+  staffId     String
+  staff       User     @relation(fields: [staffId], references: [id])
+  staffName   String
+  date        DateTime
+  shiftType   String?  // null = whole day | MORNING | EVENING
+  reason      String   @default("OTHER") // LEAVE | ABSENT | OTHER
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([staffId])
+  @@index([date])
+}
+
+/// Per-outlet knobs for the auto-scheduler (expected-traffic weighting and
+/// rest-day policy). One row per outlet; sensible defaults if absent.
+model OutletScheduleConfig {
+  id                String   @id @default(cuid())
+  outletId          String   @unique
+  outlet            Outlet   @relation(fields: [outletId], references: [id])
+  morningWeight     Float    @default(1)   // expected traffic weight — Morning
+  eveningWeight     Float    @default(1.6) // Evening is usually busier (nightlife)
+  weekendMultiplier Float    @default(1.4) // Fri/Sat uplift on both shifts
+  daysOffPerWeek    Int      @default(1)   // rest days per staff per week
+  updatedAt         DateTime @updatedAt
 }

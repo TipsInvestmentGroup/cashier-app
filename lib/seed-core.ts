@@ -22,6 +22,12 @@ export async function seedCore(prisma: any) {
     update: {},
     create: { name: 'Coco Beach Outlet', location: 'Coco Beach, Dar es Salaam' },
   })
+  // Events-only outlet: never auto-rostered; staffed temporarily per event.
+  await prisma.outlet.upsert({
+    where: { name: 'Tips Events' },
+    update: { isEventsOnly: true },
+    create: { name: 'Tips Events', location: 'External events & functions', isEventsOnly: true },
+  })
 
   const users = [
     { email: 'admin@lounge.com', name: 'System Admin', role: 'ADMIN', pass: 'admin123', outletId: null },

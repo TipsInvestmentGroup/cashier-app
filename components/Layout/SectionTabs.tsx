@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
-  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, type LucideIcon,
+  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, type LucideIcon,
 } from 'lucide-react'
 
 export type Tab = { href: string; label: string; icon: LucideIcon; roles: string[] }
@@ -20,6 +20,7 @@ export const MYPOS_TABS: Tab[] = [
   { href: '/pos/counter', label: 'Counter View', icon: Printer, roles: POS_ROLES },
   { href: '/pos/manager', label: 'All Orders', icon: ClipboardList, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/manager/items', label: 'Item Blocker', icon: Ban, roles: ['MANAGER', 'ADMIN'] },
+  { href: '/schedule', label: 'Scheduling', icon: CalendarClock, roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/shift-report', label: 'Shift Report', icon: BarChart3, roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
 ]
 
