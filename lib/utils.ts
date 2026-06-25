@@ -72,3 +72,16 @@ export const STATUS_COLORS: Record<string, string> = {
   PARTIAL: 'bg-yellow-100 text-yellow-700',
   PAID: 'bg-green-100 text-green-700',
 }
+
+// Friendly Swahili label for a POS shift name. Covers the current
+// MORNING/EVENING shifts and the legacy KWANZA/PILI/TATU/NNE ones still
+// present on historical shift records.
+const POS_SHIFT_LABELS: Record<string, string> = {
+  MORNING: 'Shift ya Asubuhi',
+  EVENING: 'Shift ya Jioni',
+  KWANZA: 'Shift ya Kwanza',
+  PILI: 'Shift ya Pili',
+  TATU: 'Shift ya Tatu',
+  NNE: 'Shift ya Nne',
+}
+export const posShiftLabel = (name: string) => POS_SHIFT_LABELS[name] || `Shift ${name}`

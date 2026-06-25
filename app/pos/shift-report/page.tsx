@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
+import { posShiftLabel } from '@/lib/utils'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
@@ -30,7 +31,7 @@ function buildPdf(report: Report): File {
   doc.setFontSize(16); doc.setFont('helvetica', 'bold')
   doc.text('Tips MyPos — Shift Report', 14, 12)
   doc.setFontSize(9); doc.setFont('helvetica', 'normal')
-  doc.text(`${report.outlet} · Shift ${report.shift.name} · ${new Date(report.shift.date).toLocaleDateString('en-TZ')}`, 14, 20)
+  doc.text(`${report.outlet} · ${posShiftLabel(report.shift.name)} · ${new Date(report.shift.date).toLocaleDateString('en-TZ')}`, 14, 20)
   doc.text(`Generated: ${new Date().toLocaleString('en-TZ')}`, W - 14, 20, { align: 'right' })
 
   let y = 36
@@ -123,7 +124,7 @@ export default function ShiftReportPage() {
     const file = buildPdf(report)
     try {
       if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: `Shift Report — ${report.shift.name}`, text: `Tips MyPos Shift Report\n${report.outlet} · Shift ${report.shift.name}\nTotal Orders: ${report.summary.totalOrders}\nGrand Total: ${fmt(report.summary.grandTotal)}` })
+        await navigator.share({ files: [file], title: `Shift Report — ${posShiftLabel(report.shift.name)}`, text: `Tips MyPos Shift Report\n${report.outlet} · ${posShiftLabel(report.shift.name)}\nTotal Orders: ${report.summary.totalOrders}\nGrand Total: ${fmt(report.summary.grandTotal)}` })
       } else {
         const url = URL.createObjectURL(file)
         const a = document.createElement('a'); a.href = url; a.download = file.name; a.click()
@@ -159,7 +160,7 @@ export default function ShiftReportPage() {
               {shifts.length === 0 && <option value="">Hakuna shifts leo</option>}
               {shifts.map(s => (
                 <option key={s.id} value={s.id}>
-                  Shift {s.name} — {s.closedAt ? 'Imefungwa' : 'Wazi'} · {new Date(s.openedAt).toLocaleTimeString('sw-TZ', { hour: '2-digit', minute: '2-digit' })}
+                  {posShiftLabel(s.name)} — {s.closedAt ? 'Imefungwa' : 'Wazi'} · {new Date(s.openedAt).toLocaleTimeString('sw-TZ', { hour: '2-digit', minute: '2-digit' })}
                 </option>
               ))}
             </select>
@@ -177,7 +178,7 @@ export default function ShiftReportPage() {
           <div className="space-y-4">
             {/* Summary */}
             <div className="bg-indigo-600 text-white rounded-2xl p-5">
-              <div className="text-indigo-200 text-sm mb-1">{report.outlet} · Shift {report.shift.name}</div>
+              <div className="text-indigo-200 text-sm mb-1">{report.outlet} · {posShiftLabel(report.shift.name)}</div>
               <div className="grid grid-cols-2 gap-4 mt-3">
                 <div>
                   <div className="text-indigo-200 text-xs">Maagizo Yaliyofungwa</div>
