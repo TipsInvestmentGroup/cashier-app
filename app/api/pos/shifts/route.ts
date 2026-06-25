@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   if (!payload) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
   const { name, outletId: bodyOutletId } = await req.json()
-  const VALID_SHIFTS = ['KWANZA', 'PILI', 'TATU', 'NNE']
+  const VALID_SHIFTS = ['MORNING', 'EVENING']
   if (!VALID_SHIFTS.includes(name)) return NextResponse.json({ error: 'Invalid shift name' }, { status: 400 })
 
   const outletId = payload.outletId ?? bodyOutletId

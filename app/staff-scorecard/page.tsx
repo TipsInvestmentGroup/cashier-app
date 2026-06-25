@@ -21,6 +21,7 @@ interface Outlet { id: string; name: string }
 interface Row {
   staff: string; days: number; systemSales: number; collected: number; creditIssued: number
   discount: number; cancellations: number; collectionRate: number; loss: number; excess: number; net: number
+  eventsWorked: number; eventsAttended: number; eventSales: number
 }
 
 export default function StaffScorecardPage() {
@@ -62,6 +63,7 @@ export default function StaffScorecardPage() {
     Staff: r.staff, Days: r.days, 'System Sales': r.systemSales, Collected: r.collected,
     'Collection %': r.collectionRate, 'Credit Issued': r.creditIssued, Cancellations: r.cancellations,
     Loss: r.loss, Excess: r.excess,
+    'Events Worked': r.eventsWorked, 'Events Attended': r.eventsAttended, 'Event Sales': r.eventSales,
   }))
 
   return (
@@ -126,6 +128,8 @@ export default function StaffScorecardPage() {
                         <th className="px-4 py-3 font-semibold text-center">Collection %</th>
                         <th className="px-4 py-3 font-semibold text-right">Credit</th>
                         <th className="px-4 py-3 font-semibold text-right">Cancel.</th>
+                        <th className="px-4 py-3 font-semibold text-center">Events</th>
+                        <th className="px-4 py-3 font-semibold text-right">Event Sales</th>
                         <th className="px-4 py-3 font-semibold text-right">Loss / Excess</th>
                       </tr>
                     </thead>
@@ -141,6 +145,8 @@ export default function StaffScorecardPage() {
                           </td>
                           <td className="px-4 py-3 text-right text-gray-500">{r.creditIssued ? formatCurrency(r.creditIssued) : '-'}</td>
                           <td className="px-4 py-3 text-right text-gray-500">{r.cancellations ? formatCurrency(r.cancellations) : '-'}</td>
+                          <td className="px-4 py-3 text-center text-gray-600">{r.eventsWorked ? `${r.eventsAttended}/${r.eventsWorked}` : '-'}</td>
+                          <td className="px-4 py-3 text-right text-gray-700">{r.eventSales ? formatCurrency(r.eventSales) : '-'}</td>
                           <td className={`px-4 py-3 text-right font-bold ${r.loss > 0 ? 'text-red-600' : r.excess > 0 ? 'text-green-600' : 'text-gray-400'}`}>
                             {r.loss > 0 ? `▼ ${formatCurrency(r.loss)}` : r.excess > 0 ? `▲ ${formatCurrency(r.excess)}` : '—'}
                           </td>

@@ -6,11 +6,10 @@ import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 
 const SHIFTS = [
-  { name: 'KWANZA', label: 'Shift ya Kwanza', time: '06:00 – 14:00', color: 'bg-amber-500' },
-  { name: 'PILI',   label: 'Shift ya Pili',   time: '14:00 – 22:00', color: 'bg-indigo-500' },
-  { name: 'TATU',   label: 'Shift ya Tatu',   time: '22:00 – 02:00', color: 'bg-violet-600' },
-  { name: 'NNE',    label: 'Shift ya Nne',    time: '02:00 – 06:00', color: 'bg-rose-600'   },
+  { name: 'MORNING', label: 'Shift ya Asubuhi', time: '09:00 – 16:00', color: 'bg-amber-500'  },
+  { name: 'EVENING', label: 'Shift ya Jioni',   time: '16:00 – 05:00', color: 'bg-indigo-600' },
 ]
+const shiftLabel = (name: string) => SHIFTS.find((s) => s.name === name)?.label ?? name
 
 interface Shift { id: string; name: string; openedAt: string; closedAt: string | null }
 interface Outlet { id: string; name: string }
@@ -113,7 +112,7 @@ export default function PosHomePage() {
         {activeShift ? (
           <div className="bg-green-50 border border-green-200 rounded-2xl p-6 mb-6 text-center">
             <div className="text-3xl mb-2">✅</div>
-            <p className="font-bold text-green-800 text-lg">Shift {activeShift.name} — Iko Wazi</p>
+            <p className="font-bold text-green-800 text-lg">{shiftLabel(activeShift.name)} — Iko Wazi</p>
             <p className="text-green-600 text-sm">
               Imefunguliwa: {new Date(activeShift.openedAt).toLocaleTimeString('sw-TZ', { hour: '2-digit', minute: '2-digit' })}
             </p>
@@ -153,7 +152,7 @@ export default function PosHomePage() {
             <div className="space-y-2">
               {shifts.map(s => (
                 <div key={s.id} className="flex justify-between items-center text-sm">
-                  <span className="font-medium text-gray-700">{s.name}</span>
+                  <span className="font-medium text-gray-700">{shiftLabel(s.name)}</span>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.closedAt ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>
                     {s.closedAt ? 'Imefungwa' : 'Wazi'}
                   </span>
