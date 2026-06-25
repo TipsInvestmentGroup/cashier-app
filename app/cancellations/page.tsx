@@ -44,9 +44,10 @@ export default function CancellationsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({ ...INIT })
 
-  const canApprove = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
   const ownerEmail = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const myEmail = (user?.email || '').toLowerCase()
+  const CANCELLATION_APPROVERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
+  const canApprove = CANCELLATION_APPROVERS.includes(myEmail) || (!!ownerEmail && myEmail === ownerEmail)
   const canCreate = user?.role === 'CASHIER' || myEmail === 'alphonce.mvungi@tips.co.tz' || (!!ownerEmail && myEmail === ownerEmail)
 
   const load = useCallback(async () => {

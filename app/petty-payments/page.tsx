@@ -4,7 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, roundMoney } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -26,6 +26,12 @@ interface Report {
   byOutlet: Group[]; byDepartment: Group[]; byRequester: Group[]; byDisburser: Group[]; byType: Group[]
 }
 interface Group { label: string; count: number; amount: number }
+
+interface LedgerTxn { id: string; date: string; type: string; amount: number; note?: string; createdByName?: string; purpose?: string }
+interface LedgerFund { id: string; name: string; ownerName: string; outletName: string; openingBalance: number; deposits: number; expenses: number; adjustments: number; closingBalance: number; txns: LedgerTxn[] }
+interface FundLedgerReport { funds: LedgerFund[]; totals: { openingBalance: number; deposits: number; expenses: number; closingBalance: number } }
+interface CashDayRow { id: string; date: string; outletName: string; openingBalance: number; cashCollected: number; paidBillsCash: number; cashierExpenses: number; cashDeposited: number; closingBalance: number; verifiedAmount?: number; notes?: string }
+interface CashReconReport { rows: CashDayRow[]; totals: { openingBalance: number; cashCollected: number; paidBillsCash: number; cashierExpenses: number; cashDeposited: number; closingBalance: number } }
 
 export default function PettyPaymentsPage() {
   const { request } = useApi()
@@ -72,10 +78,28 @@ export default function PettyPaymentsPage() {
   const [from, setFrom] = useState(format(subDays(new Date(), 29), 'yyyy-MM-dd'))
   const [to, setTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [report, setReport] = useState<Report | null>(null)
+  const [reportTab, setReportTab] = useState<'overview' | 'ledger' | 'cash'>('overview')
+  const [fundLedger, setFundLedger] = useState<FundLedgerReport | null>(null)
+  const [cashReconReport, setCashReconReport] = useState<CashReconReport | null>(null)
+  const [ledgerOwner, setLedgerOwner] = useState('')
   const loadReport = useCallback(async () => {
     try { setReport(await request(`/api/petty-cash/report?from=${from}&to=${to}`)) } catch { /* ignore */ }
   }, [request, from, to])
+  const loadFundLedger = useCallback(async () => {
+    setFundLedger(null)
+    try {
+      const p = new URLSearchParams({ from, to })
+      if (ledgerOwner) p.set('ownerName', ledgerOwner)
+      setFundLedger(await request(`/api/petty-funds/report?${p}`))
+    } catch { /* ignore */ }
+  }, [request, from, to, ledgerOwner])
+  const loadCashReport = useCallback(async () => {
+    setCashReconReport(null)
+    try { setCashReconReport(await request(`/api/cash-recon/report?from=${from}&to=${to}`)) } catch { /* ignore */ }
+  }, [request, from, to])
   useEffect(() => { if (view === 'reports') loadReport() }, [view, loadReport])
+  useEffect(() => { if (view === 'reports' && reportTab === 'ledger') loadFundLedger() }, [view, reportTab, loadFundLedger])
+  useEffect(() => { if (view === 'reports' && reportTab === 'cash') loadCashReport() }, [view, reportTab, loadCashReport])
 
   const toPay = items.filter((i) => i.status === 'APPROVED' && i.paymentStatus !== 'PAID')
   const paidHistory = items.filter((i) => i.paymentStatus === 'PAID').slice(0, 50)
@@ -198,65 +222,257 @@ export default function PettyPaymentsPage() {
         {/* ===== REPORTS ===== */}
         {view === 'reports' && (
           <div className="space-y-4">
+            {/* Controls + sub-tab switcher */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-gray-600">Period:</span>
               <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
               <span className="text-gray-400 text-sm">to</span>
               <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
-              {report && <ExportBar rows={[...report.byOutlet.map((g) => ({ Group: 'Outlet', Name: g.label, Count: g.count, Amount: g.amount })), ...report.byDepartment.map((g) => ({ Group: 'Department', Name: g.label, Count: g.count, Amount: g.amount })), ...report.byRequester.map((g) => ({ Group: 'Requester', Name: g.label, Count: g.count, Amount: g.amount }))]} filename="petty-cash-report" title="Petty Cash Report" />}
+              <div className="flex gap-1 ml-auto">
+                {(['overview', 'ledger', 'cash'] as const).map((t) => (
+                  <button key={t} onClick={() => setReportTab(t)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${reportTab === t ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                    {t === 'overview' ? 'Overview' : t === 'ledger' ? 'Accountant Ledger' : 'Cashier Cash'}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {!report ? <Card><div className="py-10 text-center text-gray-400">Loading…</div></Card> : (
-              <>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <Card><div className="text-xs text-gray-500">Paid (total)</div><div className="text-xl font-bold text-gray-900">{formatCurrency(report.totals.paid)}</div></Card>
-                  <Card><div className="text-xs text-gray-500">Approved · unpaid</div><div className="text-xl font-bold text-amber-600">{formatCurrency(report.totals.approvedUnpaid)}</div></Card>
-                  <Card><div className="text-xs text-gray-500">Pending approval</div><div className="text-xl font-bold text-gray-700">{formatCurrency(report.totals.pending)}</div></Card>
-                  <Card><div className="text-xs text-gray-500">Requested (total)</div><div className="text-xl font-bold text-gray-700">{formatCurrency(report.totals.requested)}</div></Card>
-                </div>
-
-                {/* Reconciliation split */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card>
-                    <div className="font-semibold text-gray-800 mb-2">🧾 Cashier petty cash (from drawer)</div>
-                    <div className="text-sm space-y-1">
-                      <div className="flex justify-between"><span className="text-gray-500">Paid in cash (reduces drawer)</span><span className="font-bold text-gray-900">{formatCurrency(report.totals.cashierCash)}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Paid by bank/M-PESA</span><span className="font-medium text-gray-700">{formatCurrency(report.totals.cashierNonCash)}</span></div>
-                      <div className="flex justify-between border-t border-gray-100 pt-1"><span className="text-gray-600 font-medium">Total cashier-paid</span><span className="font-bold text-gray-900">{formatCurrency(report.totals.cashierPaid)}</span></div>
-                    </div>
-                    <p className="text-[11px] text-gray-400 mt-2">Cash payments are included in daily cash reconciliation & end-of-day closing.</p>
-                  </Card>
-                  <Card>
-                    <div className="font-semibold text-gray-800 mb-2">🏦 Accountant petty cash (from fund)</div>
-                    <div className="text-sm space-y-1">
-                      <div className="flex justify-between"><span className="text-gray-500">Paid from allocated funds</span><span className="font-bold text-gray-900">{formatCurrency(report.totals.accountantPaid)}</span></div>
-                      <div className="flex justify-between border-t border-gray-100 pt-1"><span className="text-gray-600 font-medium">Current fund balance (all funds)</span><span className="font-bold text-gray-900">{formatCurrency(funds.reduce((s, f) => s + f.balance, 0))}</span></div>
-                    </div>
-                    <p className="text-[11px] text-gray-400 mt-2">Tracked against the fund balance, separate from outlet collections.</p>
-                  </Card>
-                </div>
-
-                {/* Grouped breakdowns */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {([['By outlet', report.byOutlet], ['By department', report.byDepartment], ['By requester', report.byRequester], ['By disburser', report.byDisburser]] as [string, Group[]][]).map(([title, rows]) => (
-                    <Card key={title} className="p-0 overflow-hidden">
-                      <div className="px-4 py-2 border-b border-gray-100 font-semibold text-gray-800 text-sm">{title}</div>
-                      <table className="w-full text-sm">
-                        <tbody className="divide-y divide-gray-50">
-                          {rows.slice(0, 12).map((g) => (
-                            <tr key={g.label} className="hover:bg-gray-50">
-                              <td className="px-4 py-2 text-gray-700">{g.label}</td>
-                              <td className="px-4 py-2 text-right text-gray-400 text-xs">{g.count}</td>
-                              <td className="px-4 py-2 text-right font-semibold text-gray-900">{formatCurrency(g.amount)}</td>
-                            </tr>
-                          ))}
-                          {rows.length === 0 && <tr><td className="px-4 py-6 text-center text-gray-400">No data</td></tr>}
-                        </tbody>
-                      </table>
+            {/* ---- OVERVIEW ---- */}
+            {reportTab === 'overview' && (
+              !report ? <Card><div className="py-10 text-center text-gray-400">Loading…</div></Card> : (
+                <>
+                  {report && <ExportBar rows={[...report.byOutlet.map((g) => ({ Group: 'Outlet', Name: g.label, Count: g.count, Amount: g.amount })), ...report.byDepartment.map((g) => ({ Group: 'Department', Name: g.label, Count: g.count, Amount: g.amount })), ...report.byRequester.map((g) => ({ Group: 'Requester', Name: g.label, Count: g.count, Amount: g.amount }))]} filename="petty-cash-report" title="Petty Cash Report" />}
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <Card><div className="text-xs text-gray-500">Paid (total)</div><div className="text-xl font-bold text-gray-900">{formatCurrency(report.totals.paid)}</div></Card>
+                    <Card><div className="text-xs text-gray-500">Approved · unpaid</div><div className="text-xl font-bold text-amber-600">{formatCurrency(report.totals.approvedUnpaid)}</div></Card>
+                    <Card><div className="text-xs text-gray-500">Pending approval</div><div className="text-xl font-bold text-gray-700">{formatCurrency(report.totals.pending)}</div></Card>
+                    <Card><div className="text-xs text-gray-500">Requested (total)</div><div className="text-xl font-bold text-gray-700">{formatCurrency(report.totals.requested)}</div></Card>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card>
+                      <div className="font-semibold text-gray-800 mb-2">Cashier petty cash (from drawer)</div>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between"><span className="text-gray-500">Paid in cash (reduces drawer)</span><span className="font-bold text-gray-900">{formatCurrency(report.totals.cashierCash)}</span></div>
+                        <div className="flex justify-between"><span className="text-gray-500">Paid by bank/M-PESA</span><span className="font-medium text-gray-700">{formatCurrency(report.totals.cashierNonCash)}</span></div>
+                        <div className="flex justify-between border-t border-gray-100 pt-1"><span className="text-gray-600 font-medium">Total cashier-paid</span><span className="font-bold text-gray-900">{formatCurrency(report.totals.cashierPaid)}</span></div>
+                      </div>
                     </Card>
-                  ))}
+                    <Card>
+                      <div className="font-semibold text-gray-800 mb-2">Accountant petty cash (from fund)</div>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between"><span className="text-gray-500">Paid from allocated funds</span><span className="font-bold text-gray-900">{formatCurrency(report.totals.accountantPaid)}</span></div>
+                        <div className="flex justify-between border-t border-gray-100 pt-1"><span className="text-gray-600 font-medium">Current fund balance (all funds)</span><span className="font-bold text-gray-900">{formatCurrency(funds.reduce((s, f) => s + f.balance, 0))}</span></div>
+                      </div>
+                    </Card>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {([['By outlet', report.byOutlet], ['By department', report.byDepartment], ['By requester', report.byRequester], ['By disburser', report.byDisburser]] as [string, Group[]][]).map(([title, rows]) => (
+                      <Card key={title} className="p-0 overflow-hidden">
+                        <div className="px-4 py-2 border-b border-gray-100 font-semibold text-gray-800 text-sm">{title}</div>
+                        <table className="w-full text-sm">
+                          <tbody className="divide-y divide-gray-50">
+                            {rows.slice(0, 12).map((g) => (
+                              <tr key={g.label} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 text-gray-700">{g.label}</td>
+                                <td className="px-4 py-2 text-right text-gray-400 text-xs">{g.count}</td>
+                                <td className="px-4 py-2 text-right font-semibold text-gray-900">{formatCurrency(g.amount)}</td>
+                              </tr>
+                            ))}
+                            {rows.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-gray-400">No data</td></tr>}
+                          </tbody>
+                        </table>
+                      </Card>
+                    ))}
+                  </div>
+                </>
+              )
+            )}
+
+            {/* ---- ACCOUNTANT LEDGER ---- */}
+            {reportTab === 'ledger' && (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-gray-500">Filter by accountant:</span>
+                  <select value={ledgerOwner} onChange={(e) => setLedgerOwner(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none">
+                    <option value="">All accountants</option>
+                    {[...new Set(funds.map((f) => f.ownerName).filter(Boolean))].map((name) => (
+                      <option key={name} value={name!}>{name}</option>
+                    ))}
+                  </select>
+                  <button onClick={loadFundLedger} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition">Generate</button>
                 </div>
-              </>
+
+                {!fundLedger ? (
+                  <Card><div className="py-10 text-center text-gray-400">Select a period and click Generate to view the accountant ledger.</div></Card>
+                ) : fundLedger.funds.length === 0 ? (
+                  <Card><EmptyState icon="🏦" title="No fund data" hint="No petty cash funds found for this period." /></Card>
+                ) : (
+                  <>
+                    {/* Summary KPIs */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      <Card><div className="text-xs text-gray-500">Opening Balance</div><div className="text-xl font-bold text-gray-900">{formatCurrency(fundLedger.totals.openingBalance)}</div></Card>
+                      <Card><div className="text-xs text-gray-500">Deposits Received (Dr)</div><div className="text-xl font-bold text-green-700">{formatCurrency(fundLedger.totals.deposits)}</div></Card>
+                      <Card><div className="text-xs text-gray-500">Expenses Paid (Cr)</div><div className="text-xl font-bold text-red-600">{formatCurrency(fundLedger.totals.expenses)}</div></Card>
+                      <Card><div className="text-xs text-gray-500">Closing Balance</div><div className="text-xl font-bold text-indigo-700">{formatCurrency(fundLedger.totals.closingBalance)}</div></Card>
+                    </div>
+
+                    {/* Per-fund ledger tables */}
+                    {fundLedger.funds.map((fund) => (
+                      <Card key={fund.id} className="p-0 overflow-hidden">
+                        <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                          <div>
+                            <div className="font-semibold text-gray-900">{fund.name}</div>
+                            <div className="text-xs text-gray-500">{fund.ownerName} · {fund.outletName}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs text-gray-400">Closing Balance</div>
+                            <div className="font-bold text-indigo-700">{formatCurrency(fund.closingBalance)}</div>
+                          </div>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                                <th className="px-4 py-2 text-left font-semibold">Date</th>
+                                <th className="px-4 py-2 text-left font-semibold">Description</th>
+                                <th className="px-4 py-2 text-right font-semibold text-green-700">Debit (In)</th>
+                                <th className="px-4 py-2 text-right font-semibold text-red-600">Credit (Out)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {/* Opening balance row */}
+                              <tr className="bg-blue-50/40">
+                                <td className="px-4 py-2 text-gray-400 text-xs whitespace-nowrap">—</td>
+                                <td className="px-4 py-2 font-medium text-gray-700">Opening Balance</td>
+                                <td className="px-4 py-2 text-right font-semibold text-green-700">{formatCurrency(fund.openingBalance)}</td>
+                                <td className="px-4 py-2 text-right text-gray-300">—</td>
+                              </tr>
+                              {/* Transaction rows */}
+                              {fund.txns.map((t) => {
+                                const isDebit = t.amount > 0
+                                const desc = t.type === 'REPLENISH'
+                                  ? `Deposit / Replenishment${t.note ? ` — ${t.note}` : ''}`
+                                  : t.type === 'PAYMENT'
+                                    ? `Expense${t.purpose ? `: ${t.purpose}` : ''}${t.note ? ` — ${t.note}` : ''}`
+                                    : `Adjustment${t.note ? ` — ${t.note}` : ''}`
+                                return (
+                                  <tr key={t.id} className="hover:bg-gray-50">
+                                    <td className="px-4 py-2 text-gray-400 text-xs whitespace-nowrap">{formatDate(t.date)}</td>
+                                    <td className="px-4 py-2">
+                                      <div className="text-gray-800">{desc}</div>
+                                      {t.createdByName && <div className="text-[11px] text-gray-400">{t.createdByName}</div>}
+                                    </td>
+                                    <td className="px-4 py-2 text-right text-green-700">{isDebit ? formatCurrency(t.amount) : '—'}</td>
+                                    <td className="px-4 py-2 text-right text-red-600">{!isDebit ? formatCurrency(Math.abs(t.amount)) : '—'}</td>
+                                  </tr>
+                                )
+                              })}
+                              {fund.txns.length === 0 && (
+                                <tr><td colSpan={4} className="px-4 py-4 text-center text-gray-400 text-xs">No transactions in this period</td></tr>
+                              )}
+                              {/* Closing balance row */}
+                              <tr className="bg-indigo-50/40 font-semibold border-t border-gray-200">
+                                <td className="px-4 py-2 text-gray-400 text-xs">—</td>
+                                <td className="px-4 py-2 text-gray-700">Closing Balance</td>
+                                <td className="px-4 py-2 text-right text-green-700">{formatCurrency(fund.deposits)}</td>
+                                <td className="px-4 py-2 text-right text-red-600">{formatCurrency(fund.expenses)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    ))}
+
+                    <ExportBar
+                      rows={fundLedger.funds.flatMap((f) => [
+                        { Fund: f.name, Accountant: f.ownerName, Outlet: f.outletName, Date: 'Opening', Description: 'Opening Balance', 'Debit (In)': f.openingBalance, 'Credit (Out)': '', Balance: f.openingBalance },
+                        ...f.txns.map((t) => ({ Fund: f.name, Accountant: f.ownerName, Outlet: f.outletName, Date: formatDate(t.date), Description: t.type === 'REPLENISH' ? `Deposit${t.note ? ` — ${t.note}` : ''}` : t.type === 'PAYMENT' ? `Expense${t.purpose ? `: ${t.purpose}` : ''}` : `Adjustment${t.note ? ` — ${t.note}` : ''}`, 'Debit (In)': t.amount > 0 ? t.amount : '', 'Credit (Out)': t.amount < 0 ? Math.abs(t.amount) : '', Balance: '' })),
+                        { Fund: f.name, Accountant: f.ownerName, Outlet: f.outletName, Date: 'Closing', Description: 'Closing Balance', 'Debit (In)': f.deposits, 'Credit (Out)': f.expenses, Balance: f.closingBalance },
+                      ])}
+                      filename="accountant-petty-cash-ledger"
+                      title="Accountant Petty Cash Ledger"
+                    />
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ---- CASHIER CASH REPORT ---- */}
+            {reportTab === 'cash' && (
+              <div className="space-y-4">
+                {!cashReconReport ? (
+                  <Card><div className="py-10 text-center text-gray-400">Loading cashier cash report…</div></Card>
+                ) : cashReconReport.rows.length === 0 ? (
+                  <Card><EmptyState icon="💵" title="No cash reconciliation data" hint="No daily cash reconciliations found for this period. Reconciliations are created from the Petty Cash page." /></Card>
+                ) : (
+                  <>
+                    {/* Summary KPIs */}
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                      <Card><div className="text-xs text-gray-500">Cash Collected from Sales</div><div className="text-xl font-bold text-green-700">{formatCurrency(cashReconReport.totals.cashCollected)}</div></Card>
+                      <Card><div className="text-xs text-gray-500">Petty Cash Expenses (Cashier)</div><div className="text-xl font-bold text-red-600">{formatCurrency(cashReconReport.totals.cashierExpenses)}</div></Card>
+                      <Card><div className="text-xs text-gray-500">Cash Deposited to Bank</div><div className="text-xl font-bold text-indigo-700">{formatCurrency(cashReconReport.totals.cashDeposited)}</div></Card>
+                    </div>
+
+                    {/* Daily reconciliation table */}
+                    <Card className="p-0 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                              <th className="px-4 py-3 text-left font-semibold">Date</th>
+                              <th className="px-4 py-3 text-left font-semibold">Outlet</th>
+                              <th className="px-4 py-3 text-right font-semibold">Opening Balance</th>
+                              <th className="px-4 py-3 text-right font-semibold text-green-700">Cash Collected</th>
+                              <th className="px-4 py-3 text-right font-semibold text-green-600">Paid Bills (Cash)</th>
+                              <th className="px-4 py-3 text-right font-semibold text-red-600">Petty Cash Exp.</th>
+                              <th className="px-4 py-3 text-right font-semibold text-indigo-700">Deposited to Bank</th>
+                              <th className="px-4 py-3 text-right font-semibold">Closing Balance</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {cashReconReport.rows.map((row) => (
+                              <tr key={row.id} className="hover:bg-gray-50">
+                                <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(row.date)}</td>
+                                <td className="px-4 py-3 text-gray-600">{row.outletName}</td>
+                                <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(row.openingBalance)}</td>
+                                <td className="px-4 py-3 text-right text-green-700 font-medium">{formatCurrency(row.cashCollected)}</td>
+                                <td className="px-4 py-3 text-right text-green-600">{formatCurrency(row.paidBillsCash)}</td>
+                                <td className="px-4 py-3 text-right text-red-600">{formatCurrency(row.cashierExpenses)}</td>
+                                <td className="px-4 py-3 text-right text-indigo-700">{formatCurrency(row.cashDeposited)}</td>
+                                <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(row.closingBalance)}</td>
+                              </tr>
+                            ))}
+                            <tr className="bg-gray-50 font-semibold text-gray-900 border-t-2 border-gray-200">
+                              <td className="px-4 py-3" colSpan={2}>TOTAL ({cashReconReport.rows.length} {cashReconReport.rows.length === 1 ? 'day' : 'days'})</td>
+                              <td className="px-4 py-3 text-right text-gray-400">—</td>
+                              <td className="px-4 py-3 text-right text-green-700">{formatCurrency(cashReconReport.totals.cashCollected)}</td>
+                              <td className="px-4 py-3 text-right text-green-600">{formatCurrency(cashReconReport.totals.paidBillsCash)}</td>
+                              <td className="px-4 py-3 text-right text-red-600">{formatCurrency(cashReconReport.totals.cashierExpenses)}</td>
+                              <td className="px-4 py-3 text-right text-indigo-700">{formatCurrency(cashReconReport.totals.cashDeposited)}</td>
+                              <td className="px-4 py-3 text-right text-gray-400">—</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card>
+
+                    <ExportBar
+                      rows={cashReconReport.rows.map((r) => ({
+                        Date: formatDate(r.date),
+                        Outlet: r.outletName,
+                        'Opening Balance': r.openingBalance,
+                        'Cash Collected': r.cashCollected,
+                        'Paid Bills (Cash)': r.paidBillsCash,
+                        'Petty Cash Expenses': r.cashierExpenses,
+                        'Deposited to Bank': r.cashDeposited,
+                        'Closing Balance': r.closingBalance,
+                      }))}
+                      filename="cashier-cash-report"
+                      title="Cashier Cash Management Report"
+                    />
+                  </>
+                )}
+              </div>
             )}
           </div>
         )}
