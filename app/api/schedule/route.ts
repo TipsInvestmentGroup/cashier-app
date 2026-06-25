@@ -178,6 +178,13 @@ async function manualAssign(user: any, body: any) {
   const clash = await db.scheduleAssignment.findFirst({ where: { date: day, shiftType, staffId } })
   if (clash) return NextResponse.json({ error: `${staff.name} is already scheduled for this shift` }, { status: 409 })
 
+  // Conflict: staffer is working an event that day — they're off the roster.
+  const onEvent = await db.eventStaff.findFirst({
+    where: { staffId, event: { date: { gte: day, lte: endOfDay(date) } } },
+    include: { event: { select: { name: true } } },
+  })
+  if (onEvent) return NextResponse.json({ error: `${staff.name} is assigned to event "${onEvent.event.name}" that day` }, { status: 409 })
+
   const item = await db.scheduleAssignment.create({
     data: { date: day, shiftType, outletId, staffId, staffName: staff.name, role, source: 'MANUAL', note: note || null, createdById: user.userId },
   })

@@ -37,6 +37,7 @@ model User {
   posWaiterSessions PosWaiterSession[]
   scheduleAssignments ScheduleAssignment[]
   unavailabilities    StaffUnavailability[]
+  eventStaff          EventStaff[]
 }
 
 model Outlet {
@@ -62,6 +63,7 @@ model Outlet {
   salesMetrics     SalesMetric[]
   scheduleAssignments ScheduleAssignment[]
   scheduleConfig      OutletScheduleConfig?
+  events              Event[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -678,4 +680,65 @@ model OutletScheduleConfig {
   weekendMultiplier Float    @default(1.4) // Fri/Sat uplift on both shifts
   daysOffPerWeek    Int      @default(1)   // rest days per staff per week
   updatedAt         DateTime @updatedAt
+}
+
+/// An external event or special function staffed temporarily from the
+/// "Tips Events" outlet. Staff assigned here are pulled off their regular
+/// weekly roster for the event day (see /api/events/[id]/staff).
+model Event {
+  id             String   @id @default(cuid())
+  name           String
+  clientName     String?
+  location       String?
+  date           DateTime // event day
+  startTime      String?  // "18:00"
+  endTime        String?  // "23:00"
+  expectedGuests Int      @default(0)
+  status         String   @default("PLANNED") // PLANNED | CONFIRMED | COMPLETED | CANCELLED
+  salesTotal     Float    @default(0)         // event revenue
+  notes          String?
+  outletId       String?
+  outlet         Outlet?  @relation(fields: [outletId], references: [id])
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  staff    EventStaff[]
+  expenses EventExpense[]
+
+  @@index([date])
+  @@index([status])
+}
+
+/// A staff member assigned to work an event, with their role, attendance and
+/// performance (sales attributed) during the event.
+model EventStaff {
+  id              String   @id @default(cuid())
+  eventId         String
+  event           Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  staffId         String
+  staff           User     @relation(fields: [staffId], references: [id])
+  staffName       String
+  role            String   @default("WAITER") // SUPERVISOR | WAITER | BARTENDER | CASHIER | HOSTESS
+  attended        Boolean  @default(false)
+  salesAttributed Float    @default(0)
+  performanceNote String?
+  createdAt       DateTime @default(now())
+
+  @@unique([eventId, staffId])
+  @@index([staffId])
+}
+
+/// An expense line on an event (transport, equipment, hire, etc.).
+model EventExpense {
+  id          String   @id @default(cuid())
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  category    String
+  description String?
+  amount      Float    @default(0)
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([eventId])
 }

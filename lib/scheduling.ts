@@ -22,6 +22,13 @@ export const SCHEDULE_MANAGE_ROLES = ['MANAGER', 'DIRECTOR', 'ADMIN']
 
 export const ABSENCE_REASONS = ['LEAVE', 'ABSENT', 'OTHER'] as const
 
+// ── Event Management ──────────────────────────────────────────────────────
+export const EVENT_STATUSES = ['PLANNED', 'CONFIRMED', 'COMPLETED', 'CANCELLED'] as const
+export type EventStatus = typeof EVENT_STATUSES[number]
+// Staff roles available at an event (same vocabulary as the roster).
+export const EVENT_ROLES = SCHEDULE_ROLES
+export const EVENT_EXPENSE_CATEGORIES = ['Transport', 'Equipment Hire', 'Food & Drinks', 'Decor', 'Staff Allowance', 'Other'] as const
+
 export interface SchedConfig {
   morningWeight: number
   eveningWeight: number
