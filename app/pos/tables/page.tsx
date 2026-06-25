@@ -21,16 +21,21 @@ interface PosTable {
   orders: TableOrder[]
 }
 
+interface Shift { id: string; closedAt: string | null }
+
 function TableFloor() {
   const { user, token } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const shiftId = searchParams.get('shiftId') ?? ''
-  const outletId = searchParams.get('outletId') ?? ''
+  const urlShiftId = searchParams.get('shiftId') ?? ''
+  const outletId = searchParams.get('outletId') ?? user?.outlet?.id ?? ''
 
   const [tables, setTables] = useState<PosTable[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
+  // The shift to open orders against — taken from the URL, or resolved to the
+  // outlet's currently-open shift if we arrived here without one.
+  const [shiftId, setShiftId] = useState(urlShiftId)
 
   const loadTables = useCallback(async () => {
     if (!token) return
@@ -43,6 +48,17 @@ function TableFloor() {
 
   useEffect(() => { loadTables() }, [loadTables])
 
+  // Resolve the open shift if the URL didn't carry one (e.g. opened the Floor
+  // Map directly or after a refresh that dropped the query string).
+  useEffect(() => {
+    if (urlShiftId) { setShiftId(urlShiftId); return }
+    if (!token || !outletId) return
+    fetch(`/api/pos/shifts?outletId=${outletId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: Shift[]) => { const open = data.find(s => !s.closedAt); if (open) setShiftId(open.id) })
+      .catch(() => {})
+  }, [urlShiftId, token, outletId])
+
   // Auto-refresh every 30 seconds
   useEffect(() => {
     const t = setInterval(loadTables, 30_000)
@@ -50,8 +66,7 @@ function TableFloor() {
   }, [loadTables])
 
   const openTable = async (table: PosTable) => {
-    if (!token || !shiftId) return
-    setBusy(table.id)
+    if (!token) return
 
     if (table.orders.length > 0) {
       // Table already has an open order — go directly to it
@@ -59,15 +74,29 @@ function TableFloor() {
       return
     }
 
+    if (!shiftId) {
+      alert('Hakuna shift iliyo wazi. Fungua shift kwanza.')
+      router.push('/pos')
+      return
+    }
+
     // Create a new order for this table
-    const res = await fetch('/api/pos/orders', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tableId: table.id, shiftId }),
-    })
-    if (res.ok) {
-      const order = await res.json()
-      router.push(`/pos/order/${order.id}`)
+    setBusy(table.id)
+    try {
+      const res = await fetch('/api/pos/orders', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tableId: table.id, shiftId, outletId }),
+      })
+      if (res.ok) {
+        const order = await res.json()
+        router.push(`/pos/order/${order.id}`)
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error ?? 'Imeshindikana kufungua meza — jaribu tena.')
+      }
+    } catch {
+      alert('Tatizo la mtandao — jaribu tena.')
     }
     setBusy(null)
   }
