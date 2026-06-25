@@ -263,6 +263,7 @@ model PettyFund {
   ownerName      String?
   outletId       String?
   openingBalance Float    @default(0)
+  depositDate    DateTime?                    // date the petty cash was deposited/allocated
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 

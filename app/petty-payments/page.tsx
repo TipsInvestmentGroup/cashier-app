@@ -20,7 +20,7 @@ interface Item {
   approvedBy?: string; status: string; pettyType?: string; paidByName?: string; paidAt?: string; receiptUrl?: string; outletId?: string
 }
 interface FundTxn { id: string; type: string; amount: number; note?: string; createdByName?: string; createdAt: string }
-interface Fund { id: string; name: string; ownerName?: string; openingBalance: number; replenished: number; paidOut: number; balance: number; txns: FundTxn[] }
+interface Fund { id: string; name: string; ownerName?: string; openingBalance: number; replenished: number; paidOut: number; balance: number; depositDate?: string; txns: FundTxn[] }
 interface Report {
   totals: { requested: number; paid: number; pending: number; approvedUnpaid: number; cashierPaid: number; cashierCash: number; cashierNonCash: number; accountantPaid: number }
   byOutlet: Group[]; byDepartment: Group[]; byRequester: Group[]; byDisburser: Group[]; byType: Group[]
@@ -50,14 +50,14 @@ export default function PettyPaymentsPage() {
   const [paying, setPaying] = useState<Item | null>(null)
 
   // ---- Fund create / replenish ----
-  const [fundForm, setFundForm] = useState({ name: '', ownerName: '', openingBalance: '' })
+  const [fundForm, setFundForm] = useState({ amount: '', depositDate: format(new Date(), 'yyyy-MM-dd') })
   const [replen, setReplen] = useState<{ fund: Fund; amount: string; note: string } | null>(null)
 
   const createFund = async () => {
-    if (!fundForm.name.trim()) return toast.error('Fund name required')
+    if (!fundForm.amount || Number(fundForm.amount) <= 0) return toast.error('Enter the amount deposited')
     try {
-      await request('/api/petty-funds', { method: 'POST', body: JSON.stringify(fundForm) })
-      toast.success('Fund created'); setFundForm({ name: '', ownerName: '', openingBalance: '' }); load()
+      await request('/api/petty-funds', { method: 'POST', body: JSON.stringify({ openingBalance: Number(fundForm.amount), depositDate: fundForm.depositDate }) })
+      toast.success('Petty cash recorded'); setFundForm({ amount: '', depositDate: format(new Date(), 'yyyy-MM-dd') }); load()
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Error') }
   }
   const submitReplenish = async () => {
@@ -165,7 +165,7 @@ export default function PettyPaymentsPage() {
                     {canManageFunds && <button onClick={() => setReplen({ fund: f, amount: '', note: '' })} className="text-xs font-semibold text-indigo-600 hover:underline">+ Replenish</button>}
                   </div>
                   <div className="mt-3 text-2xl font-bold text-gray-900">{formatCurrency(f.balance)}</div>
-                  <div className="text-[11px] text-gray-500 mt-1">Opening {formatCurrency(f.openingBalance)} · +{formatCurrency(f.replenished)} replenished · −{formatCurrency(f.paidOut)} paid</div>
+                  <div className="text-[11px] text-gray-500 mt-1">Deposited {formatCurrency(f.openingBalance)}{f.depositDate ? ` on ${formatDate(f.depositDate)}` : ''} · +{formatCurrency(f.replenished)} replenished · −{formatCurrency(f.paidOut)} paid</div>
                   {f.txns.length > 0 && (
                     <div className="mt-3 border-t border-gray-100 pt-2 space-y-1 max-h-40 overflow-y-auto">
                       {f.txns.slice(0, 8).map((t) => (
@@ -183,13 +183,13 @@ export default function PettyPaymentsPage() {
 
             {canManageFunds && (
               <Card>
-                <div className="font-semibold text-gray-800 mb-3">Create a fund</div>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <input value={fundForm.name} onChange={(e) => setFundForm({ ...fundForm, name: e.target.value })} placeholder="Fund name" className="px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none sm:col-span-2" />
-                  <input value={fundForm.ownerName} onChange={(e) => setFundForm({ ...fundForm, ownerName: e.target.value })} placeholder="Operated by (accountant)" className="px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
-                  <MoneyInput value={fundForm.openingBalance} onChange={(v) => setFundForm({ ...fundForm, openingBalance: v })} placeholder="Opening balance" className="px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
+                <div className="font-semibold text-gray-800 mb-1">Add petty cash</div>
+                <p className="text-xs text-gray-400 mb-3">Recorded under <span className="font-medium text-gray-600">{user?.name || 'you'}</span> as the operating accountant.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <MoneyInput value={fundForm.amount} onChange={(v) => setFundForm({ ...fundForm, amount: v })} placeholder="Amount deposited" className="px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none sm:col-span-2" />
+                  <input type="date" value={fundForm.depositDate} onChange={(e) => setFundForm({ ...fundForm, depositDate: e.target.value })} className="px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
                 </div>
-                <button onClick={createFund} className="mt-3 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition">Create Fund</button>
+                <button onClick={createFund} className="mt-3 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition">Add Petty Cash</button>
               </Card>
             )}
           </div>
