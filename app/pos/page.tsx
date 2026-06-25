@@ -85,6 +85,13 @@ export default function PosHomePage() {
           <p className="text-gray-500 text-sm mt-1">Karibu, {user?.name}</p>
         </div>
 
+        {/* No fixed outlet on this account — works for the session, but Admin should assign one. */}
+        {!user?.outlet?.id && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5 text-sm text-amber-800">
+            ⚠️ Akaunti yako haina <strong>outlet maalum</strong>. Chagua outlet hapa chini ili kuendelea, na umwombe Admin akuwekee outlet ya kudumu (Setup → Users).
+          </div>
+        )}
+
         {/* Outlet picker — only shown when user has no fixed outlet */}
         {needsOutletPicker && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-5">
