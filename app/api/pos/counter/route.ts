@@ -50,5 +50,18 @@ export async function PATCH(req: NextRequest) {
     where: { id: itemId },
     data: { status: 'PREPARED', preparedAt: new Date(), preparedBy: payload.userId },
   })
+
+  // If nothing on the order is still pending or queued, the whole order is
+  // READY — this notifies the waiter (VIP model: collect from the counter).
+  const outstanding = await prisma.posOrderItem.count({
+    where: { orderId: item.orderId, status: { in: ['PENDING', 'SENT'] } },
+  })
+  if (outstanding === 0) {
+    await prisma.posOrder.updateMany({
+      where: { id: item.orderId, status: 'SENT' },
+      data: { status: 'READY' },
+    })
+  }
+
   return NextResponse.json(updated)
 }

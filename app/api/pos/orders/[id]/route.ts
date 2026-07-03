@@ -16,6 +16,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       waiter: { select: { name: true } },
       shift: { select: { name: true } },
       outlet: { select: { name: true, legalName: true, tin: true, vrn: true } },
+      payments: { orderBy: { createdAt: 'asc' } },
       items: {
         where: { status: { not: 'CANCELLED' } },
         include: { product: { select: { id: true, name: true, code: true } } },

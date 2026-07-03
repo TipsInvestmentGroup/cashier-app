@@ -31,10 +31,23 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const now = new Date()
 
-  await prisma.posOrderItem.updateMany({
-    where: { orderId, status: 'PENDING' },
-    data: { status: 'SENT', sentAt: now },
-  })
+  // Counter service models: items sent to a DIRECT counter (Main Bar model —
+  // the seller serves immediately) skip the prep queue and are PREPARED at
+  // once; PREP counters (VIP/kitchen model) queue as SENT until staff mark
+  // them ready.
+  const counters = await prisma.posCounter.findMany({ where: { outletId: order.outletId } })
+  const modelOf = (code: string) =>
+    (counters.find((c) => c.code === code) as { serviceModel?: string } | undefined)?.serviceModel ?? 'PREP'
+
+  for (const [counterCode, items] of Object.entries(byCounter)) {
+    const direct = modelOf(counterCode) === 'DIRECT'
+    await prisma.posOrderItem.updateMany({
+      where: { id: { in: items.map((i) => i.id) } },
+      data: direct
+        ? { status: 'PREPARED', sentAt: now, preparedAt: now, preparedBy: payload.userId }
+        : { status: 'SENT', sentAt: now },
+    })
+  }
 
   for (const [counterCode, items] of Object.entries(byCounter)) {
     await prisma.posPrintLog.create({
@@ -53,7 +66,12 @@ export async function POST(req: NextRequest, { params }: Params) {
     })
   }
 
-  await prisma.posOrder.update({ where: { id: orderId }, data: { status: 'SENT' } })
+  // Still-queued items → SENT; everything already prepared (all-DIRECT order,
+  // e.g. Main Bar) → READY straight away.
+  const outstanding = await prisma.posOrderItem.count({
+    where: { orderId, status: { in: ['PENDING', 'SENT'] } },
+  })
+  await prisma.posOrder.update({ where: { id: orderId }, data: { status: outstanding > 0 ? 'SENT' : 'READY' } })
 
   return NextResponse.json({ ok: true, sent: pendingItems.length, counters: Object.keys(byCounter) })
 }

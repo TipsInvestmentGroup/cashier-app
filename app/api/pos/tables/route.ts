@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     orderBy: { number: 'asc' },
     include: {
       orders: {
-        where: { status: { in: ['OPEN', 'SENT'] } },
+        where: { status: { in: ['OPEN', 'SENT', 'READY'] } },
         select: {
           id: true, orderNo: true, status: true, totalAmount: true,
           waiterId: true, waiter: { select: { name: true } },

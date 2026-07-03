@@ -515,6 +515,11 @@ model PosCounter {
   code        String   // MAIN | BAR | SHISHA | KITCHEN
   label       String   // "Main Counter" | "Bar" | "Shisha" | "Kitchen"
   printerName String?  // default printer assigned to this counter
+  // PREP   → kitchen/VIP model: items queue at the counter, are prepared, and
+  //          the waiter is notified to collect (order goes READY).
+  // DIRECT → counter-service model (Main Bar): seller serves immediately, so
+  //          sent items skip the queue and are marked PREPARED at once.
+  serviceModel String  @default("PREP") // PREP | DIRECT
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
@@ -550,12 +555,30 @@ model PosOrder {
 
   items     PosOrderItem[]
   printLogs PosPrintLog[]
+  payments  PosPayment[]
 
   @@index([outletId])
   @@index([shiftId])
   @@index([waiterId])
   @@index([status])
   @@index([createdAt])
+}
+
+/// A (possibly partial) payment received against a POS order. Supports the
+/// "Paid 324k / Balance 81k" pattern: multiple payments until the bill settles.
+/// The recorder is the verifier — receiving staff confirm cash/digital receipt.
+model PosPayment {
+  id             String   @id @default(cuid())
+  orderId        String
+  order          PosOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount         Float
+  method         String   // CASH | CRDB | STANBIC | MPESA
+  receivedById   String   // userId of staff who received & verified the payment
+  receivedByName String
+  note           String?
+  createdAt      DateTime @default(now())
+
+  @@index([orderId])
 }
 
 // Individual items on an order. counterCode tells the system which printer to use.

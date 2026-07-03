@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
@@ -37,14 +37,48 @@ function TableFloor() {
   // outlet's currently-open shift if we arrived here without one.
   const [shiftId, setShiftId] = useState(urlShiftId)
 
+  // "Ready to collect" beep — fires when one of MY orders newly turns READY
+  // (VIP model: the counter finished preparing; go collect).
+  const readySeenRef = useRef<Set<string>>(new Set())
+  const firstLoadRef = useRef(true)
+  const audioRef = useRef<AudioContext | null>(null)
+  const myIdRef = useRef<string | undefined>(user?.id)
+  useEffect(() => { myIdRef.current = user?.id }, [user])
+
+  const beep = useCallback(() => {
+    try {
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+      audioRef.current ??= new Ctx()
+      const ctx = audioRef.current
+      if (ctx.state === 'suspended') ctx.resume()
+      // Double beep — distinct from the counter's single new-ticket tone.
+      for (const at of [0, 0.45]) {
+        const o = ctx.createOscillator(); const g = ctx.createGain()
+        o.connect(g); g.connect(ctx.destination)
+        o.type = 'sine'; o.frequency.value = 1175
+        g.gain.setValueAtTime(0.0001, ctx.currentTime + at)
+        g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + at + 0.01)
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + at + 0.3)
+        o.start(ctx.currentTime + at); o.stop(ctx.currentTime + at + 0.3)
+      }
+    } catch { /* audio blocked — ignore */ }
+  }, [])
+
   const loadTables = useCallback(async () => {
     if (!token) return
-    setLoading(true)
     const url = outletId ? `/api/pos/tables?outletId=${outletId}` : '/api/pos/tables'
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-    if (res.ok) setTables(await res.json())
+    if (res.ok) {
+      const data: PosTable[] = await res.json()
+      const myReady = data.flatMap(t => t.orders).filter(o => o.status === 'READY' && o.waiterId === myIdRef.current)
+      const fresh = myReady.filter(o => !readySeenRef.current.has(o.id))
+      if (!firstLoadRef.current && fresh.length > 0) beep()
+      myReady.forEach(o => readySeenRef.current.add(o.id))
+      firstLoadRef.current = false
+      setTables(data)
+    }
     setLoading(false)
-  }, [token, outletId])
+  }, [token, outletId, beep])
 
   useEffect(() => { loadTables() }, [loadTables])
 
@@ -59,9 +93,9 @@ function TableFloor() {
       .catch(() => {})
   }, [urlShiftId, token, outletId])
 
-  // Auto-refresh every 30 seconds
+  // Auto-refresh every 10 seconds (also drives the ready-to-collect beep)
   useEffect(() => {
-    const t = setInterval(loadTables, 30_000)
+    const t = setInterval(loadTables, 10_000)
     return () => clearInterval(t)
   }, [loadTables])
 
@@ -104,18 +138,19 @@ function TableFloor() {
   const getTableStatus = (table: PosTable) => {
     if (table.orders.length === 0) return 'free'
     const order = table.orders[0]
-    if (order.waiterId === user?.id) return 'mine'
+    if (order.waiterId === user?.id) return order.status === 'READY' ? 'ready' : 'mine'
     return 'other'
   }
 
   const TABLE_COLORS: Record<string, string> = {
     free:  'bg-green-50 border-green-300 text-green-800 hover:bg-green-100',
     mine:  'bg-indigo-600 border-indigo-700 text-white hover:bg-indigo-700',
+    ready: 'bg-green-600 border-green-700 text-white hover:bg-green-700 animate-pulse',
     other: 'bg-rose-50 border-rose-300 text-rose-800',
   }
 
   const TABLE_ICONS: Record<string, string> = {
-    free: '🟢', mine: '🔵', other: '🔴',
+    free: '🟢', mine: '🔵', ready: '✅', other: '🔴',
   }
 
   return (
@@ -135,6 +170,7 @@ function TableFloor() {
         <div className="flex gap-4 mb-4 text-xs text-gray-600">
           <span>🟢 Huru</span>
           <span>🔵 Yangu</span>
+          <span>✅ Tayari kuchukua</span>
           <span>🔴 Staff mwingine</span>
         </div>
 

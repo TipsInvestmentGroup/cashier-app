@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   if (!outletId) return NextResponse.json({ error: 'No outlet' }, { status: 400 })
 
   const orders = await prisma.posOrder.findMany({
-    where: { outletId, status: { in: ['OPEN', 'SENT'] } },
+    where: { outletId, status: { in: ['OPEN', 'SENT', 'READY'] } },
     include: {
       table: { select: { number: true, label: true } },
       waiter: { select: { name: true } },
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   // If table already has an open order, return it
   if (tableId) {
     const existing = await prisma.posOrder.findFirst({
-      where: { tableId, status: { in: ['OPEN', 'SENT'] } },
+      where: { tableId, status: { in: ['OPEN', 'SENT', 'READY'] } },
     })
     if (existing) return NextResponse.json(existing)
   }
