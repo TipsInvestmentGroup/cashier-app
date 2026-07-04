@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 import { NextRequest } from 'next/server'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret'
@@ -30,6 +31,20 @@ export async function hashPassword(password: string): Promise<string> {
 
 export async function comparePassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash)
+}
+
+export const RESET_TOKEN_TTL_MS = 60 * 60 * 1000 // 1 hour
+
+/** Generates a fresh forgot-password token. The raw token goes in the email
+ *  link; only its hash is ever stored, so a DB leak can't be used to reset
+ *  accounts. */
+export function generateResetToken(): { token: string; tokenHash: string; expiresAt: Date } {
+  const token = crypto.randomBytes(32).toString('hex')
+  return { token, tokenHash: hashResetToken(token), expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS) }
+}
+
+export function hashResetToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex')
 }
 
 export function getAuthUser(req: NextRequest): JWTPayload | null {

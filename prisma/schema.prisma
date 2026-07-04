@@ -26,6 +26,10 @@ model User {
   outletId    String?
   outlet      Outlet?  @relation(fields: [outletId], references: [id])
   isActive    Boolean  @default(true)
+  // Forgot-password flow: a hashed, single-use token with a short expiry.
+  // Never store the raw token — only its SHA-256 hash (see lib/auth.ts).
+  resetToken       String?   @unique
+  resetTokenExpiry DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
