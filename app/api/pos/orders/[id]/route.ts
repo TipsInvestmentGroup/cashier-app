@@ -15,6 +15,8 @@ export async function GET(req: NextRequest, { params }: Params) {
       table: { select: { number: true, label: true } },
       waiter: { select: { name: true } },
       shift: { select: { name: true } },
+      outlet: { select: { name: true, legalName: true, tin: true, vrn: true } },
+      payments: { orderBy: { createdAt: 'asc' } },
       items: {
         where: { status: { not: 'CANCELLED' } },
         include: { product: { select: { id: true, name: true, code: true } } },
@@ -33,10 +35,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params
   const body = await req.json()
 
+  const BILL_TYPES = ['CUSTOMER', 'ADMIN', 'DIRECTOR', 'DJ', 'TIPS', 'STAFF']
   const allowedFields: Record<string, unknown> = {}
   if (body.discount !== undefined) allowedFields.discount = Number(body.discount)
   if (body.notes !== undefined) allowedFields.notes = body.notes
   if (body.paymentMethod !== undefined) allowedFields.paymentMethod = body.paymentMethod
+  if (body.billType !== undefined && BILL_TYPES.includes(body.billType)) allowedFields.billType = body.billType
 
   const order = await prisma.posOrder.update({ where: { id }, data: allowedFields })
   return NextResponse.json(order)

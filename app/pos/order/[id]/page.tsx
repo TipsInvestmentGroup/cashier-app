@@ -3,11 +3,18 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
+import { buildBillHtml, printHtml, BILL_TYPES, BILL_TYPE_LABELS } from '@/lib/pos-receipt'
 
 const COUNTER_LABELS: Record<string, string> = {
   MAIN: '🍹 Main', BAR: '🍺 Bar', SHISHA: '💨 Shisha', KITCHEN: '🍽 Kitchen',
 }
 const COUNTERS = Object.keys(COUNTER_LABELS)
+const PAY_METHODS = [
+  { code: 'CASH', label: '💵 Cash' },
+  { code: 'CRDB', label: '🏧 CRDB' },
+  { code: 'STANBIC', label: '🏦 Stanbic' },
+  { code: 'MPESA', label: '📱 M-Pesa' },
+]
 
 interface OrderItem {
   id: string
@@ -20,16 +27,23 @@ interface OrderItem {
   status: string
 }
 
+interface Payment { id: string; amount: number; method: string; receivedByName: string; createdAt: string }
+
 interface Order {
   id: string
   orderNo: string
   status: string
+  billType: string
   totalAmount: number
   discount: number
+  paidAmount: number
+  createdAt: string
   table: { number: number; label: string | null } | null
   waiter: { name: string }
   shift: { name: string }
+  outlet?: { name: string; legalName: string | null; tin: string | null; vrn: string | null } | null
   items: OrderItem[]
+  payments: Payment[]
 }
 
 interface Product {
@@ -158,18 +172,50 @@ export default function OrderPage() {
     setBusy(false)
   }
 
-  const closeOrder = async (paymentMethod: string) => {
+  // ---- Bill printing & bill type ----
+  const printBill = () => { if (order) printHtml(buildBillHtml(order)) }
+
+  const setBillType = async (billType: string) => {
     if (!token || !order) return
-    if (!confirm(`Funga meza na kulipa kwa ${paymentMethod}?\nJumla: TSh ${order.totalAmount.toLocaleString()}`)) return
+    await fetch(`/api/pos/orders/${orderId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ billType }),
+    })
+    loadOrder()
+  }
+
+  // ---- Payments (partial + balance) ----
+  const [payModal, setPayModal] = useState(false)
+  const [payAmount, setPayAmount] = useState('')
+  const [payMethod, setPayMethod] = useState('CASH')
+
+  const net = order ? order.totalAmount - order.discount : 0
+  const balance = order ? net - order.paidAmount : 0
+
+  const recordPayment = async () => {
+    if (!token || !order) return
+    const amt = parseFloat(payAmount)
+    if (isNaN(amt) || amt <= 0) { alert('Weka kiasi sahihi'); return }
     setBusy(true)
-    const res = await fetch(`/api/pos/orders/${orderId}/close`, {
+    const res = await fetch(`/api/pos/orders/${orderId}/pay`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentMethod, paidAmount: order.totalAmount - order.discount }),
+      body: JSON.stringify({ amount: amt, method: payMethod }),
     })
+    const data = await res.json()
     if (res.ok) {
-      alert('✅ Meza imefungwa!')
-      router.back()
+      if (data.settled) {
+        alert('✅ Bili imelipwa kamili — meza imefungwa!')
+        setPayModal(false)
+        await loadOrder()
+      } else {
+        alert(`Malipo yamepokewa. Baki: TSh ${Number(data.balance).toLocaleString()}`)
+        setPayAmount('')
+        await loadOrder()
+      }
+    } else {
+      alert(data.error ?? 'Hitilafu')
     }
     setBusy(false)
   }
@@ -204,8 +250,8 @@ export default function OrderPage() {
             </h1>
             <p className="text-xs text-gray-500">{order.orderNo} · Shift {order.shift.name} · {order.waiter.name}</p>
           </div>
-          <span className={`px-3 py-1 rounded-full text-xs font-bold ${isClosed ? 'bg-gray-100 text-gray-500' : pendingCount > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-            {isClosed ? 'Imefungwa' : pendingCount > 0 ? `${pendingCount} pending` : 'Imetumwa'}
+          <span className={`px-3 py-1 rounded-full text-xs font-bold ${isClosed ? 'bg-gray-100 text-gray-500' : order.status === 'READY' ? 'bg-green-600 text-white' : pendingCount > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+            {isClosed ? 'Imefungwa' : order.status === 'READY' ? '✓ Tayari kuchukua' : pendingCount > 0 ? `${pendingCount} pending` : 'Imetumwa'}
           </span>
         </div>
 
@@ -279,9 +325,55 @@ export default function OrderPage() {
               </div>
               <div className="flex justify-between font-bold text-indigo-900 text-base border-t border-indigo-200 pt-2 mt-2">
                 <span>KULIPA</span>
-                <span>TSh {(order.totalAmount - order.discount).toLocaleString()}</span>
+                <span>TSh {net.toLocaleString()}</span>
               </div>
+              {order.paidAmount > 0 && (
+                <>
+                  <div className="flex justify-between text-sm text-green-700 mt-1">
+                    <span>Imelipwa</span>
+                    <span>TSh {order.paidAmount.toLocaleString()}</span>
+                  </div>
+                  {balance > 0.5 && (
+                    <div className="flex justify-between text-sm font-bold text-rose-700">
+                      <span>BAKI</span>
+                      <span>TSh {balance.toLocaleString()}</span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
+
+            {/* Bill type + print */}
+            <div className="flex items-center gap-2 mb-4">
+              <select
+                value={order.billType}
+                onChange={e => setBillType(e.target.value)}
+                disabled={isClosed}
+                className="flex-1 border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 disabled:bg-gray-50"
+              >
+                {BILL_TYPES.map(t => <option key={t} value={t}>{BILL_TYPE_LABELS[t]}</option>)}
+              </select>
+              <button
+                onClick={printBill}
+                disabled={order.items.length === 0}
+                className="bg-gray-800 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-gray-900 active:scale-95 transition-all disabled:opacity-40"
+              >
+                🖨 {order.billType === 'CUSTOMER' ? 'Customer Bill' : 'In-House Bill'}
+              </button>
+            </div>
+
+            {/* Payments history */}
+            {order.payments.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 mb-4">
+                <p className="text-xs font-semibold text-gray-500 mb-2">Malipo yaliyopokewa</p>
+                {order.payments.map(p => (
+                  <div key={p.id} className="flex justify-between text-sm py-1 border-b border-gray-50 last:border-0">
+                    <span className="text-gray-600">{p.method} · {p.receivedByName}</span>
+                    <span className="font-semibold text-gray-800">TSh {p.amount.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Discount modal */}
             {discountModal && (
@@ -319,23 +411,77 @@ export default function OrderPage() {
                     📤 Tuma kwa Counter ({pendingCount} bidhaa)
                   </button>
                 )}
-                {order.items.length > 0 && pendingCount === 0 && (
-                  <div>
-                    <p className="text-sm text-gray-500 text-center mb-2 font-medium">Chagua jinsi ya malipo:</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {['CASH', 'CRDB', 'MPESA', 'SIGNED'].map(method => (
-                        <button
-                          key={method}
-                          onClick={() => closeOrder(method)}
-                          disabled={busy}
-                          className="bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
-                        >
-                          {method === 'CASH' ? '💵 Cash' : method === 'CRDB' ? '🏧 CRDB' : method === 'MPESA' ? '📱 M-Pesa' : '✍️ Signed'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                {order.items.length > 0 && pendingCount === 0 && balance > 0.5 && (
+                  <>
+                    <button
+                      onClick={() => { setPayAmount(String(balance)); setPayModal(true) }}
+                      disabled={busy}
+                      className="w-full bg-indigo-600 text-white py-3.5 rounded-xl font-bold text-base hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      💰 Pokea Malipo (Baki: TSh {balance.toLocaleString()})
+                    </button>
+                    {order.paidAmount === 0 && (
+                      <button
+                        onClick={async () => {
+                          if (!token || !confirm('Funga kama Signed Bill (deni)?')) return
+                          setBusy(true)
+                          const res = await fetch(`/api/pos/orders/${orderId}/close`, {
+                            method: 'POST',
+                            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paymentMethod: 'SIGNED', paidAmount: 0 }),
+                          })
+                          if (res.ok) { alert('✅ Imefungwa kama Signed Bill'); router.back() }
+                          setBusy(false)
+                        }}
+                        disabled={busy}
+                        className="w-full border-2 border-gray-300 text-gray-600 py-2.5 rounded-xl font-semibold text-sm hover:bg-gray-50 transition-all disabled:opacity-50"
+                      >
+                        ✍️ Funga kama Signed Bill
+                      </button>
+                    )}
+                  </>
                 )}
+              </div>
+            )}
+
+            {/* Payment modal — partial payments with running balance */}
+            {payModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPayModal(false)}>
+                <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                  <h3 className="font-bold text-gray-800 text-lg mb-1">Pokea Malipo</h3>
+                  <div className="text-sm text-gray-500 mb-4 space-y-0.5">
+                    <div className="flex justify-between"><span>Jumla</span><span>TSh {net.toLocaleString()}</span></div>
+                    {order.paidAmount > 0 && <div className="flex justify-between text-green-700"><span>Imelipwa</span><span>TSh {order.paidAmount.toLocaleString()}</span></div>}
+                    <div className="flex justify-between font-bold text-gray-800"><span>Baki</span><span>TSh {balance.toLocaleString()}</span></div>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={payAmount}
+                    onChange={e => setPayAmount(e.target.value)}
+                    placeholder="Kiasi kinacholipwa sasa (TSh)"
+                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg mb-3 focus:outline-none focus:border-indigo-400"
+                    autoFocus
+                  />
+                  <div className="grid grid-cols-2 gap-2 mb-4">
+                    {PAY_METHODS.map(m => (
+                      <button
+                        key={m.code}
+                        onClick={() => setPayMethod(m.code)}
+                        className={`py-2.5 rounded-xl text-sm font-semibold border-2 transition-colors ${payMethod === m.code ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-200 text-gray-600'}`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => setPayModal(false)} className="border-2 border-gray-200 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50">Ghairi</button>
+                    <button onClick={recordPayment} disabled={busy} className="bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 disabled:opacity-50">
+                      {busy ? 'Inapokea...' : '✓ Pokea & Thibitisha'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-3 text-center">Kupokea = kuthibitisha malipo. Ukilipa pungufu, baki litabaki kwenye bili.</p>
+                </div>
               </div>
             )}
           </div>

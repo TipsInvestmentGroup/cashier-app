@@ -11,11 +11,13 @@ export async function POST(req: NextRequest) {
 
   const outlets = await prisma.outlet.findMany({ where: { isActive: true } })
 
+  // serviceModel: DIRECT = seller serves immediately (Main Bar model);
+  // PREP = queue → prepare → notify waiter to collect (VIP/kitchen model).
   const COUNTERS = [
-    { code: 'MAIN', label: 'Main Counter' },
-    { code: 'BAR', label: 'Bar Counter' },
-    { code: 'SHISHA', label: 'Shisha Counter' },
-    { code: 'KITCHEN', label: 'Kitchen Counter' },
+    { code: 'MAIN', label: 'Main Counter', serviceModel: 'DIRECT' },
+    { code: 'BAR', label: 'Bar Counter', serviceModel: 'DIRECT' },
+    { code: 'SHISHA', label: 'Shisha Counter', serviceModel: 'PREP' },
+    { code: 'KITCHEN', label: 'Kitchen Counter', serviceModel: 'PREP' },
   ]
 
   let tablesCreated = 0
@@ -32,8 +34,10 @@ export async function POST(req: NextRequest) {
     for (const c of COUNTERS) {
       const existing = await prisma.posCounter.findFirst({ where: { outletId: outlet.id, code: c.code } })
       if (!existing) {
-        await prisma.posCounter.create({ data: { outletId: outlet.id, code: c.code, label: c.label } })
+        await prisma.posCounter.create({ data: { outletId: outlet.id, code: c.code, label: c.label, serviceModel: c.serviceModel } })
         countersCreated++
+      } else {
+        await prisma.posCounter.update({ where: { id: existing.id }, data: { serviceModel: c.serviceModel } })
       }
     }
   }

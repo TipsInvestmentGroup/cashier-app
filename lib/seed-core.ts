@@ -12,15 +12,16 @@ interface SeedPerson { name: string; phone: string | null; type: string; creditL
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function seedCore(prisma: any) {
+  const TAX = { legalName: 'TIPS INVESTMENT LTD', tin: '132-051-100', vrn: '40-028205-X' }
   const mikocheni = await prisma.outlet.upsert({
     where: { name: 'Mikocheni Outlet' },
-    update: {},
-    create: { name: 'Mikocheni Outlet', location: 'Mikocheni, Dar es Salaam' },
+    update: TAX,
+    create: { name: 'Mikocheni Outlet', location: 'Mikocheni, Dar es Salaam', ...TAX },
   })
   const cocoBeach = await prisma.outlet.upsert({
     where: { name: 'Coco Beach Outlet' },
-    update: {},
-    create: { name: 'Coco Beach Outlet', location: 'Coco Beach, Dar es Salaam' },
+    update: TAX,
+    create: { name: 'Coco Beach Outlet', location: 'Coco Beach, Dar es Salaam', ...TAX },
   })
   // Events-only outlet: never auto-rostered; staffed temporarily per event.
   await prisma.outlet.upsert({
