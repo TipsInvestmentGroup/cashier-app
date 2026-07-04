@@ -37,6 +37,16 @@ export async function seedCore(prisma: any) {
     { email: 'manager@lounge.com', name: 'Peter Manager', role: 'MANAGER', pass: 'manager123', outletId: null },
     { email: 'director@lounge.com', name: 'Dr. James Director', role: 'DIRECTOR', pass: 'director123', outletId: null },
     { email: 'accountant@lounge.com', name: 'Sarah Accountant', role: 'ACCOUNTANT', pass: 'accountant123', outletId: null },
+    // Test waiters — one of each role in the order workflow, at both outlets,
+    // so a full VIP prep / Main Bar direct-serve run can be tested end-to-end.
+    // VIP model:    Outside → creates order → Abdul preps/serves at SHISHA/KITCHEN → notifies → Outside collects, prints & takes payment.
+    // Main Bar:     Bar Lady → creates order → serves instantly at BAR/MAIN → prints & takes payment.
+    { email: 'outside.coco@lounge.com', name: 'Fatuma Outside', role: 'WAITER', pass: 'waiter123', outletId: cocoBeach.id },
+    { email: 'abdul.coco@lounge.com', name: 'Abdul VIP', role: 'WAITER', pass: 'waiter123', outletId: cocoBeach.id },
+    { email: 'barlady.coco@lounge.com', name: 'Warda Bar Lady', role: 'WAITER', pass: 'waiter123', outletId: cocoBeach.id },
+    { email: 'outside.mikocheni@lounge.com', name: 'Neema Outside', role: 'WAITER', pass: 'waiter123', outletId: mikocheni.id },
+    { email: 'kitchen.mikocheni@lounge.com', name: 'Juma Kitchen', role: 'WAITER', pass: 'waiter123', outletId: mikocheni.id },
+    { email: 'barlady.mikocheni@lounge.com', name: 'Rehema Bar Lady', role: 'WAITER', pass: 'waiter123', outletId: mikocheni.id },
   ]
   for (const u of users) {
     await prisma.user.upsert({
