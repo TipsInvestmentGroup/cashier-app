@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
  * POST /api/pos/stock-requests — a counter out of stock asks another counter
  * to supply a product (e.g. VIP asking the Main Drinks Counter). Which
  * counter can ask which is fixed by the requester's position — see
- * STOCK_REQUEST_ROUTES. body: { productName, note? }
+ * STOCK_REQUEST_ROUTES. body: { productId, quantity?, note? }. Product name
+ * is looked up server-side (not trusted from the client) and snapshotted.
  */
 export async function POST(req: NextRequest) {
   const payload = getAuthUser(req)
@@ -49,17 +50,24 @@ export async function POST(req: NextRequest) {
   const outletId = payload.outletId
   if (!outletId) return NextResponse.json({ error: 'No outlet' }, { status: 400 })
 
-  const { productName, note } = await req.json().catch(() => ({}))
-  if (!productName || typeof productName !== 'string' || !productName.trim()) {
-    return NextResponse.json({ error: 'productName required' }, { status: 400 })
+  const { productId, quantity, note } = await req.json().catch(() => ({}))
+  if (!productId || typeof productId !== 'string') {
+    return NextResponse.json({ error: 'productId required' }, { status: 400 })
   }
+  const qty = Number(quantity)
+  if (!Number.isFinite(qty) || qty <= 0) return NextResponse.json({ error: 'quantity must be a positive number' }, { status: 400 })
+
+  const product = await prisma.product.findUnique({ where: { id: productId }, select: { name: true, isActive: true } })
+  if (!product || !product.isActive) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
   const request = await prisma.posStockRequest.create({
     data: {
       outletId,
       fromCounter: route.from,
       toCounter: route.to,
-      productName: productName.trim().slice(0, 200),
+      productId,
+      productName: product.name,
+      quantity: qty,
       note: typeof note === 'string' && note.trim() ? note.trim().slice(0, 300) : null,
       requestedById: payload.userId,
       requestedByName: payload.name,
@@ -76,7 +84,7 @@ export async function POST(req: NextRequest) {
     await Promise.all(suppliers.map((s) =>
       sendPushToUser(s.id, {
         title: '🔄 Ombi la bidhaa',
-        body: `${request.fromCounter} inaomba: ${request.productName}`,
+        body: `${request.fromCounter} inaomba: ${request.quantity} x ${request.productName}`,
         url: '/pos/counter',
       }).catch((err) => console.error('[push] stock request notify failed for', s.id, err))
     ))

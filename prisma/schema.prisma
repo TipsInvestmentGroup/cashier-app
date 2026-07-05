@@ -645,7 +645,9 @@ model PosStockRequest {
   outlet          Outlet    @relation(fields: [outletId], references: [id])
   fromCounter     String    // VIP | MAIN — counter that's out of stock and asking
   toCounter       String    // MAIN | VIP — counter being asked to supply
-  productName     String
+  productId       String
+  productName     String    // snapshot at request time (price/name may change later)
+  quantity        Float     @default(1)
   note            String?
   status          String    @default("PENDING") // PENDING | FULFILLED
   requestedById   String

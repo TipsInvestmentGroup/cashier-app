@@ -41,11 +41,14 @@ interface Group {
 interface StockRequest {
   id: string
   productName: string
+  quantity: number
   note: string | null
   status: string
   requestedByName: string
   createdAt: string
 }
+
+interface ProductOption { id: string; name: string; category: string | null }
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return <button onClick={onClick} className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${on ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-400'}`}>{label}</button>
@@ -111,8 +114,10 @@ function CounterView() {
   const [flash, setFlash] = useState(false)
   const [newOrders, setNewOrders] = useState<Set<string>>(new Set())
   const [stockRequests, setStockRequests] = useState<StockRequest[]>([])
+  const [products, setProducts] = useState<ProductOption[]>([])
   const [showRequestForm, setShowRequestForm] = useState(false)
-  const [requestProduct, setRequestProduct] = useState('')
+  const [requestProductId, setRequestProductId] = useState('')
+  const [requestQty, setRequestQty] = useState(1)
   const [requestNote, setRequestNote] = useState('')
   const [sendingRequest, setSendingRequest] = useState(false)
 
@@ -146,6 +151,15 @@ function CounterView() {
       .then(r => r.ok ? r.json() : [])
       .then((data: CounterDef[]) => setCounters(data))
   }, [token, user?.outlet?.id])
+
+  // Product list for the stock-request picker — only fetched when this
+  // staffer's counter is actually allowed to raise a request.
+  useEffect(() => {
+    if (!token || !user?.outlet?.id || !canRequestStock) return
+    fetch(`/api/pos/products?outletId=${user.outlet.id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { flat: ProductOption[] } | null) => { if (data) setProducts(data.flat) })
+  }, [token, user?.outlet?.id, canRequestStock])
 
   // Once we know which counters this staffer is allowed to see, lock the
   // active tab to one of them — if their current selection isn't in the
@@ -243,19 +257,19 @@ function CounterView() {
   }, [loadStockRequests])
 
   const sendStockRequest = useCallback(async () => {
-    if (!token || !requestProduct.trim()) return
+    if (!token || !requestProductId || requestQty <= 0) return
     setSendingRequest(true)
     const res = await fetch('/api/pos/stock-requests', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productName: requestProduct.trim(), note: requestNote.trim() || undefined }),
+      body: JSON.stringify({ productId: requestProductId, quantity: requestQty, note: requestNote.trim() || undefined }),
     })
     setSendingRequest(false)
     if (res.ok) {
-      setRequestProduct(''); setRequestNote(''); setShowRequestForm(false)
+      setRequestProductId(''); setRequestQty(1); setRequestNote(''); setShowRequestForm(false)
       loadStockRequests()
     }
-  }, [token, requestProduct, requestNote, loadStockRequests])
+  }, [token, requestProductId, requestQty, requestNote, loadStockRequests])
 
   const fulfillStockRequest = useCallback(async (id: string) => {
     if (!token) return
@@ -349,22 +363,31 @@ function CounterView() {
               </button>
             ) : (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-                <input value={requestProduct} onChange={(e) => setRequestProduct(e.target.value)} placeholder="Jina la bidhaa (mf. Brutal Fruit 275ml)"
-                  className="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:border-amber-400" />
+                <select value={requestProductId} onChange={(e) => setRequestProductId(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:border-amber-400 bg-white">
+                  <option value="">-- Chagua bidhaa --</option>
+                  {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-semibold text-amber-800">Idadi</label>
+                  <input type="number" min={1} value={requestQty}
+                    onChange={(e) => setRequestQty(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-20 px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:border-amber-400" />
+                </div>
                 <input value={requestNote} onChange={(e) => setRequestNote(e.target.value)} placeholder="Maelezo (hiari)"
                   className="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:border-amber-400" />
                 <div className="flex gap-2">
-                  <button onClick={sendStockRequest} disabled={sendingRequest || !requestProduct.trim()}
+                  <button onClick={sendStockRequest} disabled={sendingRequest || !requestProductId}
                     className="text-xs font-bold text-white bg-amber-600 px-3 py-1.5 rounded-lg hover:bg-amber-700 disabled:opacity-50">
                     {sendingRequest ? '...' : 'Tuma ombi'}
                   </button>
-                  <button onClick={() => { setShowRequestForm(false); setRequestProduct(''); setRequestNote('') }} className="text-xs font-semibold text-gray-500 px-3 py-1.5">Ghairi</button>
+                  <button onClick={() => { setShowRequestForm(false); setRequestProductId(''); setRequestQty(1); setRequestNote('') }} className="text-xs font-semibold text-gray-500 px-3 py-1.5">Ghairi</button>
                 </div>
               </div>
             )}
             {stockRequests.length > 0 && (
               <div className="mt-2 text-xs text-amber-700">
-                {stockRequests.map((r) => <div key={r.id}>⏳ {r.productName} — inasubiri Main Bar</div>)}
+                {stockRequests.map((r) => <div key={r.id}>⏳ {r.quantity} x {r.productName} — inasubiri Main Bar</div>)}
               </div>
             )}
           </div>
@@ -376,7 +399,7 @@ function CounterView() {
             {stockRequests.map((r) => (
               <div key={r.id} className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                 <div>
-                  <div className="text-sm font-semibold text-amber-900">👑 VIP inaomba: {r.productName}</div>
+                  <div className="text-sm font-semibold text-amber-900">👑 VIP inaomba: {r.quantity} x {r.productName}</div>
                   {r.note && <div className="text-xs text-amber-700">{r.note}</div>}
                   <div className="text-xs text-amber-500">{r.requestedByName}</div>
                 </div>
