@@ -91,8 +91,15 @@ export function generateWeekSchedule(opts: {
   config: SchedConfig
   weekDows: number[] // length 7
 }): GeneratedAssignment[] {
-  const { staff, unavailable, config, weekDows } = opts
+  const { staff, unavailable, weekDows } = opts
   if (staff.length === 0) return []
+
+  // Clamp defensively here too, not just at the API route that currently
+  // calls this — daysOffPerWeek=7 would mark every staffer "resting" every
+  // day of the week (nobody ever gets scheduled, with no error), and this
+  // function is exported/reusable, so a future direct caller shouldn't have
+  // to remember to re-implement the route's clamp.
+  const config = { ...opts.config, daysOffPerWeek: Math.min(6, Math.max(0, Math.round(opts.config.daysOffPerWeek))) }
 
   // Normalize performance to 0..1 within the outlet (baseline 0.5 if all flat).
   const maxPerf = Math.max(0, ...staff.map((s) => s.perf))
@@ -135,7 +142,12 @@ export function generateWeekSchedule(opts: {
 
     const peakW = peak === 'EVENING' ? eW : mW
     const offW = off === 'EVENING' ? eW : mW
-    let peakCount = Math.round((working.length * peakW) / (peakW + offW))
+    // Both weights can be saved as 0 (a manager zeroing out traffic weights in
+    // the config modal) — dividing by (peakW + offW) === 0 would produce NaN
+    // and silently break the "at least one on peak" guarantee below. Fall
+    // back to an even split when there's no usable weight signal.
+    const totalW = peakW + offW
+    let peakCount = totalW > 0 ? Math.round((working.length * peakW) / totalW) : Math.ceil(working.length / 2)
     peakCount = Math.min(working.length, Math.max(1, peakCount)) // at least one on peak
 
     // Forced placements from per-shift unavailability.

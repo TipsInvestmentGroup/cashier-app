@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { canActOnOrder } from '@/lib/pos-close'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -33,6 +34,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!payload) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
   const { id } = await params
+  const existing = await prisma.posOrder.findUnique({ where: { id }, select: { outletId: true } })
+  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!canActOnOrder(payload, existing)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   const body = await req.json()
 
   const BILL_TYPES = ['CUSTOMER', 'ADMIN', 'DIRECTOR', 'DJ', 'TIPS', 'STAFF']

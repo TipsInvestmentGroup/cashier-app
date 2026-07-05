@@ -2,14 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
-import { settlePosOrder } from '@/lib/pos-close'
+import { settlePosOrder, canActOnOrder } from '@/lib/pos-close'
 
 type Params = { params: Promise<{ id: string }> }
 
 const METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = prisma as any
 
 /**
  * POST /api/pos/orders/[id]/pay — record a (possibly partial) payment.
@@ -30,35 +27,48 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!(amount > 0)) return NextResponse.json({ error: 'Weka kiasi sahihi' }, { status: 400 })
   if (!METHODS.includes(method)) return NextResponse.json({ error: 'Njia ya malipo si sahihi' }, { status: 400 })
 
-  const order = await prisma.posOrder.findUnique({ where: { id: orderId } })
-  if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
-  if (order.status === 'CLOSED' || order.status === 'CANCELLED')
-    return NextResponse.json({ error: 'Order is closed' }, { status: 400 })
+  const orderForAuth = await prisma.posOrder.findUnique({ where: { id: orderId }, select: { outletId: true } })
+  if (!orderForAuth) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+  if (!canActOnOrder(payload, orderForAuth)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const net = roundMoney(order.totalAmount - order.discount)
-  const balance = roundMoney(net - order.paidAmount)
-  if (amount > balance + 0.5)
-    return NextResponse.json({ error: `Kiasi kinazidi baki (${balance.toLocaleString()})` }, { status: 400 })
+  try {
+    // Everything below runs in one transaction, re-reading paidAmount fresh
+    // inside it — SQLite serializes concurrent transactions, so two
+    // simultaneous partial payments can no longer both read a stale balance
+    // and both think they're settling the order (previously a real race).
+    const result = await prisma.$transaction(async (tx) => {
+      const order = await tx.posOrder.findUnique({ where: { id: orderId } })
+      if (!order) throw new Error('NOT_FOUND')
+      if (order.status === 'CLOSED' || order.status === 'CANCELLED') throw new Error('ALREADY_CLOSED')
 
-  const payment = await db.posPayment.create({
-    data: {
-      orderId, amount, method,
-      receivedById: payload.userId, receivedByName: payload.name,
-      note: body.note || null,
-    },
-  })
+      const net = roundMoney(order.totalAmount - order.discount)
+      const balance = roundMoney(net - order.paidAmount)
+      if (amount > balance + 0.5) throw new Error(`OVER_BALANCE:${balance}`)
 
-  const newPaid = roundMoney(order.paidAmount + amount)
-  const settled = newPaid >= net - 0.5
+      const payment = await tx.posPayment.create({
+        data: { orderId, amount, method, receivedById: payload.userId, receivedByName: payload.name, note: body.note || null },
+      })
 
-  if (settled) {
-    // Mixed methods across partial payments → record MIXED on the order.
-    const all = await db.posPayment.findMany({ where: { orderId }, select: { method: true } })
-    const methods = new Set(all.map((p: { method: string }) => p.method))
-    await settlePosOrder({ orderId, paymentMethod: methods.size > 1 ? 'MIXED' : method, paidAmount: newPaid, userId: payload.userId })
-  } else {
-    await prisma.posOrder.update({ where: { id: orderId }, data: { paidAmount: newPaid } })
+      const newPaid = roundMoney(order.paidAmount + amount)
+      const settled = newPaid >= net - 0.5
+
+      if (settled) {
+        const all = await tx.posPayment.findMany({ where: { orderId }, select: { method: true } })
+        const methods = new Set(all.map((p: { method: string }) => p.method))
+        await settlePosOrder({ orderId, paymentMethod: methods.size > 1 ? 'MIXED' : method, paidAmount: newPaid, userId: payload.userId }, tx)
+      } else {
+        await tx.posOrder.update({ where: { id: orderId }, data: { paidAmount: newPaid } })
+      }
+
+      return { payment, paidAmount: newPaid, balance: roundMoney(net - newPaid), settled }
+    })
+
+    return NextResponse.json({ ok: true, ...result }, { status: 201 })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : ''
+    if (msg === 'NOT_FOUND') return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+    if (msg === 'ALREADY_CLOSED') return NextResponse.json({ error: 'Order is closed' }, { status: 400 })
+    if (msg.startsWith('OVER_BALANCE:')) return NextResponse.json({ error: `Kiasi kinazidi baki (${Number(msg.split(':')[1]).toLocaleString()})` }, { status: 400 })
+    throw err
   }
-
-  return NextResponse.json({ ok: true, payment, paidAmount: newPaid, balance: roundMoney(net - newPaid), settled }, { status: 201 })
 }

@@ -69,12 +69,18 @@ export async function PATCH(req: NextRequest) {
       })
       if (order) {
         const tableLabel = order.table ? `Meza ${order.table.number}${order.table.label ? ` — ${order.table.label}` : ''}` : order.orderNo
-        // Best-effort — never block the counter action on push delivery, but
-        // log failures so they're visible in Vercel's function logs.
+        // Best-effort — never block the counter action on push delivery. Note
+        // sendPushToUser never rejects (it catches per-subscription errors
+        // internally), so the real failure information is in its resolved
+        // result, not in a caught exception — must inspect .then, not just
+        // .catch, or every VAPID-misconfigured/delivery failure here (the one
+        // unattended, real "order ready" trigger) would be invisible.
         sendPushToUser(order.waiterId, {
           title: '✅ Tayari kuchukua',
           body: `${tableLabel} — bidhaa zipo tayari kwenye counter`,
           url: `/pos/order/${item.orderId}`,
+        }).then((result) => {
+          if (result.failed.length > 0) console.error(`[push] order ${item.orderId} ready-alert: ${result.sent}/${result.attempted} delivered`, result.failed)
         }).catch((err) => console.error('[push] sendPushToUser threw for order', item.orderId, err))
       }
     }

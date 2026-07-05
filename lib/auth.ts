@@ -3,6 +3,14 @@ import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { NextRequest } from 'next/server'
 
+// A missing JWT_SECRET in production means every token is signed with this
+// well-known string — anyone could forge an ADMIN token and bypass all
+// authorization in the app. Fail loudly rather than run silently insecure;
+// only fall back for local dev, where this file is imported long before any
+// request is actually signed/verified.
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET is not set in production — refusing to start with a guessable auth secret. Set JWT_SECRET in your deployment environment.')
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret'
 
 export interface JWTPayload {

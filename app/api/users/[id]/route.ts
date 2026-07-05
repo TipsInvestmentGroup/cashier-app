@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, hashPassword } from '@/lib/auth'
+import { VALID_ROLES } from '@/lib/shared-constants'
 
 const OWNER_EMAIL = process.env.NEXT_PUBLIC_OWNER_EMAIL || ''
 const PIN_RE = /^\d{4}$/
@@ -19,6 +20,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const body = await req.json()
   const { name, email, role, outletId, isActive, password, pin, position } = body
   if (pin && !PIN_RE.test(String(pin))) return NextResponse.json({ error: 'PIN must be exactly 4 digits' }, { status: 400 })
+  if (role !== undefined && !VALID_ROLES.includes(role)) return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = {}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, hashPassword } from '@/lib/auth'
+import { VALID_ROLES } from '@/lib/shared-constants'
 
 const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
 const isOwner = (email?: string) => !!OWNER_EMAIL && (email || '').toLowerCase() === OWNER_EMAIL
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
   if (user.role !== 'ADMIN' && !isOwner(user.email)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { name, email, password, role, outletId, pin, position } = await req.json()
+  if (!VALID_ROLES.includes(role)) return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
   if (pin && !PIN_RE.test(String(pin))) return NextResponse.json({ error: 'PIN must be exactly 4 digits' }, { status: 400 })
   const hashed = await hashPassword(password)
 

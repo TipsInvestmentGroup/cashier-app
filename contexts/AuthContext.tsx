@@ -63,6 +63,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const logout = () => {
+    // MyPos devices are shared per-counter — clean up this device's push
+    // subscription so it doesn't keep notifying whoever's logging out on
+    // behalf of whoever logs in next. Fire-and-forget: must not block/delay
+    // the actual logout even if this fails.
+    if (token) import('@/lib/push-client').then(({ unsubscribeFromPush }) => unsubscribeFromPush(token)).catch(() => {})
     setToken(null)
     setUser(null)
     localStorage.removeItem('cashier_token')

@@ -4,6 +4,11 @@ import { getAuthUser, readOutletScope } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
+// Matches the role gate already enforced on the base /api/cash-recon route —
+// this report endpoint had no role check at all, so any authenticated user
+// (not just those the UI intends) could call it directly.
+const ALLOWED_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
+
 /**
  * Cashier cash management report for a date range.
  * Each row = one daily cash reconciliation record, enriched with
@@ -13,6 +18,7 @@ import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!ALLOWED_ROLES.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const outletId = readOutletScope(user, searchParams.get('outletId'))

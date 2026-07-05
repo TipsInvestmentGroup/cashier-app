@@ -9,6 +9,7 @@ import { SearchBox } from '@/components/SearchBox'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { ExportBar } from '@/components/ExportBar'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
+import { CANCELLATION_APPROVERS } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 
@@ -46,7 +47,6 @@ export default function CancellationsPage() {
 
   const ownerEmail = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const myEmail = (user?.email || '').toLowerCase()
-  const CANCELLATION_APPROVERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
   const canApprove = CANCELLATION_APPROVERS.includes(myEmail) || (!!ownerEmail && myEmail === ownerEmail)
   const canCreate = user?.role === 'CASHIER' || myEmail === 'alphonce.mvungi@tips.co.tz' || (!!ownerEmail && myEmail === ownerEmail)
 

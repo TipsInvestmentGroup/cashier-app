@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { canActOnOrder } from '@/lib/pos-close'
+import { sendPushToUser } from '@/lib/push'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -12,6 +14,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const order = await prisma.posOrder.findUnique({ where: { id: orderId } })
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
+  if (!canActOnOrder(payload, order)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   if (order.status === 'CLOSED' || order.status === 'CANCELLED')
     return NextResponse.json({ error: 'Order is closed' }, { status: 400 })
 
@@ -71,7 +74,25 @@ export async function POST(req: NextRequest, { params }: Params) {
   const outstanding = await prisma.posOrderItem.count({
     where: { orderId, status: { in: ['PENDING', 'SENT'] } },
   })
-  await prisma.posOrder.update({ where: { id: orderId }, data: { status: outstanding > 0 ? 'SENT' : 'READY' } })
+  const newStatus = outstanding > 0 ? 'SENT' : 'READY'
+  await prisma.posOrder.update({ where: { id: orderId }, data: { status: newStatus } })
+
+  // This path can also produce a fresh READY (an all-DIRECT send, or a send
+  // that happens to clear the last outstanding item) — previously only
+  // counter/route.ts's PATCH handler fired the "ready to collect" push, so a
+  // READY reached via this route silently skipped the notification even
+  // though the waiter's screen picks it up fine via polling.
+  if (newStatus === 'READY' && order.status !== 'READY') {
+    const orderWithTable = await prisma.posOrder.findUnique({ where: { id: orderId }, select: { table: { select: { number: true, label: true } } } })
+    const tableLabel = orderWithTable?.table ? `Meza ${orderWithTable.table.number}${orderWithTable.table.label ? ` — ${orderWithTable.table.label}` : ''}` : order.orderNo
+    sendPushToUser(order.waiterId, {
+      title: '✅ Tayari kuchukua',
+      body: `${tableLabel} — bidhaa zipo tayari kwenye counter`,
+      url: `/pos/order/${orderId}`,
+    }).then((result) => {
+      if (result.failed.length > 0) console.error(`[push] order ${orderId} ready-alert (via send): ${result.sent}/${result.attempted} delivered`, result.failed)
+    }).catch((err) => console.error('[push] sendPushToUser threw for order', orderId, err))
+  }
 
   return NextResponse.json({ ok: true, sent: pendingItems.length, counters: Object.keys(byCounter) })
 }

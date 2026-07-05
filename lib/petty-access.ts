@@ -1,11 +1,9 @@
 import { prisma } from '@/lib/prisma'
+import { DEPT_FIXED_MANAGERS, PETTY_APPROVERS } from '@/lib/shared-constants'
 
 const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
 
-// Fixed users who can always manage Departments & Functions (besides the owner)
-// and who are the petty-cash approvers.
-export const DEPT_FIXED_MANAGERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
-export const PETTY_APPROVERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
+export { DEPT_FIXED_MANAGERS, PETTY_APPROVERS }
 // Default accounts allowed to SUBMIT a petty-cash request (used until the owner customises the list).
 export const DEFAULT_PETTY_REQUESTERS = [
   'bonzon@tips.co.tz',

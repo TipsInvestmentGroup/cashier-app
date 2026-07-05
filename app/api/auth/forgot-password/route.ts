@@ -26,7 +26,14 @@ export async function POST(req: NextRequest) {
         data: { resetToken: tokenHash, resetTokenExpiry: expiresAt },
       })
 
-      const resetLink = `${req.nextUrl.origin}/reset-password?token=${token}`
+      // Prefer a trusted, explicitly-configured base URL over the request's
+      // own origin — req.nextUrl.origin is derived from the incoming Host
+      // header, which (if the hosting platform doesn't strictly pin it) an
+      // attacker could forge to redirect the emailed reset link to a
+      // look-alike domain and capture the token. Falls back to the request
+      // origin only for local dev, where APP_URL usually isn't set.
+      const baseUrl = process.env.APP_URL || req.nextUrl.origin
+      const resetLink = `${baseUrl}/reset-password?token=${token}`
       const html = `
         <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
           <h2 style="color:#4f46e5">Reset your password</h2>
@@ -40,7 +47,12 @@ export async function POST(req: NextRequest) {
         </div>`
 
       const result = await sendMail({ to: [user.email], subject: 'Reset your Cashier Management password', html })
-      previewUrl = result.mode === 'ethereal' ? (result.previewUrl || undefined) : undefined
+      // Gated on NODE_ENV, not just the SMTP-configured check inside sendMail
+      // — if SMTP env vars were ever accidentally left unset in production,
+      // this response would otherwise hand back a live reset link/token to
+      // an unauthenticated caller for ANY email address, turning a
+      // misconfiguration into a full account-takeover vector.
+      previewUrl = process.env.NODE_ENV !== 'production' && result.mode === 'ethereal' ? (result.previewUrl || undefined) : undefined
 
       await prisma.auditLog.create({
         data: { userId: user.id, action: 'FORGOT_PASSWORD', entity: 'User', entityId: user.id, details: 'Password reset link requested' },
