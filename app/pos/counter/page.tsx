@@ -14,6 +14,16 @@ const COUNTER_ICONS: Record<string, string> = {
 }
 const REFRESH_MS = 5_000
 
+// Staff normally only work one physical station, so their Counter View is
+// locked to it — Abdul (VIP BAR) shouldn't see the Main Bar tab and vice
+// versa. Positions with no station mapping here (e.g. OUTSIDE STAFF) and all
+// management roles fall through to seeing every counter.
+const POSITION_COUNTERS: Record<string, string[]> = {
+  'VIP BAR': ['VIP'],
+  'BAR LADY': ['MAIN'],
+}
+const MANAGEMENT_ROLES = ['MANAGER', 'ADMIN', 'DIRECTOR']
+
 interface CounterDef { code: string; label: string; serviceModel: string }
 
 interface OrderItem {
@@ -109,17 +119,29 @@ function CounterView() {
   useEffect(() => { soundRef.current = soundOn }, [soundOn])
   useEffect(() => { autoPrintRef.current = autoPrint }, [autoPrint])
 
+  const visibleCounters = useMemo(() => {
+    if (!user || MANAGEMENT_ROLES.includes(user.role)) return counters
+    const allowed = user.position ? POSITION_COUNTERS[user.position] : undefined
+    if (!allowed) return counters
+    return counters.filter((c) => allowed.includes(c.code))
+  }, [counters, user])
+
   const counterLabel = counters.find((c) => c.code === activeCounter)?.label ?? activeCounter
 
   useEffect(() => {
     if (!token || !user?.outlet?.id) return
     fetch(`/api/pos/counters?outletId=${user.outlet.id}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : [])
-      .then((data: CounterDef[]) => {
-        setCounters(data)
-        setActiveCounter(prev => prev || data[0]?.code || '')
-      })
+      .then((data: CounterDef[]) => setCounters(data))
   }, [token, user?.outlet?.id])
+
+  // Once we know which counters this staffer is allowed to see, lock the
+  // active tab to one of them — if their current selection isn't in the
+  // visible set (or nothing's selected yet), default to the first visible one.
+  useEffect(() => {
+    if (visibleCounters.length === 0) return
+    setActiveCounter((prev) => (visibleCounters.some((c) => c.code === prev) ? prev : visibleCounters[0].code))
+  }, [visibleCounters])
 
   const beep = useCallback(() => {
     if (!soundRef.current) return
@@ -229,18 +251,24 @@ function CounterView() {
           </div>
         </div>
 
-        {/* Counter tabs */}
-        <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
-          {counters.map((c) => (
-            <button
-              key={c.code}
-              onClick={() => setActiveCounter(c.code)}
-              className={`flex-shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${activeCounter === c.code ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}
-            >
-              {COUNTER_ICONS[c.code] ?? '🔸'} {c.label}
-            </button>
-          ))}
-        </div>
+        {/* Counter tabs — hidden when the staffer is locked to a single station */}
+        {visibleCounters.length > 1 ? (
+          <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
+            {visibleCounters.map((c) => (
+              <button
+                key={c.code}
+                onClick={() => setActiveCounter(c.code)}
+                className={`flex-shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${activeCounter === c.code ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              >
+                {COUNTER_ICONS[c.code] ?? '🔸'} {c.label}
+              </button>
+            ))}
+          </div>
+        ) : visibleCounters.length === 1 ? (
+          <div className="mb-4 px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-50 text-indigo-700 inline-block">
+            {COUNTER_ICONS[visibleCounters[0].code] ?? '🔸'} {visibleCounters[0].label}
+          </div>
+        ) : null}
 
         {loading ? (
           <div className="text-center py-16 text-gray-400">Inapakia...</div>
