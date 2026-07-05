@@ -5,6 +5,8 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
 import { PushEnableBanner } from '@/components/PushEnableBanner'
+import { apiFetch, NetworkError, createLocalOrder } from '@/lib/offline-queue'
+import { getWithCache } from '@/lib/offline-cache'
 
 interface TableOrder {
   id: string
@@ -66,19 +68,25 @@ function TableFloor() {
     } catch { /* audio blocked — ignore */ }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Falls back to the last-cached table list on a genuine network failure so
+  // a brief WiFi drop doesn't leave the Floor Map blank — a real server
+  // rejection still surfaces normally (getWithCache only masks NetworkError).
   const loadTables = useCallback(async () => {
     if (!token) return
     const url = outletId ? `/api/pos/tables?outletId=${outletId}` : '/api/pos/tables'
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-    if (res.ok) {
-      const data: PosTable[] = await res.json()
+    try {
+      const { data } = await getWithCache<PosTable[]>(`tables_${outletId}`, async () => {
+        const res = await apiFetch(url, { headers: { Authorization: `Bearer ${token}` } })
+        if (!res.ok) throw new Error('Failed to load tables')
+        return res.json()
+      })
       const myReady = data.flatMap(t => t.orders).filter(o => o.status === 'READY' && o.waiterId === myIdRef.current)
       const fresh = myReady.filter(o => !readySeenRef.current.has(o.id))
       if (!firstLoadRef.current && fresh.length > 0) beep()
       myReady.forEach(o => readySeenRef.current.add(o.id))
       firstLoadRef.current = false
       setTables(data)
-    }
+    } catch { /* real rejection or no cache yet — leave current state as-is */ }
     setLoading(false)
   }, [token, outletId, beep])
 
@@ -89,9 +97,12 @@ function TableFloor() {
   useEffect(() => {
     if (urlShiftId) { setShiftId(urlShiftId); return }
     if (!token || !outletId) return
-    fetch(`/api/pos/shifts?outletId=${outletId}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : [])
-      .then((data: Shift[]) => { const open = data.find(s => !s.closedAt); if (open) setShiftId(open.id) })
+    getWithCache<Shift[]>(`shifts_${outletId}`, async () => {
+      const res = await apiFetch(`/api/pos/shifts?outletId=${outletId}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error('Failed to load shifts')
+      return res.json()
+    })
+      .then(({ data }) => { const open = data.find(s => !s.closedAt); if (open) setShiftId(open.id) })
       .catch(() => {})
   }, [urlShiftId, token, outletId])
 
@@ -119,7 +130,7 @@ function TableFloor() {
     // Create a new order for this table
     setBusy(table.id)
     try {
-      const res = await fetch('/api/pos/orders', {
+      const res = await apiFetch('/api/pos/orders', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ tableId: table.id, shiftId, outletId }),
@@ -131,8 +142,19 @@ function TableFloor() {
         const err = await res.json().catch(() => ({}))
         alert(err.error ?? 'Imeshindikana kufungua meza — jaribu tena.')
       }
-    } catch {
-      alert('Tatizo la mtandao — jaribu tena.')
+    } catch (err) {
+      if (err instanceof NetworkError) {
+        // No connection right now — open the table locally and queue the
+        // create; it'll sync automatically once back online (see
+        // lib/offline-queue.ts). The order screen shows an offline badge
+        // until then and blocks payment until it's a real synced order.
+        const localOrderId = await createLocalOrder({
+          tableId: table.id, shiftId, outletId, tableNumber: table.number, tableLabel: table.label,
+        })
+        router.push(`/pos/order/${localOrderId}`)
+      } else {
+        alert('Tatizo la mtandao — jaribu tena.')
+      }
     }
     setBusy(null)
   }

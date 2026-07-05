@@ -6,6 +6,7 @@ import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
 import { POSITION_COUNTERS, MANAGEMENT_ROLES, STOCK_REQUEST_ROUTES, SUPPLIER_POSITION } from '@/lib/shared-constants'
+import { apiFetch, NetworkError, enqueueMarkPrepared, getChainState } from '@/lib/offline-queue'
 
 // Outlets can have different physical counter setups (e.g. Mikocheni's Main
 // Bar + VIP + Shisha + Kitchen), so the tab list is fetched per-outlet (see
@@ -122,6 +123,7 @@ function CounterView() {
   const [requestQty, setRequestQty] = useState('1') // kept as text so the field can be cleared while typing on phone/PC
   const [requestNote, setRequestNote] = useState('')
   const [sendingRequest, setSendingRequest] = useState(false)
+  const [pendingMarks, setPendingMarks] = useState<string[]>([])
 
   const seenRef = useRef<Set<string>>(new Set())
   const firstLoadRef = useRef(true)
@@ -243,6 +245,23 @@ function CounterView() {
     return () => clearInterval(t)
   }, [load])
 
+  // Prunes pendingMarks once each queued MARK_PREPARED action actually syncs
+  // (chain length drops to zero) — drives the "N zinasubiri kutumwa" note.
+  useEffect(() => {
+    if (pendingMarks.length === 0) return
+    let cancelled = false
+    const check = async () => {
+      const stillPending: string[] = []
+      for (const itemId of pendingMarks) {
+        const state = await getChainState(itemId)
+        if (state !== 'synced') stillPending.push(itemId)
+      }
+      if (!cancelled) setPendingMarks(stillPending)
+    }
+    const t = setInterval(check, REFRESH_MS)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [pendingMarks])
+
   const groups = useMemo(() => groupItems(items), [items])
 
   const outletId = user?.outlet?.id
@@ -293,12 +312,25 @@ function CounterView() {
     if (!token) return
     setMarking(itemId)
     setItems((prev) => prev.filter((i) => i.id !== itemId))
-    const res = await fetch('/api/pos/counter', {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId }),
-    })
-    if (res.ok) setDoneToday((n) => n + 1); else load()
+    try {
+      const res = await apiFetch('/api/pos/counter', {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId }),
+      })
+      if (res.ok) setDoneToday((n) => n + 1)
+      else load()
+    } catch (err) {
+      if (err instanceof NetworkError) {
+        // Leave it optimistically removed — queue the mark and let it sync
+        // automatically once back online (see lib/offline-queue.ts). A
+        // benign "already marked" response on flush is treated as success.
+        await enqueueMarkPrepared(itemId)
+        setPendingMarks((prev) => [...prev, itemId])
+      } else {
+        load()
+      }
+    }
     setMarking(null)
   }, [token, load])
 
@@ -361,6 +393,12 @@ function CounterView() {
             {COUNTER_ICONS[visibleCounters[0].code] ?? '🔸'} {visibleCounters[0].label}
           </div>
         ) : null}
+
+        {pendingMarks.length > 0 && (
+          <div className="mb-4 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            📴 {pendingMarks.length} zinasubiri kutumwa — tayari zimeondolewa hapa, zitasajiliwa mtandao utakaporudi.
+          </div>
+        )}
 
         {/* Stock-transfer: this counter requesting backup stock from its paired counter */}
         {canRequestStock && (

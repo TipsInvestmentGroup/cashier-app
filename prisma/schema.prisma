@@ -581,6 +581,11 @@ model PosOrder {
   closedAt      DateTime?
   closedBy      String?   // userId
   notes         String?
+  // Offline-queue idempotency key (see lib/offline-queue.ts) — lets a retried
+  // "create order" sync request return the already-created row instead of
+  // making a duplicate if the first attempt actually succeeded but its
+  // response never reached the client. Null for orders created while online.
+  clientRequestId String? @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -630,6 +635,8 @@ model PosOrderItem {
   preparedAt  DateTime? // when the counter marked it ready/served
   preparedBy  String?   // userId of counter staff who marked it ready
   cancelledBy String?  // userId
+  // Offline-queue idempotency key — see PosOrder.clientRequestId.
+  clientRequestId String? @unique
   createdAt   DateTime @default(now())
 
   @@index([orderId])

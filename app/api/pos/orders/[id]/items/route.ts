@@ -11,8 +11,21 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!payload) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
   const { id: orderId } = await params
-  const { productId, quantity = 1, extras = [], counterCode } = await req.json()
+  const { productId, quantity = 1, extras = [], counterCode, clientRequestId } = await req.json()
   if (!productId) return NextResponse.json({ error: 'productId required' }, { status: 400 })
+
+  // Offline-queue retry: if this exact item was already added (the first
+  // attempt succeeded server-side but its response never reached the client
+  // before the connection dropped again), return it instead of adding a
+  // duplicate line item.
+  if (clientRequestId) {
+    const existingByKey = await prisma.posOrderItem.findUnique({ where: { clientRequestId } })
+    if (existingByKey) {
+      const items = await prisma.posOrderItem.findMany({ where: { orderId, status: { not: 'CANCELLED' } }, select: { amount: true } })
+      const totalAmount = roundMoney(items.reduce((s: number, i: { amount: number }) => s + i.amount, 0))
+      return NextResponse.json({ item: existingByKey, totalAmount })
+    }
+  }
 
   const order = await prisma.posOrder.findUnique({ where: { id: orderId } })
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
@@ -33,18 +46,32 @@ export async function POST(req: NextRequest, { params }: Params) {
   const qty = Number(quantity)
   const amount = roundMoney(product.sellingPrice * qty)
 
-  const item = await prisma.posOrderItem.create({
-    data: {
-      orderId,
-      productId,
-      productName: product.name,
-      unitPrice: product.sellingPrice,
-      quantity: qty,
-      amount,
-      extras: extras.length ? JSON.stringify(extras) : null,
-      counterCode: counterCode ?? null,
-    },
-  })
+  let item
+  try {
+    item = await prisma.posOrderItem.create({
+      data: {
+        orderId,
+        productId,
+        productName: product.name,
+        unitPrice: product.sellingPrice,
+        quantity: qty,
+        amount,
+        extras: extras.length ? JSON.stringify(extras) : null,
+        counterCode: counterCode ?? null,
+        clientRequestId: clientRequestId ?? null,
+      },
+    })
+  } catch (err) {
+    // clientRequestId collision — a concurrent request already created this
+    // exact item (the pre-check above missed it in a tight race).
+    if (clientRequestId && err instanceof Error && err.message.includes('clientRequestId')) {
+      const existingByKey = await prisma.posOrderItem.findUnique({ where: { clientRequestId } })
+      if (existingByKey) item = existingByKey
+      else throw err
+    } else {
+      throw err
+    }
+  }
 
   const items = await prisma.posOrderItem.findMany({
     where: { orderId, status: { not: 'CANCELLED' } },

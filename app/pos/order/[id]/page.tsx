@@ -7,6 +7,12 @@ import { buildBillHtml, printHtml, BILL_TYPES, BILL_TYPE_LABELS } from '@/lib/po
 import { useUnlockedAudio } from '@/lib/audio-unlock'
 import { PushEnableBanner } from '@/components/PushEnableBanner'
 import { allowedCountersForCategory } from '@/lib/shared-constants'
+import {
+  apiFetch, NetworkError, addLocalItem, removeLocalItem, enqueueSendOrder,
+  onQueueEvent, getChainState, getChainError, discardLocalOrder, retryChain,
+} from '@/lib/offline-queue'
+import { getLocalOrder, type LocalOrder } from '@/lib/offline-db'
+import { getWithCache } from '@/lib/offline-cache'
 
 const ORDER_POLL_MS = 5_000
 
@@ -83,12 +89,51 @@ interface Product {
   sellingPrice: number
 }
 
+/** Renders a still-unsynced LocalOrder (see lib/offline-db.ts) in the same
+ *  shape as a real server Order, so the rest of this screen doesn't need a
+ *  separate code path for the "never reached the server yet" case. */
+function localOrderToOrderShape(local: LocalOrder, waiterName: string): Order {
+  const items: OrderItem[] = local.items.map((i) => ({
+    id: i.localItemId,
+    productName: i.productName,
+    unitPrice: i.unitPrice,
+    quantity: i.quantity,
+    amount: i.amount,
+    extras: i.extras.length ? JSON.stringify(i.extras) : null,
+    counterCode: i.counterCode,
+    status: 'PENDING',
+    sentAt: null,
+    preparedAt: null,
+    preparedByName: null,
+  }))
+  return {
+    id: local.localOrderId,
+    orderNo: '— bado haijatumwa —',
+    status: 'OPEN',
+    billType: 'CUSTOMER',
+    totalAmount: items.reduce((s, i) => s + i.amount, 0),
+    discount: 0,
+    paidAmount: 0,
+    createdAt: new Date(local.createdAt).toISOString(),
+    outletId: local.outletId,
+    table: local.tableId ? { number: local.tableNumber ?? 0, label: local.tableLabel ?? null } : null,
+    waiter: { name: waiterName },
+    shift: { name: '' },
+    outlet: null,
+    items,
+    payments: [],
+  }
+}
+
 export default function OrderPage() {
   const { token, user } = useAuth()
   const router = useRouter()
   const { id: orderId } = useParams<{ id: string }>()
+  const isLocalOrder = orderId.startsWith('local-')
 
   const [order, setOrder] = useState<Order | null>(null)
+  const [chainState, setChainState] = useState<'synced' | 'pending' | 'blocked'>('synced')
+  const [chainError, setChainError] = useState<string | undefined>()
   const [products, setProducts] = useState<Record<string, Product[]>>({})
   const [extras, setExtras] = useState<string[]>([])
   const [counters, setCounters] = useState<Counter[]>([])
@@ -128,6 +173,14 @@ export default function OrderPage() {
   }, [selectedProduct, availableCounters])
 
   const loadOrder = useCallback(async () => {
+    // A never-synced order lives only in IndexedDB until its CREATE_ORDER
+    // action flushes — see lib/offline-queue.ts's 'order-resolved' handling
+    // below for the transition to a real, server-backed order.
+    if (isLocalOrder) {
+      const local = await getLocalOrder(orderId)
+      if (local) setOrder(localOrderToOrderShape(local, user?.name ?? ''))
+      return
+    }
     if (!token) return
     const res = await fetch(`/api/pos/orders/${orderId}`, { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) return
@@ -146,26 +199,32 @@ export default function OrderPage() {
     }
     prevStatusRef.current = data.status
     setOrder(data)
-  }, [token, orderId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, orderId, isLocalOrder, user?.name]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMenu = useCallback(async () => {
     if (!token) return
-    const res = await fetch('/api/pos/products', { headers: { Authorization: `Bearer ${token}` } })
-    if (res.ok) {
-      const data = await res.json()
+    try {
+      const { data } = await getWithCache<{ grouped: Record<string, Product[]> }>('products', async () => {
+        const res = await apiFetch('/api/pos/products', { headers: { Authorization: `Bearer ${token}` } })
+        if (!res.ok) throw new Error('Failed to load products')
+        return res.json()
+      })
       setProducts(data.grouped)
       const cats = Object.keys(data.grouped)
       if (cats.length > 0) setActiveCategory(cats[0])
-    }
+    } catch { /* real rejection or no cache yet */ }
   }, [token])
 
   const loadExtras = useCallback(async () => {
     if (!token) return
-    const res = await fetch('/api/pos/extras', { headers: { Authorization: `Bearer ${token}` } })
-    if (res.ok) {
-      const data: { name: string }[] = await res.json()
+    try {
+      const { data } = await getWithCache<{ name: string }[]>('extras', async () => {
+        const res = await apiFetch('/api/pos/extras', { headers: { Authorization: `Bearer ${token}` } })
+        if (!res.ok) throw new Error('Failed to load extras')
+        return res.json()
+      })
       setExtras(data.map(e => e.name))
-    }
+    } catch { /* real rejection or no cache yet */ }
   }, [token])
 
   useEffect(() => {
@@ -174,17 +233,58 @@ export default function OrderPage() {
     loadExtras()
   }, [loadOrder, loadMenu, loadExtras])
 
+  // Once this local order's CREATE_ORDER syncs, fetch the authoritative
+  // server copy and swap the URL to the real id via router.replace (not
+  // push) — no full navigation/remount, just the URL catching up to reality.
+  useEffect(() => {
+    return onQueueEvent((event) => {
+      if (event.type === 'order-resolved' && event.localOrderId === orderId && token) {
+        fetch(`/api/pos/orders/${event.realOrderId}`, { headers: { Authorization: `Bearer ${token}` } })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (data) {
+              setOrder(data)
+              router.replace(`/pos/order/${event.realOrderId}`, { scroll: false })
+            }
+          })
+          .catch(() => {})
+      }
+      if (event.type === 'chain-blocked' && event.chainKey === orderId) {
+        setChainState('blocked')
+        setChainError(event.error)
+      }
+    })
+  }, [orderId, token, router])
+
+  // Reflects this order's current queue state (pending sync / blocked /
+  // fully synced) in the offline badge — checked on an interval since events
+  // only fire on transitions, not on page (re)load with pre-existing state.
+  useEffect(() => {
+    let cancelled = false
+    const check = () => {
+      getChainState(orderId).then((s) => { if (!cancelled) setChainState(s) })
+      getChainError(orderId).then((e) => { if (!cancelled) setChainError(e) })
+    }
+    check()
+    const t = setInterval(check, ORDER_POLL_MS)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [orderId])
+
   // Counter list is outlet-specific (Mikocheni's Main Bar/VIP/Shisha/Kitchen
   // differs from other outlets), so it's fetched once the order tells us
   // which outlet it belongs to, rather than hardcoded.
   useEffect(() => {
     if (!token || !order?.outletId) return
-    fetch(`/api/pos/counters?outletId=${order.outletId}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : [])
-      .then((data: Counter[]) => {
+    getWithCache<Counter[]>(`counters_${order.outletId}`, async () => {
+      const res = await apiFetch(`/api/pos/counters?outletId=${order.outletId}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error('Failed to load counters')
+      return res.json()
+    })
+      .then(({ data }) => {
         setCounters(data)
         setSelectedCounter(prev => prev || data[0]?.code || '')
       })
+      .catch(() => {})
   }, [token, order?.outletId])
 
   // Keep watching this order while it's still active — this is the screen a
@@ -201,63 +301,120 @@ export default function OrderPage() {
     if (!selectedProduct || !token) return
     if (!selectedCounter) { alert('Counters bado zinapakia — subiri sekunde chache.'); return }
     setBusy(true)
-    const res = await fetch(`/api/pos/orders/${orderId}/items`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        productId: selectedProduct.id,
-        quantity: qty,
-        extras: selectedExtras,
-        counterCode: selectedCounter,
-      }),
-    })
-    if (res.ok) {
+    const itemPayload = {
+      productId: selectedProduct.id, productName: selectedProduct.name, unitPrice: selectedProduct.sellingPrice,
+      quantity: qty, amount: selectedProduct.sellingPrice * qty, extras: selectedExtras, counterCode: selectedCounter,
+    }
+    if (isLocalOrder) {
+      // Never reached the server yet at all — add straight to the local
+      // order and its queued CREATE_ORDER chain (see lib/offline-queue.ts).
+      await addLocalItem(orderId, itemPayload)
       await loadOrder()
-      setSelectedProduct(null)
-      setSelectedExtras([])
-      setQty(1)
-      setTab('order')
+      setSelectedProduct(null); setSelectedExtras([]); setQty(1); setTab('order')
+      setBusy(false)
+      return
+    }
+    try {
+      const res = await apiFetch(`/api/pos/orders/${orderId}/items`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: itemPayload.productId, quantity: itemPayload.quantity, extras: itemPayload.extras, counterCode: itemPayload.counterCode }),
+      })
+      if (res.ok) {
+        await loadOrder()
+        setSelectedProduct(null); setSelectedExtras([]); setQty(1); setTab('order')
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error ?? 'Hitilafu')
+      }
+    } catch (err) {
+      if (err instanceof NetworkError) {
+        // The order already exists server-side; this one add-item call just
+        // couldn't reach it right now — queue it against the real order id,
+        // it'll sync automatically (see lib/offline-queue.ts).
+        await addLocalItem(orderId, itemPayload)
+        alert('📴 Hakuna mtandao — bidhaa imewekwa kwenye foleni, itatumwa yenyewe.')
+        setSelectedProduct(null); setSelectedExtras([]); setQty(1); setTab('order')
+      } else {
+        alert('Tatizo la mtandao — jaribu tena.')
+      }
     }
     setBusy(false)
   }
 
   const removeItem = async (itemId: string) => {
     if (!token) return
-    await fetch(`/api/pos/orders/${orderId}/items?itemId=${itemId}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    if (isLocalOrder) {
+      // Never left the device — nothing to undo server-side.
+      await removeLocalItem(orderId, itemId)
+      await loadOrder()
+      return
+    }
+    try {
+      const res = await apiFetch(`/api/pos/orders/${orderId}/items?itemId=${itemId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) alert('Imeshindikana kuondoa — jaribu tena.')
+    } catch (err) {
+      if (err instanceof NetworkError) alert('📴 Kuondoa bidhaa kunahitaji mtandao — jaribu tena.')
+    }
     loadOrder()
   }
 
   const sendOrder = async () => {
     if (!token) return
     setBusy(true)
-    const res = await fetch(`/api/pos/orders/${orderId}/send`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (res.ok) {
-      await loadOrder()
-      alert('✅ Imetumwa kwa counter!')
-    } else {
-      const err = await res.json()
-      alert(err.error ?? 'Hitilafu')
+    if (isLocalOrder) {
+      await enqueueSendOrder(orderId)
+      alert('📴 Hakuna mtandao — order itatumwa kwa counter yenyewe mtandao utakaporudi.')
+      setBusy(false)
+      return
+    }
+    try {
+      const res = await apiFetch(`/api/pos/orders/${orderId}/send`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        await loadOrder()
+        alert('✅ Imetumwa kwa counter!')
+      } else {
+        const err = await res.json()
+        alert(err.error ?? 'Hitilafu')
+      }
+    } catch (err) {
+      if (err instanceof NetworkError) {
+        await enqueueSendOrder(orderId)
+        alert('📴 Hakuna mtandao — itatumwa yenyewe mtandao utakaporudi.')
+      } else {
+        alert('Tatizo la mtandao — jaribu tena.')
+      }
     }
     setBusy(false)
   }
 
+  // Discount, bill-type, printing, and closing all require a real, synced
+  // order AND a live connection — never queued offline (payments-adjacent,
+  // see the offline-resilience scope decision). These wrap apiFetch so a
+  // transient network failure shows a clear message instead of failing
+  // silently or throwing uncaught, which is what happened here before.
   const applyDiscount = async () => {
     if (!token || !order) return
     const val = parseFloat(discountInput)
     if (isNaN(val) || val < 0) return
     setBusy(true)
-    await fetch(`/api/pos/orders/${orderId}`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ discount: val }),
-    })
-    await loadOrder()
+    try {
+      const res = await apiFetch(`/api/pos/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discount: val }),
+      })
+      if (!res.ok) { const err = await res.json().catch(() => ({})); alert(err.error ?? 'Hitilafu'); setBusy(false); return }
+      await loadOrder()
+    } catch (err) {
+      if (err instanceof NetworkError) alert('📴 Inahitaji mtandao — jaribu tena.')
+    }
     setDiscountModal(false)
     setDiscountInput('')
     setBusy(false)
@@ -268,11 +425,16 @@ export default function OrderPage() {
 
   const setBillType = async (billType: string) => {
     if (!token || !order) return
-    await fetch(`/api/pos/orders/${orderId}`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ billType }),
-    })
+    try {
+      const res = await apiFetch(`/api/pos/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ billType }),
+      })
+      if (!res.ok) { const err = await res.json().catch(() => ({})); alert(err.error ?? 'Hitilafu'); return }
+    } catch (err) {
+      if (err instanceof NetworkError) { alert('📴 Inahitaji mtandao — jaribu tena.'); return }
+    }
     loadOrder()
   }
 
@@ -289,24 +451,28 @@ export default function OrderPage() {
     const amt = parseFloat(payAmount)
     if (isNaN(amt) || amt <= 0) { alert('Weka kiasi sahihi'); return }
     setBusy(true)
-    const res = await fetch(`/api/pos/orders/${orderId}/pay`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount: amt, method: payMethod }),
-    })
-    const data = await res.json()
-    if (res.ok) {
-      if (data.settled) {
-        alert('✅ Bili imelipwa kamili — meza imefungwa!')
-        setPayModal(false)
-        await loadOrder()
+    try {
+      const res = await apiFetch(`/api/pos/orders/${orderId}/pay`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amt, method: payMethod }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        if (data.settled) {
+          alert('✅ Bili imelipwa kamili — meza imefungwa!')
+          setPayModal(false)
+          await loadOrder()
+        } else {
+          alert(`Malipo yamepokewa. Baki: TSh ${Number(data.balance).toLocaleString()}`)
+          setPayAmount('')
+          await loadOrder()
+        }
       } else {
-        alert(`Malipo yamepokewa. Baki: TSh ${Number(data.balance).toLocaleString()}`)
-        setPayAmount('')
-        await loadOrder()
+        alert(data.error ?? 'Hitilafu')
       }
-    } else {
-      alert(data.error ?? 'Hitilafu')
+    } catch (err) {
+      if (err instanceof NetworkError) alert('📴 Malipo yanahitaji mtandao — jaribu tena.')
     }
     setBusy(false)
   }
@@ -349,6 +515,36 @@ export default function OrderPage() {
             {isClosed ? 'Imefungwa' : order.status === 'READY' ? '✓ Tayari kuchukua' : pendingCount > 0 ? `${pendingCount} pending` : 'Imetumwa'}
           </span>
         </div>
+
+        {/* Offline-queue state — a still-unsynced order or a chain the server
+            genuinely rejected once reconnected (not a transient blip). */}
+        {chainState === 'pending' && (
+          <div className="mb-4 rounded-xl p-3 bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium text-center">
+            📴 Bado haijatumwa — itatuma yenyewe mtandao utakaporudi.
+          </div>
+        )}
+        {chainState === 'blocked' && (
+          <div className="mb-4 rounded-xl p-3 bg-rose-50 border border-rose-200 text-rose-800 text-sm">
+            <p className="font-bold mb-1">⚠️ Imeshindikana kutuma</p>
+            <p className="mb-2">{chainError ?? 'Hitilafu haijulikani.'}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => retryChain(orderId, () => token)}
+                className="text-xs font-semibold bg-rose-600 text-white px-3 py-1.5 rounded-lg hover:bg-rose-700"
+              >
+                🔄 Jaribu tena
+              </button>
+              {isLocalOrder && (
+                <button
+                  onClick={async () => { if (confirm('Futa order hii kabisa? Utaanza upya.')) { await discardLocalOrder(orderId); router.back() } }}
+                  className="text-xs font-semibold text-rose-700 border border-rose-300 px-3 py-1.5 rounded-lg hover:bg-rose-100"
+                >
+                  🗑 Futa na uanze upya
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {!isClosed && <PushEnableBanner />}
 
@@ -426,7 +622,7 @@ export default function OrderPage() {
                 <span>Punguzo</span>
                 <div className="flex items-center gap-2">
                   <span>{order.discount > 0 ? `− TSh ${order.discount.toLocaleString()}` : '—'}</span>
-                  {!isClosed && ['MANAGER', 'ADMIN'].includes(user?.role ?? '') && (
+                  {!isClosed && !isLocalOrder && ['MANAGER', 'ADMIN'].includes(user?.role ?? '') && (
                     <button onClick={() => { setDiscountInput(String(order.discount)); setDiscountModal(true) }} className="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full hover:bg-rose-200">
                       {order.discount > 0 ? 'Badilisha' : '+ Weka'}
                     </button>
@@ -458,19 +654,22 @@ export default function OrderPage() {
               <select
                 value={order.billType}
                 onChange={e => setBillType(e.target.value)}
-                disabled={isClosed}
+                disabled={isClosed || isLocalOrder}
                 className="flex-1 border-2 border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-indigo-400 disabled:bg-gray-50"
               >
                 {BILL_TYPES.map(t => <option key={t} value={t}>{BILL_TYPE_LABELS[t]}</option>)}
               </select>
               <button
                 onClick={printBill}
-                disabled={order.items.length === 0}
+                disabled={order.items.length === 0 || isLocalOrder}
                 className="bg-gray-800 text-white px-4 py-2 rounded-xl font-semibold text-sm hover:bg-gray-900 active:scale-95 transition-all disabled:opacity-40"
               >
                 🖨 {order.billType === 'CUSTOMER' ? 'Customer Bill' : 'In-House Bill'}
               </button>
             </div>
+            {isLocalOrder && (
+              <p className="text-xs text-amber-600 -mt-3 mb-4">📴 Punguzo, aina ya bili, na kuchapisha bili vinahitaji order isawazishwe kwanza.</p>
+            )}
 
             {/* Payments history */}
             {order.payments.length > 0 && (
@@ -566,12 +765,17 @@ export default function OrderPage() {
                         onClick={async () => {
                           if (!token || !confirm('Funga kama Signed Bill (deni)?')) return
                           setBusy(true)
-                          const res = await fetch(`/api/pos/orders/${orderId}/close`, {
-                            method: 'POST',
-                            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ paymentMethod: 'SIGNED', paidAmount: 0 }),
-                          })
-                          if (res.ok) { alert('✅ Imefungwa kama Signed Bill'); router.back() }
+                          try {
+                            const res = await apiFetch(`/api/pos/orders/${orderId}/close`, {
+                              method: 'POST',
+                              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ paymentMethod: 'SIGNED', paidAmount: 0 }),
+                            })
+                            if (res.ok) { alert('✅ Imefungwa kama Signed Bill'); router.back() }
+                            else { const err = await res.json().catch(() => ({})); alert(err.error ?? 'Hitilafu') }
+                          } catch (err) {
+                            if (err instanceof NetworkError) alert('📴 Kufunga bili kunahitaji mtandao — jaribu tena.')
+                          }
                           setBusy(false)
                         }}
                         disabled={busy}

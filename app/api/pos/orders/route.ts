@@ -28,11 +28,23 @@ export async function POST(req: NextRequest) {
   const payload = getAuthUser(req)
   if (!payload) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { tableId, shiftId, outletId: bodyOutletId } = await req.json()
+  const { tableId, shiftId, outletId: bodyOutletId, clientRequestId } = await req.json()
   if (!shiftId) return NextResponse.json({ error: 'shiftId required' }, { status: 400 })
 
   const outletId = payload.outletId ?? bodyOutletId
   if (!outletId) return NextResponse.json({ error: 'No outlet' }, { status: 400 })
+
+  // Offline-queue retry: if this exact create was already applied (e.g. the
+  // first attempt succeeded server-side but its response never reached the
+  // client before the connection dropped again), return the same order
+  // instead of creating a duplicate for the same table. The client compares
+  // the returned clientRequestId against its own to tell "this is genuinely
+  // my order" apart from the tableId short-circuit below returning someone
+  // ELSE's pre-existing order for that table.
+  if (clientRequestId) {
+    const existingByKey = await prisma.posOrder.findUnique({ where: { clientRequestId } })
+    if (existingByKey) return NextResponse.json(existingByKey)
+  }
 
   // If table already has an open order, return it
   if (tableId) {
@@ -68,10 +80,18 @@ export async function POST(req: NextRequest) {
     const orderNo = `ORD-${dateStr}-${String(count + 1 + attempt).padStart(3, '0')}`
     try {
       order = await prisma.posOrder.create({
-        data: { orderNo, outletId, tableId: tableId ?? null, shiftId, waiterId: payload.userId },
+        data: { orderNo, outletId, tableId: tableId ?? null, shiftId, waiterId: payload.userId, clientRequestId: clientRequestId ?? null },
       })
       break
     } catch (err) {
+      // A clientRequestId collision means a concurrent request already
+      // created this exact order (the pre-check above missed it in a tight
+      // race) — return that row instead of retrying with a new orderNo,
+      // which would never succeed since clientRequestId stays fixed.
+      if (clientRequestId && err instanceof Error && err.message.includes('clientRequestId')) {
+        const existingByKey = await prisma.posOrder.findUnique({ where: { clientRequestId } })
+        if (existingByKey) { order = existingByKey; break }
+      }
       if (err instanceof Error && err.message.includes('Unique') && attempt < 4) continue
       throw err
     }
