@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatDate } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-interface User { id: string; name: string; email: string; role: string; outlet?: { name: string } | null; isActive: boolean; createdAt: string }
+interface User { id: string; name: string; email: string; role: string; position: string | null; hasPin: boolean; outlet?: { name: string } | null; isActive: boolean; createdAt: string }
 interface Outlet { id: string; name: string }
 
 const ROLES = ['CASHIER', 'WAITER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -18,6 +18,8 @@ const ROLE_COLORS: Record<string, string> = {
   ACCOUNTANT: 'bg-green-100 text-green-700',
   MANAGER: 'bg-purple-100 text-purple-700', DIRECTOR: 'bg-orange-100 text-orange-700', ADMIN: 'bg-red-100 text-red-700',
 }
+// MyPOS floor role — shown on the staff PIN picker; informational only.
+const POSITIONS = ['OUTSIDE STAFF', 'BAR LADY', 'VIP BAR']
 
 export default function UsersPage() {
   const { request } = useApi()
@@ -30,7 +32,8 @@ export default function UsersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showPw, setShowPw] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true })
+  const [showPin, setShowPin] = useState(false)
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true, pin: '', position: '' })
 
   const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && (user?.email || '').toLowerCase() === OWNER_EMAIL
@@ -54,7 +57,7 @@ export default function UsersPage() {
     </AppShell>
   )
 
-  const resetForm = () => setForm({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true })
+  const resetForm = () => setForm({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true, pin: '', position: '' })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -76,7 +79,8 @@ export default function UsersPage() {
   const startEdit = (u: User) => {
     setEditingId(u.id)
     setShowPw(false)
-    setForm({ name: u.name, email: u.email, password: '', role: u.role, outletId: '', isActive: u.isActive })
+    setShowPin(false)
+    setForm({ name: u.name, email: u.email, password: '', role: u.role, outletId: '', isActive: u.isActive, pin: '', position: u.position || '' })
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -148,6 +152,33 @@ export default function UsersPage() {
                     {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </select>
                 </div>
+                {form.role === 'WAITER' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">MyPos Floor Role</label>
+                      <select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none">
+                        <option value="">-- Not set --</option>
+                        {POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">{editingId ? 'New MyPos PIN (optional)' : 'MyPos PIN (4 digits)'}</label>
+                      <div className="relative">
+                        <input type={showPin ? 'text' : 'password'} inputMode="numeric" pattern="[0-9]*" maxLength={4}
+                          value={form.pin} onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })}
+                          autoComplete="off"
+                          className="w-full px-4 py-3 pr-12 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none"
+                          placeholder={editingId ? 'Leave blank to keep current PIN' : 'e.g. 1234'} />
+                        <button type="button" onClick={() => setShowPin((s) => !s)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg" title={showPin ? 'Hide' : 'Show'}>
+                          {showPin ? '🙈' : '👁'}
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">Used on the MyPos terminal — tap name, enter PIN. Leave blank to sign in only via email/password.</p>
+                    </div>
+                  </>
+                )}
                 {editingId && (
                   <div className="flex items-center gap-2 pt-7">
                     <input id="isActive" type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} className="w-4 h-4" />
@@ -180,6 +211,7 @@ export default function UsersPage() {
                     <th className="px-5 py-3 font-semibold">Name</th>
                     <th className="px-5 py-3 font-semibold">Email</th>
                     <th className="px-5 py-3 font-semibold">Role</th>
+                    <th className="px-5 py-3 font-semibold">MyPos</th>
                     <th className="px-5 py-3 font-semibold">Outlet</th>
                     <th className="px-5 py-3 font-semibold">Status</th>
                     <th className="px-5 py-3 font-semibold">Created</th>
@@ -200,6 +232,14 @@ export default function UsersPage() {
                       <td className="px-5 py-4 text-gray-600">{u.email}</td>
                       <td className="px-5 py-4">
                         <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${ROLE_COLORS[u.role]}`}>{u.role}</span>
+                      </td>
+                      <td className="px-5 py-4 text-gray-500 text-xs">
+                        {u.role === 'WAITER' ? (
+                          <>
+                            {u.position && <div className="mb-0.5">{u.position}</div>}
+                            <span className={u.hasPin ? 'text-green-600 font-semibold' : 'text-gray-400'}>{u.hasPin ? '🔑 PIN set' : 'No PIN'}</span>
+                          </>
+                        ) : '—'}
                       </td>
                       <td className="px-5 py-4 text-gray-500">{u.outlet?.name || 'All'}</td>
                       <td className="px-5 py-4">

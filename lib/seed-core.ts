@@ -56,6 +56,47 @@ export async function seedCore(prisma: any) {
     })
   }
 
+  // Real MyPos floor staff, from the business's staff roster (waiters.xlsx).
+  // They sign in on the terminal via the PIN picker, not email+password, so
+  // email here is just an internal placeholder to satisfy the unique
+  // constraint — never shown to them. Default PIN "1234" for everyone on
+  // first seed; change per-person via Setup → Users once live.
+  const slug = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '')
+  const DEFAULT_PIN = '1234'
+  const waiterRoster: { name: string; position: 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR'; outletId: string; outletTag: string }[] = [
+    // Mikocheni
+    ...[
+      ['Beatrice', 'BAR LADY'], ['Jazila', 'BAR LADY'], ['Nango Kaporo', 'OUTSIDE STAFF'], ['Amina', 'OUTSIDE STAFF'],
+      ['Martha Ajabu', 'OUTSIDE STAFF'], ['Shakira', 'OUTSIDE STAFF'], ['Jaf', 'OUTSIDE STAFF'], ['Glory', 'BAR LADY'],
+      ['Shukrani', 'OUTSIDE STAFF'], ['Stella', 'OUTSIDE STAFF'], ['Neema Damas', 'OUTSIDE STAFF'], ['Diana', 'BAR LADY'],
+      ['Scola', 'OUTSIDE STAFF'], ['Aishaa', 'OUTSIDE STAFF'], ['Marry J', 'OUTSIDE STAFF'], ['Brenda', 'BAR LADY'],
+      ['Innocent', 'OUTSIDE STAFF'], ['Cleo', 'OUTSIDE STAFF'], ['Dolis', 'OUTSIDE STAFF'], ['Agneta Zelamula', 'OUTSIDE STAFF'],
+      ['Vero', 'OUTSIDE STAFF'], ['Charz', 'OUTSIDE STAFF'], ['Christina', 'OUTSIDE STAFF'], ['Violeth', 'OUTSIDE STAFF'],
+      ['Abdul', 'VIP BAR'], ['Gift', 'OUTSIDE STAFF'],
+    ].map(([name, position]) => ({ name, position: position as 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR', outletId: mikocheni.id, outletTag: 'mik' })),
+    // Coco Beach
+    ...[
+      ['Violet', 'OUTSIDE STAFF'], ['Christina', 'OUTSIDE STAFF'], ['Yasinta', 'OUTSIDE STAFF'], ['Inno', 'OUTSIDE STAFF'],
+      ['Amina', 'OUTSIDE STAFF'], ['Nango Kaporo', 'OUTSIDE STAFF'], ['Sabrina', 'OUTSIDE STAFF'], ['Nasra', 'OUTSIDE STAFF'],
+      ['Reny', 'OUTSIDE STAFF'], ['Warda', 'BAR LADY'], ['Tinna', 'OUTSIDE STAFF'], ['Manga', 'OUTSIDE STAFF'],
+      ['Lucy', 'OUTSIDE STAFF'], ['Jaffari', 'OUTSIDE STAFF'], ['Layla', 'OUTSIDE STAFF'], ['Charz', 'OUTSIDE STAFF'],
+      ['Salma', 'OUTSIDE STAFF'],
+    ].map(([name, position]) => ({ name, position: position as 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR', outletId: cocoBeach.id, outletTag: 'coco' })),
+  ]
+  const hashedDefaultPin = await bcrypt.hash(DEFAULT_PIN, 12)
+  for (const w of waiterRoster) {
+    const email = `${slug(w.name)}.${w.outletTag}@staff.internal`
+    await prisma.user.upsert({
+      where: { email },
+      update: {},
+      create: {
+        name: w.name, email, password: await bcrypt.hash('staffLogin123', 12), role: 'WAITER',
+        outletId: w.outletId, position: w.position, pin: hashedDefaultPin,
+      },
+    })
+  }
+  const waitersCreated = waiterRoster.length
+
   let personsCreated = 0
   const existing = await prisma.person.count()
   if (existing === 0) {
@@ -67,5 +108,5 @@ export async function seedCore(prisma: any) {
     }
   }
 
-  return { outlets: 2, users: users.length, personsCreated, personsExisting: existing }
+  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing }
 }

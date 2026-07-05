@@ -30,6 +30,15 @@ model User {
   // Never store the raw token — only its SHA-256 hash (see lib/auth.ts).
   resetToken       String?   @unique
   resetTokenExpiry DateTime?
+  // Streamlined MyPOS staff login: WAITER accounts sign in by tapping their
+  // name and entering a short numeric PIN instead of email+password. `pin`
+  // is a bcrypt hash (same as `password`), never the raw digits. `position`
+  // is the floor role shown on the picker tile (OUTSIDE STAFF | BAR LADY |
+  // VIP BAR) — informational only, not enforced by the system.
+  pin               String?
+  position          String?
+  pinFailedAttempts Int       @default(0)
+  pinLockedUntil    DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
