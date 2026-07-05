@@ -3,8 +3,13 @@ import { prisma } from '@/lib/prisma'
 
 const CRON_SECRET = process.env.CRON_SECRET
 
-// POST /api/pos/setup?secret=xxx — idempotent seed of tables, counters, and extras.
-export async function POST(req: NextRequest) {
+/**
+ * /api/pos/setup?secret=xxx — idempotent seed of tables, counters, and
+ * extras. Supports GET as well as POST (like /api/admin/seed) so it can be
+ * run by just visiting the URL in a browser — a plain address-bar visit is
+ * always a GET, and a POST-only route 405s on that.
+ */
+async function handle(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret')
   if (!CRON_SECRET || secret !== CRON_SECRET)
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -67,4 +72,11 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true, outlets: outlets.length, tablesCreated, countersCreated })
+}
+
+export async function GET(req: NextRequest) {
+  return handle(req)
+}
+export async function POST(req: NextRequest) {
+  return handle(req)
 }
