@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/prepare-db.mjs && prisma generate && next build",
-    "vercel-build": "node scripts/prepare-db.mjs && prisma generate && prisma db push && next build",
+    "vercel-build": "node scripts/prepare-db.mjs && prisma generate && prisma db push --accept-data-loss && next build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "node scripts/prepare-db.mjs && prisma generate",
