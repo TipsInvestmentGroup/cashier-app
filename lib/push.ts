@@ -9,7 +9,15 @@ function ensureConfigured() {
     console.error('[push] VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY not set — push notifications are disabled. Check the env vars in Vercel and redeploy.')
     return false
   }
-  webpush.setVapidDetails(VAPID_SUBJECT || 'mailto:admin@tips.co.tz', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
+  // The VAPID spec requires the subject to be a full URL or a mailto: URI —
+  // a bare email address (a common copy-paste mistake) fails at send time
+  // with a cryptic error. Catch it here instead, with a fix in the message.
+  let subject = VAPID_SUBJECT || 'mailto:admin@tips.co.tz'
+  if (!/^(mailto:|https?:\/\/)/i.test(subject)) {
+    console.error(`[push] VAPID_SUBJECT "${subject}" is missing the required "mailto:" or "https://" prefix — using mailto: automatically. Fix the env var to mailto:${subject} in Vercel.`)
+    subject = `mailto:${subject}`
+  }
+  webpush.setVapidDetails(subject, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
   configured = true
   return true
 }
