@@ -20,7 +20,7 @@ const ROLE_COLORS: Record<string, string> = {
   MANAGER: 'bg-purple-100 text-purple-700', DIRECTOR: 'bg-orange-100 text-orange-700', ADMIN: 'bg-red-100 text-red-700',
 }
 // MyPOS floor role — shown on the staff PIN picker; informational only.
-const POSITIONS = ['OUTSIDE STAFF', 'BAR LADY', 'VIP BAR']
+const POSITIONS = ['OUTSIDE STAFF', 'BAR LADY', 'VIP BAR', 'SHISHA COUNTER', 'KITCHEN COUNTER']
 
 export default function UsersPage() {
   const { request } = useApi()

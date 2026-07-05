@@ -21,6 +21,8 @@ const REFRESH_MS = 5_000
 const POSITION_COUNTERS: Record<string, string[]> = {
   'VIP BAR': ['VIP'],
   'BAR LADY': ['MAIN'],
+  'SHISHA COUNTER': ['SHISHA'],
+  'KITCHEN COUNTER': ['KITCHEN'],
 }
 const MANAGEMENT_ROLES = ['MANAGER', 'ADMIN', 'DIRECTOR']
 

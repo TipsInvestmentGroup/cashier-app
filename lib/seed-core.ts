@@ -63,7 +63,7 @@ export async function seedCore(prisma: any) {
   // first seed; change per-person via Setup → Users once live.
   const slug = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '')
   const DEFAULT_PIN = '1234'
-  const waiterRoster: { name: string; position: 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR'; outletId: string; outletTag: string }[] = [
+  const waiterRoster: { name: string; position: 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR' | 'SHISHA COUNTER' | 'KITCHEN COUNTER'; outletId: string; outletTag: string }[] = [
     // Mikocheni
     ...[
       ['Beatrice', 'BAR LADY'], ['Jazila', 'BAR LADY'], ['Nango Kaporo', 'OUTSIDE STAFF'], ['Amina', 'OUTSIDE STAFF'],
@@ -72,8 +72,8 @@ export async function seedCore(prisma: any) {
       ['Scola', 'OUTSIDE STAFF'], ['Aishaa', 'OUTSIDE STAFF'], ['Marry J', 'OUTSIDE STAFF'], ['Brenda', 'BAR LADY'],
       ['Innocent', 'OUTSIDE STAFF'], ['Cleo', 'OUTSIDE STAFF'], ['Dolis', 'OUTSIDE STAFF'], ['Agneta Zelamula', 'OUTSIDE STAFF'],
       ['Vero', 'OUTSIDE STAFF'], ['Charz', 'OUTSIDE STAFF'], ['Christina', 'OUTSIDE STAFF'], ['Violeth', 'OUTSIDE STAFF'],
-      ['Abdul', 'VIP BAR'], ['Gift', 'OUTSIDE STAFF'],
-    ].map(([name, position]) => ({ name, position: position as 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR', outletId: mikocheni.id, outletTag: 'mik' })),
+      ['Abdul', 'VIP BAR'], ['Gift', 'OUTSIDE STAFF'], ['Derick', 'SHISHA COUNTER'], ['Babuu', 'KITCHEN COUNTER'],
+    ].map(([name, position]) => ({ name, position: position as 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR' | 'SHISHA COUNTER' | 'KITCHEN COUNTER', outletId: mikocheni.id, outletTag: 'mik' })),
     // Coco Beach
     ...[
       ['Violet', 'OUTSIDE STAFF'], ['Christina', 'OUTSIDE STAFF'], ['Yasinta', 'OUTSIDE STAFF'], ['Inno', 'OUTSIDE STAFF'],
