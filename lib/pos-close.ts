@@ -14,9 +14,18 @@ export function canActOnOrder(user: JWTPayload, order: { outletId: string | null
 }
 
 /**
- * Close a settled POS order and feed its net total into today's
- * DailyCollection.systemSales for the outlet. Shared by the close route
- * (full payment) and the pay route (final partial payment).
+ * Close a settled POS order (mark CLOSED, record payment method/amount).
+ * Shared by the close route (full payment) and the pay route (final partial
+ * payment).
+ *
+ * Does NOT touch DailyCollection.systemSales — a cashier's manually-entered
+ * "System Sales" figure already reflects the day's full MyPos activity (it's
+ * read off the same combined POS report), so auto-adding order totals on top
+ * would double-count every sale a second time. An earlier version of this
+ * function did increment it on every close, inherited from the original
+ * close/route.ts before MyPos payments existed — confirmed with the business
+ * owner and removed; DailyCollection.systemSales is the cashier's number
+ * alone, in full, independent of when it was entered relative to POS orders.
  *
  * Pass `db` (a $transaction callback's `tx` client) when the caller needs
  * this to run atomically alongside its own reads/writes — e.g. the pay route
@@ -36,7 +45,6 @@ export async function settlePosOrder(opts: {
   if (!order || order.status === 'CLOSED') return order
 
   const now = new Date()
-  const finalAmount = roundMoney(order.totalAmount - order.discount)
 
   await db.posOrder.update({
     where: { id: opts.orderId },
@@ -48,34 +56,6 @@ export async function settlePosOrder(opts: {
       closedBy: opts.userId,
     },
   })
-
-  const todayStart = new Date(now)
-  todayStart.setHours(0, 0, 0, 0)
-  const existing = await db.dailyCollection.findFirst({
-    where: { outletId: order.outletId, date: { gte: todayStart } },
-    orderBy: { date: 'desc' },
-  })
-  if (existing) {
-    await db.dailyCollection.update({
-      where: { id: existing.id },
-      data: { systemSales: roundMoney(existing.systemSales + finalAmount) },
-    })
-  } else if (finalAmount > 0) {
-    // No cashier has opened today's collection for this outlet yet, so there's
-    // nowhere to book this sale — DailyCollection.cashierId is required and we
-    // have no cashier to attribute it to. Rather than silently losing the
-    // revenue with zero trace, log it so an accountant can reconcile it
-    // manually. TODO: decide whether MyPos order totals should fold into a
-    // later-created DailyCollection.systemSales automatically, or whether
-    // that figure already includes POS sales when the cashier enters it
-    // (folding both in would double-count) — flagged, not auto-resolved here.
-    await db.auditLog.create({
-      data: {
-        userId: opts.userId, action: 'UNATTRIBUTED', entity: 'PosOrder', entityId: order.id,
-        details: `Order ${order.orderNo} settled for ${finalAmount} at outlet ${order.outletId} before any DailyCollection existed for today — not counted in any systemSales figure. Needs manual reconciliation.`,
-      },
-    })
-  }
 
   return order
 }
