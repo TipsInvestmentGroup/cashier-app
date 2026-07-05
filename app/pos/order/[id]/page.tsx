@@ -23,10 +23,14 @@ function playReadyBeep(ctx: AudioContext) {
   }
 }
 
-const COUNTER_LABELS: Record<string, string> = {
-  MAIN: '🍹 Main', BAR: '🍺 Bar', SHISHA: '💨 Shisha', KITCHEN: '🍽 Kitchen',
+// Outlets can have different physical counter setups (e.g. Mikocheni's Main
+// Bar + VIP + Shisha + Kitchen), so the counter list is fetched per-outlet
+// (see loadCounters below) rather than hardcoded — this icon map is just a
+// display nicety, with a sensible fallback for any code it doesn't know.
+const COUNTER_ICONS: Record<string, string> = {
+  MAIN: '🍹', BAR: '🍺', VIP: '👑', SHISHA: '💨', KITCHEN: '🍽',
 }
-const COUNTERS = Object.keys(COUNTER_LABELS)
+const counterLabel = (code: string, label?: string) => `${COUNTER_ICONS[code] ?? '🔸'} ${label ?? code}`
 const PAY_METHODS = [
   { code: 'CASH', label: '💵 Cash' },
   { code: 'CRDB', label: '🏧 CRDB' },
@@ -56,6 +60,7 @@ interface Order {
   discount: number
   paidAmount: number
   createdAt: string
+  outletId: string
   table: { number: number; label: string | null } | null
   waiter: { name: string }
   shift: { name: string }
@@ -63,6 +68,8 @@ interface Order {
   items: OrderItem[]
   payments: Payment[]
 }
+
+interface Counter { code: string; label: string; serviceModel: string }
 
 interface Product {
   id: string
@@ -80,13 +87,14 @@ export default function OrderPage() {
   const [order, setOrder] = useState<Order | null>(null)
   const [products, setProducts] = useState<Record<string, Product[]>>({})
   const [extras, setExtras] = useState<string[]>([])
+  const [counters, setCounters] = useState<Counter[]>([])
   const [tab, setTab] = useState<'order' | 'menu'>('order')
   const [activeCategory, setActiveCategory] = useState('')
   const [search, setSearch] = useState('')
 
   // Add-item state
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [selectedCounter, setSelectedCounter] = useState('BAR')
+  const [selectedCounter, setSelectedCounter] = useState('')
   const [selectedExtras, setSelectedExtras] = useState<string[]>([])
   const [qty, setQty] = useState(1)
   const [busy, setBusy] = useState(false)
@@ -144,6 +152,19 @@ export default function OrderPage() {
     loadExtras()
   }, [loadOrder, loadMenu, loadExtras])
 
+  // Counter list is outlet-specific (Mikocheni's Main Bar/VIP/Shisha/Kitchen
+  // differs from other outlets), so it's fetched once the order tells us
+  // which outlet it belongs to, rather than hardcoded.
+  useEffect(() => {
+    if (!token || !order?.outletId) return
+    fetch(`/api/pos/counters?outletId=${order.outletId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: Counter[]) => {
+        setCounters(data)
+        setSelectedCounter(prev => prev || data[0]?.code || '')
+      })
+  }, [token, order?.outletId])
+
   // Keep watching this order while it's still active — this is the screen a
   // waiter naturally sits on after sending to the counter, so it needs its
   // own live refresh (the Floor Map's beep only fires if they've navigated
@@ -156,6 +177,7 @@ export default function OrderPage() {
 
   const addItem = async () => {
     if (!selectedProduct || !token) return
+    if (!selectedCounter) { alert('Counters bado zinapakia — subiri sekunde chache.'); return }
     setBusy(true)
     const res = await fetch(`/api/pos/orders/${orderId}/items`, {
       method: 'POST',
@@ -341,7 +363,7 @@ export default function OrderPage() {
                       <div className="font-medium text-gray-800 text-sm">{item.productName}</div>
                       <div className="text-xs text-gray-400 mt-0.5">
                         {item.quantity} × TSh {item.unitPrice.toLocaleString()}
-                        {item.counterCode && <span className="ml-2 bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{COUNTER_LABELS[item.counterCode] ?? item.counterCode}</span>}
+                        {item.counterCode && <span className="ml-2 bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{counterLabel(item.counterCode, counters.find(c => c.code === item.counterCode)?.label)}</span>}
                       </div>
                       {item.extras && (
                         <div className="text-xs text-gray-400 mt-0.5">
@@ -561,13 +583,13 @@ export default function OrderPage() {
                 {/* Counter selection */}
                 <p className="text-xs text-gray-500 font-medium mb-2">Tuma kwa counter:</p>
                 <div className="grid grid-cols-2 gap-2 mb-4">
-                  {COUNTERS.map(c => (
+                  {counters.map(c => (
                     <button
-                      key={c}
-                      onClick={() => setSelectedCounter(c)}
-                      className={`py-2 rounded-xl text-sm font-medium border-2 transition-colors ${selectedCounter === c ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-200 text-gray-600'}`}
+                      key={c.code}
+                      onClick={() => setSelectedCounter(c.code)}
+                      className={`py-2 rounded-xl text-sm font-medium border-2 transition-colors ${selectedCounter === c.code ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-200 text-gray-600'}`}
                     >
-                      {COUNTER_LABELS[c]}
+                      {counterLabel(c.code, c.label)}
                     </button>
                   ))}
                 </div>
