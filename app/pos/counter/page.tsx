@@ -6,13 +6,15 @@ import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
 
-const COUNTERS = [
-  { code: 'BAR',     label: 'Bar Counter',     icon: '🍺' },
-  { code: 'SHISHA',  label: 'Shisha Counter',  icon: '💨' },
-  { code: 'KITCHEN', label: 'Kitchen Counter', icon: '🍽' },
-  { code: 'MAIN',    label: 'Main Counter',    icon: '🍹' },
-]
+// Outlets can have different physical counter setups (e.g. Mikocheni's Main
+// Bar + VIP + Shisha + Kitchen), so the tab list is fetched per-outlet (see
+// loadCounters below) rather than hardcoded. This icon map is cosmetic only.
+const COUNTER_ICONS: Record<string, string> = {
+  MAIN: '🍹', BAR: '🍺', VIP: '👑', SHISHA: '💨', KITCHEN: '🍽',
+}
 const REFRESH_MS = 5_000
+
+interface CounterDef { code: string; label: string; serviceModel: string }
 
 interface OrderItem {
   id: string
@@ -86,9 +88,10 @@ ${tableLine ? `<div class="meta">${tableLine}</div>` : ''}
 }
 
 function CounterView() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
   const searchParams = useSearchParams()
-  const [activeCounter, setActiveCounter] = useState(searchParams.get('code') ?? 'BAR')
+  const [counters, setCounters] = useState<CounterDef[]>([])
+  const [activeCounter, setActiveCounter] = useState(searchParams.get('code') ?? '')
   const [items, setItems] = useState<OrderItem[]>([])
   const [loading, setLoading] = useState(true)
   const [doneToday, setDoneToday] = useState(0)
@@ -106,7 +109,17 @@ function CounterView() {
   useEffect(() => { soundRef.current = soundOn }, [soundOn])
   useEffect(() => { autoPrintRef.current = autoPrint }, [autoPrint])
 
-  const counterLabel = COUNTERS.find((c) => c.code === activeCounter)?.label ?? activeCounter
+  const counterLabel = counters.find((c) => c.code === activeCounter)?.label ?? activeCounter
+
+  useEffect(() => {
+    if (!token || !user?.outlet?.id) return
+    fetch(`/api/pos/counters?outletId=${user.outlet.id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: CounterDef[]) => {
+        setCounters(data)
+        setActiveCounter(prev => prev || data[0]?.code || '')
+      })
+  }, [token, user?.outlet?.id])
 
   const beep = useCallback(() => {
     if (!soundRef.current) return
@@ -141,7 +154,7 @@ function CounterView() {
   }, [counterLabel])
 
   const load = useCallback(async () => {
-    if (!token) return
+    if (!token || !activeCounter) return
     const res = await fetch(`/api/pos/counter?code=${activeCounter}`, { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) { setLoading(false); return }
     const data: OrderItem[] = await res.json()
@@ -218,13 +231,13 @@ function CounterView() {
 
         {/* Counter tabs */}
         <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
-          {COUNTERS.map((c) => (
+          {counters.map((c) => (
             <button
               key={c.code}
               onClick={() => setActiveCounter(c.code)}
               className={`flex-shrink-0 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${activeCounter === c.code ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600'}`}
             >
-              {c.icon} {c.label}
+              {COUNTER_ICONS[c.code] ?? '🔸'} {c.label}
             </button>
           ))}
         </div>
