@@ -37,3 +37,16 @@ export const STOCK_REQUEST_ROUTES: Record<string, { from: string; to: string }> 
 }
 // Reverse lookup: which position is asked to supply a given counter code.
 export const SUPPLIER_POSITION: Record<string, string> = { MAIN: 'BAR LADY', VIP: 'VIP BAR' }
+
+// Each product only belongs on the counter(s) that actually stock it: Shisha
+// products go to the Shisha counter, food to Kitchen, and everything else
+// (drinks, cigarettes, etc.) to VIP Counter or Main Bar/Bar — never Kitchen
+// or Shisha. Product.category is free text (no enum), so this is a keyword
+// match rather than an exact lookup — case-insensitive, substring-based, so
+// seed data like "SHISHA" or a future "Food" category both match cleanly.
+export function allowedCountersForCategory(category: string | null | undefined): string[] {
+  const cat = (category || '').trim().toUpperCase()
+  if (cat.includes('SHISHA')) return ['SHISHA']
+  if (cat.includes('FOOD')) return ['KITCHEN']
+  return ['VIP', 'MAIN', 'BAR']
+}

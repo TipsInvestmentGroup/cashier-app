@@ -1,11 +1,12 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
 import { buildBillHtml, printHtml, BILL_TYPES, BILL_TYPE_LABELS } from '@/lib/pos-receipt'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
 import { PushEnableBanner } from '@/components/PushEnableBanner'
+import { allowedCountersForCategory } from '@/lib/shared-constants'
 
 const ORDER_POLL_MS = 5_000
 
@@ -104,6 +105,23 @@ export default function OrderPage() {
 
   const prevStatusRef = useRef<string | null>(null)
   const audioRef = useUnlockedAudio()
+
+  // Shisha/food/other products can each only be sent to the counter(s) that
+  // stock them — see allowedCountersForCategory. Narrows the picker and
+  // auto-selects when there's only one valid counter.
+  const availableCounters = useMemo(() => {
+    if (!selectedProduct) return counters
+    const allowed = allowedCountersForCategory(selectedProduct.category)
+    return counters.filter((c) => allowed.includes(c.code))
+  }, [counters, selectedProduct])
+
+  useEffect(() => {
+    if (!selectedProduct) return
+    setSelectedCounter((prev) => {
+      if (availableCounters.some((c) => c.code === prev)) return prev
+      return availableCounters.length === 1 ? availableCounters[0].code : ''
+    })
+  }, [selectedProduct, availableCounters])
 
   const loadOrder = useCallback(async () => {
     if (!token) return
@@ -583,7 +601,7 @@ export default function OrderPage() {
                 {/* Counter selection */}
                 <p className="text-xs text-gray-500 font-medium mb-2">Tuma kwa counter:</p>
                 <div className="grid grid-cols-2 gap-2 mb-4">
-                  {counters.map(c => (
+                  {availableCounters.map(c => (
                     <button
                       key={c.code}
                       onClick={() => setSelectedCounter(c.code)}

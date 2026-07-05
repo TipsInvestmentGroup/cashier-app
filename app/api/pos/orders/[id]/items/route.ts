@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
+import { allowedCountersForCategory } from '@/lib/shared-constants'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -20,6 +21,14 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const product = await prisma.product.findUnique({ where: { id: productId } })
   if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+
+  // Shisha products only go to the Shisha counter, food only to Kitchen —
+  // everything else (drinks, cigarettes, etc.) only to VIP/Main/Bar. Client
+  // already filters the counter picker by this, but enforce it here too
+  // since counterCode arrives as plain client input.
+  if (counterCode && !allowedCountersForCategory(product.category).includes(counterCode)) {
+    return NextResponse.json({ error: `${product.name} cannot be sent to counter ${counterCode}` }, { status: 400 })
+  }
 
   const qty = Number(quantity)
   const amount = roundMoney(product.sellingPrice * qty)
