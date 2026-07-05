@@ -39,14 +39,24 @@ export function PushEnableBanner() {
   const sendTest = async () => {
     if (!token) return
     setBusy(true)
+    let res: Response
     try {
-      const res = await fetch('/api/push/test', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      res = await fetch('/api/push/test', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    } catch (err) {
+      // The request never reached the server at all (offline, DNS, timeout).
+      toast.error(`Mtandao: ${err instanceof Error ? err.message : 'haijulikani'}`)
+      setBusy(false)
+      return
+    }
+    try {
       const data = await res.json()
-      if (!res.ok) { toast.error(data.error || 'Imeshindikana kutuma jaribio'); return }
+      if (!res.ok) { toast.error(data.error || `Server error (${res.status})`); return }
       if (data.sent > 0) toast.success(`✓ Jaribio limetumwa (${data.sent}/${data.attempted}) — subiri arifa kwenye simu yako.`)
       else toast.error(`Halikutumwa: ${data.failed?.[0]?.error || 'Haijulikani sababu'}`)
     } catch {
-      toast.error('Hitilafu ya mtandao')
+      // The server responded, but not with JSON — likely an unhandled server
+      // error page. Surface the raw status so it's still actionable.
+      toast.error(`Server error (${res.status}) — jibu si JSON`)
     } finally {
       setBusy(false)
     }
