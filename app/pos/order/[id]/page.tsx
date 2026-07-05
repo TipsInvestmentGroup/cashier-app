@@ -1,9 +1,25 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
 import { buildBillHtml, printHtml, BILL_TYPES, BILL_TYPE_LABELS } from '@/lib/pos-receipt'
+
+const ORDER_POLL_MS = 5_000
+
+/** Double high-pitched beep — same "ready to collect" tone used on the Floor Map. */
+function playReadyBeep(ctx: AudioContext) {
+  if (ctx.state === 'suspended') ctx.resume()
+  for (const at of [0, 0.45]) {
+    const o = ctx.createOscillator(); const g = ctx.createGain()
+    o.connect(g); g.connect(ctx.destination)
+    o.type = 'sine'; o.frequency.value = 1175
+    g.gain.setValueAtTime(0.0001, ctx.currentTime + at)
+    g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + at + 0.01)
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + at + 0.3)
+    o.start(ctx.currentTime + at); o.stop(ctx.currentTime + at + 0.3)
+  }
+}
 
 const COUNTER_LABELS: Record<string, string> = {
   MAIN: '🍹 Main', BAR: '🍺 Bar', SHISHA: '💨 Shisha', KITCHEN: '🍽 Kitchen',
@@ -74,11 +90,30 @@ export default function OrderPage() {
   const [busy, setBusy] = useState(false)
   const [discountModal, setDiscountModal] = useState(false)
   const [discountInput, setDiscountInput] = useState('')
+  const [justReady, setJustReady] = useState(false)
+
+  const prevStatusRef = useRef<string | null>(null)
+  const audioRef = useRef<AudioContext | null>(null)
 
   const loadOrder = useCallback(async () => {
     if (!token) return
     const res = await fetch(`/api/pos/orders/${orderId}`, { headers: { Authorization: `Bearer ${token}` } })
-    if (res.ok) setOrder(await res.json())
+    if (!res.ok) return
+    const data: Order = await res.json()
+
+    // Beep + flash the moment this order (being watched right here on this
+    // screen) flips to READY — the counter just finished preparing it.
+    if (prevStatusRef.current && prevStatusRef.current !== 'READY' && data.status === 'READY') {
+      try {
+        const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        audioRef.current ??= new Ctx()
+        playReadyBeep(audioRef.current)
+      } catch { /* audio blocked — ignore */ }
+      setJustReady(true)
+      setTimeout(() => setJustReady(false), 6000)
+    }
+    prevStatusRef.current = data.status
+    setOrder(data)
   }, [token, orderId])
 
   const loadMenu = useCallback(async () => {
@@ -106,6 +141,16 @@ export default function OrderPage() {
     loadMenu()
     loadExtras()
   }, [loadOrder, loadMenu, loadExtras])
+
+  // Keep watching this order while it's still active — this is the screen a
+  // waiter naturally sits on after sending to the counter, so it needs its
+  // own live refresh (the Floor Map's beep only fires if they've navigated
+  // away from here).
+  useEffect(() => {
+    if (order && (order.status === 'CLOSED' || order.status === 'CANCELLED')) return
+    const t = setInterval(loadOrder, ORDER_POLL_MS)
+    return () => clearInterval(t)
+  }, [loadOrder, order?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const addItem = async () => {
     if (!selectedProduct || !token) return
@@ -254,6 +299,14 @@ export default function OrderPage() {
             {isClosed ? 'Imefungwa' : order.status === 'READY' ? '✓ Tayari kuchukua' : pendingCount > 0 ? `${pendingCount} pending` : 'Imetumwa'}
           </span>
         </div>
+
+        {/* Ready-to-collect banner — flashes for a few seconds right after the
+            counter finishes preparing, alongside the beep. */}
+        {(justReady || order.status === 'READY') && !isClosed && (
+          <div className={`mb-4 rounded-xl p-3 text-center text-white font-bold text-sm transition ${justReady ? 'bg-green-600 animate-pulse' : 'bg-green-600'}`}>
+            ✅ Bidhaa zako zipo tayari — chukua kwenye counter!
+          </div>
+        )}
 
         {/* Tabs */}
         {!isClosed && (
