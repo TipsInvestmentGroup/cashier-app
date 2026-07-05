@@ -35,6 +35,21 @@ async function handle(req: NextRequest) {
     { code: 'SHISHA', label: 'Shisha Counter', serviceModel: 'PREP' },
     { code: 'KITCHEN', label: 'Kitchen Counter', serviceModel: 'PREP' },
   ]
+  // Coco Beach's real layout: one Drinks Counter (three bar ladies, no
+  // separate VIP station) + Kitchen + Shisha, both fed by bar ladies AND
+  // outside staff. Also merges MAIN+BAR like Mikocheni — see below.
+  const COCO_BEACH_COUNTERS = [
+    { code: 'MAIN', label: 'Drinks Counter', serviceModel: 'DIRECT' },
+    { code: 'SHISHA', label: 'Shisha Counter', serviceModel: 'PREP' },
+    { code: 'KITCHEN', label: 'Kitchen Counter', serviceModel: 'PREP' },
+  ]
+  const OUTLET_COUNTERS: Record<string, typeof DEFAULT_COUNTERS> = {
+    'Mikocheni Outlet': MIKOCHENI_COUNTERS,
+    'Coco Beach Outlet': COCO_BEACH_COUNTERS,
+  }
+  // Outlets with a merged MAIN+BAR layout — BAR is deactivated (not
+  // deleted) so its order history stays intact and queryable.
+  const MERGES_BAR_INTO_MAIN = new Set(['Mikocheni Outlet', 'Coco Beach Outlet'])
 
   let tablesCreated = 0
   let countersCreated = 0
@@ -47,8 +62,7 @@ async function handle(req: NextRequest) {
         tablesCreated++
       }
     }
-    const isMikocheni = outlet.name === 'Mikocheni Outlet'
-    const COUNTERS = isMikocheni ? MIKOCHENI_COUNTERS : DEFAULT_COUNTERS
+    const COUNTERS = OUTLET_COUNTERS[outlet.name] ?? DEFAULT_COUNTERS
     for (const c of COUNTERS) {
       const existing = await prisma.posCounter.findFirst({ where: { outletId: outlet.id, code: c.code } })
       if (!existing) {
@@ -58,10 +72,7 @@ async function handle(req: NextRequest) {
         await prisma.posCounter.update({ where: { id: existing.id }, data: { label: c.label, serviceModel: c.serviceModel, isActive: true } })
       }
     }
-    // Mikocheni's separate "BAR" counter is superseded by the merged "MAIN"
-    // (now "Main Bar") — deactivate rather than delete so its order history
-    // stays intact and queryable.
-    if (isMikocheni) {
+    if (MERGES_BAR_INTO_MAIN.has(outlet.name)) {
       await prisma.posCounter.updateMany({ where: { outletId: outlet.id, code: 'BAR' }, data: { isActive: false } })
     }
   }

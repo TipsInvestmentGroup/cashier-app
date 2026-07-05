@@ -144,7 +144,10 @@ function CounterView() {
   // shown only to the requesting counter (a "request" button) or the
   // supplying counter (a pending-requests list), per STOCK_REQUEST_ROUTES.
   const stockRoute = user?.position ? STOCK_REQUEST_ROUTES[user.position] : undefined
-  const canRequestStock = !!stockRoute && stockRoute.from === activeCounter
+  // Only offer the request button if the paired counter actually exists at
+  // this outlet — e.g. Coco Beach has no VIP counter, so a Bar Lady there
+  // must never be able to raise a request nobody can ever see or fulfil.
+  const canRequestStock = !!stockRoute && stockRoute.from === activeCounter && counters.some((c) => c.code === stockRoute.to)
   const isSupplier = !!user && (MANAGEMENT_ROLES.includes(user.role) || SUPPLIER_POSITION[activeCounter] === user.position)
   const counterName = useCallback((code: string) => counters.find((c) => c.code === code)?.label ?? code, [counters])
 

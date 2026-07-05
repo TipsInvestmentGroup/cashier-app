@@ -50,6 +50,12 @@ export async function POST(req: NextRequest) {
   const outletId = payload.outletId
   if (!outletId) return NextResponse.json({ error: 'No outlet' }, { status: 400 })
 
+  // Not every outlet has every counter (e.g. Coco Beach has no VIP counter)
+  // — reject a request whose supplying counter doesn't exist here, since
+  // nobody could ever see or fulfil it.
+  const targetCounter = await prisma.posCounter.findFirst({ where: { outletId, code: route.to, isActive: true } })
+  if (!targetCounter) return NextResponse.json({ error: `${route.to} counter does not exist at this outlet` }, { status: 400 })
+
   const { productId, quantity, note } = await req.json().catch(() => ({}))
   if (!productId || typeof productId !== 'string') {
     return NextResponse.json({ error: 'productId required' }, { status: 400 })
