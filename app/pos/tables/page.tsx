@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
+import { PushEnableBanner } from '@/components/PushEnableBanner'
 
 interface TableOrder {
   id: string
@@ -166,6 +167,8 @@ function TableFloor() {
             Refresh ↻
           </button>
         </div>
+
+        <PushEnableBanner />
 
         {/* Legend */}
         <div className="flex gap-4 mb-4 text-xs text-gray-600">
