@@ -58,14 +58,22 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id } = await params
   if (id === user.userId) return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 400 })
 
-  // Block delete if the user has linked records (keeps history intact) — suggest deactivate
-  const [colls, signed, paid] = await Promise.all([
+  // Block delete if the user has ANY linked record — every one of these is a
+  // required (non-cascading) foreign key to User, so missing even one here
+  // lets prisma.user.delete() hit an unhandled FK-constraint error and crash
+  // with a bare 500 instead of this friendly message.
+  const [colls, signed, paid, orders, waiterSessions, scheduleAssignments, unavailability, eventStaff] = await Promise.all([
     prisma.dailyCollection.count({ where: { cashierId: id } }),
     prisma.signedBill.count({ where: { cashierId: id } }),
     prisma.paidBill.count({ where: { cashierId: id } }),
+    prisma.posOrder.count({ where: { waiterId: id } }),
+    prisma.posWaiterSession.count({ where: { waiterId: id } }),
+    prisma.scheduleAssignment.count({ where: { staffId: id } }),
+    prisma.staffUnavailability.count({ where: { staffId: id } }),
+    prisma.eventStaff.count({ where: { staffId: id } }),
   ])
-  if (colls + signed + paid > 0) {
-    return NextResponse.json({ error: 'This user has recorded transactions — deactivate them instead of deleting (to keep history).' }, { status: 409 })
+  if (colls + signed + paid + orders + waiterSessions + scheduleAssignments + unavailability + eventStaff > 0) {
+    return NextResponse.json({ error: 'This user has linked records (orders, schedule, transactions, etc.) — deactivate them instead of deleting (to keep history).' }, { status: 409 })
   }
 
   // Remove their audit logs first (no useful history without the user), then delete
