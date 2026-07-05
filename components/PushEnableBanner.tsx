@@ -41,7 +41,10 @@ export function PushEnableBanner() {
     const result = await subscribeToPush(token)
     setBusy(false)
     if (result === 'subscribed') { setSubscribed(true); toast.success('Arifa zimewezeshwa!') }
-    else if (result === 'denied') toast.error('Umekataa arifa. Unaweza kuwezesha tena kwenye mipangilio ya kivinjari.')
+    // Not an error the waiter needs to fix — the beep sound already works
+    // automatically on this screen without this permission; push is only an
+    // extra channel for alerts while on another tab or app.
+    else if (result === 'denied') toast('Sauti ya "beep" bado itafanya kazi hapa hapa. Arifa za ziada zimekataliwa — unaweza kuwezesha tena kwenye mipangilio ya kivinjari ukihitaji.', { icon: 'ℹ️' })
     else toast.error('Imeshindikana kuwezesha arifa — jaribu tena.')
   }
 
@@ -120,7 +123,7 @@ export function PushEnableBanner() {
   return (
     <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4 flex items-center gap-3">
       <span className="text-lg">🔔</span>
-      <p className="flex-1 text-sm text-indigo-800 font-medium">Wezesha arifa za simu ili upate taarifa hata ukiwa kwenye tab nyingine.</p>
+      <p className="flex-1 text-sm text-indigo-800 font-medium">Sauti ya &quot;beep&quot; tayari inafanya kazi bila hii. Wezesha arifa za ziada ili upate taarifa hata ukiwa kwenye tab nyingine.</p>
       <button
         onClick={enable}
         disabled={busy}
