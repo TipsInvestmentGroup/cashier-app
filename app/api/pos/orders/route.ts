@@ -53,13 +53,28 @@ export async function POST(req: NextRequest) {
 
   const today = new Date()
   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
-  const count = await prisma.posOrder.count({
-    where: { outletId, createdAt: { gte: new Date(today.toDateString()) } },
-  })
-  const orderNo = `ORD-${dateStr}-${String(count + 1).padStart(3, '0')}`
+  const dayStart = new Date(today.toDateString())
 
-  const order = await prisma.posOrder.create({
-    data: { orderNo, outletId, tableId: tableId ?? null, shiftId, waiterId: payload.userId },
-  })
+  // orderNo is unique across ALL outlets (not per-outlet), but the sequence
+  // number was counted per-outlet — the first order of the day at a second
+  // outlet always landed on "001" too, colliding with an outlet that had
+  // already claimed it (e.g. Mikocheni creates ORD-...-001 first, then Coco
+  // Beach's first order of the day also computes "001" and crashes on the
+  // unique constraint). Count across all outlets instead, and retry with an
+  // incrementing offset to absorb any remaining race between concurrent taps.
+  let order
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const count = await prisma.posOrder.count({ where: { createdAt: { gte: dayStart } } })
+    const orderNo = `ORD-${dateStr}-${String(count + 1 + attempt).padStart(3, '0')}`
+    try {
+      order = await prisma.posOrder.create({
+        data: { orderNo, outletId, tableId: tableId ?? null, shiftId, waiterId: payload.userId },
+      })
+      break
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('Unique') && attempt < 4) continue
+      throw err
+    }
+  }
   return NextResponse.json(order, { status: 201 })
 }
