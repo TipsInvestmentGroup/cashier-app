@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { sendPushToUser } from '@/lib/push'
 
 export async function GET(req: NextRequest) {
   const payload = getAuthUser(req)
@@ -57,10 +58,24 @@ export async function PATCH(req: NextRequest) {
     where: { orderId: item.orderId, status: { in: ['PENDING', 'SENT'] } },
   })
   if (outstanding === 0) {
-    await prisma.posOrder.updateMany({
+    const { count } = await prisma.posOrder.updateMany({
       where: { id: item.orderId, status: 'SENT' },
       data: { status: 'READY' },
     })
+    if (count > 0) {
+      const order = await prisma.posOrder.findUnique({
+        where: { id: item.orderId },
+        select: { orderNo: true, waiterId: true, table: { select: { number: true, label: true } } },
+      })
+      if (order) {
+        const tableLabel = order.table ? `Meza ${order.table.number}${order.table.label ? ` — ${order.table.label}` : ''}` : order.orderNo
+        sendPushToUser(order.waiterId, {
+          title: '✅ Tayari kuchukua',
+          body: `${tableLabel} — bidhaa zipo tayari kwenye counter`,
+          url: `/pos/order/${item.orderId}`,
+        }).catch(() => {}) // best-effort — never block the counter action on push delivery
+      }
+    }
   }
 
   return NextResponse.json(updated)

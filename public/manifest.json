@@ -1,0 +1,14 @@
+{
+  "name": "Tips MyPos",
+  "short_name": "MyPos",
+  "description": "Tips Investment Ltd — MyPos staff terminal",
+  "start_url": "/mypos",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#4f46e5",
+  "theme_color": "#4f46e5",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

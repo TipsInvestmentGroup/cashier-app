@@ -5,6 +5,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
 import { buildBillHtml, printHtml, BILL_TYPES, BILL_TYPE_LABELS } from '@/lib/pos-receipt'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
+import { PushEnableBanner } from '@/components/PushEnableBanner'
 
 const ORDER_POLL_MS = 5_000
 
@@ -300,6 +301,8 @@ export default function OrderPage() {
             {isClosed ? 'Imefungwa' : order.status === 'READY' ? '✓ Tayari kuchukua' : pendingCount > 0 ? `${pendingCount} pending` : 'Imetumwa'}
           </span>
         </div>
+
+        {!isClosed && <PushEnableBanner />}
 
         {/* Ready-to-collect banner — flashes for a few seconds right after the
             counter finishes preparing, alongside the beep. */}

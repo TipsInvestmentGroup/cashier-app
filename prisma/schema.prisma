@@ -51,6 +51,23 @@ model User {
   scheduleAssignments ScheduleAssignment[]
   unavailabilities    StaffUnavailability[]
   eventStaff          EventStaff[]
+  pushSubscriptions   PushSubscription[]
+}
+
+/// A browser's Web Push subscription for one user's device. Lets the server
+/// send a real OS-level notification (works even if the tab is backgrounded
+/// or closed) -- used for "order ready to collect" alerts on MyPos, where an
+/// in-page beep is unreliable once a phone's tab isn't the active one.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Outlet {
