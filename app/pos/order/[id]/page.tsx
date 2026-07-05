@@ -48,6 +48,9 @@ interface OrderItem {
   extras: string | null
   counterCode: string | null
   status: string
+  sentAt: string | null
+  preparedAt: string | null
+  preparedByName: string | null
 }
 
 interface Payment { id: string; amount: number; method: string; receivedByName: string; createdAt: string }
@@ -102,6 +105,7 @@ export default function OrderPage() {
   const [discountModal, setDiscountModal] = useState(false)
   const [discountInput, setDiscountInput] = useState('')
   const [justReady, setJustReady] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
 
   const prevStatusRef = useRef<string | null>(null)
   const audioRef = useUnlockedAudio()
@@ -324,6 +328,10 @@ export default function OrderPage() {
 
   const pendingCount = order.items.filter(i => i.status === 'PENDING').length
   const isClosed = order.status === 'CLOSED' || order.status === 'CANCELLED'
+  // Once a counter marks an item prepared/served, it's done — keep the main
+  // list focused on what's still in flight and move served items to History.
+  const activeItems = order.items.filter(i => i.status !== 'PREPARED')
+  const historyItems = order.items.filter(i => i.status === 'PREPARED')
 
   return (
     <AppShell>
@@ -367,15 +375,20 @@ export default function OrderPage() {
         {/* ORDER TAB */}
         {tab === 'order' && (
           <div>
-            {order.items.length === 0 ? (
+            {historyItems.length > 0 && (
+              <button onClick={() => setShowHistory(true)} className="mb-3 text-xs font-semibold text-indigo-600 border border-indigo-200 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors">
+                📜 Historia ya bidhaa zilizohudumiwa ({historyItems.length})
+              </button>
+            )}
+            {activeItems.length === 0 ? (
               <div className="text-center py-12 text-gray-400">
-                <div className="text-4xl mb-2">🛒</div>
-                <p>Hakuna bidhaa bado.</p>
-                {!isClosed && <button onClick={() => setTab('menu')} className="mt-3 text-indigo-600 text-sm font-medium">Ongeza bidhaa →</button>}
+                <div className="text-4xl mb-2">{order.items.length === 0 ? '🛒' : '✅'}</div>
+                <p>{order.items.length === 0 ? 'Hakuna bidhaa bado.' : 'Bidhaa zote zimehudumiwa — angalia Historia.'}</p>
+                {!isClosed && order.items.length === 0 && <button onClick={() => setTab('menu')} className="mt-3 text-indigo-600 text-sm font-medium">Ongeza bidhaa →</button>}
               </div>
             ) : (
               <div className="space-y-2 mb-4">
-                {order.items.map(item => (
+                {activeItems.map(item => (
                   <div key={item.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 flex gap-3 items-start">
                     <div className="flex-1">
                       <div className="font-medium text-gray-800 text-sm">{item.productName}</div>
@@ -491,6 +504,37 @@ export default function OrderPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <button onClick={() => setDiscountModal(false)} className="border-2 border-gray-200 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50">Ghairi</button>
                     <button onClick={applyDiscount} disabled={busy} className="bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 disabled:opacity-50">Weka</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showHistory && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowHistory(false)}>
+                <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-gray-800 text-lg">Historia ya bidhaa</h3>
+                    <button onClick={() => setShowHistory(false)} className="text-gray-400 text-2xl leading-none">×</button>
+                  </div>
+                  <div className="space-y-3">
+                    {historyItems.map(item => (
+                      <div key={item.id} className="border border-gray-100 rounded-xl p-3">
+                        <div className="flex justify-between items-start">
+                          <div className="font-medium text-gray-800 text-sm">{item.quantity} × {item.productName}</div>
+                          <div className="text-sm font-bold text-gray-800">TSh {item.amount.toLocaleString()}</div>
+                        </div>
+                        {item.counterCode && (
+                          <span className="inline-block mt-1 bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded text-xs">
+                            {counterLabel(item.counterCode, counters.find(c => c.code === item.counterCode)?.label)}
+                          </span>
+                        )}
+                        <div className="text-xs text-gray-400 mt-1 space-y-0.5">
+                          {item.sentAt && <div>Iliyotumwa: {new Date(item.sentAt).toLocaleString('sw-TZ')}</div>}
+                          {item.preparedAt && <div>Ilihudumiwa: {new Date(item.preparedAt).toLocaleString('sw-TZ')}</div>}
+                          {item.preparedByName && <div>Na: {item.preparedByName}</div>}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>

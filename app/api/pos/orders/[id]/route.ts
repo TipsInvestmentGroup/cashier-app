@@ -26,7 +26,18 @@ export async function GET(req: NextRequest, { params }: Params) {
     },
   })
   if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json(order)
+
+  // preparedBy is a plain userId (no relation on PosOrderItem) — resolve to a
+  // display name here so the client's order-history view doesn't need a
+  // separate round-trip per item.
+  const preparedByIds = [...new Set(order.items.map((i) => i.preparedBy).filter((v): v is string => !!v))]
+  const preparers = preparedByIds.length
+    ? await prisma.user.findMany({ where: { id: { in: preparedByIds } }, select: { id: true, name: true } })
+    : []
+  const preparerNames = new Map(preparers.map((p) => [p.id, p.name]))
+  const itemsWithPreparer = order.items.map((i) => ({ ...i, preparedByName: i.preparedBy ? preparerNames.get(i.preparedBy) ?? null : null }))
+
+  return NextResponse.json({ ...order, items: itemsWithPreparer })
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
