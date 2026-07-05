@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import toast from 'react-hot-toast'
@@ -62,6 +63,11 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 required
               />
+              <div className="text-right mt-2">
+                <Link href="/forgot-password" className="text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+                  Forgot password?
+                </Link>
+              </div>
             </div>
 
             <button
