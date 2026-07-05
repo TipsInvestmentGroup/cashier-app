@@ -21,8 +21,17 @@ export function PushEnableBanner() {
   useEffect(() => {
     const s = checkPushSupport()
     setSupport(s)
-    if (s === 'ready') getExistingSubscription().then((sub) => setSubscribed(!!sub))
-  }, [])
+    if (s !== 'ready' || !token) return
+    getExistingSubscription().then((sub) => {
+      setSubscribed(!!sub)
+      // Self-heal: a browser can already hold a subscription the server
+      // never actually saved (a bug in an earlier version silently dropped
+      // failed saves). Re-POSTing an existing subscription is a harmless
+      // no-op if it was already saved, and repairs it silently if it wasn't
+      // — no need for every affected person to notice and re-click Wezesha.
+      if (sub) subscribeToPush(token).catch(() => {})
+    })
+  }, [token])
 
   if (!support || support === 'unsupported' || dismissed) return null
 
@@ -34,6 +43,15 @@ export function PushEnableBanner() {
     if (result === 'subscribed') { setSubscribed(true); toast.success('Arifa zimewezeshwa!') }
     else if (result === 'denied') toast.error('Umekataa arifa. Unaweza kuwezesha tena kwenye mipangilio ya kivinjari.')
     else toast.error('Imeshindikana kuwezesha arifa — jaribu tena.')
+  }
+
+  const resync = async () => {
+    if (!token) return
+    setBusy(true)
+    const result = await subscribeToPush(token)
+    setBusy(false)
+    if (result === 'subscribed') toast.success('✓ Usajili umesasishwa kwenye seva.')
+    else toast.error('Imeshindikana kusasisha — jaribu tena, au bofya Tuma jaribio kuangalia hitilafu.')
   }
 
   const sendTest = async () => {
@@ -64,15 +82,22 @@ export function PushEnableBanner() {
 
   if (subscribed) {
     return (
-      <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-4 flex items-center gap-3">
+      <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-4 flex items-center gap-3 flex-wrap">
         <span className="text-lg">✓</span>
-        <p className="flex-1 text-sm text-green-800 font-medium">Arifa za simu zimewezeshwa.</p>
+        <p className="flex-1 text-sm text-green-800 font-medium min-w-[140px]">Arifa za simu zimewezeshwa.</p>
         <button
           onClick={sendTest}
           disabled={busy}
           className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition disabled:opacity-50 whitespace-nowrap"
         >
           {busy ? '...' : '🔔 Tuma jaribio'}
+        </button>
+        <button
+          onClick={resync}
+          disabled={busy}
+          className="px-3 py-1.5 border border-green-300 text-green-700 rounded-lg text-xs font-semibold hover:bg-green-100 transition disabled:opacity-50 whitespace-nowrap"
+        >
+          {busy ? '...' : '🔄 Sasisha usajili'}
         </button>
         <button onClick={() => setDismissed(true)} className="text-green-300 hover:text-green-700 text-lg leading-none">✕</button>
       </div>
