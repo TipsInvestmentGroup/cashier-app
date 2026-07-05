@@ -24,7 +24,7 @@ export function PushEnableBanner() {
     if (s === 'ready') getExistingSubscription().then((sub) => setSubscribed(!!sub))
   }, [])
 
-  if (!support || support === 'unsupported' || subscribed || dismissed) return null
+  if (!support || support === 'unsupported' || dismissed) return null
 
   const enable = async () => {
     if (!token) return
@@ -34,6 +34,39 @@ export function PushEnableBanner() {
     if (result === 'subscribed') { setSubscribed(true); toast.success('Arifa zimewezeshwa!') }
     else if (result === 'denied') toast.error('Umekataa arifa. Unaweza kuwezesha tena kwenye mipangilio ya kivinjari.')
     else toast.error('Imeshindikana kuwezesha arifa — jaribu tena.')
+  }
+
+  const sendTest = async () => {
+    if (!token) return
+    setBusy(true)
+    try {
+      const res = await fetch('/api/push/test', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      const data = await res.json()
+      if (!res.ok) { toast.error(data.error || 'Imeshindikana kutuma jaribio'); return }
+      if (data.sent > 0) toast.success(`✓ Jaribio limetumwa (${data.sent}/${data.attempted}) — subiri arifa kwenye simu yako.`)
+      else toast.error(`Halikutumwa: ${data.failed?.[0]?.error || 'Haijulikani sababu'}`)
+    } catch {
+      toast.error('Hitilafu ya mtandao')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (subscribed) {
+    return (
+      <div className="bg-green-50 border border-green-200 rounded-xl p-3 mb-4 flex items-center gap-3">
+        <span className="text-lg">✓</span>
+        <p className="flex-1 text-sm text-green-800 font-medium">Arifa za simu zimewezeshwa.</p>
+        <button
+          onClick={sendTest}
+          disabled={busy}
+          className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition disabled:opacity-50 whitespace-nowrap"
+        >
+          {busy ? '...' : '🔔 Tuma jaribio'}
+        </button>
+        <button onClick={() => setDismissed(true)} className="text-green-300 hover:text-green-700 text-lg leading-none">✕</button>
+      </div>
+    )
   }
 
   if (support === 'ios-needs-install') {

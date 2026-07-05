@@ -69,11 +69,13 @@ export async function PATCH(req: NextRequest) {
       })
       if (order) {
         const tableLabel = order.table ? `Meza ${order.table.number}${order.table.label ? ` — ${order.table.label}` : ''}` : order.orderNo
+        // Best-effort — never block the counter action on push delivery, but
+        // log failures so they're visible in Vercel's function logs.
         sendPushToUser(order.waiterId, {
           title: '✅ Tayari kuchukua',
           body: `${tableLabel} — bidhaa zipo tayari kwenye counter`,
           url: `/pos/order/${item.orderId}`,
-        }).catch(() => {}) // best-effort — never block the counter action on push delivery
+        }).catch((err) => console.error('[push] sendPushToUser threw for order', item.orderId, err))
       }
     }
   }

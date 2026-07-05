@@ -49,11 +49,14 @@ export async function subscribeToPush(token: string): Promise<'subscribed' | 'de
       applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
     })
 
-    await fetch('/api/push/subscribe', {
+    const res = await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(sub.toJSON()),
     })
+    // The browser-side subscribe() can succeed even if the server never saved
+    // it (expired token, 500, etc.) — must confirm the save, not just assume it.
+    if (!res.ok) return 'error'
     return 'subscribed'
   } catch {
     return 'error'
