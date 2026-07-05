@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
+import { useUnlockedAudio } from '@/lib/audio-unlock'
 
 interface TableOrder {
   id: string
@@ -41,7 +42,7 @@ function TableFloor() {
   // (VIP model: the counter finished preparing; go collect).
   const readySeenRef = useRef<Set<string>>(new Set())
   const firstLoadRef = useRef(true)
-  const audioRef = useRef<AudioContext | null>(null)
+  const audioRef = useUnlockedAudio()
   const myIdRef = useRef<string | undefined>(user?.id)
   useEffect(() => { myIdRef.current = user?.id }, [user])
 
@@ -62,7 +63,7 @@ function TableFloor() {
         o.start(ctx.currentTime + at); o.stop(ctx.currentTime + at + 0.3)
       }
     } catch { /* audio blocked — ignore */ }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTables = useCallback(async () => {
     if (!token) return

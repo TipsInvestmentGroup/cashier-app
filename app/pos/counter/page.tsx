@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
+import { useUnlockedAudio } from '@/lib/audio-unlock'
 
 const COUNTERS = [
   { code: 'BAR',     label: 'Bar Counter',     icon: '🍺' },
@@ -99,7 +100,7 @@ function CounterView() {
 
   const seenRef = useRef<Set<string>>(new Set())
   const firstLoadRef = useRef(true)
-  const audioRef = useRef<AudioContext | null>(null)
+  const audioRef = useUnlockedAudio()
   const soundRef = useRef(soundOn)
   const autoPrintRef = useRef(autoPrint)
   useEffect(() => { soundRef.current = soundOn }, [soundOn])
@@ -122,7 +123,7 @@ function CounterView() {
       g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35)
       o.start(); o.stop(ctx.currentTime + 0.35)
     } catch { /* audio blocked — ignore */ }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const printChit = useCallback((g: Group) => {
     const html = buildChit(g, counterLabel.toUpperCase(), new Date().toLocaleString('sw-TZ'))

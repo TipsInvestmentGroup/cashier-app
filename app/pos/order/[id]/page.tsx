@@ -4,6 +4,7 @@ import { useRouter, useParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
 import { buildBillHtml, printHtml, BILL_TYPES, BILL_TYPE_LABELS } from '@/lib/pos-receipt'
+import { useUnlockedAudio } from '@/lib/audio-unlock'
 
 const ORDER_POLL_MS = 5_000
 
@@ -93,7 +94,7 @@ export default function OrderPage() {
   const [justReady, setJustReady] = useState(false)
 
   const prevStatusRef = useRef<string | null>(null)
-  const audioRef = useRef<AudioContext | null>(null)
+  const audioRef = useUnlockedAudio()
 
   const loadOrder = useCallback(async () => {
     if (!token) return
@@ -114,7 +115,7 @@ export default function OrderPage() {
     }
     prevStatusRef.current = data.status
     setOrder(data)
-  }, [token, orderId])
+  }, [token, orderId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadMenu = useCallback(async () => {
     if (!token) return
