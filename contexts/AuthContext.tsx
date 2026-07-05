@@ -13,6 +13,7 @@ interface AuthContextType {
   user: User | null
   token: string | null
   login: (email: string, password: string) => Promise<void>
+  loginWithToken: (token: string, user: User) => void
   logout: () => void
   isLoading: boolean
 }
@@ -51,6 +52,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('cashier_user', JSON.stringify(data.user))
   }
 
+  /** Used by the MyPOS PIN-login flow — the token/user already came back
+   *  from /api/auth/pin-login, so this just persists the session without
+   *  another network round-trip. */
+  const loginWithToken = (newToken: string, newUser: User) => {
+    setToken(newToken)
+    setUser(newUser)
+    localStorage.setItem('cashier_token', newToken)
+    localStorage.setItem('cashier_user', JSON.stringify(newUser))
+  }
+
   const logout = () => {
     setToken(null)
     setUser(null)
@@ -59,7 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, token, login, loginWithToken, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   )

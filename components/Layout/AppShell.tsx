@@ -1,22 +1,28 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { Sidebar } from './Sidebar'
 import { GlobalSearch } from './GlobalSearch'
 import { PendingBell } from './PendingBell'
 import { Menu } from 'lucide-react'
 
+// MyPOS pages redirect logged-out visits to the staff PIN picker instead of
+// the office email/password login — that's the "terminal" entry point.
+const MYPOS_PREFIXES = ['/pos', '/mypos', '/schedule', '/events']
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth()
   const router = useRouter()
+  const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     if (!isLoading && !user) {
-      router.push('/login')
+      const isMyPos = MYPOS_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))
+      router.push(isMyPos ? '/mypos/staff-login' : '/login')
     }
-  }, [user, isLoading, router])
+  }, [user, isLoading, router, pathname])
 
   if (isLoading) {
     return (
