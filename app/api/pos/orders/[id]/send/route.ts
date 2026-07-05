@@ -3,6 +3,7 @@ import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { canActOnOrder } from '@/lib/pos-close'
 import { sendPushToUser } from '@/lib/push'
+import { SUPPLIER_POSITION, MANAGEMENT_ROLES } from '@/lib/shared-constants'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -37,13 +38,22 @@ export async function POST(req: NextRequest, { params }: Params) {
   // Counter service models: items sent to a DIRECT counter (Main Bar model —
   // the seller serves immediately) skip the prep queue and are PREPARED at
   // once; PREP counters (VIP/kitchen model) queue as SENT until staff mark
-  // them ready.
+  // them ready. But "DIRECT" only means instant-serve when the person
+  // sending IS that counter's own staff (self-serve, e.g. a Bar Lady making
+  // an order for her own seated customer) — some outlets (Coco Beach) also
+  // route Outside Staff orders through a DIRECT counter for the counter
+  // staff to prepare and hand over for delivery, which still needs a real
+  // queue entry so the counter staff can see and mark it ready.
   const counters = await prisma.posCounter.findMany({ where: { outletId: order.outletId } })
   const modelOf = (code: string) =>
     (counters.find((c) => c.code === code) as { serviceModel?: string } | undefined)?.serviceModel ?? 'PREP'
+  const isSelfServe = (code: string) => {
+    const ownerPosition = SUPPLIER_POSITION[code]
+    return !ownerPosition || payload.position === ownerPosition || MANAGEMENT_ROLES.includes(payload.role)
+  }
 
   for (const [counterCode, items] of Object.entries(byCounter)) {
-    const direct = modelOf(counterCode) === 'DIRECT'
+    const direct = modelOf(counterCode) === 'DIRECT' && isSelfServe(counterCode)
     await prisma.posOrderItem.updateMany({
       where: { id: { in: items.map((i) => i.id) } },
       data: direct
