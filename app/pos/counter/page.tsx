@@ -119,7 +119,7 @@ function CounterView() {
   const [products, setProducts] = useState<ProductOption[]>([])
   const [showRequestForm, setShowRequestForm] = useState(false)
   const [requestProductId, setRequestProductId] = useState('')
-  const [requestQty, setRequestQty] = useState(1)
+  const [requestQty, setRequestQty] = useState('1') // kept as text so the field can be cleared while typing on phone/PC
   const [requestNote, setRequestNote] = useState('')
   const [sendingRequest, setSendingRequest] = useState(false)
 
@@ -259,20 +259,22 @@ function CounterView() {
     return () => clearInterval(t)
   }, [loadStockRequests])
 
+  const parsedQty = parseInt(requestQty, 10) || 0
+
   const sendStockRequest = useCallback(async () => {
-    if (!token || !requestProductId || requestQty <= 0) return
+    if (!token || !requestProductId || parsedQty <= 0) return
     setSendingRequest(true)
     const res = await fetch('/api/pos/stock-requests', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productId: requestProductId, quantity: requestQty, note: requestNote.trim() || undefined }),
+      body: JSON.stringify({ productId: requestProductId, quantity: parsedQty, note: requestNote.trim() || undefined }),
     })
     setSendingRequest(false)
     if (res.ok) {
-      setRequestProductId(''); setRequestQty(1); setRequestNote(''); setShowRequestForm(false)
+      setRequestProductId(''); setRequestQty('1'); setRequestNote(''); setShowRequestForm(false)
       loadStockRequests()
     }
-  }, [token, requestProductId, requestQty, requestNote, loadStockRequests])
+  }, [token, requestProductId, parsedQty, requestNote, loadStockRequests])
 
   const fulfillStockRequest = useCallback(async (id: string) => {
     if (!token) return
@@ -373,18 +375,18 @@ function CounterView() {
                 </select>
                 <div className="flex items-center gap-2">
                   <label className="text-xs font-semibold text-amber-800">Idadi</label>
-                  <input type="number" min={1} value={requestQty}
-                    onChange={(e) => setRequestQty(Math.max(1, Number(e.target.value) || 1))}
+                  <input type="text" inputMode="numeric" pattern="[0-9]*" value={requestQty}
+                    onChange={(e) => setRequestQty(e.target.value.replace(/\D/g, ''))}
                     className="w-20 px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:border-amber-400" />
                 </div>
                 <input value={requestNote} onChange={(e) => setRequestNote(e.target.value)} placeholder="Maelezo (hiari)"
                   className="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:border-amber-400" />
                 <div className="flex gap-2">
-                  <button onClick={sendStockRequest} disabled={sendingRequest || !requestProductId}
+                  <button onClick={sendStockRequest} disabled={sendingRequest || !requestProductId || parsedQty <= 0}
                     className="text-xs font-bold text-white bg-amber-600 px-3 py-1.5 rounded-lg hover:bg-amber-700 disabled:opacity-50">
                     {sendingRequest ? '...' : 'Tuma ombi'}
                   </button>
-                  <button onClick={() => { setShowRequestForm(false); setRequestProductId(''); setRequestQty(1); setRequestNote('') }} className="text-xs font-semibold text-gray-500 px-3 py-1.5">Ghairi</button>
+                  <button onClick={() => { setShowRequestForm(false); setRequestProductId(''); setRequestQty('1'); setRequestNote('') }} className="text-xs font-semibold text-gray-500 px-3 py-1.5">Ghairi</button>
                 </div>
               </div>
             )}
