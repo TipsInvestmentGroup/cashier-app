@@ -78,6 +78,12 @@ export default function LoginPage() {
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
+
+          <div className="border-t border-gray-100 p-4 text-center">
+            <Link href="/mypos/staff-login" className="text-sm font-semibold text-gray-400 hover:text-indigo-600">
+              ← Back to service login
+            </Link>
+          </div>
         </div>
       </div>
     </div>
