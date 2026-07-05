@@ -40,6 +40,8 @@ interface Group {
 
 interface StockRequest {
   id: string
+  fromCounter: string
+  toCounter: string
   productName: string
   quantity: number
   note: string | null
@@ -144,6 +146,7 @@ function CounterView() {
   const stockRoute = user?.position ? STOCK_REQUEST_ROUTES[user.position] : undefined
   const canRequestStock = !!stockRoute && stockRoute.from === activeCounter
   const isSupplier = !!user && (MANAGEMENT_ROLES.includes(user.role) || SUPPLIER_POSITION[activeCounter] === user.position)
+  const counterName = useCallback((code: string) => counters.find((c) => c.code === code)?.label ?? code, [counters])
 
   useEffect(() => {
     if (!token || !user?.outlet?.id) return
@@ -354,12 +357,12 @@ function CounterView() {
           </div>
         ) : null}
 
-        {/* Stock-transfer: VIP staff requesting backup stock from Main Bar */}
+        {/* Stock-transfer: this counter requesting backup stock from its paired counter */}
         {canRequestStock && (
           <div className="mb-4">
             {!showRequestForm ? (
               <button onClick={() => setShowRequestForm(true)} className="text-xs font-semibold text-amber-700 border border-amber-300 bg-amber-50 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors">
-                🔄 Omba bidhaa kutoka Main Bar
+                🔄 Omba bidhaa kutoka {counterName(stockRoute!.to)}
               </button>
             ) : (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
@@ -387,19 +390,19 @@ function CounterView() {
             )}
             {stockRequests.length > 0 && (
               <div className="mt-2 text-xs text-amber-700">
-                {stockRequests.map((r) => <div key={r.id}>⏳ {r.quantity} x {r.productName} — inasubiri Main Bar</div>)}
+                {stockRequests.map((r) => <div key={r.id}>⏳ {r.quantity} x {r.productName} — inasubiri {counterName(r.toCounter)}</div>)}
               </div>
             )}
           </div>
         )}
 
-        {/* Stock-transfer: Main Bar fulfilling VIP requests */}
+        {/* Stock-transfer: this counter fulfilling requests from its paired counter */}
         {isSupplier && stockRequests.length > 0 && (
           <div className="mb-4 space-y-2">
             {stockRequests.map((r) => (
               <div key={r.id} className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
                 <div>
-                  <div className="text-sm font-semibold text-amber-900">👑 VIP inaomba: {r.quantity} x {r.productName}</div>
+                  <div className="text-sm font-semibold text-amber-900">{COUNTER_ICONS[r.fromCounter] ?? '🔸'} {counterName(r.fromCounter)} inaomba: {r.quantity} x {r.productName}</div>
                   {r.note && <div className="text-xs text-amber-700">{r.note}</div>}
                   <div className="text-xs text-amber-500">{r.requestedByName}</div>
                 </div>

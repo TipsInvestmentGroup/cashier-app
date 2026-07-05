@@ -27,12 +27,13 @@ export const POSITION_COUNTERS: Record<string, string[]> = {
 }
 export const MANAGEMENT_ROLES = ['MANAGER', 'ADMIN', 'DIRECTOR']
 
-// Stock-transfer requests: today only VIP Counter staff can call for backup
-// stock from the Main Drinks Counter when the VIP counter runs out of a
-// product — keyed by the requester's position so another counter pair can be
-// added later without touching the request-handling code.
+// Stock-transfer requests: VIP and Main Bar can each call on the other for
+// backup stock when they run out of a product — keyed by the requester's
+// position so another counter pair can be added later without touching the
+// request-handling code.
 export const STOCK_REQUEST_ROUTES: Record<string, { from: string; to: string }> = {
   'VIP BAR': { from: 'VIP', to: 'MAIN' },
+  'BAR LADY': { from: 'MAIN', to: 'VIP' },
 }
 // Reverse lookup: which position is asked to supply a given counter code.
-export const SUPPLIER_POSITION: Record<string, string> = { MAIN: 'BAR LADY' }
+export const SUPPLIER_POSITION: Record<string, string> = { MAIN: 'BAR LADY', VIP: 'VIP BAR' }
