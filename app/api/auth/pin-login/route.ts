@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     await prisma.user.update({ where: { id: user.id }, data: { pinFailedAttempts: 0, pinLockedUntil: null } })
 
     const outlet = user.outletId ? await prisma.outlet.findUnique({ where: { id: user.outletId } }) : null
-    const token = signToken({ userId: user.id, email: user.email, role: user.role, outletId: user.outletId || undefined, name: user.name })
+    const token = signToken({ userId: user.id, email: user.email, role: user.role, outletId: user.outletId || undefined, name: user.name, position: user.position || undefined })
 
     return NextResponse.json({
       token,

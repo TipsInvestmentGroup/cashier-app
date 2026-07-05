@@ -3,9 +3,18 @@ import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { sendPushToUser } from '@/lib/push'
 
+// Outside Staff place orders and collect finished ones from a counter, but
+// never operate a counter themselves — they're not authorized to issue or
+// transfer products (see the TIPS role spec). Enforced server-side, not just
+// by hiding the nav link/tabs client-side.
+function isOutsideStaff(payload: { position?: string }) {
+  return payload.position === 'OUTSIDE STAFF'
+}
+
 export async function GET(req: NextRequest) {
   const payload = getAuthUser(req)
   if (!payload) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+  if (isOutsideStaff(payload)) return NextResponse.json({ error: 'Outside Staff cannot operate a counter' }, { status: 403 })
 
   const outletId = payload.outletId ?? req.nextUrl.searchParams.get('outletId')
   const code = req.nextUrl.searchParams.get('code')
@@ -39,6 +48,7 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const payload = getAuthUser(req)
   if (!payload) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
+  if (isOutsideStaff(payload)) return NextResponse.json({ error: 'Outside Staff cannot operate a counter' }, { status: 403 })
 
   const { itemId } = await req.json().catch(() => ({}))
   if (!itemId) return NextResponse.json({ error: 'itemId required' }, { status: 400 })

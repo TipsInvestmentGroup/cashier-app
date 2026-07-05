@@ -8,7 +8,7 @@ import {
   Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, type LucideIcon,
 } from 'lucide-react'
 
-export type Tab = { href: string; label: string; icon: LucideIcon; roles: string[] }
+export type Tab = { href: string; label: string; icon: LucideIcon; roles: string[]; excludePositions?: string[] }
 
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -17,7 +17,9 @@ const POS_ROLES = ['WAITER', 'MANAGER', 'ADMIN']
 // Groups per section, in the order they appear (role-gated per group).
 export const MYPOS_TABS: Tab[] = [
   { href: '/pos', label: 'Waiter App', icon: UtensilsCrossed, roles: POS_ROLES },
-  { href: '/pos/counter', label: 'Counter View', icon: Printer, roles: POS_ROLES },
+  // Outside Staff place orders and collect from a counter, but never operate
+  // one — they're not authorized to issue/transfer products.
+  { href: '/pos/counter', label: 'Counter View', icon: Printer, roles: POS_ROLES, excludePositions: ['OUTSIDE STAFF'] },
   { href: '/pos/manager', label: 'All Orders', icon: ClipboardList, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/manager/items', label: 'Item Blocker', icon: Ban, roles: ['MANAGER', 'ADMIN'] },
   { href: '/schedule', label: 'Scheduling', icon: CalendarClock, roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
@@ -63,7 +65,7 @@ export const FINANCE_TABS: Tab[] = [
 export function SectionTabs({ tabs }: { tabs: Tab[] }) {
   const pathname = usePathname()
   const { user } = useAuth()
-  const visible = tabs.filter((t) => t.roles.includes(user?.role || ''))
+  const visible = tabs.filter((t) => t.roles.includes(user?.role || '') && !t.excludePositions?.includes(user?.position || ''))
   // Longest matching href wins so nested routes don't also light up their parent.
   const matches = (h: string) => pathname === h || pathname.startsWith(h + '/')
   const best = visible.filter((t) => matches(t.href)).sort((a, b) => b.href.length - a.href.length)[0]?.href

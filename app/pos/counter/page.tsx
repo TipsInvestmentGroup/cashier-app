@@ -5,6 +5,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
+import { POSITION_COUNTERS, MANAGEMENT_ROLES, STOCK_REQUEST_ROUTES, SUPPLIER_POSITION } from '@/lib/shared-constants'
 
 // Outlets can have different physical counter setups (e.g. Mikocheni's Main
 // Bar + VIP + Shisha + Kitchen), so the tab list is fetched per-outlet (see
@@ -13,18 +14,6 @@ const COUNTER_ICONS: Record<string, string> = {
   MAIN: '🍹', BAR: '🍺', VIP: '👑', SHISHA: '💨', KITCHEN: '🍽',
 }
 const REFRESH_MS = 5_000
-
-// Staff normally only work one physical station, so their Counter View is
-// locked to it — Abdul (VIP BAR) shouldn't see the Main Bar tab and vice
-// versa. Positions with no station mapping here (e.g. OUTSIDE STAFF) and all
-// management roles fall through to seeing every counter.
-const POSITION_COUNTERS: Record<string, string[]> = {
-  'VIP BAR': ['VIP'],
-  'BAR LADY': ['MAIN'],
-  'SHISHA COUNTER': ['SHISHA'],
-  'KITCHEN COUNTER': ['KITCHEN'],
-}
-const MANAGEMENT_ROLES = ['MANAGER', 'ADMIN', 'DIRECTOR']
 
 interface CounterDef { code: string; label: string; serviceModel: string }
 
@@ -47,6 +36,15 @@ interface Group {
   waiter: { name: string }
   items: OrderItem[]
   earliest: number
+}
+
+interface StockRequest {
+  id: string
+  productName: string
+  note: string | null
+  status: string
+  requestedByName: string
+  createdAt: string
 }
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
@@ -112,6 +110,11 @@ function CounterView() {
   const [autoPrint, setAutoPrint] = useState(false)
   const [flash, setFlash] = useState(false)
   const [newOrders, setNewOrders] = useState<Set<string>>(new Set())
+  const [stockRequests, setStockRequests] = useState<StockRequest[]>([])
+  const [showRequestForm, setShowRequestForm] = useState(false)
+  const [requestProduct, setRequestProduct] = useState('')
+  const [requestNote, setRequestNote] = useState('')
+  const [sendingRequest, setSendingRequest] = useState(false)
 
   const seenRef = useRef<Set<string>>(new Set())
   const firstLoadRef = useRef(true)
@@ -129,6 +132,13 @@ function CounterView() {
   }, [counters, user])
 
   const counterLabel = counters.find((c) => c.code === activeCounter)?.label ?? activeCounter
+
+  // Stock-transfer requests (e.g. VIP asking Main Bar for backup stock) —
+  // shown only to the requesting counter (a "request" button) or the
+  // supplying counter (a pending-requests list), per STOCK_REQUEST_ROUTES.
+  const stockRoute = user?.position ? STOCK_REQUEST_ROUTES[user.position] : undefined
+  const canRequestStock = !!stockRoute && stockRoute.from === activeCounter
+  const isSupplier = !!user && (MANAGEMENT_ROLES.includes(user.role) || SUPPLIER_POSITION[activeCounter] === user.position)
 
   useEffect(() => {
     if (!token || !user?.outlet?.id) return
@@ -215,6 +225,48 @@ function CounterView() {
 
   const groups = useMemo(() => groupItems(items), [items])
 
+  const outletId = user?.outlet?.id
+  const loadStockRequests = useCallback(async () => {
+    if (!token || !outletId) return
+    if (!canRequestStock && !isSupplier) { setStockRequests([]); return }
+    const filterKey = isSupplier ? 'toCounter' : 'fromCounter'
+    const res = await fetch(`/api/pos/stock-requests?outletId=${outletId}&${filterKey}=${activeCounter}&status=PENDING`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (res.ok) setStockRequests(await res.json())
+  }, [token, outletId, activeCounter, canRequestStock, isSupplier])
+
+  useEffect(() => { loadStockRequests() }, [loadStockRequests])
+  useEffect(() => {
+    const t = setInterval(loadStockRequests, REFRESH_MS)
+    return () => clearInterval(t)
+  }, [loadStockRequests])
+
+  const sendStockRequest = useCallback(async () => {
+    if (!token || !requestProduct.trim()) return
+    setSendingRequest(true)
+    const res = await fetch('/api/pos/stock-requests', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productName: requestProduct.trim(), note: requestNote.trim() || undefined }),
+    })
+    setSendingRequest(false)
+    if (res.ok) {
+      setRequestProduct(''); setRequestNote(''); setShowRequestForm(false)
+      loadStockRequests()
+    }
+  }, [token, requestProduct, requestNote, loadStockRequests])
+
+  const fulfillStockRequest = useCallback(async (id: string) => {
+    if (!token) return
+    setStockRequests((prev) => prev.filter((r) => r.id !== id))
+    const res = await fetch(`/api/pos/stock-requests/${id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) loadStockRequests()
+  }, [token, loadStockRequests])
+
   const markPrepared = useCallback(async (itemId: string) => {
     if (!token) return
     setMarking(itemId)
@@ -237,6 +289,22 @@ function CounterView() {
     const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000)
     if (diff < 1) return 'Sasa hivi'
     return `Min ${diff} iliyopita`
+  }
+
+  // Outside Staff place orders and collect from a counter, but never operate
+  // one — not authorized to issue/transfer products. Nav hides the link too,
+  // but this covers anyone reaching the URL directly.
+  if (user?.position === 'OUTSIDE STAFF') {
+    return (
+      <AppShell>
+        <SectionTabs tabs={MYPOS_TABS} />
+        <div className="max-w-md mx-auto text-center py-16">
+          <div className="text-5xl mb-3">🚫</div>
+          <p className="text-gray-600 font-medium">Counter View si kwa Outside Staff</p>
+          <p className="text-gray-400 text-sm mt-1">Waomba na kukusanya maagizo tu — huna ruhusa ya kuendesha counter.</p>
+        </div>
+      </AppShell>
+    )
   }
 
   return (
@@ -271,6 +339,52 @@ function CounterView() {
             {COUNTER_ICONS[visibleCounters[0].code] ?? '🔸'} {visibleCounters[0].label}
           </div>
         ) : null}
+
+        {/* Stock-transfer: VIP staff requesting backup stock from Main Bar */}
+        {canRequestStock && (
+          <div className="mb-4">
+            {!showRequestForm ? (
+              <button onClick={() => setShowRequestForm(true)} className="text-xs font-semibold text-amber-700 border border-amber-300 bg-amber-50 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors">
+                🔄 Omba bidhaa kutoka Main Bar
+              </button>
+            ) : (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                <input value={requestProduct} onChange={(e) => setRequestProduct(e.target.value)} placeholder="Jina la bidhaa (mf. Brutal Fruit 275ml)"
+                  className="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:border-amber-400" />
+                <input value={requestNote} onChange={(e) => setRequestNote(e.target.value)} placeholder="Maelezo (hiari)"
+                  className="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg focus:outline-none focus:border-amber-400" />
+                <div className="flex gap-2">
+                  <button onClick={sendStockRequest} disabled={sendingRequest || !requestProduct.trim()}
+                    className="text-xs font-bold text-white bg-amber-600 px-3 py-1.5 rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                    {sendingRequest ? '...' : 'Tuma ombi'}
+                  </button>
+                  <button onClick={() => { setShowRequestForm(false); setRequestProduct(''); setRequestNote('') }} className="text-xs font-semibold text-gray-500 px-3 py-1.5">Ghairi</button>
+                </div>
+              </div>
+            )}
+            {stockRequests.length > 0 && (
+              <div className="mt-2 text-xs text-amber-700">
+                {stockRequests.map((r) => <div key={r.id}>⏳ {r.productName} — inasubiri Main Bar</div>)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Stock-transfer: Main Bar fulfilling VIP requests */}
+        {isSupplier && stockRequests.length > 0 && (
+          <div className="mb-4 space-y-2">
+            {stockRequests.map((r) => (
+              <div key={r.id} className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                <div>
+                  <div className="text-sm font-semibold text-amber-900">👑 VIP inaomba: {r.productName}</div>
+                  {r.note && <div className="text-xs text-amber-700">{r.note}</div>}
+                  <div className="text-xs text-amber-500">{r.requestedByName}</div>
+                </div>
+                <button onClick={() => fulfillStockRequest(r.id)} className="text-xs font-bold text-white bg-amber-600 px-3 py-1.5 rounded-lg hover:bg-amber-700 transition-colors">✓ Nimetoa</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {loading ? (
           <div className="text-center py-16 text-gray-400">Inapakia...</div>

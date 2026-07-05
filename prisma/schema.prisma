@@ -92,6 +92,7 @@ model Outlet {
   posTables        PosTable[]
   posShifts        PosShift[]
   posCounters      PosCounter[]
+  posStockRequests PosStockRequest[]
   posOrders        PosOrder[]
   posBlockedItems  PosBlockedItem[]
   dayClosures      DayClosure[]
@@ -633,6 +634,28 @@ model PosOrderItem {
 
   @@index([orderId])
   @@index([productId])
+}
+
+/// VIP Counter staff requesting drinks from the Main Drinks Counter (or vice
+/// versa) when their own counter is out of stock of a product — physical
+/// hand-off between staff, this just carries the notification/queue.
+model PosStockRequest {
+  id              String    @id @default(cuid())
+  outletId        String
+  outlet          Outlet    @relation(fields: [outletId], references: [id])
+  fromCounter     String    // VIP | MAIN — counter that's out of stock and asking
+  toCounter       String    // MAIN | VIP — counter being asked to supply
+  productName     String
+  note            String?
+  status          String    @default("PENDING") // PENDING | FULFILLED
+  requestedById   String
+  requestedByName String
+  fulfilledById   String?
+  fulfilledAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([outletId])
+  @@index([status])
 }
 
 // Tracks every receipt/ticket sent to a counter printer.

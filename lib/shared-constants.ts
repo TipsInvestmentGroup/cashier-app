@@ -13,3 +13,26 @@ export const CANCELLATION_APPROVERS = PETTY_APPROVERS
 // stops an API caller from writing an arbitrary string here — validate
 // against this list wherever role is set.
 export const VALID_ROLES = ['CASHIER', 'WAITER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+
+// MyPos floor staff normally work one physical station, so both the Counter
+// View UI (client) and its API (server) lock a staffer to their assigned
+// counter(s) by this map. Positions with no entry here (e.g. OUTSIDE STAFF,
+// which is explicitly blocked elsewhere) and all management roles fall
+// through to seeing every counter.
+export const POSITION_COUNTERS: Record<string, string[]> = {
+  'VIP BAR': ['VIP'],
+  'BAR LADY': ['MAIN'],
+  'SHISHA COUNTER': ['SHISHA'],
+  'KITCHEN COUNTER': ['KITCHEN'],
+}
+export const MANAGEMENT_ROLES = ['MANAGER', 'ADMIN', 'DIRECTOR']
+
+// Stock-transfer requests: today only VIP Counter staff can call for backup
+// stock from the Main Drinks Counter when the VIP counter runs out of a
+// product — keyed by the requester's position so another counter pair can be
+// added later without touching the request-handling code.
+export const STOCK_REQUEST_ROUTES: Record<string, { from: string; to: string }> = {
+  'VIP BAR': { from: 'VIP', to: 'MAIN' },
+}
+// Reverse lookup: which position is asked to supply a given counter code.
+export const SUPPLIER_POSITION: Record<string, string> = { MAIN: 'BAR LADY' }

@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
       role: user.role,
       outletId: user.outletId || undefined,
       name: user.name,
+      position: user.position || undefined,
     })
 
     return NextResponse.json({

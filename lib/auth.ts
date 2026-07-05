@@ -19,6 +19,7 @@ export interface JWTPayload {
   role: string
   outletId?: string
   name: string
+  position?: string
 }
 
 export function signToken(payload: JWTPayload): string {
