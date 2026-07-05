@@ -42,6 +42,15 @@ export async function POST(req: NextRequest) {
     if (existing) return NextResponse.json(existing)
   }
 
+  // shiftId is a required FK on PosOrder with no validation before this point
+  // — a stale/mismatched id (e.g. an old cached shift from before an outlet
+  // reconfiguration) would otherwise throw an uncaught FK-constraint error
+  // here, surfacing to the waiter as a bare 500 with no usable message.
+  const shift = await prisma.posShift.findUnique({ where: { id: shiftId } })
+  if (!shift || shift.outletId !== outletId || shift.closedAt) {
+    return NextResponse.json({ error: 'Shift haipo au imefungwa — anza shift mpya kwenye Waiter App.' }, { status: 400 })
+  }
+
   const today = new Date()
   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
   const count = await prisma.posOrder.count({
