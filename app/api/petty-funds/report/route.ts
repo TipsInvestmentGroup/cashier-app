@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope } from '@/lib/auth'
+import { canManageFunds, isOwner } from '@/lib/petty-access'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
@@ -16,6 +17,9 @@ const db = prisma as any
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!canManageFunds(user.role) && !isOwner(user.email)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { searchParams } = new URL(req.url)
   const outletId = readOutletScope(user, searchParams.get('outletId'))
@@ -33,12 +37,22 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = { isActive: true }
   if (outletId) where.outletId = outletId
-  if (ownerName) where.ownerName = ownerName
 
-  const funds = await db.pettyFund.findMany({
+  // ownerName is filtered case-insensitively below in JS, not via Prisma's
+  // `mode: 'insensitive'` — that option is Postgres-only and throws on SQLite
+  // (this app's local/dev datasource). A raw equality filter here would
+  // silently return zero funds on any casing mismatch, easy to mistake for
+  // "no data," so match the case-insensitive convention used everywhere else
+  // in this codebase (email/name comparisons) instead.
+  let funds = await db.pettyFund.findMany({
     where,
     include: { txns: { orderBy: { createdAt: 'asc' } } },
   })
+  if (ownerName) {
+    const target = ownerName.trim().toLowerCase()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    funds = funds.filter((f: any) => (f.ownerName || '').trim().toLowerCase() === target)
+  }
 
   const outlets = await prisma.outlet.findMany({ select: { id: true, name: true } })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

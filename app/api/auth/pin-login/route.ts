@@ -29,15 +29,21 @@ export async function POST(req: NextRequest) {
 
     const valid = await comparePassword(String(pin), user.pin)
     if (!valid) {
-      const attempts = user.pinFailedAttempts + 1
-      const lockingOut = attempts >= MAX_ATTEMPTS
-      await prisma.user.update({
+      // Atomic DB-level increment, not a JS read-then-write — concurrent wrong
+      // guesses (e.g. a brute-force script firing many requests at once) each
+      // get an accurate, correctly-serialized post-increment count, so the
+      // lockout can no longer be raced past by firing attempts in parallel.
+      const updated = await prisma.user.update({
         where: { id: user.id },
-        data: {
-          pinFailedAttempts: lockingOut ? 0 : attempts,
-          pinLockedUntil: lockingOut ? new Date(Date.now() + LOCKOUT_MS) : null,
-        },
+        data: { pinFailedAttempts: { increment: 1 } },
       })
+      const lockingOut = updated.pinFailedAttempts >= MAX_ATTEMPTS
+      if (lockingOut) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { pinFailedAttempts: 0, pinLockedUntil: new Date(Date.now() + LOCKOUT_MS) },
+        })
+      }
       return NextResponse.json({ error: lockingOut ? 'Too many attempts. Try again in 5 minutes.' : 'Incorrect PIN' }, { status: 401 })
     }
 

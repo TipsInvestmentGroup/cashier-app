@@ -185,9 +185,22 @@ async function manualAssign(user: any, body: any) {
   })
   if (onEvent) return NextResponse.json({ error: `${staff.name} is assigned to event "${onEvent.event.name}" that day` }, { status: 409 })
 
-  const item = await db.scheduleAssignment.create({
-    data: { date: day, shiftType, outletId, staffId, staffName: staff.name, role, source: 'MANUAL', note: note || null, createdById: user.userId },
-  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let item: any
+  try {
+    item = await db.scheduleAssignment.create({
+      data: { date: day, shiftType, outletId, staffId, staffName: staff.name, role, source: 'MANUAL', note: note || null, createdById: user.userId },
+    })
+  } catch (err: unknown) {
+    // The clash-check above and this create aren't atomic — a genuine
+    // concurrent double-submit (double-click, or two managers at once) can
+    // still race past it and hit the @@unique constraint here. Without this,
+    // that raises an unhandled 500 instead of the friendly 409 above.
+    if (err instanceof Error && err.message.includes('Unique')) {
+      return NextResponse.json({ error: `${staff.name} is already scheduled for this shift` }, { status: 409 })
+    }
+    throw err
+  }
 
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'CREATE', entity: 'ScheduleAssignment', entityId: item.id, details: `Assigned ${staff.name} to ${shiftType} (manual)` },

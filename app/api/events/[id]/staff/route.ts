@@ -37,48 +37,72 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const day = startOfDay(new Date(event.date))
   const dayEnd = endOfDay(new Date(event.date))
+  // Stable marker embedded in the unavailability note — matched later by
+  // eventId, not by the event's (editable) name, so renaming the event after
+  // assigning staff can't orphan the cleanup in DELETE below.
+  const eventTag = `[eventId:${event.id}]`
 
-  // Already on this event?
-  const dupe = await db.eventStaff.findFirst({ where: { eventId: id, staffId: staff.id } })
-  if (dupe) return NextResponse.json({ error: `${staff.name} is already on this event` }, { status: 409 })
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tdb = tx as any
 
-  // Conflict: booked on another event the same day.
-  const otherEvent = await db.eventStaff.findFirst({
-    where: { staffId: staff.id, event: { date: { gte: day, lte: dayEnd } }, eventId: { not: id } },
-    include: { event: { select: { name: true } } },
-  })
-  if (otherEvent) {
-    return NextResponse.json({ error: `${staff.name} is already assigned to event "${otherEvent.event.name}" that day` }, { status: 409 })
-  }
+      // Both conflict checks now run inside the same transaction as the
+      // insert — previously they ran beforehand as separate queries, so two
+      // concurrent assignments (two managers, two tabs) could each pass the
+      // checks before either committed, double-booking the same staffer
+      // across two events the same day.
+      const dupe = await tdb.eventStaff.findFirst({ where: { eventId: id, staffId: staff.id } })
+      if (dupe) throw new Error(`ALREADY_ON_EVENT`)
 
-  const result = await prisma.$transaction(async (tx) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tdb = tx as any
-    const assignment = await tdb.eventStaff.create({
-      data: { eventId: id, staffId: staff.id, staffName: staff.name, role },
-    })
-
-    // Pull the staffer off their regular roster for the event day.
-    const removed = await tdb.scheduleAssignment.deleteMany({ where: { staffId: staff.id, date: { gte: day, lte: dayEnd } } })
-
-    // Record a whole-day unavailability so auto-generation won't re-roster them
-    // (skip if one already exists for the day).
-    const existingUnavail = await tdb.staffUnavailability.findFirst({
-      where: { staffId: staff.id, date: { gte: day, lte: dayEnd }, shiftType: null },
-    })
-    if (!existingUnavail) {
-      await tdb.staffUnavailability.create({
-        data: { staffId: staff.id, staffName: staff.name, date: day, shiftType: null, reason: 'OTHER', note: `Working event: ${event.name}`, createdById: user.userId },
+      const otherEvent = await tdb.eventStaff.findFirst({
+        where: { staffId: staff.id, event: { date: { gte: day, lte: dayEnd } }, eventId: { not: id } },
+        include: { event: { select: { name: true } } },
       })
-    }
-    return { assignment, removedShifts: removed.count }
-  })
+      if (otherEvent) throw new Error(`OTHER_EVENT:${otherEvent.event.name}`)
 
-  await prisma.auditLog.create({
-    data: { userId: user.userId, action: 'CREATE', entity: 'EventStaff', entityId: result.assignment.id, details: `Assigned ${staff.name} to event "${event.name}" (removed ${result.removedShifts} roster shift(s))` },
-  })
+      // A manager's deliberate MANUAL shift shouldn't vanish silently just
+      // because the same staffer is also being sent to an event — block and
+      // ask the manager to resolve it explicitly instead.
+      const manualShift = await tdb.scheduleAssignment.findFirst({
+        where: { staffId: staff.id, date: { gte: day, lte: dayEnd }, source: 'MANUAL' },
+      })
+      if (manualShift) throw new Error(`HAS_MANUAL_SHIFT:${manualShift.shiftType}`)
 
-  return NextResponse.json({ ...result.assignment, removedShifts: result.removedShifts }, { status: 201 })
+      const assignment = await tdb.eventStaff.create({
+        data: { eventId: id, staffId: staff.id, staffName: staff.name, role },
+      })
+
+      // Pull the staffer off their (AUTO-generated) roster for the event day.
+      const removed = await tdb.scheduleAssignment.deleteMany({
+        where: { staffId: staff.id, date: { gte: day, lte: dayEnd }, source: 'AUTO' },
+      })
+
+      // Record a whole-day unavailability so auto-generation won't re-roster them
+      // (skip if one already exists for the day).
+      const existingUnavail = await tdb.staffUnavailability.findFirst({
+        where: { staffId: staff.id, date: { gte: day, lte: dayEnd }, shiftType: null },
+      })
+      if (!existingUnavail) {
+        await tdb.staffUnavailability.create({
+          data: { staffId: staff.id, staffName: staff.name, date: day, shiftType: null, reason: 'OTHER', note: `Working event: ${event.name} ${eventTag}`, createdById: user.userId },
+        })
+      }
+      return { assignment, removedShifts: removed.count }
+    })
+
+    await prisma.auditLog.create({
+      data: { userId: user.userId, action: 'CREATE', entity: 'EventStaff', entityId: result.assignment.id, details: `Assigned ${staff.name} to event "${event.name}" (removed ${result.removedShifts} roster shift(s))` },
+    })
+
+    return NextResponse.json({ ...result.assignment, removedShifts: result.removedShifts }, { status: 201 })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : ''
+    if (msg === 'ALREADY_ON_EVENT') return NextResponse.json({ error: `${staff.name} is already on this event` }, { status: 409 })
+    if (msg.startsWith('OTHER_EVENT:')) return NextResponse.json({ error: `${staff.name} is already assigned to event "${msg.slice('OTHER_EVENT:'.length)}" that day` }, { status: 409 })
+    if (msg.startsWith('HAS_MANUAL_SHIFT:')) return NextResponse.json({ error: `${staff.name} has a manually-assigned ${msg.slice('HAS_MANUAL_SHIFT:'.length)} shift that day — remove or reassign it first.` }, { status: 409 })
+    throw err
+  }
 }
 
 /** PATCH /api/events/[id]/staff — update attendance / sales / role. body: { assignId, attended?, salesAttributed?, role?, performanceNote? } */
@@ -122,11 +146,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tdb = tx as any
     await tdb.eventStaff.delete({ where: { id: assignId } })
-    // Lift the auto-added "working event" unavailability so they can be re-rostered.
+    // Lift the auto-added "working event" unavailability so they can be
+    // re-rostered. Matched by the stable [eventId:...] tag embedded in the
+    // note, not by the event's name — renaming the event between assigning
+    // and removing staff used to make this match fail silently, permanently
+    // stranding the unavailability row (and the staffer) forever.
     const day = startOfDay(new Date(existing.event.date))
     const dayEnd = endOfDay(new Date(existing.event.date))
     await tdb.staffUnavailability.deleteMany({
-      where: { staffId: existing.staffId, date: { gte: day, lte: dayEnd }, shiftType: null, note: `Working event: ${existing.event.name}` },
+      where: { staffId: existing.staffId, date: { gte: day, lte: dayEnd }, shiftType: null, note: { contains: `[eventId:${existing.eventId}]` } },
     })
   })
 

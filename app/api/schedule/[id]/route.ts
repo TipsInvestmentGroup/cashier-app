@@ -43,7 +43,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (clash) return NextResponse.json({ error: 'Staff already has that shift this day' }, { status: 409 })
   }
 
-  const item = await db.scheduleAssignment.update({ where: { id }, data })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let item: any
+  try {
+    item = await db.scheduleAssignment.update({ where: { id }, data })
+  } catch (err: unknown) {
+    // Same clash-check-then-write gap as the manual-assign route — a genuine
+    // concurrent collision on the @@unique constraint would otherwise raise
+    // an unhandled 500 instead of this friendly 409.
+    if (err instanceof Error && err.message.includes('Unique')) {
+      return NextResponse.json({ error: 'Staff already has that shift this day' }, { status: 409 })
+    }
+    throw err
+  }
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'UPDATE', entity: 'ScheduleAssignment', entityId: id, details: `Override ${existing.staffName}` },
   })

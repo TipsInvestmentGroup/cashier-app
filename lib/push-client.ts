@@ -34,6 +34,27 @@ export async function getExistingSubscription(): Promise<PushSubscription | null
   return reg.pushManager.getSubscription()
 }
 
+/**
+ * Removes this device's push subscription, both from the browser and from
+ * the server — call on logout. MyPos devices are intentionally shared
+ * per-counter (any staffer can log into any device), so leaving a stale
+ * subscription behind after logging out means the departed person keeps
+ * getting "order ready" pushes meant for whoever's now using their old
+ * device, with no way for anyone to notice. Best-effort: never throws.
+ */
+export async function unsubscribeFromPush(token: string): Promise<void> {
+  try {
+    const sub = await getExistingSubscription()
+    if (!sub) return
+    await fetch('/api/push/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ endpoint: sub.endpoint }),
+    }).catch(() => {})
+    await sub.unsubscribe().catch(() => {})
+  } catch { /* best-effort — logout should never fail because of this */ }
+}
+
 export async function subscribeToPush(token: string): Promise<'subscribed' | 'denied' | 'error'> {
   try {
     const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY

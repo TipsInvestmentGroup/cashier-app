@@ -7,12 +7,13 @@ import { Button } from '@/components/ui/Button'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatDate } from '@/lib/utils'
+import { VALID_ROLES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 
 interface User { id: string; name: string; email: string; role: string; position: string | null; hasPin: boolean; outlet?: { name: string } | null; isActive: boolean; createdAt: string }
 interface Outlet { id: string; name: string }
 
-const ROLES = ['CASHIER', 'WAITER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+const ROLES = VALID_ROLES
 const ROLE_COLORS: Record<string, string> = {
   CASHIER: 'bg-blue-100 text-blue-700', WAITER: 'bg-teal-100 text-teal-700',
   ACCOUNTANT: 'bg-green-100 text-green-700',
