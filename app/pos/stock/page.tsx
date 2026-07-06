@@ -33,6 +33,9 @@ const TYPE_PILL: Record<string, string> = {
   RESTOCK: 'bg-green-100 text-green-700',
   SALE: 'bg-amber-100 text-amber-700',
   ADJUSTMENT: 'bg-blue-100 text-blue-700',
+  GRN_RECEIVE: 'bg-emerald-100 text-emerald-700',
+  TRANSFER_OUT: 'bg-orange-100 text-orange-700',
+  TRANSFER_IN: 'bg-sky-100 text-sky-700',
 }
 
 export default function StockPage() {
@@ -220,7 +223,8 @@ export default function StockPage() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => { setRestockRow(null); setShowAddNew(false) }}>
             <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
               <h3 className="font-bold text-gray-800 text-lg mb-1">Ongeza Stock</h3>
-              <p className="text-sm text-gray-500 mb-4">{activeCounterLabel}</p>
+              <p className="text-sm text-gray-500 mb-1">{activeCounterLabel}</p>
+              <p className="text-xs text-gray-400 mb-4">Kwa hisa inayotoka moja kwa moja kwenye counter (si kupitia Main Store).</p>
               {restockRow ? (
                 <p className="font-semibold text-gray-800 mb-3">{restockRow.productName}</p>
               ) : (

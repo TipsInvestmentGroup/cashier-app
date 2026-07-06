@@ -5,8 +5,9 @@ import { MANAGEMENT_ROLES } from '@/lib/shared-constants'
 
 /**
  * GET /api/inventory/stock-levels/ledger?outletId=&counterCode=&productId=
- * Recent stock movements for the history view — RESTOCK and SALE entries,
- * most recent first.
+ * GET /api/inventory/stock-levels/ledger?warehouseId=&productId=
+ * Recent stock movements for the history view, most recent first. Accepts
+ * either a counter (outletId, optional counterCode) or a warehouseId.
  */
 export async function GET(req: NextRequest) {
   const payload = getAuthUser(req)
@@ -15,11 +16,15 @@ export async function GET(req: NextRequest) {
 
   const outletId = req.nextUrl.searchParams.get('outletId')
   const counterCode = req.nextUrl.searchParams.get('counterCode')
+  const warehouseId = req.nextUrl.searchParams.get('warehouseId')
   const productId = req.nextUrl.searchParams.get('productId')
-  if (!outletId) return NextResponse.json({ error: 'outletId required' }, { status: 400 })
+  if (!outletId && !warehouseId) return NextResponse.json({ error: 'outletId or warehouseId required' }, { status: 400 })
 
   const entries = await prisma.stockLedgerEntry.findMany({
-    where: { outletId, ...(counterCode ? { counterCode } : {}), ...(productId ? { productId } : {}) },
+    where: {
+      ...(warehouseId ? { warehouseId } : { outletId, ...(counterCode ? { counterCode } : {}) }),
+      ...(productId ? { productId } : {}),
+    },
     orderBy: { createdAt: 'desc' },
     take: 100,
   })

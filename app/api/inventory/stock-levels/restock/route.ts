@@ -6,8 +6,8 @@ import { restockCounter } from '@/lib/stock'
 /**
  * POST /api/inventory/stock-levels/restock
  * body: { productId, outletId, counterCode, quantity, note? }
- * Manual "Add Stock" entry — stand-in for a real Store→Counter transfer
- * until Procurement/Main Store exists (see lib/stock.ts).
+ * Manual Adjustment — for stock arriving directly at a counter outside the
+ * normal Main Store → Transfer flow (see /api/inventory/transfers).
  */
 export async function POST(req: NextRequest) {
   const payload = getAuthUser(req)
