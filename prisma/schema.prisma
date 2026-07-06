@@ -621,6 +621,72 @@ model StockTransferItem {
   @@index([productId])
 }
 
+/// A physical stock count at one counter, comparing what the ledger says
+/// should be there against what's actually counted — the loop automatic
+/// stock tracking alone can't close (spillage/theft/breakage that never
+/// shows up as a recorded sale). Single-step: counted and submitted in one
+/// action, no separate review step (see lib/stock.ts submitStockCount).
+model StockCountSession {
+  id            String   @id @default(cuid())
+  outletId      String
+  counterCode   String
+  countDate     DateTime @default(now())
+  status        String   @default("IN_PROGRESS") // IN_PROGRESS | SUBMITTED
+  conductedById String
+  totalLossValue Float   @default(0)
+  createdAt     DateTime @default(now())
+
+  items        StockCountItem[]
+  attributions StockLossAttribution[]
+
+  @@index([outletId, counterCode])
+  @@index([countDate])
+}
+
+/// One product's line in a count. Replays the real stock-take workbook's
+/// own columns: B/F + Receivings + TransfersIn − TransfersOut =
+/// Closing(System); vs. Closing(Physical) gives ExpectedSales; vs. actual
+/// POS sales gives the variance — see lib/stock.ts's reconciliation math.
+model StockCountItem {
+  id               String            @id @default(cuid())
+  sessionId        String
+  session          StockCountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  productId        String
+  productName      String            // snapshot
+  openingBalance   Float
+  receivings       Float             @default(0)
+  transfersIn      Float             @default(0)
+  transfersOut     Float             @default(0) // always 0 today — no counter→store returns yet
+  closingSystem    Float             // = opening + receivings + transfersIn − transfersOut
+  closingPhysical  Float             @default(0) // the actual count — units, or grams if trackingMode=WEIGHT
+  posSalesQty      Float             @default(0) // pulled from the SALE ledger entries in the same window
+  expectedSalesQty Float             @default(0) // = closingSystem − closingPhysical
+  varianceQty      Float             @default(0) // = posSalesQty − expectedSalesQty
+  unitCost         Float             // Product.buyingPrice at count time
+  varianceValue    Float             @default(0) // = (varianceQty − discountQty − breakageQty) * unitCost
+  discountQty      Float             @default(0) // authorised discounts, excluded from "loss"
+  breakageQty      Float             @default(0)
+
+  @@index([sessionId])
+  @@index([productId])
+}
+
+/// The workbook's staff loss table, made structural — free-form
+/// accountability, not an enforced reconciliation (amounts don't have to
+/// sum to the session's totalLossValue).
+model StockLossAttribution {
+  id        String            @id @default(cuid())
+  sessionId String
+  session   StockCountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  staffId   String
+  staffName String            // snapshot
+  amount    Float
+  note      String?
+  createdAt DateTime          @default(now())
+
+  @@index([sessionId])
+}
+
 // Cancellations recorded against a daily collection (Double Punch / Out of Stock / Wrong Punch).
 model Cancellation {
   id           String           @id @default(cuid())
