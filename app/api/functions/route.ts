@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManageDepartments } from '@/lib/petty-access'
 
-const DEFAULTS = ['Purchases of', 'Allowance', 'Transport']
+const DEFAULTS = ['Purchases of', 'Allowance', 'Transport', 'Ice for Main Store', 'Gas Refill', 'Cleaning Supplies — Store']
 
 /** List functions (any authed user — needed for the cash-request form). Seeds defaults once. */
 export async function GET(req: NextRequest) {

@@ -7,6 +7,7 @@ import { useApi } from '@/hooks/useApi'
 interface Outlet { id: string; name: string }
 interface Counter { code: string; label: string }
 interface Staff { id: string; name: string }
+interface Warehouse { id: string; name: string }
 
 interface CountItem {
   id: string
@@ -46,10 +47,12 @@ interface LineEdit { closingPhysical: string; discountQty: string; breakageQty: 
 export default function StockCountPage() {
   const { request } = useApi()
 
+  const [mode, setMode] = useState<'COUNTER_DAILY' | 'STORE_MONTHLY'>('COUNTER_DAILY')
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [counters, setCounters] = useState<Counter[]>([])
   const [outletId, setOutletId] = useState('')
   const [counterCode, setCounterCode] = useState('')
+  const [warehouseId, setWarehouseId] = useState('')
 
   const [history, setHistory] = useState<SessionRow[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -68,6 +71,7 @@ export default function StockCountPage() {
 
   useEffect(() => {
     request('/api/outlets').then(setOutlets).catch(() => {})
+    request('/api/inventory/warehouses').then((d: { warehouses: Warehouse[] }) => setWarehouseId(d.warehouses[0]?.id ?? '')).catch(() => {})
   }, [request])
 
   useEffect(() => {
@@ -76,13 +80,15 @@ export default function StockCountPage() {
     request(`/api/inventory/staff?outletId=${outletId}`).then((d: { staff: Staff[] }) => setStaff(d.staff)).catch(() => {})
   }, [outletId, request])
 
+  const locationReady = mode === 'STORE_MONTHLY' ? !!warehouseId : !!(outletId && counterCode)
+
   const loadIdRef = useRef(0)
   const loadHistory = useCallback(async () => {
-    if (!outletId || !counterCode) { setHistory([]); return }
+    if (!locationReady) { setHistory([]); return }
     const id = ++loadIdRef.current
     setHistoryLoading(true)
     try {
-      const qs = new URLSearchParams({ outletId, counterCode })
+      const qs = mode === 'STORE_MONTHLY' ? new URLSearchParams({ warehouseId }) : new URLSearchParams({ outletId, counterCode })
       const data = await request(`/api/inventory/stock-counts?${qs}`)
       if (id !== loadIdRef.current) return
       setHistory(data.rows ?? [])
@@ -91,7 +97,7 @@ export default function StockCountPage() {
       setHistory([])
     }
     if (id === loadIdRef.current) setHistoryLoading(false)
-  }, [outletId, counterCode, request, loadIdRef])
+  }, [mode, locationReady, warehouseId, outletId, counterCode, request, loadIdRef])
 
   useEffect(() => { loadHistory(); setSession(null) }, [loadHistory])
 
@@ -112,10 +118,11 @@ export default function StockCountPage() {
   }
 
   const startCount = async () => {
-    if (!outletId || !counterCode) { alert('Chagua outlet na counter kwanza.'); return }
+    if (!locationReady) { alert(mode === 'STORE_MONTHLY' ? 'Inapakia Main Store...' : 'Chagua outlet na counter kwanza.'); return }
     setStarting(true)
     try {
-      const data = await request('/api/inventory/stock-counts', { method: 'POST', body: JSON.stringify({ outletId, counterCode }) })
+      const body = mode === 'STORE_MONTHLY' ? { scope: mode, warehouseId } : { scope: mode, outletId, counterCode }
+      const data = await request('/api/inventory/stock-counts', { method: 'POST', body: JSON.stringify(body) })
       await loadSession(data.sessionId)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Imeshindikana kuanza hesabu')
@@ -183,26 +190,34 @@ export default function StockCountPage() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h1 className="text-xl font-bold text-indigo-900">Stock Count</h1>
-          {counterCode && !session && (
+          {locationReady && !session && (
             <button onClick={startCount} disabled={starting} className="bg-indigo-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50">
-              {starting ? '...' : 'Anza Hesabu ya Leo'}
+              {starting ? '...' : mode === 'STORE_MONTHLY' ? 'Anza Hesabu ya Mwezi' : 'Anza Hesabu ya Leo'}
             </button>
           )}
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap gap-2 mb-4">
-          <select value={outletId} onChange={(e) => setOutletId(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none">
-            <option value="">-- Chagua Outlet --</option>
-            {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-          </select>
-          <select value={counterCode} onChange={(e) => setCounterCode(e.target.value)} disabled={!outletId} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none disabled:bg-gray-50">
-            <option value="">-- Chagua Counter --</option>
-            {counters.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
-          </select>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4">
+          <div className="flex gap-2 mb-3">
+            <button onClick={() => { setMode('COUNTER_DAILY'); setSession(null) }} className={`flex-1 text-xs font-semibold py-2 rounded-lg border-2 ${mode === 'COUNTER_DAILY' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500'}`}>Hesabu ya Counter</button>
+            <button onClick={() => { setMode('STORE_MONTHLY'); setSession(null) }} className={`flex-1 text-xs font-semibold py-2 rounded-lg border-2 ${mode === 'STORE_MONTHLY' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500'}`}>Hesabu ya Ghala (Kila Mwezi)</button>
+          </div>
+          {mode === 'COUNTER_DAILY' && (
+            <div className="flex flex-wrap gap-2">
+              <select value={outletId} onChange={(e) => setOutletId(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none">
+                <option value="">-- Chagua Outlet --</option>
+                {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+              <select value={counterCode} onChange={(e) => setCounterCode(e.target.value)} disabled={!outletId} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none disabled:bg-gray-50">
+                <option value="">-- Chagua Counter --</option>
+                {counters.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
-        {!outletId || !counterCode ? (
-          <div className="text-center py-16 text-gray-400">Chagua outlet na counter kuanza.</div>
+        {!locationReady ? (
+          <div className="text-center py-16 text-gray-400">{mode === 'STORE_MONTHLY' ? 'Inapakia Main Store...' : 'Chagua outlet na counter kuanza.'}</div>
         ) : session ? (
           <div className="space-y-4">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
@@ -304,7 +319,7 @@ export default function StockCountPage() {
             ) : history.length === 0 ? (
               <div className="text-center py-16">
                 <div className="text-4xl mb-2">🧮</div>
-                <p className="text-gray-500 font-medium">Hakuna hesabu ya {activeCounterLabel} bado.</p>
+                <p className="text-gray-500 font-medium">Hakuna hesabu ya {mode === 'STORE_MONTHLY' ? 'Main Store' : activeCounterLabel} bado.</p>
               </div>
             ) : (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">
