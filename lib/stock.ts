@@ -413,43 +413,64 @@ export async function cancelPurchaseOrder(opts: { purchaseOrderId: string; reaso
 }
 
 /**
- * Starts (or resumes) today's physical stock count for a counter. Idempotent
- * — an already-IN_PROGRESS session for this outlet+counterCode+today is
- * returned as-is rather than duplicated. Prefills one StockCountItem per
- * currently-tracked product: openingBalance carries forward from the last
- * SUBMITTED count's own closingPhysical (the last verified truth), or the
- * counter's live StockLevel.quantity if this product has never been counted
- * before (nothing has moved between "now" and "now"). receivings/
- * transfersIn/posSalesQty sum the relevant StockLedgerEntry types in the
+ * Which ledger types feed which reconciliation term, per scope. Counters
+ * have a point-of-sale channel (SALE) to cross-check against; a warehouse
+ * doesn't, so posSalesQty is pinned to 0 there — any shrinkage between
+ * closingSystem and closingPhysical shows up directly as loss, which is
+ * exactly right for a warehouse (see startStockCount/submitStockCount).
+ */
+const SCOPE_LEDGER_TYPES: Record<'COUNTER_DAILY' | 'STORE_MONTHLY', { receivings: string; transfersIn?: string; transfersOut?: string; posSales?: string }> = {
+  COUNTER_DAILY: { receivings: 'RESTOCK', transfersIn: 'TRANSFER_IN', posSales: 'SALE' },
+  STORE_MONTHLY: { receivings: 'GRN_RECEIVE', transfersOut: 'TRANSFER_OUT' },
+}
+
+/**
+ * Starts (or resumes) today's physical stock count for a counter (scope
+ * COUNTER_DAILY, location { outletId, counterCode }) or Main Store (scope
+ * STORE_MONTHLY, location { warehouseId }). Idempotent — an already-
+ * IN_PROGRESS session for this scope+location+today is returned as-is
+ * rather than duplicated. Prefills one StockCountItem per currently-tracked
+ * product: openingBalance carries forward from the last SUBMITTED count's
+ * own closingPhysical (the last verified truth), or the location's live
+ * StockLevel.quantity if this product has never been counted before
+ * (nothing has moved between "now" and "now"). receivings/transfersIn/
+ * transfersOut/posSalesQty sum the relevant StockLedgerEntry types in the
  * window since that last count (or are 0 for a first-ever count).
  */
 export async function startStockCount(opts: {
-  outletId: string
-  counterCode: string
+  scope: 'COUNTER_DAILY' | 'STORE_MONTHLY'
+  outletId?: string
+  counterCode?: string
+  warehouseId?: string
   userId: string
 }): Promise<{ sessionId: string }> {
+  const location: { outletId: string | null; counterCode: string | null; warehouseId: string | null } = opts.scope === 'STORE_MONTHLY'
+    ? { outletId: null, counterCode: null, warehouseId: opts.warehouseId ?? null }
+    : { outletId: opts.outletId ?? null, counterCode: opts.counterCode ?? null, warehouseId: null }
+  const ledgerTypes = SCOPE_LEDGER_TYPES[opts.scope]
+
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
 
   const existing = await prisma.stockCountSession.findFirst({
-    where: { outletId: opts.outletId, counterCode: opts.counterCode, status: 'IN_PROGRESS', countDate: { gte: todayStart } },
+    where: { scope: opts.scope, ...location, status: 'IN_PROGRESS', countDate: { gte: todayStart } },
   })
   if (existing) return { sessionId: existing.id }
 
   const levels = await prisma.stockLevel.findMany({
-    where: { outletId: opts.outletId, counterCode: opts.counterCode },
+    where: location,
     include: { product: { select: { name: true, buyingPrice: true } } },
   })
-  if (!levels.length) throw new Error('Hakuna bidhaa zinazofuatiliwa kwenye counter hii')
+  if (!levels.length) throw new Error('Hakuna bidhaa zinazofuatiliwa kwenye eneo hili')
 
   return prisma.$transaction(async (tx) => {
     const session = await tx.stockCountSession.create({
-      data: { outletId: opts.outletId, counterCode: opts.counterCode, conductedById: opts.userId },
+      data: { scope: opts.scope, outletId: location.outletId ?? null, counterCode: location.counterCode ?? null, warehouseId: location.warehouseId ?? null, conductedById: opts.userId },
     })
 
     for (const level of levels) {
       const lastItem = await tx.stockCountItem.findFirst({
-        where: { productId: level.productId, session: { outletId: opts.outletId, counterCode: opts.counterCode, status: 'SUBMITTED' } },
+        where: { productId: level.productId, session: { scope: opts.scope, outletId: location.outletId ?? null, counterCode: location.counterCode ?? null, warehouseId: location.warehouseId ?? null, status: 'SUBMITTED' } },
         orderBy: { session: { countDate: 'desc' } },
         include: { session: { select: { createdAt: true } } },
       })
@@ -457,32 +478,34 @@ export async function startStockCount(opts: {
       const openingBalance = lastItem ? lastItem.closingPhysical : level.quantity
       let receivings = 0
       let transfersIn = 0
+      let transfersOut = 0
       let posSalesQty = 0
 
       if (lastItem) {
+        const types = [ledgerTypes.receivings, ledgerTypes.transfersIn, ledgerTypes.transfersOut, ledgerTypes.posSales].filter((t): t is string => !!t)
         const movements = await tx.stockLedgerEntry.groupBy({
           by: ['type'],
           where: {
-            productId: level.productId, outletId: opts.outletId, counterCode: opts.counterCode,
-            createdAt: { gt: lastItem.session.createdAt },
-            type: { in: ['RESTOCK', 'TRANSFER_IN', 'SALE'] },
+            productId: level.productId, outletId: level.outletId, counterCode: level.counterCode, warehouseId: level.warehouseId,
+            createdAt: { gt: lastItem.session.createdAt }, type: { in: types },
           },
           _sum: { quantity: true },
         })
         for (const m of movements) {
-          const sum = m._sum.quantity ?? 0
-          if (m.type === 'RESTOCK') receivings = sum
-          else if (m.type === 'TRANSFER_IN') transfersIn = sum
-          else if (m.type === 'SALE') posSalesQty = -sum // SALE entries are stored negative
+          const sum = m._sum?.quantity ?? 0
+          if (m.type === ledgerTypes.receivings) receivings = sum
+          else if (ledgerTypes.transfersIn && m.type === ledgerTypes.transfersIn) transfersIn = sum
+          else if (ledgerTypes.transfersOut && m.type === ledgerTypes.transfersOut) transfersOut = -sum // stored negative
+          else if (ledgerTypes.posSales && m.type === ledgerTypes.posSales) posSalesQty = -sum // stored negative
         }
       }
 
-      const closingSystem = roundMoney(openingBalance + receivings + transfersIn)
+      const closingSystem = roundMoney(openingBalance + receivings + transfersIn - transfersOut)
 
       await tx.stockCountItem.create({
         data: {
           sessionId: session.id, productId: level.productId, productName: level.product.name,
-          openingBalance, receivings, transfersIn, closingSystem, posSalesQty, unitCost: level.product.buyingPrice,
+          openingBalance, receivings, transfersIn, transfersOut, closingSystem, posSalesQty, unitCost: level.product.buyingPrice,
         },
       })
     }
@@ -530,13 +553,13 @@ export async function submitStockCount(opts: {
         data: { closingPhysical, discountQty, breakageQty, expectedSalesQty, varianceQty, varianceValue },
       })
 
-      const currentLevel = await getStockLevel(tx, { productId: item.productId, outletId: session.outletId, counterCode: session.counterCode })
+      const currentLevel = await getStockLevel(tx, { productId: item.productId, outletId: session.outletId, counterCode: session.counterCode, warehouseId: session.warehouseId })
       if (currentLevel && currentLevel.quantity !== closingPhysical) {
         const delta = roundMoney(closingPhysical - currentLevel.quantity)
         await tx.stockLevel.update({ where: { id: currentLevel.id }, data: { quantity: closingPhysical } })
         await tx.stockLedgerEntry.create({
           data: {
-            productId: item.productId, productName: item.productName, outletId: session.outletId, counterCode: session.counterCode,
+            productId: item.productId, productName: item.productName, outletId: session.outletId, counterCode: session.counterCode, warehouseId: session.warehouseId,
             type: 'ADJUSTMENT', quantity: delta, balanceAfter: closingPhysical,
             note: 'Stock count correction', refType: 'StockCountSession', refId: session.id, createdById: opts.userId,
           },
@@ -566,4 +589,56 @@ export async function addLossAttribution(opts: {
     data: { sessionId: opts.sessionId, staffId: opts.staffId, staffName: staff.name, amount: opts.amount, note: opts.note || null },
   })
   return { id: attribution.id }
+}
+
+/**
+ * Reports a breakage/expiry/damage — deducts stock immediately and gives
+ * loss an explained reason the moment it happens, rather than waiting for
+ * the next stock count to notice it. Unlike recordItemPrepared's silent
+ * no-op for an untracked product (an expected case — most products aren't
+ * tracked everywhere), reporting breakage on stock that was never tracked
+ * at this location is a real usage error and throws.
+ */
+export async function reportBreakage(opts: {
+  productId: string
+  quantity: number
+  reason: string
+  outletId?: string
+  counterCode?: string
+  warehouseId?: string
+  note?: string
+  photoUrl?: string
+  userId: string
+}): Promise<{ breakageId: string }> {
+  if (!(opts.quantity > 0)) throw new Error('Invalid quantity')
+
+  const product = await prisma.product.findUnique({ where: { id: opts.productId }, select: { name: true, buyingPrice: true } })
+  if (!product) throw new Error('Product not found')
+
+  const location: LocationKey = { productId: opts.productId, outletId: opts.outletId, counterCode: opts.counterCode, warehouseId: opts.warehouseId }
+
+  return prisma.$transaction(async (tx) => {
+    const currentLevel = await getStockLevel(tx, location)
+    if (!currentLevel) throw new Error('Bidhaa hii haifuatiliwi kwenye eneo hili')
+
+    const valueLost = roundMoney(opts.quantity * product.buyingPrice)
+    const breakage = await tx.breakage.create({
+      data: {
+        productId: opts.productId, productName: product.name, quantity: opts.quantity, reason: opts.reason,
+        outletId: opts.outletId ?? null, counterCode: opts.counterCode ?? null, warehouseId: opts.warehouseId ?? null,
+        unitCost: product.buyingPrice, valueLost, photoUrl: opts.photoUrl || null, note: opts.note || null, reportedById: opts.userId,
+      },
+    })
+
+    const level = await tx.stockLevel.update({ where: { id: currentLevel.id }, data: { quantity: { decrement: opts.quantity } } })
+    await tx.stockLedgerEntry.create({
+      data: {
+        productId: opts.productId, productName: product.name, outletId: opts.outletId ?? null, counterCode: opts.counterCode ?? null, warehouseId: opts.warehouseId ?? null,
+        type: 'BREAKAGE', quantity: -opts.quantity, balanceAfter: level.quantity,
+        note: opts.reason, refType: 'Breakage', refId: breakage.id, createdById: opts.userId,
+      },
+    })
+
+    return { breakageId: breakage.id }
+  })
 }

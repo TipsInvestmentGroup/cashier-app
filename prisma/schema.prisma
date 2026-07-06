@@ -454,7 +454,7 @@ model StockLedgerEntry {
   counterCode  String?
   warehouseId  String?
   warehouse    Warehouse? @relation(fields: [warehouseId], references: [id])
-  type         String     // RESTOCK | SALE | ADJUSTMENT | GRN_RECEIVE | TRANSFER_OUT | TRANSFER_IN
+  type         String     // RESTOCK | SALE | ADJUSTMENT | GRN_RECEIVE | TRANSFER_OUT | TRANSFER_IN | BREAKAGE
   quantity     Float      // signed — negative for sales/deductions/outflows
   balanceAfter Float
   note         String?
@@ -621,15 +621,20 @@ model StockTransferItem {
   @@index([productId])
 }
 
-/// A physical stock count at one counter, comparing what the ledger says
-/// should be there against what's actually counted — the loop automatic
-/// stock tracking alone can't close (spillage/theft/breakage that never
-/// shows up as a recorded sale). Single-step: counted and submitted in one
-/// action, no separate review step (see lib/stock.ts submitStockCount).
+/// A physical stock count, comparing what the ledger says should be there
+/// against what's actually counted — the loop automatic stock tracking
+/// alone can't close (spillage/theft/breakage that never shows up as a
+/// recorded sale). Single-step: counted and submitted in one action, no
+/// separate review step (see lib/stock.ts submitStockCount). scope
+/// distinguishes a daily counter count (outletId+counterCode set) from a
+/// monthly Main Store count (warehouseId set) — exactly one of the two is
+/// set per row, same convention StockLevel already uses.
 model StockCountSession {
   id            String   @id @default(cuid())
-  outletId      String
-  counterCode   String
+  scope         String   @default("COUNTER_DAILY") // COUNTER_DAILY | STORE_MONTHLY
+  outletId      String?
+  counterCode   String?
+  warehouseId   String?
   countDate     DateTime @default(now())
   status        String   @default("IN_PROGRESS") // IN_PROGRESS | SUBMITTED
   conductedById String
@@ -640,6 +645,7 @@ model StockCountSession {
   attributions StockLossAttribution[]
 
   @@index([outletId, counterCode])
+  @@index([warehouseId])
   @@index([countDate])
 }
 
@@ -685,6 +691,31 @@ model StockLossAttribution {
   createdAt DateTime          @default(now())
 
   @@index([sessionId])
+}
+
+/// A breakage/expiry/damage report — deducts stock immediately and gives
+/// loss an explained reason the moment it happens, rather than waiting for
+/// the next stock count to notice it. Exactly one location (counter or
+/// warehouse) is set per row, same convention as StockLevel.
+model Breakage {
+  id           String   @id @default(cuid())
+  productId    String
+  productName  String   // snapshot
+  quantity     Float
+  reason       String   // BROKEN | EXPIRED | DAMAGED | LOST
+  outletId     String?
+  counterCode  String?
+  warehouseId  String?
+  unitCost     Float
+  valueLost    Float
+  photoUrl     String?
+  note         String?
+  reportedById String
+  createdAt    DateTime @default(now())
+
+  @@index([outletId, counterCode])
+  @@index([warehouseId])
+  @@index([createdAt])
 }
 
 // Cancellations recorded against a daily collection (Double Punch / Out of Stock / Wrong Punch).

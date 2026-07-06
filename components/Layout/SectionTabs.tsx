@@ -30,6 +30,7 @@ export const MYPOS_TABS: Tab[] = [
   { href: '/pos/main-store', label: 'Main Store', icon: Warehouse, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/purchase-orders', label: 'Purchase Orders', icon: FileText, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/stock-count', label: 'Stock Count', icon: ClipboardCheck, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
+  { href: '/pos/breakage', label: 'Breakage', icon: Ban, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
 ]
 
 export const DAILY_TABS: Tab[] = [
