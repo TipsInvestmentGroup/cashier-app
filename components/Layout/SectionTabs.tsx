@@ -28,6 +28,7 @@ export const MYPOS_TABS: Tab[] = [
   { href: '/pos/reports', label: 'Reports', icon: FileBarChart, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/stock', label: 'Stock', icon: Package, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/main-store', label: 'Main Store', icon: Warehouse, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
+  { href: '/pos/purchase-orders', label: 'Purchase Orders', icon: FileText, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
 ]
 
 export const DAILY_TABS: Tab[] = [
