@@ -144,13 +144,22 @@ export async function getStockLossReport(f: InventoryFilters): Promise<StockLoss
 
   const countRows: StockLossRow[] = countItems.map((i) => {
     const session = sessionMap.get(i.sessionId)!
+    // Net out discount/breakage the same way valueLost already does
+    // (varianceValue = (varianceQty − discountQty − breakageQty) * unitCost)
+    // — showing the raw varianceQty here would make quantity and valueLost
+    // silently disagree on any line where either adjustment is non-zero.
+    const netQty = i.varianceQty - i.discountQty - i.breakageQty
     return {
       id: i.id, source: 'STOCK_COUNT', productName: i.productName,
       location: session.warehouseId ? (warehouseNameMap.get(session.warehouseId) ?? 'Main Store') : `${outletNameMap.get(session.outletId!) ?? session.outletId} / ${session.counterCode}`,
-      quantity: roundMoney(Math.abs(i.varianceQty)), valueLost: roundMoney(-i.varianceValue), date: session.countDate, reason: 'Stock count variance',
+      quantity: roundMoney(Math.abs(netQty)), valueLost: roundMoney(-i.varianceValue), date: session.countDate, reason: 'Stock count variance',
     }
   })
 
+  // No `take` cap here — this list feeds the same totals the Inventory
+  // Dashboard sums with no cap of its own; capping one but not the other
+  // would make the two screens silently disagree once a date range holds
+  // more than the cap's worth of rows.
   const breakages = await prisma.breakage.findMany({
     where: {
       ...dateWhere(f),
@@ -159,7 +168,6 @@ export async function getStockLossReport(f: InventoryFilters): Promise<StockLoss
       ...(f.warehouseId ? { warehouseId: f.warehouseId } : {}),
     },
     orderBy: { createdAt: 'desc' },
-    take: 500,
   })
   const breakageOutletIds = [...new Set(breakages.map((b) => b.outletId).filter((v): v is string => !!v))]
   const breakageWarehouseIds = [...new Set(breakages.map((b) => b.warehouseId).filter((v): v is string => !!v))]
@@ -228,9 +236,39 @@ export interface InventoryDashboard {
 
 export async function getInventoryDashboard(f: InventoryFilters): Promise<InventoryDashboard> {
   const [levels, lossItems, breakages, pendingApprovals, openStockCounts, grnCount, transferCount] = await Promise.all([
-    prisma.stockLevel.findMany({ include: { product: { select: { buyingPrice: true } } } }),
-    prisma.stockCountItem.findMany({ where: { varianceValue: { lt: 0 }, session: { status: 'SUBMITTED', ...dateWhere(f, 'countDate') } }, select: { varianceValue: true } }),
-    prisma.breakage.findMany({ where: dateWhere(f), select: { valueLost: true } }),
+    // Honor the same location filters getStockValuation does — otherwise
+    // selecting an outlet in the filter bar silently has no effect on this
+    // card while the Stock Valuation tab right next to it does respect it,
+    // and the two numbers stop reconciling.
+    prisma.stockLevel.findMany({
+      where: {
+        ...(f.outletId ? { outletId: f.outletId } : {}),
+        ...(f.counterCode ? { counterCode: f.counterCode } : {}),
+        ...(f.warehouseId ? { warehouseId: f.warehouseId } : {}),
+      },
+      include: { product: { select: { buyingPrice: true } } },
+    }),
+    prisma.stockCountItem.findMany({
+      where: {
+        varianceValue: { lt: 0 },
+        session: {
+          status: 'SUBMITTED', ...dateWhere(f, 'countDate'),
+          ...(f.outletId ? { outletId: f.outletId } : {}),
+          ...(f.counterCode ? { counterCode: f.counterCode } : {}),
+          ...(f.warehouseId ? { warehouseId: f.warehouseId } : {}),
+        },
+      },
+      select: { varianceValue: true },
+    }),
+    prisma.breakage.findMany({
+      where: {
+        ...dateWhere(f),
+        ...(f.outletId ? { outletId: f.outletId } : {}),
+        ...(f.counterCode ? { counterCode: f.counterCode } : {}),
+        ...(f.warehouseId ? { warehouseId: f.warehouseId } : {}),
+      },
+      select: { valueLost: true },
+    }),
     prisma.purchaseOrder.count({ where: { status: 'PENDING_APPROVAL' } }),
     prisma.stockCountSession.count({ where: { status: 'IN_PROGRESS' } }),
     prisma.grn.count({ where: dateWhere(f, 'receivedDate') }),

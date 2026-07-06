@@ -133,7 +133,10 @@ export default function StockCountPage() {
   const computed = (item: CountItem) => {
     const edit = edits[item.id]
     const closingPhysical = parseFloat(edit?.closingPhysical || '') || 0
-    const discountQty = parseFloat(edit?.discountQty || '') || 0
+    // "Discount" only applies to a counter sale — the server zeroes it for
+    // a Main Store count regardless of what's submitted, so this preview
+    // matches that rather than showing a number the backend will ignore.
+    const discountQty = mode === 'STORE_MONTHLY' ? 0 : parseFloat(edit?.discountQty || '') || 0
     const breakageQty = parseFloat(edit?.breakageQty || '') || 0
     const expectedSalesQty = item.closingSystem - closingPhysical
     const varianceQty = item.posSalesQty - expectedSalesQty
@@ -230,7 +233,7 @@ export default function StockCountPage() {
                     <th className="px-3 py-2.5 text-right font-semibold text-gray-600">Transfers In</th>
                     <th className="px-3 py-2.5 text-right font-semibold text-gray-600">Closing (System)</th>
                     <th className="px-3 py-2.5 text-right font-semibold text-gray-600">Closing (Physical)</th>
-                    <th className="px-3 py-2.5 text-right font-semibold text-gray-600">Discount</th>
+                    {mode === 'COUNTER_DAILY' && <th className="px-3 py-2.5 text-right font-semibold text-gray-600">Discount</th>}
                     <th className="px-3 py-2.5 text-right font-semibold text-gray-600">Breakage</th>
                     <th className="px-3 py-2.5 text-right font-semibold text-gray-600">Variance</th>
                   </tr>
@@ -251,11 +254,13 @@ export default function StockCountPage() {
                             <input type="text" inputMode="decimal" value={edits[item.id]?.closingPhysical ?? ''} onChange={(e) => setEdits((cur) => ({ ...cur, [item.id]: { ...cur[item.id], closingPhysical: e.target.value.replace(/[^\d.]/g, '') } }))} className="w-20 border-2 border-gray-200 rounded-lg px-2 py-1 text-right text-sm focus:outline-none focus:border-indigo-400" />
                           )}
                         </td>
-                        <td className="px-3 py-2 text-right">
-                          {readOnly ? item.discountQty.toLocaleString() : (
-                            <input type="text" inputMode="decimal" value={edits[item.id]?.discountQty ?? ''} onChange={(e) => setEdits((cur) => ({ ...cur, [item.id]: { ...cur[item.id], discountQty: e.target.value.replace(/[^\d.]/g, '') } }))} className="w-16 border-2 border-gray-200 rounded-lg px-2 py-1 text-right text-sm focus:outline-none focus:border-indigo-400" />
-                          )}
-                        </td>
+                        {mode === 'COUNTER_DAILY' && (
+                          <td className="px-3 py-2 text-right">
+                            {readOnly ? item.discountQty.toLocaleString() : (
+                              <input type="text" inputMode="decimal" value={edits[item.id]?.discountQty ?? ''} onChange={(e) => setEdits((cur) => ({ ...cur, [item.id]: { ...cur[item.id], discountQty: e.target.value.replace(/[^\d.]/g, '') } }))} className="w-16 border-2 border-gray-200 rounded-lg px-2 py-1 text-right text-sm focus:outline-none focus:border-indigo-400" />
+                            )}
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-right">
                           {readOnly ? item.breakageQty.toLocaleString() : (
                             <input type="text" inputMode="decimal" value={edits[item.id]?.breakageQty ?? ''} onChange={(e) => setEdits((cur) => ({ ...cur, [item.id]: { ...cur[item.id], breakageQty: e.target.value.replace(/[^\d.]/g, '') } }))} className="w-16 border-2 border-gray-200 rounded-lg px-2 py-1 text-right text-sm focus:outline-none focus:border-indigo-400" />

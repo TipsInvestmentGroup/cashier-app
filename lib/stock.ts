@@ -49,9 +49,21 @@ async function upsertStockLevel(tx: Tx, key: LocationKey, delta: number) {
   if (existing) {
     return tx.stockLevel.update({ where: { id: existing.id }, data: { quantity: { increment: delta } } })
   }
-  return tx.stockLevel.create({
-    data: { productId: key.productId, outletId: key.outletId ?? null, counterCode: key.counterCode ?? null, warehouseId: key.warehouseId ?? null, quantity: delta },
-  })
+  try {
+    return await tx.stockLevel.create({
+      data: { productId: key.productId, outletId: key.outletId ?? null, counterCode: key.counterCode ?? null, warehouseId: key.warehouseId ?? null, quantity: delta },
+    })
+  } catch (err) {
+    // A concurrent call for this exact product+location's very first-ever
+    // movement can race here — both see no existing row and both attempt
+    // create. The @@unique constraint rejects the second create; recover by
+    // falling back to the increment path instead of failing the whole call.
+    if (err instanceof Error && err.message.includes('Unique')) {
+      const nowExisting = await getStockLevel(tx, key)
+      if (nowExisting) return tx.stockLevel.update({ where: { id: nowExisting.id }, data: { quantity: { increment: delta } } })
+    }
+    throw err
+  }
 }
 
 async function nextSequenceNumber(prefix: string, count: () => Promise<number>): Promise<string> {
@@ -195,6 +207,16 @@ export async function receiveGrn(opts: {
       })
 
       if (item.purchaseOrderItemId) {
+        // Re-check against the PO line's own remaining quantity, not the
+        // client-supplied one — a stale prefill or an overtyped value could
+        // otherwise record receipt of far more than was ever ordered, with
+        // nothing downstream ever catching or clamping it.
+        const poItem = await tx.purchaseOrderItem.findUnique({ where: { id: item.purchaseOrderItemId } })
+        if (!poItem) throw new Error('Purchase order line not found')
+        const remaining = roundMoney(poItem.quantity - poItem.quantityReceived)
+        if (item.quantityOrdered > remaining + 0.001) {
+          throw new Error(`Cannot receive ${item.quantityOrdered} ${item.purchaseUnit} for ${productName} — only ${remaining} remaining on the purchase order`)
+        }
         await tx.purchaseOrderItem.update({
           where: { id: item.purchaseOrderItemId },
           data: { quantityReceived: { increment: item.quantityOrdered } },
@@ -203,13 +225,19 @@ export async function receiveGrn(opts: {
     }
 
     if (opts.purchaseOrderId) {
+      const po = await tx.purchaseOrder.findUnique({ where: { id: opts.purchaseOrderId }, select: { status: true } })
       const poItems = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: opts.purchaseOrderId } })
       const fullyReceived = poItems.every((i) => i.quantityReceived >= i.quantity)
       const anyReceived = poItems.some((i) => i.quantityReceived > 0)
-      await tx.purchaseOrder.update({
-        where: { id: opts.purchaseOrderId },
-        data: { status: fullyReceived ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : undefined },
-      })
+      const nextStatus = fullyReceived ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : undefined
+      // Never let a concurrent GRN against a different line of the same PO
+      // regress its status backward (e.g. two GRNs racing, the slower one
+      // computing PARTIALLY_RECEIVED from a stale read after the faster one
+      // already reached FULLY_RECEIVED).
+      const wouldRegress = po?.status === 'FULLY_RECEIVED' && nextStatus !== 'FULLY_RECEIVED'
+      if (nextStatus && !wouldRegress) {
+        await tx.purchaseOrder.update({ where: { id: opts.purchaseOrderId }, data: { status: nextStatus } })
+      }
     }
 
     return { grnId: grn.id, grnNumber: grn.grnNumber }
@@ -539,9 +567,14 @@ export async function submitStockCount(opts: {
     for (const input of opts.items) {
       const item = itemMap.get(input.id)
       if (!item) continue // not part of this session — ignore
-      const closingPhysical = input.closingPhysical
-      const discountQty = input.discountQty || 0
-      const breakageQty = input.breakageQty || 0
+      const closingPhysical = roundMoney(Math.max(0, input.closingPhysical))
+      // "Discount" (an authorised price concession to a customer) only
+      // applies to a counter sale — it has no meaning for a Main Store
+      // count, so it's zeroed there regardless of what was submitted.
+      // Both fields are clamped non-negative: a negative value would
+      // inflate rather than explain away the reported loss.
+      const discountQty = session.scope === 'STORE_MONTHLY' ? 0 : Math.max(0, input.discountQty || 0)
+      const breakageQty = Math.max(0, input.breakageQty || 0)
 
       const expectedSalesQty = roundMoney(item.closingSystem - closingPhysical)
       const varianceQty = roundMoney(item.posSalesQty - expectedSalesQty)
@@ -620,6 +653,12 @@ export async function reportBreakage(opts: {
   return prisma.$transaction(async (tx) => {
     const currentLevel = await getStockLevel(tx, location)
     if (!currentLevel) throw new Error('Bidhaa hii haifuatiliwi kwenye eneo hili')
+    // Same guard issueTransfer already applies before decrementing Main
+    // Store stock — reporting more breakage than is physically on the
+    // shelf would otherwise push stock negative silently.
+    if (currentLevel.quantity < opts.quantity) {
+      throw new Error(`Insufficient stock for ${product.name} (available: ${currentLevel.quantity}, requested: ${opts.quantity})`)
+    }
 
     const valueLost = roundMoney(opts.quantity * product.buyingPrice)
     const breakage = await tx.breakage.create({

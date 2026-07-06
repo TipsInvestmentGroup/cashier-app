@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
@@ -8,6 +8,7 @@ interface Outlet { id: string; name: string }
 interface Counter { code: string; label: string }
 interface Warehouse { id: string; name: string }
 interface Product { id: string; name: string; category: string | null }
+interface StockRow { productId: string; quantity: number }
 
 interface BreakageRow {
   id: string
@@ -43,6 +44,7 @@ export default function BreakagePage() {
 
   const [history, setHistory] = useState<BreakageRow[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [stockRows, setStockRows] = useState<StockRow[]>([])
 
   useEffect(() => {
     request('/api/outlets').then(setOutlets).catch(() => {})
@@ -76,11 +78,29 @@ export default function BreakagePage() {
 
   useEffect(() => { loadHistory() }, [loadHistory])
 
+  // Current stock at the selected location — lets the form show "Available:
+  // N" and restrict the product picker to things actually stocked here,
+  // instead of letting a user report breakage against a product with 0 (or
+  // untracked) stock and only finding out from a server error afterward.
+  useEffect(() => {
+    if (!locationReady) { setStockRows([]); return }
+    const url = locationMode === 'warehouse' ? `/api/inventory/warehouse-stock?warehouseId=${warehouseId}` : `/api/inventory/stock-levels?outletId=${outletId}&counterCode=${counterCode}`
+    request(url).then((d: { rows: StockRow[] }) => setStockRows(d.rows ?? [])).catch(() => setStockRows([]))
+    setProductId('')
+  }, [locationMode, locationReady, warehouseId, outletId, counterCode, request])
+
+  const stockByProduct = useMemo(() => new Map(stockRows.map((r) => [r.productId, r.quantity])), [stockRows])
+  const trackedProducts = useMemo(() => products.filter((p) => (stockByProduct.get(p.id) ?? 0) > 0), [products, stockByProduct])
+  const availableForSelected = productId ? stockByProduct.get(productId) ?? 0 : null
+
   const submitBreakage = async () => {
     if (!locationReady) { alert('Chagua eneo kwanza.'); return }
     if (!productId) { alert('Chagua bidhaa.'); return }
     const qty = parseFloat(quantity)
     if (isNaN(qty) || qty <= 0) { alert('Weka idadi sahihi.'); return }
+    if (availableForSelected !== null && qty > availableForSelected) {
+      alert(`Idadi uliyoweka (${qty}) ni zaidi ya iliyopo (${availableForSelected}).`); return
+    }
     setBusy(true)
     try {
       await request('/api/inventory/breakage', {
@@ -123,10 +143,12 @@ export default function BreakagePage() {
             </div>
           )}
 
-          <select value={productId} onChange={(e) => setProductId(e.target.value)} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-3 focus:outline-none focus:border-indigo-400">
+          <select value={productId} onChange={(e) => setProductId(e.target.value)} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-1 focus:outline-none focus:border-indigo-400">
             <option value="">-- Chagua bidhaa --</option>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {trackedProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          {availableForSelected !== null && <div className="text-xs text-gray-400 mb-2">Iliyopo: {availableForSelected.toLocaleString()}</div>}
+          {locationReady && trackedProducts.length === 0 && <div className="text-xs text-gray-400 mb-2">Hakuna bidhaa zenye stock hapa.</div>}
 
           <div className="grid grid-cols-2 gap-2 mb-3">
             <input type="text" inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^\d.]/g, ''))} placeholder="Idadi" className="border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-400" />
