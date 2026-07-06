@@ -89,11 +89,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   const { id: orderId } = await params
   const itemId = req.nextUrl.searchParams.get('itemId')
+  const cancelReason = req.nextUrl.searchParams.get('reason')
   if (!itemId) return NextResponse.json({ error: 'itemId required' }, { status: 400 })
 
   await prisma.posOrderItem.update({
     where: { id: itemId },
-    data: { status: 'CANCELLED', cancelledBy: payload.userId },
+    data: { status: 'CANCELLED', cancelledBy: payload.userId, cancelReason: cancelReason || null },
   })
 
   const items = await prisma.posOrderItem.findMany({

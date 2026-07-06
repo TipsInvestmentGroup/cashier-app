@@ -54,6 +54,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const BILL_TYPES = ['CUSTOMER', 'ADMIN', 'DIRECTOR', 'DJ', 'TIPS', 'STAFF']
   const allowedFields: Record<string, unknown> = {}
   if (body.discount !== undefined) allowedFields.discount = Number(body.discount)
+  if (body.discountReason !== undefined) allowedFields.discountReason = body.discountReason || null
   if (body.notes !== undefined) allowedFields.notes = body.notes
   if (body.paymentMethod !== undefined) allowedFields.paymentMethod = body.paymentMethod
   if (body.billType !== undefined && BILL_TYPES.includes(body.billType)) allowedFields.billType = body.billType

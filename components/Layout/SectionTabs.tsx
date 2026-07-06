@@ -25,6 +25,7 @@ export const MYPOS_TABS: Tab[] = [
   { href: '/schedule', label: 'Scheduling', icon: CalendarClock, roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/events', label: 'Events', icon: PartyPopper, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/shift-report', label: 'Shift Report', icon: BarChart3, roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
+  { href: '/pos/reports', label: 'Reports', icon: FileBarChart, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
 ]
 
 export const DAILY_TABS: Tab[] = [

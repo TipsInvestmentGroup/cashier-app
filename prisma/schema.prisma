@@ -574,12 +574,14 @@ model PosOrder {
   // CUSTOMER → prints "CUSTOMER'S BILL"; the rest are in-house → "IN-HOUSE BILL".
   billType      String    @default("CUSTOMER") // CUSTOMER | ADMIN | DIRECTOR | DJ | TIPS | STAFF
   discount      Float     @default(0)
+  discountReason String?  // why the discount was applied — captured for reporting
   totalAmount   Float     @default(0)
   paidAmount    Float     @default(0)
   paymentMethod String?   // CASH | CRDB | STANBIC | MPESA | SIGNED
   signedBillId  String?   // set when paymentMethod = SIGNED → links to cashier SignedBill
   closedAt      DateTime?
   closedBy      String?   // userId
+  voidReason    String?   // why the order was cancelled/voided
   notes         String?
   // Offline-queue idempotency key (see lib/offline-queue.ts) — lets a retried
   // "create order" sync request return the already-created row instead of
@@ -635,6 +637,7 @@ model PosOrderItem {
   preparedAt  DateTime? // when the counter marked it ready/served
   preparedBy  String?   // userId of counter staff who marked it ready
   cancelledBy String?  // userId
+  cancelReason String?  // why the item was cancelled — captured for reporting
   // Offline-queue idempotency key — see PosOrder.clientRequestId.
   clientRequestId String? @unique
   createdAt   DateTime @default(now())

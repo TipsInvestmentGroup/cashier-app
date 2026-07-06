@@ -9,12 +9,17 @@ export async function GET(req: NextRequest) {
   const outletId = payload.outletId ?? req.nextUrl.searchParams.get('outletId')
   if (!outletId) return NextResponse.json({ error: 'No outlet' }, { status: 400 })
 
+  // Waiter/tables flows only ever need "today's open shift" — default stays
+  // that way. Reports (management-only, already role-gated by the caller)
+  // need a historical shift picker, so ?all=true skips the today filter.
+  const includeAll = req.nextUrl.searchParams.get('all') === 'true'
   const todayStart = new Date()
   todayStart.setHours(0, 0, 0, 0)
 
   const shifts = await prisma.posShift.findMany({
-    where: { outletId, date: { gte: todayStart } },
+    where: { outletId, ...(includeAll ? {} : { date: { gte: todayStart } }) },
     orderBy: { openedAt: 'desc' },
+    ...(includeAll ? { take: 200 } : {}),
   })
   return NextResponse.json(shifts)
 }

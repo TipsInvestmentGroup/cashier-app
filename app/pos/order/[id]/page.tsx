@@ -68,6 +68,7 @@ interface Order {
   billType: string
   totalAmount: number
   discount: number
+  discountReason: string | null
   paidAmount: number
   createdAt: string
   outletId: string
@@ -113,6 +114,7 @@ function localOrderToOrderShape(local: LocalOrder, waiterName: string): Order {
     billType: 'CUSTOMER',
     totalAmount: items.reduce((s, i) => s + i.amount, 0),
     discount: 0,
+    discountReason: null,
     paidAmount: 0,
     createdAt: new Date(local.createdAt).toISOString(),
     outletId: local.outletId,
@@ -149,6 +151,7 @@ export default function OrderPage() {
   const [busy, setBusy] = useState(false)
   const [discountModal, setDiscountModal] = useState(false)
   const [discountInput, setDiscountInput] = useState('')
+  const [discountReasonInput, setDiscountReasonInput] = useState('')
   const [justReady, setJustReady] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
 
@@ -350,8 +353,10 @@ export default function OrderPage() {
       await loadOrder()
       return
     }
+    // Captured for the Cancelled/Void Orders report — why, not just that.
+    const reason = window.prompt('Sababu ya kuondoa bidhaa hii (hiari):') ?? ''
     try {
-      const res = await apiFetch(`/api/pos/orders/${orderId}/items?itemId=${itemId}`, {
+      const res = await apiFetch(`/api/pos/orders/${orderId}/items?itemId=${itemId}&reason=${encodeURIComponent(reason)}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -408,7 +413,7 @@ export default function OrderPage() {
       const res = await apiFetch(`/api/pos/orders/${orderId}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ discount: val }),
+        body: JSON.stringify({ discount: val, discountReason: discountReasonInput.trim() || null }),
       })
       if (!res.ok) { const err = await res.json().catch(() => ({})); alert(err.error ?? 'Hitilafu'); setBusy(false); return }
       await loadOrder()
@@ -417,6 +422,7 @@ export default function OrderPage() {
     }
     setDiscountModal(false)
     setDiscountInput('')
+    setDiscountReasonInput('')
     setBusy(false)
   }
 
@@ -623,7 +629,7 @@ export default function OrderPage() {
                 <div className="flex items-center gap-2">
                   <span>{order.discount > 0 ? `− TSh ${order.discount.toLocaleString()}` : '—'}</span>
                   {!isClosed && !isLocalOrder && ['MANAGER', 'ADMIN'].includes(user?.role ?? '') && (
-                    <button onClick={() => { setDiscountInput(String(order.discount)); setDiscountModal(true) }} className="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full hover:bg-rose-200">
+                    <button onClick={() => { setDiscountInput(String(order.discount)); setDiscountReasonInput(order.discountReason ?? ''); setDiscountModal(true) }} className="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full hover:bg-rose-200">
                       {order.discount > 0 ? 'Badilisha' : '+ Weka'}
                     </button>
                   )}
@@ -697,8 +703,15 @@ export default function OrderPage() {
                     value={discountInput}
                     onChange={e => setDiscountInput(e.target.value)}
                     placeholder="Kiasi cha punguzo (TSh)"
-                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg mb-4 focus:outline-none focus:border-indigo-400"
+                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg mb-3 focus:outline-none focus:border-indigo-400"
                     autoFocus
+                  />
+                  <input
+                    type="text"
+                    value={discountReasonInput}
+                    onChange={e => setDiscountReasonInput(e.target.value)}
+                    placeholder="Sababu ya punguzo (hiari)"
+                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-4 focus:outline-none focus:border-indigo-400"
                   />
                   <div className="grid grid-cols-2 gap-3">
                     <button onClick={() => setDiscountModal(false)} className="border-2 border-gray-200 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50">Ghairi</button>
