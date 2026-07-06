@@ -6,16 +6,17 @@ import { receiveGrn } from '@/lib/stock'
 
 /**
  * POST /api/inventory/grn
- * body: { warehouseId, supplierName, invoiceRef?, note?, items: [{ productId, purchaseUnit, packSize, quantityOrdered, unitCost? }] }
- * No-PO free-form goods-received note — records physical receipt of stock
- * into a Warehouse (see lib/stock.ts's receiveGrn).
+ * body: { warehouseId, supplierName, invoiceRef?, note?, purchaseOrderId?, items: [{ productId, purchaseUnit, packSize, quantityOrdered, unitCost?, purchaseOrderItemId? }] }
+ * Goods-received note — records physical receipt of stock into a
+ * Warehouse, either free-form or against a formal PurchaseOrder (see
+ * lib/stock.ts's receiveGrn).
  */
 export async function POST(req: NextRequest) {
   const payload = getAuthUser(req)
   if (!payload) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
   if (!requireRole(payload, MANAGEMENT_ROLES)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { warehouseId, supplierName, invoiceRef, note, items } = await req.json().catch(() => ({}))
+  const { warehouseId, supplierName, invoiceRef, note, purchaseOrderId, items } = await req.json().catch(() => ({}))
   if (!warehouseId || !supplierName) {
     return NextResponse.json({ error: 'warehouseId and supplierName are required' }, { status: 400 })
   }
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'At least one item is required' }, { status: 400 })
   }
 
-  const parsedItems: Array<{ productId: string; purchaseUnit: string; packSize: number; quantityOrdered: number; unitCost?: number }> = []
+  const parsedItems: Array<{ productId: string; purchaseUnit: string; packSize: number; quantityOrdered: number; unitCost?: number; purchaseOrderItemId?: string }> = []
   for (const item of items) {
     const packSize = Number(item?.packSize)
     const quantityOrdered = Number(item?.quantityOrdered)
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
     parsedItems.push({
       productId: item.productId, purchaseUnit: item.purchaseUnit.trim(), packSize, quantityOrdered,
       unitCost: unitCost !== undefined && Number.isFinite(unitCost) ? unitCost : undefined,
+      purchaseOrderItemId: typeof item.purchaseOrderItemId === 'string' ? item.purchaseOrderItemId : undefined,
     })
   }
 
@@ -48,6 +50,7 @@ export async function POST(req: NextRequest) {
       warehouseId, supplierName: String(supplierName).trim().slice(0, 200),
       invoiceRef: typeof invoiceRef === 'string' ? invoiceRef.trim().slice(0, 100) || undefined : undefined,
       note: typeof note === 'string' ? note.trim().slice(0, 300) || undefined : undefined,
+      purchaseOrderId: typeof purchaseOrderId === 'string' ? purchaseOrderId : undefined,
       items: parsedItems, userId: payload.userId,
     })
     return NextResponse.json(result, { status: 201 })

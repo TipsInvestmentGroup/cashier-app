@@ -397,6 +397,7 @@ model Product {
   stockLevels        StockLevel[]
   grnItems           GrnItem[]
   stockTransferItems StockTransferItem[]
+  purchaseOrderItems PurchaseOrderItem[]
 
   @@index([name])
 }
@@ -466,46 +467,119 @@ model StockLedgerEntry {
   @@index([productId, warehouseId, createdAt])
 }
 
+/// A vendor TIPS buys from. Price history lives on PurchaseOrderItem, not
+/// here, so "cheapest supplier for X" is a query, not a separate table.
+model Supplier {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  contactPerson String?
+  phone         String?
+  email         String?
+  paymentTerms  String?  // e.g. "30 days", "Cash on delivery"
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  purchaseOrders PurchaseOrder[]
+}
+
+/// A Purchase Order to a supplier. status is the workflow engine: DRAFT ->
+/// PENDING_APPROVAL -> APPROVED -> SENT -> PARTIALLY_RECEIVED ->
+/// FULLY_RECEIVED, with REJECTED/CANCELLED as terminal off-ramps. Approval
+/// and receiving are handled in lib/stock.ts (submitForApproval,
+/// decidePurchaseOrder, receiveGrn).
+model PurchaseOrder {
+  id              String    @id @default(cuid())
+  poNumber        String    @unique // "PO-000001"
+  supplierId      String
+  supplier        Supplier  @relation(fields: [supplierId], references: [id])
+  status          String    @default("DRAFT")
+  outletIds       String    // JSON array — informational, a PO can be for more than one outlet
+  orderDate       DateTime  @default(now())
+  expectedDate    DateTime?
+  subtotal        Float     @default(0)
+  vatRate         Float     @default(0.18)
+  vatAmount       Float     @default(0)
+  total           Float     @default(0)
+  paymentTerms    String?
+  notes           String?
+  createdById     String
+  approvedById    String?
+  approvedAt      DateTime?
+  cancelledReason String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  items PurchaseOrderItem[]
+  grns  Grn[]
+
+  @@index([status])
+  @@index([supplierId])
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+  productName     String        // snapshot, same pattern as PosOrderItem.productName
+  purchaseUnit    String        // "Carton", "Bottle", "Case" — the unit the supplier sells in
+  packSize        Float         @default(1) // pieces per purchase unit
+  quantity        Float         // quantity in purchaseUnit, e.g. 10 cartons
+  unitPrice       Float
+  amount          Float
+  quantityReceived Float        @default(0) // running total across all GRNs against this line, in purchaseUnit
+
+  @@index([purchaseOrderId])
+}
+
 /// A no-PO, free-form goods-received note — records physical receipt of
-/// stock into a Warehouse. Supplier is plain text (no Supplier model yet;
-/// deferred to a later Procurement phase). One Grn creates one GRN_RECEIVE
-/// ledger entry per line and bumps Main Store StockLevel in a single
-/// transaction (see lib/stock.ts receiveGrn).
+/// stock into a Warehouse. Supplier is plain text when there's no PO;
+/// purchaseOrderId links it to a formal PO instead when receiving against
+/// one. One Grn creates one GRN_RECEIVE ledger entry per line and bumps
+/// Main Store StockLevel in a single transaction (see lib/stock.ts
+/// receiveGrn).
 model Grn {
-  id           String    @id @default(cuid())
-  grnNumber    String    @unique // "GRN-000123"
-  warehouseId  String
-  warehouse    Warehouse @relation(fields: [warehouseId], references: [id])
-  supplierName String
-  invoiceRef   String?
-  receivedDate DateTime  @default(now())
-  note         String?
-  createdById  String
-  createdAt    DateTime  @default(now())
+  id              String         @id @default(cuid())
+  grnNumber       String         @unique // "GRN-000123"
+  warehouseId     String
+  warehouse       Warehouse      @relation(fields: [warehouseId], references: [id])
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+  supplierName    String
+  invoiceRef      String?
+  receivedDate    DateTime       @default(now())
+  note            String?
+  createdById     String
+  createdAt       DateTime       @default(now())
 
   items GrnItem[]
 
   @@index([warehouseId])
   @@index([receivedDate])
+  @@index([purchaseOrderId])
 }
 
 /// One line of a Grn. Quantity is entered in a purchase unit (e.g.
 /// "Carton") with a packSize (pieces/grams per unit); piecesReceived is the
 /// derived, persisted total actually added to stock — same conversion
 /// principle as Product.trackingMode/gramsPerServing on the sell side.
+/// purchaseOrderItemId is a loose id link (like StockLedgerEntry.refId),
+/// not a FK relation, since not every GrnItem receives against a PO line.
 model GrnItem {
-  id              String   @id @default(cuid())
-  grnId           String
-  grn             Grn      @relation(fields: [grnId], references: [id], onDelete: Cascade)
-  productId       String
-  product         Product  @relation(fields: [productId], references: [id])
-  productName     String   // snapshot, same convention as StockLedgerEntry.productName
-  purchaseUnit    String   // e.g. "Carton", "Piece", "Kg"
-  packSize        Float    @default(1) // pieces (or grams) per purchaseUnit
-  quantityOrdered Float    // quantity in purchaseUnit, e.g. 10 (Cartons)
-  piecesReceived  Float    // derived: quantityOrdered * packSize, in stock units
-  unitCost        Float?   // optional, per purchaseUnit — not used by stock math
-  createdAt       DateTime @default(now())
+  id                  String   @id @default(cuid())
+  grnId               String
+  grn                 Grn      @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  purchaseOrderItemId String?
+  productId           String
+  product             Product  @relation(fields: [productId], references: [id])
+  productName         String   // snapshot, same convention as StockLedgerEntry.productName
+  purchaseUnit        String   // e.g. "Carton", "Piece", "Kg"
+  packSize            Float    @default(1) // pieces (or grams) per purchaseUnit
+  quantityOrdered     Float    // quantity in purchaseUnit, e.g. 10 (Cartons)
+  piecesReceived      Float    // derived: quantityOrdered * packSize, in stock units
+  unitCost            Float?   // optional, per purchaseUnit — not used by stock math
+  createdAt           DateTime @default(now())
 
   @@index([grnId])
   @@index([productId])

@@ -133,18 +133,23 @@ export async function recordItemPrepared(opts: {
 }
 
 /**
- * Store Keeper posts a no-PO goods-received note — physical stock arriving
- * at Main Store. Converts each line's purchase-unit quantity (e.g. 10
- * Cartons) into stock units (e.g. 240 pieces) via packSize, same conversion
- * principle as Product.gramsPerServing on the sell side, and bumps Main
- * Store's StockLevel + ledger in one transaction.
+ * Store Keeper posts a goods-received note — physical stock arriving at
+ * Main Store, either free-form (no PO) or against a formal PurchaseOrder
+ * (opts.purchaseOrderId + per-item purchaseOrderItemId set). Converts each
+ * line's purchase-unit quantity (e.g. 10 Cartons) into stock units (e.g.
+ * 240 pieces) via packSize, same conversion principle as
+ * Product.gramsPerServing on the sell side, and bumps Main Store's
+ * StockLevel + ledger in one transaction. When linked to a PO, also bumps
+ * that PurchaseOrderItem's quantityReceived and re-derives the PO's overall
+ * status (PARTIALLY_RECEIVED / FULLY_RECEIVED).
  */
 export async function receiveGrn(opts: {
   warehouseId: string
   supplierName: string
   invoiceRef?: string
   note?: string
-  items: Array<{ productId: string; purchaseUnit: string; packSize: number; quantityOrdered: number; unitCost?: number }>
+  purchaseOrderId?: string
+  items: Array<{ productId: string; purchaseUnit: string; packSize: number; quantityOrdered: number; unitCost?: number; purchaseOrderItemId?: string }>
   userId: string
 }): Promise<{ grnId: string; grnNumber: string }> {
   if (!opts.items.length) throw new Error('At least one item is required')
@@ -161,6 +166,7 @@ export async function receiveGrn(opts: {
     const grn = await tx.grn.create({
       data: {
         grnNumber, warehouseId: opts.warehouseId, supplierName: opts.supplierName,
+        purchaseOrderId: opts.purchaseOrderId || null,
         invoiceRef: opts.invoiceRef || null, note: opts.note || null, createdById: opts.userId,
       },
     })
@@ -173,6 +179,7 @@ export async function receiveGrn(opts: {
       await tx.grnItem.create({
         data: {
           grnId: grn.id, productId: item.productId, productName,
+          purchaseOrderItemId: item.purchaseOrderItemId || null,
           purchaseUnit: item.purchaseUnit, packSize: item.packSize,
           quantityOrdered: item.quantityOrdered, piecesReceived, unitCost: item.unitCost ?? null,
         },
@@ -185,6 +192,23 @@ export async function receiveGrn(opts: {
           type: 'GRN_RECEIVE', quantity: piecesReceived, balanceAfter: level.quantity,
           refType: 'Grn', refId: grn.id, createdById: opts.userId,
         },
+      })
+
+      if (item.purchaseOrderItemId) {
+        await tx.purchaseOrderItem.update({
+          where: { id: item.purchaseOrderItemId },
+          data: { quantityReceived: { increment: item.quantityOrdered } },
+        })
+      }
+    }
+
+    if (opts.purchaseOrderId) {
+      const poItems = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: opts.purchaseOrderId } })
+      const fullyReceived = poItems.every((i) => i.quantityReceived >= i.quantity)
+      const anyReceived = poItems.some((i) => i.quantityReceived > 0)
+      await tx.purchaseOrder.update({
+        where: { id: opts.purchaseOrderId },
+        data: { status: fullyReceived ? 'FULLY_RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : undefined },
       })
     }
 
@@ -274,4 +298,116 @@ export async function issueTransfer(opts: {
 
     return { transferId: transfer.id, transferNumber: transfer.transferNumber }
   })
+}
+
+/**
+ * Drafts a Purchase Order — the start of the formal Procurement flow (as
+ * opposed to a no-PO GRN). Computes and persists subtotal/VAT/total rather
+ * than recomputing on every read, same convention as
+ * StockLedgerEntry.balanceAfter.
+ */
+export async function createPurchaseOrder(opts: {
+  supplierId: string
+  outletIds: string[]
+  expectedDate?: Date
+  paymentTerms?: string
+  notes?: string
+  items: Array<{ productId: string; purchaseUnit: string; packSize: number; quantity: number; unitPrice: number }>
+  userId: string
+}): Promise<{ purchaseOrderId: string; poNumber: string }> {
+  if (!opts.items.length) throw new Error('At least one item is required')
+  for (const item of opts.items) {
+    if (!(item.quantity > 0)) throw new Error('Invalid quantity for item')
+    if (!(item.packSize > 0)) throw new Error('Invalid pack size for item')
+    if (!(item.unitPrice >= 0)) throw new Error('Invalid unit price for item')
+  }
+
+  const products = await prisma.product.findMany({ where: { id: { in: opts.items.map((i) => i.productId) } }, select: { id: true, name: true } })
+  const productMap = new Map(products.map((p) => [p.id, p.name]))
+
+  const VAT_RATE = 0.18
+  const lineAmounts = opts.items.map((item) => roundMoney(item.quantity * item.unitPrice))
+  const subtotal = roundMoney(lineAmounts.reduce((sum, a) => sum + a, 0))
+  const vatAmount = roundMoney(subtotal * VAT_RATE)
+  const total = roundMoney(subtotal + vatAmount)
+
+  return prisma.$transaction(async (tx) => {
+    const poNumber = await nextSequenceNumber('PO', () => tx.purchaseOrder.count())
+    const po = await tx.purchaseOrder.create({
+      data: {
+        poNumber, supplierId: opts.supplierId, status: 'DRAFT', outletIds: JSON.stringify(opts.outletIds),
+        expectedDate: opts.expectedDate || null, subtotal, vatRate: VAT_RATE, vatAmount, total,
+        paymentTerms: opts.paymentTerms || null, notes: opts.notes || null, createdById: opts.userId,
+      },
+    })
+
+    for (let i = 0; i < opts.items.length; i++) {
+      const item = opts.items[i]
+      const productName = productMap.get(item.productId)
+      if (!productName) throw new Error('Product not found')
+      await tx.purchaseOrderItem.create({
+        data: {
+          purchaseOrderId: po.id, productId: item.productId, productName,
+          purchaseUnit: item.purchaseUnit, packSize: item.packSize, quantity: item.quantity,
+          unitPrice: item.unitPrice, amount: lineAmounts[i],
+        },
+      })
+    }
+
+    return { purchaseOrderId: po.id, poNumber: po.poNumber }
+  })
+}
+
+/** DRAFT -> PENDING_APPROVAL. Any management user, not just the creator, can submit. */
+export async function submitForApproval(purchaseOrderId: string): Promise<{ status: string }> {
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: purchaseOrderId } })
+  if (!po) throw new Error('Purchase order not found')
+  if (po.status !== 'DRAFT') throw new Error('Only a draft purchase order can be submitted for approval')
+  const updated = await prisma.purchaseOrder.update({ where: { id: purchaseOrderId }, data: { status: 'PENDING_APPROVAL' } })
+  return { status: updated.status }
+}
+
+/**
+ * PENDING_APPROVAL -> APPROVED | REJECTED. The user who created the PO
+ * cannot approve it themselves — a cheap, obvious safeguard against a
+ * manager drafting and immediately rubber-stamping their own order.
+ */
+export async function decidePurchaseOrder(opts: {
+  purchaseOrderId: string
+  userId: string
+  action: 'approve' | 'reject'
+  reason?: string
+}): Promise<{ status: string }> {
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: opts.purchaseOrderId } })
+  if (!po) throw new Error('Purchase order not found')
+  if (po.status !== 'PENDING_APPROVAL') throw new Error('Only a purchase order pending approval can be approved or rejected')
+  if (opts.action === 'approve' && po.createdById === opts.userId) {
+    throw new Error('You cannot approve your own purchase order')
+  }
+
+  const status = opts.action === 'approve' ? 'APPROVED' : 'REJECTED'
+  const updated = await prisma.purchaseOrder.update({
+    where: { id: opts.purchaseOrderId },
+    data: {
+      status,
+      approvedById: opts.action === 'approve' ? opts.userId : null,
+      approvedAt: opts.action === 'approve' ? new Date() : null,
+      cancelledReason: opts.action === 'reject' ? (opts.reason || null) : null,
+    },
+  })
+  return { status: updated.status }
+}
+
+/** Cancel a PO that hasn't been fully received yet. */
+export async function cancelPurchaseOrder(opts: { purchaseOrderId: string; reason?: string }): Promise<{ status: string }> {
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: opts.purchaseOrderId } })
+  if (!po) throw new Error('Purchase order not found')
+  if (po.status === 'FULLY_RECEIVED' || po.status === 'CANCELLED') {
+    throw new Error(`A ${po.status.toLowerCase().replace('_', ' ')} purchase order cannot be cancelled`)
+  }
+  const updated = await prisma.purchaseOrder.update({
+    where: { id: opts.purchaseOrderId },
+    data: { status: 'CANCELLED', cancelledReason: opts.reason || null },
+  })
+  return { status: updated.status }
 }

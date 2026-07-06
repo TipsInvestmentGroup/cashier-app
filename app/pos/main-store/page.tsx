@@ -58,9 +58,12 @@ const TYPE_PILL: Record<string, string> = {
   TRANSFER_IN: 'bg-sky-100 text-sky-700',
 }
 
-interface GrnLine { productId: string; purchaseUnit: string; packSize: string; quantityOrdered: string }
+interface GrnLine { productId: string; purchaseUnit: string; packSize: string; quantityOrdered: string; purchaseOrderItemId?: string }
 interface TransferLine { productId: string; quantity: string }
+interface PoOption { id: string; poNumber: string; status: string }
+interface PoDetailForGrn { supplier: { name: string }; items: { id: string; productId: string; purchaseUnit: string; packSize: number; quantity: number; quantityReceived: number }[] }
 
+const RECEIVABLE_PO_STATUSES = ['APPROVED', 'SENT', 'PARTIALLY_RECEIVED']
 const emptyGrnLine = (): GrnLine => ({ productId: '', purchaseUnit: 'Carton', packSize: '', quantityOrdered: '' })
 const emptyTransferLine = (): TransferLine => ({ productId: '', quantity: '' })
 
@@ -81,6 +84,9 @@ export default function MainStorePage() {
   const [ledgerLoading, setLedgerLoading] = useState(false)
 
   const [showGrn, setShowGrn] = useState(false)
+  const [grnMode, setGrnMode] = useState<'none' | 'po'>('none')
+  const [receivablePos, setReceivablePos] = useState<PoOption[]>([])
+  const [selectedPoId, setSelectedPoId] = useState('')
   const [supplierName, setSupplierName] = useState('')
   const [invoiceRef, setInvoiceRef] = useState('')
   const [grnNote, setGrnNote] = useState('')
@@ -149,12 +155,46 @@ export default function MainStorePage() {
   }
 
   const openGrn = () => {
+    setGrnMode('none'); setSelectedPoId('')
     setSupplierName(''); setInvoiceRef(''); setGrnNote(''); setGrnLines([emptyGrnLine()])
     setShowGrn(true)
   }
 
+  const switchGrnMode = async (mode: 'none' | 'po') => {
+    setGrnMode(mode)
+    setSelectedPoId(''); setSupplierName(''); setGrnLines([emptyGrnLine()])
+    if (mode === 'po' && receivablePos.length === 0) {
+      try {
+        const data = await request('/api/inventory/purchase-orders')
+        setReceivablePos((data.rows ?? []).filter((r: { status: string }) => RECEIVABLE_PO_STATUSES.includes(r.status)))
+      } catch {
+        setReceivablePos([])
+      }
+    }
+  }
+
+  const pickPo = async (poId: string) => {
+    setSelectedPoId(poId)
+    if (!poId) { setSupplierName(''); setGrnLines([emptyGrnLine()]); return }
+    try {
+      const data = await request(`/api/inventory/purchase-orders/${poId}`)
+      const po: PoDetailForGrn = data.purchaseOrder
+      setSupplierName(po.supplier.name)
+      const remaining = po.items
+        .filter((it) => it.quantityReceived < it.quantity)
+        .map((it) => ({
+          productId: it.productId, purchaseUnit: it.purchaseUnit, packSize: String(it.packSize),
+          quantityOrdered: String(it.quantity - it.quantityReceived), purchaseOrderItemId: it.id,
+        }))
+      setGrnLines(remaining.length ? remaining : [emptyGrnLine()])
+    } catch {
+      alert('Imeshindikana kupakia PO')
+    }
+  }
+
   const submitGrn = async () => {
     if (!warehouseId) return
+    if (grnMode === 'po' && !selectedPoId) { alert('Chagua PO.'); return }
     if (!supplierName.trim()) { alert('Weka jina la muuzaji.'); return }
     const items = []
     for (const line of grnLines) {
@@ -164,14 +204,17 @@ export default function MainStorePage() {
       if (isNaN(packSize) || packSize <= 0 || isNaN(quantityOrdered) || quantityOrdered <= 0) {
         alert('Angalia idadi na pack size za kila bidhaa.'); return
       }
-      items.push({ productId: line.productId, purchaseUnit: line.purchaseUnit.trim() || 'Piece', packSize, quantityOrdered })
+      items.push({ productId: line.productId, purchaseUnit: line.purchaseUnit.trim() || 'Piece', packSize, quantityOrdered, purchaseOrderItemId: line.purchaseOrderItemId })
     }
     if (items.length === 0) { alert('Ongeza bidhaa moja angalau.'); return }
     setGrnBusy(true)
     try {
       await request('/api/inventory/grn', {
         method: 'POST',
-        body: JSON.stringify({ warehouseId, supplierName: supplierName.trim(), invoiceRef: invoiceRef.trim() || undefined, note: grnNote.trim() || undefined, items }),
+        body: JSON.stringify({
+          warehouseId, supplierName: supplierName.trim(), invoiceRef: invoiceRef.trim() || undefined, note: grnNote.trim() || undefined,
+          purchaseOrderId: grnMode === 'po' ? selectedPoId : undefined, items,
+        }),
       })
       setShowGrn(false)
       await load()
@@ -301,33 +344,52 @@ export default function MainStorePage() {
         {showGrn && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowGrn(false)}>
             <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-              <h3 className="font-bold text-gray-800 text-lg mb-4">Pokea Bidhaa (GRN)</h3>
-              <input type="text" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} placeholder="Jina la muuzaji" className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-3 focus:outline-none focus:border-indigo-400" autoFocus />
+              <h3 className="font-bold text-gray-800 text-lg mb-1">Pokea Bidhaa (GRN)</h3>
+              <div className="flex gap-2 mb-3">
+                <button onClick={() => switchGrnMode('none')} className={`flex-1 text-xs font-semibold py-2 rounded-lg border-2 ${grnMode === 'none' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500'}`}>Bila PO</button>
+                <button onClick={() => switchGrnMode('po')} className={`flex-1 text-xs font-semibold py-2 rounded-lg border-2 ${grnMode === 'po' ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500'}`}>Kutoka PO</button>
+              </div>
+
+              {grnMode === 'po' && (
+                <select value={selectedPoId} onChange={(e) => pickPo(e.target.value)} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-3 focus:outline-none focus:border-indigo-400">
+                  <option value="">-- Chagua PO --</option>
+                  {receivablePos.map((po) => <option key={po.id} value={po.id}>{po.poNumber} ({po.status.replace('_', ' ')})</option>)}
+                </select>
+              )}
+
+              <input type="text" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} placeholder="Jina la muuzaji" disabled={grnMode === 'po'} className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-3 focus:outline-none focus:border-indigo-400 disabled:bg-gray-50" autoFocus={grnMode === 'none'} />
               <input type="text" value={invoiceRef} onChange={(e) => setInvoiceRef(e.target.value)} placeholder="Invoice/DO namba (hiari)" className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-3 focus:outline-none focus:border-indigo-400" />
 
               <div className="space-y-3 mb-3">
                 {grnLines.map((line, idx) => {
                   const pieces = (parseFloat(line.packSize) || 0) * (parseFloat(line.quantityOrdered) || 0)
+                  const locked = !!line.purchaseOrderItemId
                   return (
                     <div key={idx} className="border border-gray-100 rounded-xl p-3">
-                      <select value={line.productId} onChange={(e) => setGrnLines((ls) => ls.map((l, i) => i === idx ? { ...l, productId: e.target.value } : l))} className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:border-indigo-400">
-                        <option value="">-- Chagua bidhaa --</option>
-                        {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
+                      {locked ? (
+                        <div className="font-medium text-gray-800 text-sm mb-2">{products.find((p) => p.id === line.productId)?.name ?? line.productId}</div>
+                      ) : (
+                        <select value={line.productId} onChange={(e) => setGrnLines((ls) => ls.map((l, i) => i === idx ? { ...l, productId: e.target.value } : l))} className="w-full border-2 border-gray-200 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:border-indigo-400">
+                          <option value="">-- Chagua bidhaa --</option>
+                          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      )}
                       <div className="grid grid-cols-3 gap-2">
-                        <input type="text" value={line.purchaseUnit} onChange={(e) => setGrnLines((ls) => ls.map((l, i) => i === idx ? { ...l, purchaseUnit: e.target.value } : l))} placeholder="Unit (Carton)" className="border-2 border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-indigo-400" />
-                        <input type="text" inputMode="decimal" value={line.packSize} onChange={(e) => setGrnLines((ls) => ls.map((l, i) => i === idx ? { ...l, packSize: e.target.value.replace(/[^\d.]/g, '') } : l))} placeholder="Pack size" className="border-2 border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-indigo-400" />
-                        <input type="text" inputMode="decimal" value={line.quantityOrdered} onChange={(e) => setGrnLines((ls) => ls.map((l, i) => i === idx ? { ...l, quantityOrdered: e.target.value.replace(/[^\d.]/g, '') } : l))} placeholder="Idadi" className="border-2 border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-indigo-400" />
+                        <input type="text" value={line.purchaseUnit} disabled={locked} onChange={(e) => setGrnLines((ls) => ls.map((l, i) => i === idx ? { ...l, purchaseUnit: e.target.value } : l))} placeholder="Unit (Carton)" className="border-2 border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-indigo-400 disabled:bg-gray-50" />
+                        <input type="text" inputMode="decimal" value={line.packSize} disabled={locked} onChange={(e) => setGrnLines((ls) => ls.map((l, i) => i === idx ? { ...l, packSize: e.target.value.replace(/[^\d.]/g, '') } : l))} placeholder="Pack size" className="border-2 border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-indigo-400 disabled:bg-gray-50" />
+                        <input type="text" inputMode="decimal" value={line.quantityOrdered} onChange={(e) => setGrnLines((ls) => ls.map((l, i) => i === idx ? { ...l, quantityOrdered: e.target.value.replace(/[^\d.]/g, '') } : l))} placeholder="Idadi iliyofika" className="border-2 border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:border-indigo-400" />
                       </div>
                       {pieces > 0 && <div className="text-xs text-gray-400 mt-1.5">= {pieces.toLocaleString()} pieces</div>}
-                      {grnLines.length > 1 && (
+                      {!locked && grnLines.length > 1 && (
                         <button onClick={() => setGrnLines((ls) => ls.filter((_, i) => i !== idx))} className="text-xs text-rose-500 mt-1.5">Ondoa</button>
                       )}
                     </div>
                   )
                 })}
               </div>
-              <button onClick={() => setGrnLines((ls) => [...ls, emptyGrnLine()])} className="text-sm text-indigo-600 font-medium mb-3">+ Ongeza Bidhaa</button>
+              {grnMode === 'none' && (
+                <button onClick={() => setGrnLines((ls) => [...ls, emptyGrnLine()])} className="text-sm text-indigo-600 font-medium mb-3">+ Ongeza Bidhaa</button>
+              )}
 
               <input type="text" value={grnNote} onChange={(e) => setGrnNote(e.target.value)} placeholder="Maelezo (hiari)" className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm mb-4 focus:outline-none focus:border-indigo-400" />
 
