@@ -17,7 +17,7 @@ interface StaffOption { id: string; name: string; role: string }
 interface Counter { code: string; label: string }
 interface Product { id: string; name: string; category: string | null }
 
-type Section = 'Sales' | 'Operations' | 'Credit' | 'Summary'
+type Section = 'Sales' | 'Operations' | 'Credit' | 'Summary' | 'Inventory'
 
 interface Column { key: string; label: string; align?: 'right'; format?: (v: unknown, row: Row) => string }
 
@@ -114,9 +114,82 @@ const TABS: TabConfig[] = [
       { key: 'discountTotal', label: 'Punguzo', align: 'right', format: money },
     ],
   },
+  { key: 'inv-dashboard', label: 'Inventory Dashboard', section: 'Inventory', columns: [], isSummary: true },
+  {
+    key: 'inv-valuation', label: 'Stock Valuation', section: 'Inventory', defaultSortKey: 'value', defaultSortDir: 'desc',
+    columns: [
+      { key: 'productName', label: 'Bidhaa' },
+      { key: 'location', label: 'Eneo' },
+      { key: 'quantity', label: 'Idadi', align: 'right', format: num },
+      { key: 'unitCost', label: 'Bei ya Ununuzi', align: 'right', format: money },
+      { key: 'value', label: 'Thamani', align: 'right', format: money },
+    ],
+  },
+  {
+    key: 'inv-po', label: 'Purchase Orders', section: 'Inventory', defaultSortKey: 'createdAt', defaultSortDir: 'desc',
+    columns: [
+      { key: 'createdAt', label: 'Tarehe', format: dateStr },
+      { key: 'poNumber', label: 'PO' },
+      { key: 'supplierName', label: 'Muuzaji' },
+      { key: 'status', label: 'Status' },
+      { key: 'total', label: 'Jumla', align: 'right', format: money },
+    ],
+  },
+  {
+    key: 'inv-grn', label: 'Receiving (GRN)', section: 'Inventory', defaultSortKey: 'receivedDate', defaultSortDir: 'desc',
+    columns: [
+      { key: 'receivedDate', label: 'Tarehe', format: dateStr },
+      { key: 'grnNumber', label: 'GRN' },
+      { key: 'supplierName', label: 'Muuzaji' },
+      { key: 'itemCount', label: 'Bidhaa', align: 'right', format: num },
+      { key: 'totalPieces', label: 'Idadi Jumla', align: 'right', format: num },
+    ],
+  },
+  {
+    key: 'inv-transfers', label: 'Transfers', section: 'Inventory', defaultSortKey: 'createdAt', defaultSortDir: 'desc',
+    columns: [
+      { key: 'createdAt', label: 'Tarehe', format: dateStr },
+      { key: 'transferNumber', label: 'Transfer' },
+      { key: 'destination', label: 'Kwenda' },
+      { key: 'itemCount', label: 'Bidhaa', align: 'right', format: num },
+      { key: 'totalQuantity', label: 'Idadi Jumla', align: 'right', format: num },
+    ],
+  },
+  {
+    key: 'inv-loss', label: 'Stock Loss', section: 'Inventory', defaultSortKey: 'valueLost', defaultSortDir: 'desc',
+    columns: [
+      { key: 'date', label: 'Tarehe', format: dateStr },
+      { key: 'source', label: 'Chanzo' },
+      { key: 'productName', label: 'Bidhaa' },
+      { key: 'location', label: 'Eneo' },
+      { key: 'quantity', label: 'Idadi', align: 'right', format: num },
+      { key: 'valueLost', label: 'Thamani Iliyopotea', align: 'right', format: money },
+      { key: 'reason', label: 'Sababu' },
+    ],
+  },
+  {
+    key: 'inv-staff-loss', label: 'Staff Loss Attribution', section: 'Inventory', defaultSortKey: 'totalAmount', defaultSortDir: 'desc',
+    columns: [
+      { key: 'staffName', label: 'Mfanyakazi' },
+      { key: 'totalAmount', label: 'Jumla', align: 'right', format: money },
+      { key: 'count', label: 'Idadi ya Matukio', align: 'right', format: num },
+    ],
+  },
+  {
+    key: 'inv-ledger', label: 'Stock Movement Ledger', section: 'Inventory', defaultSortKey: 'date', defaultSortDir: 'desc',
+    columns: [
+      { key: 'date', label: 'Tarehe', format: dateStr },
+      { key: 'type', label: 'Aina' },
+      { key: 'productName', label: 'Bidhaa' },
+      { key: 'location', label: 'Eneo' },
+      { key: 'quantity', label: 'Idadi', align: 'right', format: num },
+      { key: 'balanceAfter', label: 'Baki', align: 'right', format: num },
+      { key: 'note', label: 'Maelezo', format: (v) => (v as string) || '—' },
+    ],
+  },
 ]
 
-const SECTIONS: Section[] = ['Sales', 'Operations', 'Credit', 'Summary']
+const SECTIONS: Section[] = ['Sales', 'Operations', 'Credit', 'Summary', 'Inventory']
 const PAYMENT_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA', 'SIGNED']
 
 function endpointFor(tabKey: string, params: URLSearchParams): string {
@@ -137,6 +210,14 @@ function endpointFor(tabKey: string, params: URLSearchParams): string {
     case 'signed-outstanding': return `/api/pos/reports/signed-bills?outstandingOnly=true&${qs}`
     case 'summary': return `/api/pos/reports/summary?${qs}`
     case 'staff-perf': return `/api/pos/reports/staff-performance?${qs}`
+    case 'inv-dashboard': return `/api/inventory/reports/dashboard?${qs}`
+    case 'inv-valuation': return `/api/inventory/reports/valuation?${qs}`
+    case 'inv-po': return `/api/inventory/reports/purchase-orders?${qs}`
+    case 'inv-grn': return `/api/inventory/reports/grn?${qs}`
+    case 'inv-transfers': return `/api/inventory/reports/transfers?${qs}`
+    case 'inv-loss': return `/api/inventory/reports/loss?${qs}`
+    case 'inv-staff-loss': return `/api/inventory/reports/staff-loss?${qs}`
+    case 'inv-ledger': return `/api/inventory/reports/ledger?${qs}`
     default: return ''
   }
 }
@@ -240,7 +321,7 @@ export default function PosReportsPage() {
       const url = endpointFor(activeTab, filterParams)
       const data = await request(url)
       if (id !== loadIdRef.current) return
-      if (activeTab === 'summary') setSummary(data)
+      if (activeTab === 'summary' || activeTab === 'inv-dashboard') setSummary(data)
       else setRows(data.rows ?? [])
     } catch (err) {
       if (id !== loadIdRef.current) return
@@ -353,7 +434,16 @@ export default function PosReportsPage() {
           ) : error ? (
             <div className="text-center py-16 text-rose-500">{error}</div>
           ) : tab.isSummary ? (
-            summary && (
+            summary && activeTab === 'inv-dashboard' ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <SummaryCard label="Thamani ya Stock" value={money(summary.totalStockValue)} color="indigo" />
+                <SummaryCard label="Hasara Kipindi Hiki" value={money(summary.totalLossThisPeriod)} color="rose" />
+                <SummaryCard label="PO Zinazosubiri Idhini" value={num(summary.pendingApprovals)} color="amber" />
+                <SummaryCard label="Hesabu Zinazoendelea" value={num(summary.openStockCounts)} color="gray" />
+                <SummaryCard label="GRN Kipindi Hiki" value={num(summary.grnCount)} color="green" />
+                <SummaryCard label="Transfers Kipindi Hiki" value={num(summary.transferCount)} color="indigo" />
+              </div>
+            ) : summary && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 <SummaryCard label="Jumla ya Mauzo" value={money(summary.totalSales)} color="indigo" />
                 <SummaryCard label="Punguzo" value={money(summary.totalDiscount)} color="rose" />
