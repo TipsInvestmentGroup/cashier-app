@@ -411,3 +411,159 @@ export async function cancelPurchaseOrder(opts: { purchaseOrderId: string; reaso
   })
   return { status: updated.status }
 }
+
+/**
+ * Starts (or resumes) today's physical stock count for a counter. Idempotent
+ * — an already-IN_PROGRESS session for this outlet+counterCode+today is
+ * returned as-is rather than duplicated. Prefills one StockCountItem per
+ * currently-tracked product: openingBalance carries forward from the last
+ * SUBMITTED count's own closingPhysical (the last verified truth), or the
+ * counter's live StockLevel.quantity if this product has never been counted
+ * before (nothing has moved between "now" and "now"). receivings/
+ * transfersIn/posSalesQty sum the relevant StockLedgerEntry types in the
+ * window since that last count (or are 0 for a first-ever count).
+ */
+export async function startStockCount(opts: {
+  outletId: string
+  counterCode: string
+  userId: string
+}): Promise<{ sessionId: string }> {
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+
+  const existing = await prisma.stockCountSession.findFirst({
+    where: { outletId: opts.outletId, counterCode: opts.counterCode, status: 'IN_PROGRESS', countDate: { gte: todayStart } },
+  })
+  if (existing) return { sessionId: existing.id }
+
+  const levels = await prisma.stockLevel.findMany({
+    where: { outletId: opts.outletId, counterCode: opts.counterCode },
+    include: { product: { select: { name: true, buyingPrice: true } } },
+  })
+  if (!levels.length) throw new Error('Hakuna bidhaa zinazofuatiliwa kwenye counter hii')
+
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.stockCountSession.create({
+      data: { outletId: opts.outletId, counterCode: opts.counterCode, conductedById: opts.userId },
+    })
+
+    for (const level of levels) {
+      const lastItem = await tx.stockCountItem.findFirst({
+        where: { productId: level.productId, session: { outletId: opts.outletId, counterCode: opts.counterCode, status: 'SUBMITTED' } },
+        orderBy: { session: { countDate: 'desc' } },
+        include: { session: { select: { createdAt: true } } },
+      })
+
+      const openingBalance = lastItem ? lastItem.closingPhysical : level.quantity
+      let receivings = 0
+      let transfersIn = 0
+      let posSalesQty = 0
+
+      if (lastItem) {
+        const movements = await tx.stockLedgerEntry.groupBy({
+          by: ['type'],
+          where: {
+            productId: level.productId, outletId: opts.outletId, counterCode: opts.counterCode,
+            createdAt: { gt: lastItem.session.createdAt },
+            type: { in: ['RESTOCK', 'TRANSFER_IN', 'SALE'] },
+          },
+          _sum: { quantity: true },
+        })
+        for (const m of movements) {
+          const sum = m._sum.quantity ?? 0
+          if (m.type === 'RESTOCK') receivings = sum
+          else if (m.type === 'TRANSFER_IN') transfersIn = sum
+          else if (m.type === 'SALE') posSalesQty = -sum // SALE entries are stored negative
+        }
+      }
+
+      const closingSystem = roundMoney(openingBalance + receivings + transfersIn)
+
+      await tx.stockCountItem.create({
+        data: {
+          sessionId: session.id, productId: level.productId, productName: level.product.name,
+          openingBalance, receivings, transfersIn, closingSystem, posSalesQty, unitCost: level.product.buyingPrice,
+        },
+      })
+    }
+
+    return { sessionId: session.id }
+  })
+}
+
+/**
+ * Finalizes a stock count: computes the variance/loss per line, corrects
+ * the counter's live StockLevel to match the physical count (writing an
+ * ADJUSTMENT ledger entry, same type the Manual Adjustment escape hatch
+ * uses — skipped when the physical count already matches, to avoid a
+ * no-op audit-log entry), and rolls the loss portion up into the session's
+ * totalLossValue. Single step — no separate review/approval.
+ */
+export async function submitStockCount(opts: {
+  sessionId: string
+  items: Array<{ id: string; closingPhysical: number; discountQty?: number; breakageQty?: number }>
+  userId: string
+}): Promise<{ status: string; totalLossValue: number }> {
+  const session = await prisma.stockCountSession.findUnique({ where: { id: opts.sessionId }, include: { items: true } })
+  if (!session) throw new Error('Stock count session not found')
+  if (session.status !== 'IN_PROGRESS') throw new Error('Only an in-progress stock count can be submitted')
+
+  const itemMap = new Map(session.items.map((i) => [i.id, i]))
+
+  return prisma.$transaction(async (tx) => {
+    let totalLossValue = 0
+
+    for (const input of opts.items) {
+      const item = itemMap.get(input.id)
+      if (!item) continue // not part of this session — ignore
+      const closingPhysical = input.closingPhysical
+      const discountQty = input.discountQty || 0
+      const breakageQty = input.breakageQty || 0
+
+      const expectedSalesQty = roundMoney(item.closingSystem - closingPhysical)
+      const varianceQty = roundMoney(item.posSalesQty - expectedSalesQty)
+      const varianceValue = roundMoney((varianceQty - discountQty - breakageQty) * item.unitCost)
+      totalLossValue += Math.max(0, -varianceValue)
+
+      await tx.stockCountItem.update({
+        where: { id: item.id },
+        data: { closingPhysical, discountQty, breakageQty, expectedSalesQty, varianceQty, varianceValue },
+      })
+
+      const currentLevel = await getStockLevel(tx, { productId: item.productId, outletId: session.outletId, counterCode: session.counterCode })
+      if (currentLevel && currentLevel.quantity !== closingPhysical) {
+        const delta = roundMoney(closingPhysical - currentLevel.quantity)
+        await tx.stockLevel.update({ where: { id: currentLevel.id }, data: { quantity: closingPhysical } })
+        await tx.stockLedgerEntry.create({
+          data: {
+            productId: item.productId, productName: item.productName, outletId: session.outletId, counterCode: session.counterCode,
+            type: 'ADJUSTMENT', quantity: delta, balanceAfter: closingPhysical,
+            note: 'Stock count correction', refType: 'StockCountSession', refId: session.id, createdById: opts.userId,
+          },
+        })
+      }
+    }
+
+    const updated = await tx.stockCountSession.update({
+      where: { id: session.id },
+      data: { status: 'SUBMITTED', totalLossValue: roundMoney(totalLossValue) },
+    })
+    return { status: updated.status, totalLossValue: updated.totalLossValue }
+  })
+}
+
+/** Free-form accountability record — not an enforced reconciliation. */
+export async function addLossAttribution(opts: {
+  sessionId: string
+  staffId: string
+  amount: number
+  note?: string
+}): Promise<{ id: string }> {
+  const staff = await prisma.user.findUnique({ where: { id: opts.staffId }, select: { name: true } })
+  if (!staff) throw new Error('Staff member not found')
+
+  const attribution = await prisma.stockLossAttribution.create({
+    data: { sessionId: opts.sessionId, staffId: opts.staffId, staffName: staff.name, amount: opts.amount, note: opts.note || null },
+  })
+  return { id: attribution.id }
+}
