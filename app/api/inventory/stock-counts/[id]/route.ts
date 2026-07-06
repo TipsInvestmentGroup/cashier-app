@@ -49,11 +49,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
     const discountQty = item.discountQty === undefined || item.discountQty === null || item.discountQty === '' ? undefined : Number(item.discountQty)
     const breakageQty = item.breakageQty === undefined || item.breakageQty === null || item.breakageQty === '' ? undefined : Number(item.breakageQty)
-    parsedItems.push({
-      id: item.id, closingPhysical,
-      discountQty: discountQty !== undefined && Number.isFinite(discountQty) ? discountQty : undefined,
-      breakageQty: breakageQty !== undefined && Number.isFinite(breakageQty) ? breakageQty : undefined,
-    })
+    if (discountQty !== undefined && (!Number.isFinite(discountQty) || discountQty < 0)) {
+      return NextResponse.json({ error: 'discountQty must be a non-negative number' }, { status: 400 })
+    }
+    if (breakageQty !== undefined && (!Number.isFinite(breakageQty) || breakageQty < 0)) {
+      return NextResponse.json({ error: 'breakageQty must be a non-negative number' }, { status: 400 })
+    }
+    parsedItems.push({ id: item.id, closingPhysical, discountQty, breakageQty })
   }
 
   try {
