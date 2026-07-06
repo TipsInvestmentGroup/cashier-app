@@ -29,6 +29,12 @@ export async function seedCore(prisma: any) {
     update: { isEventsOnly: true },
     create: { name: 'Tips Events', location: 'External events & functions', isEventsOnly: true },
   })
+  // Central stock location that GRNs receive into and transfers issue out of.
+  await prisma.warehouse.upsert({
+    where: { name: 'Main Store' },
+    update: {},
+    create: { name: 'Main Store' },
+  })
 
   const users = [
     { email: 'admin@lounge.com', name: 'System Admin', role: 'ADMIN', pass: 'admin123', outletId: null },
