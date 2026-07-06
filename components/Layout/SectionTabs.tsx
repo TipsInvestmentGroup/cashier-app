@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
-  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, type LucideIcon,
+  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, type LucideIcon,
 } from 'lucide-react'
 
 export type Tab = { href: string; label: string; icon: LucideIcon; roles: string[]; excludePositions?: string[] }
@@ -26,6 +26,7 @@ export const MYPOS_TABS: Tab[] = [
   { href: '/events', label: 'Events', icon: PartyPopper, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/shift-report', label: 'Shift Report', icon: BarChart3, roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/reports', label: 'Reports', icon: FileBarChart, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
+  { href: '/pos/stock', label: 'Stock', icon: Package, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
 ]
 
 export const DAILY_TABS: Tab[] = [

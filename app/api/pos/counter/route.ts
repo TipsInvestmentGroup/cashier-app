@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { sendPushToUser } from '@/lib/push'
+import { recordItemPrepared } from '@/lib/stock'
 
 // Outside Staff place orders and collect finished ones from a counter, but
 // never operate a counter themselves — they're not authorized to issue or
@@ -53,13 +54,23 @@ export async function PATCH(req: NextRequest) {
   const { itemId } = await req.json().catch(() => ({}))
   if (!itemId) return NextResponse.json({ error: 'itemId required' }, { status: 400 })
 
-  const item = await prisma.posOrderItem.findUnique({ where: { id: itemId } })
+  const item = await prisma.posOrderItem.findUnique({
+    where: { id: itemId },
+    include: { order: { select: { outletId: true } } },
+  })
   if (!item) return NextResponse.json({ error: 'Item not found' }, { status: 404 })
   if (item.status !== 'SENT') return NextResponse.json({ error: 'Only sent items can be marked ready' }, { status: 400 })
 
   const updated = await prisma.posOrderItem.update({
     where: { id: itemId },
     data: { status: 'PREPARED', preparedAt: new Date(), preparedBy: payload.userId },
+  })
+
+  // Best-effort — see lib/stock.ts (silently no-ops for anything not opted
+  // into counter stock tracking).
+  await recordItemPrepared({
+    itemId: item.id, productId: item.productId, productName: item.productName, quantity: item.quantity,
+    outletId: item.order.outletId, counterCode: item.counterCode, userId: payload.userId,
   })
 
   // If nothing on the order is still pending or queued, the whole order is

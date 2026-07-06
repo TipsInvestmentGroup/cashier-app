@@ -93,6 +93,7 @@ model Outlet {
   posShifts        PosShift[]
   posCounters      PosCounter[]
   posStockRequests PosStockRequest[]
+  stockLevels      StockLevel[]
   posOrders        PosOrder[]
   posBlockedItems  PosBlockedItem[]
   dayClosures      DayClosure[]
@@ -380,14 +381,60 @@ model Product {
   sellingPrice Float    @default(0)
   unitMeasure  String            // unit | kg | crate 24 bottle | crate 25 bottle | crate 6 bottle
   isActive     Boolean  @default(true)
+  // Counter stock tracking (see StockLevel/StockLedgerEntry below). WEIGHT
+  // items (e.g. shisha flavours) are counted in grams; gramsPerServing
+  // converts a gram reading into sellable servings, same conversion the
+  // business already does by hand on paper stock-take sheets.
+  trackingMode    String @default("UNIT") // UNIT | WEIGHT
+  gramsPerServing Float?
   createdAt    DateTime @default(now())
 
   cancellations   Cancellation[]
   billItems       BillItem[]
   posOrderItems   PosOrderItem[]
   posBlockedItems PosBlockedItem[]
+  stockLevels     StockLevel[]
 
   @@index([name])
+}
+
+/// Current quantity of one product at one counter — pieces, or grams when
+/// the product's trackingMode is WEIGHT. A row only exists once someone has
+/// restocked that product at that counter at least once: tracking is
+/// opt-in per product-per-counter rather than pre-created for every
+/// Product×Counter×Outlet combination, most of which nobody stocks there.
+model StockLevel {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  outletId    String
+  outlet      Outlet   @relation(fields: [outletId], references: [id])
+  counterCode String   // MAIN | VIP | SHISHA | KITCHEN
+  quantity    Float    @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([productId, outletId, counterCode])
+  @@index([outletId, counterCode])
+}
+
+/// Every stock quantity change, ever — mirrors the "never delete, only
+/// reverse" audit principle already used for PosOrder/PosOrderItem history.
+model StockLedgerEntry {
+  id           String   @id @default(cuid())
+  productId    String
+  productName  String   // snapshot, same pattern as PosOrderItem.productName
+  outletId     String
+  counterCode  String
+  type         String   // RESTOCK | SALE | ADJUSTMENT
+  quantity     Float    // signed — negative for sales/deductions
+  balanceAfter Float
+  note         String?
+  refType      String?  // "PosOrderItem" for sale-driven entries
+  refId        String?
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  @@index([productId, outletId, counterCode, createdAt])
 }
 
 // Cancellations recorded against a daily collection (Double Punch / Out of Stock / Wrong Punch).

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { canActOnOrder } from '@/lib/pos-close'
 import { sendPushToUser } from '@/lib/push'
 import { SUPPLIER_POSITION, MANAGEMENT_ROLES } from '@/lib/shared-constants'
+import { recordItemPrepared } from '@/lib/stock'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -60,6 +61,15 @@ export async function POST(req: NextRequest, { params }: Params) {
         ? { status: 'PREPARED', sentAt: now, preparedAt: now, preparedBy: payload.userId }
         : { status: 'SENT', sentAt: now },
     })
+    // DIRECT items skip the prep queue and leave the counter's stock right
+    // now — best-effort, see lib/stock.ts (silently no-ops for anything not
+    // opted into counter stock tracking).
+    if (direct) {
+      await Promise.all(items.map((i) => recordItemPrepared({
+        itemId: i.id, productId: i.productId, productName: i.productName, quantity: i.quantity,
+        outletId: order.outletId, counterCode: i.counterCode, userId: payload.userId,
+      })))
+    }
   }
 
   for (const [counterCode, items] of Object.entries(byCounter)) {
