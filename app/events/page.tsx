@@ -431,8 +431,16 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                   <tr key={x.id} className="hover:bg-gray-50">
                     <td className="px-3 py-2 font-medium text-gray-700">{x.category}</td>
                     <td className="px-3 py-2 text-gray-500">{x.description || '—'}</td>
-                    <td className="px-3 py-2 text-right text-gray-600">{formatCurrency(x.estimatedCost)}</td>
-                    <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatCurrency(x.amount)}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">
+                      {canManage ? (
+                        <InlineNumberField key={`${x.id}-est-${x.estimatedCost}`} defaultValue={x.estimatedCost} onCommit={(v) => updateExpense(x.id, { estimatedCost: Number(v) || 0 })} className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" />
+                      ) : formatCurrency(x.estimatedCost)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold text-gray-900">
+                      {canManage ? (
+                        <InlineNumberField key={`${x.id}-act-${x.amount}`} defaultValue={x.amount} onCommit={(v) => updateExpense(x.id, { amount: Number(v) || 0 })} className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" />
+                      ) : formatCurrency(x.amount)}
+                    </td>
                     <td className="px-3 py-2 text-gray-500">{x.supplier || '—'}</td>
                     <td className="px-3 py-2">
                       {canManage ? (
