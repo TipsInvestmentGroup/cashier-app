@@ -58,13 +58,17 @@ export default function PosHomePage() {
   useEffect(() => {
     if (!token || !selectedOutletId) { setBookableEvents([]); return }
     const today = format(new Date(), 'yyyy-MM-dd')
-    fetch(`/api/events?outletId=${selectedOutletId}&status=PLANNED,CONFIRMED&from=${today}&to=${today}`, {
+    // Matches events at this outlet OR events this staffer was personally
+    // assigned to work (see EventStaff) even if hosted at a different
+    // outlet — e.g. a Mikocheni waiter pulled onto a Tips Events booking.
+    const staffSuffix = user?.id ? `&staffId=${user.id}` : ''
+    fetch(`/api/events?outletId=${selectedOutletId}&status=PLANNED,CONFIRMED&from=${today}&to=${today}${staffSuffix}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => (r.ok ? r.json() : []))
       .then((data: BookableEvent[]) => { setBookableEvents(data); setSelectedEventId(data.length === 1 ? data[0].id : '') })
       .catch(() => setBookableEvents([]))
-  }, [token, selectedOutletId])
+  }, [token, selectedOutletId, user?.id])
 
   const openShift = async (name: string) => {
     if (!token) return
