@@ -11,7 +11,7 @@ import { formatCurrency, STATUS_COLORS } from '@/lib/utils'
 import { EVENT_TYPES, EVENT_EXPENSE_CATEGORIES, EXPENSE_PAYMENT_STATUSES, SPONSORSHIP_TYPES, SPONSOR_AGREEMENT_STATUSES, EVENT_TARGET_TYPES } from '@/lib/scheduling'
 import { format, parseISO } from 'date-fns'
 import toast from 'react-hot-toast'
-import { PartyPopper, Plus, X, Trash2, Users, Wallet, TrendingUp, Gift, Package, Target, Ticket, Armchair, Copy } from 'lucide-react'
+import { PartyPopper, Plus, X, Trash2, Users, Wallet, TrendingUp, Gift, Package, Target, Ticket, Armchair, Copy, Pencil } from 'lucide-react'
 
 const MANAGE_ROLES = ['MANAGER', 'DIRECTOR', 'ADMIN']
 const STATUSES = ['PLANNED', 'CONFIRMED', 'COMPLETED', 'CANCELLED']
@@ -214,6 +214,13 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
   const [ticketType, setTicketType] = useState({ name: '', price: '', quantityAvailable: '' })
   const [table, setTable] = useState({ name: '', tableType: '', capacity: '4', price: '' })
   const [salesEdit, setSalesEdit] = useState(String(detail.salesTotal || 0))
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState({
+    name: detail.name, eventType: detail.eventType || '', clientName: detail.clientName || '',
+    date: format(parseISO(detail.date), 'yyyy-MM-dd'), location: detail.location || '',
+    startTime: detail.startTime || '', endTime: detail.endTime || '',
+    expectedGuests: String(detail.expectedGuests || ''), description: detail.description || '', notes: detail.notes || '',
+  })
 
   const assignedIds = new Set(detail.staff.map((s) => s.staffId))
   const available = detail.allStaff.filter((s) => !assignedIds.has(s.id))
@@ -298,6 +305,27 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
 
   const copyBookingLink = () => { navigator.clipboard.writeText(`${window.location.origin}/book/${detail.id}`); toast.success('Booking link copied') }
 
+  // Re-sync the edit form from the latest detail each time it's opened —
+  // detail can change from under us (e.g. another admin's edit, or our own
+  // refresh() after some other action) while this modal stays mounted.
+  const openEdit = () => {
+    setEditForm({
+      name: detail.name, eventType: detail.eventType || '', clientName: detail.clientName || '',
+      date: format(parseISO(detail.date), 'yyyy-MM-dd'), location: detail.location || '',
+      startTime: detail.startTime || '', endTime: detail.endTime || '',
+      expectedGuests: String(detail.expectedGuests || ''), description: detail.description || '', notes: detail.notes || '',
+    })
+    setEditOpen(true)
+  }
+  const saveEventDetails = () => {
+    if (!editForm.name.trim()) return toast.error('Event name is required')
+    api(async () => {
+      await request(`/api/events/${detail.id}`, { method: 'PATCH', body: JSON.stringify({ ...editForm, expectedGuests: Number(editForm.expectedGuests) || 0 }) })
+      setEditOpen(false)
+      toast.success('Event details updated')
+    }, async () => { await refresh(); await reload() })
+  }
+
   const deleteEvent = async () => { if (!confirm(`Delete event "${detail.name}"? This cannot be undone.`)) return; try { await request(`/api/events/${detail.id}`, { method: 'DELETE' }); toast.success('Event deleted'); onClose(); await reload() } catch (err) { toast.error(err instanceof Error ? err.message : 'Error') } }
 
   const r = detail.report
@@ -318,13 +346,42 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
             {detail.location && <p className="text-xs text-gray-400">📍 {detail.location} · {detail.expectedGuests} guests expected</p>}
             {detail.description && <p className="text-xs text-gray-500 mt-1">{detail.description}</p>}
             {canManage && (
-              <button onClick={copyBookingLink} className="flex items-center gap-1 mt-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700">
-                <Copy className="w-3 h-3" />Copy public booking link
-              </button>
+              <div className="flex items-center gap-3 mt-1.5">
+                <button onClick={openEdit} className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700">
+                  <Pencil className="w-3 h-3" />Edit details
+                </button>
+                <button onClick={copyBookingLink} className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700">
+                  <Copy className="w-3 h-3" />Copy public booking link
+                </button>
+              </div>
             )}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
         </div>
+
+        {/* Edit event details */}
+        {editOpen && (
+          <Modal title="Edit event details" onClose={() => setEditOpen(false)} wide>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Event name *"><input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className={inputCls} /></Field>
+              <Field label="Event type">
+                <select value={editForm.eventType} onChange={(e) => setEditForm({ ...editForm, eventType: e.target.value })} className={inputCls}>
+                  <option value="">Select type…</option>
+                  {EVENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </Field>
+              <Field label="Client"><input value={editForm.clientName} onChange={(e) => setEditForm({ ...editForm, clientName: e.target.value })} className={inputCls} /></Field>
+              <Field label="Date *"><input type="date" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })} className={inputCls} /></Field>
+              <Field label="Location / Venue"><input value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className={inputCls} /></Field>
+              <Field label="Start time"><input type="time" value={editForm.startTime} onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value })} className={inputCls} /></Field>
+              <Field label="End time"><input type="time" value={editForm.endTime} onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value })} className={inputCls} /></Field>
+              <Field label="Expected guests"><NumberField value={editForm.expectedGuests} onChange={(v) => setEditForm({ ...editForm, expectedGuests: v })} className={inputCls} /></Field>
+            </div>
+            <Field label="Description"><textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={2} className={inputCls} /></Field>
+            <Field label="Notes"><textarea value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} rows={2} className={inputCls} /></Field>
+            <button onClick={saveEventDetails} className="w-full mt-2 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">Save changes</button>
+          </Modal>
+        )}
 
         {/* Status */}
         <div className="flex items-center gap-2">
