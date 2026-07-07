@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
+import { format } from 'date-fns'
 
 const SHIFTS = [
   { name: 'MORNING', label: 'Shift ya Asubuhi', time: '09:00 – 16:00', color: 'bg-amber-500'  },
@@ -13,6 +14,7 @@ const shiftLabel = (name: string) => SHIFTS.find((s) => s.name === name)?.label 
 
 interface Shift { id: string; name: string; openedAt: string; closedAt: string | null }
 interface Outlet { id: string; name: string }
+interface BookableEvent { id: string; name: string }
 
 export default function PosHomePage() {
   const { user, token } = useAuth()
@@ -24,6 +26,8 @@ export default function PosHomePage() {
   const [selectedOutletId, setSelectedOutletId] = useState(user?.outlet?.id ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [bookableEvents, setBookableEvents] = useState<BookableEvent[]>([])
+  const [selectedEventId, setSelectedEventId] = useState('')
 
   // Fetch outlets list if user has no outletId
   useEffect(() => {
@@ -48,6 +52,20 @@ export default function PosHomePage() {
 
   useEffect(() => { loadShifts() }, [loadShifts])
 
+  // Optional event scoping — if this outlet has any bookable event happening
+  // today, offer to tag the shift's sales to it (e.g. the dedicated "Tips
+  // Events" outlet). Not required: staff can still ring up regular sales.
+  useEffect(() => {
+    if (!token || !selectedOutletId) { setBookableEvents([]); return }
+    const today = format(new Date(), 'yyyy-MM-dd')
+    fetch(`/api/events?outletId=${selectedOutletId}&status=PLANNED,CONFIRMED&from=${today}&to=${today}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: BookableEvent[]) => { setBookableEvents(data); setSelectedEventId(data.length === 1 ? data[0].id : '') })
+      .catch(() => setBookableEvents([]))
+  }, [token, selectedOutletId])
+
   const openShift = async (name: string) => {
     if (!token) return
     if (!selectedOutletId) { setError('Chagua outlet kwanza kabla ya kufungua shift.'); return }
@@ -61,7 +79,8 @@ export default function PosHomePage() {
     if (res.ok) {
       const shift: Shift = await res.json()
       setActiveShift(shift)
-      router.push(`/pos/tables?shiftId=${shift.id}&outletId=${selectedOutletId}`)
+      const eventSuffix = selectedEventId ? `&eventId=${selectedEventId}` : ''
+      router.push(`/pos/tables?shiftId=${shift.id}&outletId=${selectedOutletId}${eventSuffix}`)
     } else {
       const data = await res.json()
       setError(data.error ?? 'Hitilafu — jaribu tena.')
@@ -70,7 +89,9 @@ export default function PosHomePage() {
   }
 
   const goToTables = () => {
-    if (activeShift) router.push(`/pos/tables?shiftId=${activeShift.id}&outletId=${selectedOutletId}`)
+    if (!activeShift) return
+    const eventSuffix = selectedEventId ? `&eventId=${selectedEventId}` : ''
+    router.push(`/pos/tables?shiftId=${activeShift.id}&outletId=${selectedOutletId}${eventSuffix}`)
   }
 
   const needsOutletPicker = !user?.outlet?.id && outlets.length > 0
@@ -113,6 +134,22 @@ export default function PosHomePage() {
         {error && (
           <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 mb-4 text-rose-700 text-sm text-center">
             ⚠️ {error}
+          </div>
+        )}
+
+        {bookableEvents.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-5">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Ni tukio gani (hiari)?</label>
+            <select
+              value={selectedEventId}
+              onChange={(e) => setSelectedEventId(e.target.value)}
+              className="w-full border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-indigo-400"
+            >
+              <option value="">Hakuna — mauzo ya kawaida</option>
+              {bookableEvents.map((ev) => (
+                <option key={ev.id} value={ev.id}>{ev.name}</option>
+              ))}
+            </select>
           </div>
         )}
 

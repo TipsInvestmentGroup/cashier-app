@@ -33,6 +33,7 @@ function TableFloor() {
   const searchParams = useSearchParams()
   const urlShiftId = searchParams.get('shiftId') ?? ''
   const outletId = searchParams.get('outletId') ?? user?.outlet?.id ?? ''
+  const eventId = searchParams.get('eventId') ?? ''
 
   const [tables, setTables] = useState<PosTable[]>([])
   const [loading, setLoading] = useState(true)
@@ -133,7 +134,7 @@ function TableFloor() {
       const res = await apiFetch('/api/pos/orders', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tableId: table.id, shiftId, outletId }),
+        body: JSON.stringify({ tableId: table.id, shiftId, outletId, eventId: eventId || undefined }),
       })
       if (res.ok) {
         const order = await res.json()
@@ -149,7 +150,7 @@ function TableFloor() {
         // lib/offline-queue.ts). The order screen shows an offline badge
         // until then and blocks payment until it's a real synced order.
         const localOrderId = await createLocalOrder({
-          tableId: table.id, shiftId, outletId, tableNumber: table.number, tableLabel: table.label,
+          tableId: table.id, shiftId, outletId, eventId: eventId || undefined, tableNumber: table.number, tableLabel: table.label,
         })
         router.push(`/pos/order/${localOrderId}`)
       } else {

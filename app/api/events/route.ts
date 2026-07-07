@@ -14,7 +14,7 @@ const parseDay = (s: string | null) => {
   return isValid(p) ? p : null
 }
 
-/** GET /api/events?from=&to=&status= — list events with rolled-up totals. */
+/** GET /api/events?from=&to=&status=&outletId= — list events with rolled-up totals. `status` accepts a comma-separated list. */
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -23,22 +23,27 @@ export async function GET(req: NextRequest) {
   const from = parseDay(searchParams.get('from'))
   const to = parseDay(searchParams.get('to'))
   const status = searchParams.get('status')
+  const outletId = searchParams.get('outletId')
 
   const where: Record<string, unknown> = {}
   if (from && to) where.date = { gte: startOfDay(from), lte: endOfDay(to) }
-  if (status) where.status = status
+  if (status) where.status = status.includes(',') ? { in: status.split(',') } : status
+  if (outletId) where.outletId = outletId
 
   const events = await db.event.findMany({
     where,
     orderBy: { date: 'desc' },
-    include: { staff: true, expenses: true },
+    include: { staff: true, expenses: true, sponsors: true },
   })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rows = events.map((e: any) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const expenses = roundMoney(e.expenses.reduce((s: number, x: any) => s + (x.amount || 0), 0))
-    const profit = roundMoney((e.salesTotal || 0) - expenses)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sponsorshipTotal = roundMoney(e.sponsors.reduce((s: number, x: any) => s + (x.sponsorshipValue || 0), 0))
+    const grossRevenue = roundMoney((e.salesTotal || 0) + sponsorshipTotal)
+    const profit = roundMoney(grossRevenue - expenses)
     return {
       id: e.id, name: e.name, clientName: e.clientName, location: e.location, date: e.date,
       startTime: e.startTime, endTime: e.endTime, expectedGuests: e.expectedGuests, status: e.status,
@@ -73,6 +78,8 @@ export async function POST(req: NextRequest) {
   const event = await db.event.create({
     data: {
       name: body.name.trim(),
+      description: body.description?.trim() || null,
+      eventType: body.eventType?.trim() || null,
       clientName: body.clientName?.trim() || null,
       location: body.location?.trim() || null,
       date: startOfDay(date),

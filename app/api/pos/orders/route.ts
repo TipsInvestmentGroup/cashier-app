@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   const payload = getAuthUser(req)
   if (!payload) return NextResponse.json({ error: 'Unauthorised' }, { status: 401 })
 
-  const { tableId, shiftId, outletId: bodyOutletId, clientRequestId } = await req.json()
+  const { tableId, shiftId, outletId: bodyOutletId, eventId, clientRequestId } = await req.json()
   if (!shiftId) return NextResponse.json({ error: 'shiftId required' }, { status: 400 })
 
   const outletId = payload.outletId ?? bodyOutletId
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
     const orderNo = `ORD-${dateStr}-${String(count + 1 + attempt).padStart(3, '0')}`
     try {
       order = await prisma.posOrder.create({
-        data: { orderNo, outletId, tableId: tableId ?? null, shiftId, waiterId: payload.userId, clientRequestId: clientRequestId ?? null },
+        data: { orderNo, outletId, tableId: tableId ?? null, eventId: eventId ?? null, shiftId, waiterId: payload.userId, clientRequestId: clientRequestId ?? null },
       })
       break
     } catch (err) {

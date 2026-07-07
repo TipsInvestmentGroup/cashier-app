@@ -89,18 +89,18 @@ async function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 // ---- Local order lifecycle (create/add/remove) ----
 
 export async function createLocalOrder(opts: {
-  tableId: string | null; shiftId: string; outletId: string; tableNumber?: number; tableLabel?: string | null
+  tableId: string | null; shiftId: string; outletId: string; eventId?: string | null; tableNumber?: number; tableLabel?: string | null
 }): Promise<string> {
   const localOrderId = `local-${crypto.randomUUID()}`
   const order: LocalOrder = {
-    localOrderId, tableId: opts.tableId, shiftId: opts.shiftId, outletId: opts.outletId,
+    localOrderId, tableId: opts.tableId, shiftId: opts.shiftId, outletId: opts.outletId, eventId: opts.eventId ?? null,
     tableNumber: opts.tableNumber, tableLabel: opts.tableLabel, items: [], createdAt: Date.now(),
   }
   await putLocalOrder(order)
   const clientRequestId = crypto.randomUUID()
   await addQueueAction({
     chainKey: localOrderId, type: 'CREATE_ORDER',
-    payload: { tableId: opts.tableId, shiftId: opts.shiftId, outletId: opts.outletId },
+    payload: { tableId: opts.tableId, shiftId: opts.shiftId, outletId: opts.outletId, eventId: opts.eventId ?? null },
     clientRequestId, createdAt: Date.now(), status: 'pending',
   })
   notifyQueueChanged()
