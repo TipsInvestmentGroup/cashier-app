@@ -14,7 +14,7 @@ const parseDay = (s: string | null) => {
   return isValid(p) ? p : null
 }
 
-/** GET /api/events?from=&to=&status=&outletId= — list events with rolled-up totals. `status` accepts a comma-separated list. */
+/** GET /api/events?from=&to=&status=&outletId=&staffId= — list events with rolled-up totals. `status` accepts a comma-separated list. */
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -24,11 +24,18 @@ export async function GET(req: NextRequest) {
   const to = parseDay(searchParams.get('to'))
   const status = searchParams.get('status')
   const outletId = searchParams.get('outletId')
+  const staffId = searchParams.get('staffId')
 
   const where: Record<string, unknown> = {}
   if (from && to) where.date = { gte: startOfDay(from), lte: endOfDay(to) }
   if (status) where.status = status.includes(',') ? { in: status.split(',') } : status
-  if (outletId) where.outletId = outletId
+  // A staffer pulled off their home outlet's roster to work an event
+  // (see EventStaff) should see it even though the event's own outlet
+  // differs from theirs — so when both filters are given, match either,
+  // not just an outlet-exact event.
+  if (outletId && staffId) where.OR = [{ outletId }, { staff: { some: { staffId } } }]
+  else if (outletId) where.outletId = outletId
+  else if (staffId) where.staff = { some: { staffId } }
 
   const events = await db.event.findMany({
     where,
