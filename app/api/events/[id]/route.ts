@@ -17,6 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const event = await db.event.findUnique({
     where: { id },
     include: {
+      outlet: { select: { id: true, name: true } },
       staff: { orderBy: { staffName: 'asc' } },
       expenses: { orderBy: { createdAt: 'asc' } },
       sponsors: { orderBy: { createdAt: 'asc' } },
@@ -104,12 +105,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const allProducts = await prisma.product.findMany({
     where: { isActive: true }, select: { id: true, name: true, category: true, sellingPrice: true, unitMeasure: true }, orderBy: { name: 'asc' },
   })
+  // Outlets available to (re)assign this event to — surfaced because the
+  // event-scoped POS only offers this event to staff logged into the SAME
+  // outlet, so which outlet an event belongs to needs to be visible/editable.
+  const allOutlets = await prisma.outlet.findMany({
+    where: { isActive: true }, select: { id: true, name: true, isEventsOnly: true }, orderBy: { name: 'asc' },
+  })
 
   return NextResponse.json({
     ...event,
     targets,
     allStaff,
     allProducts,
+    allOutlets,
     report: {
       salesTotal, manualSalesTotal, posSalesTotal, posOrderCount, sponsorshipTotal, grossRevenue, totalExpenses: totalActual, profit, margin,
       staffCount: event.staff.length, attended, staffSales,
@@ -141,6 +149,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.startTime !== undefined) data.startTime = body.startTime || null
   if (body.endTime !== undefined) data.endTime = body.endTime || null
   if (body.notes !== undefined) data.notes = body.notes?.trim() || null
+  if (body.outletId !== undefined) data.outletId = body.outletId || null
   if (body.expectedGuests !== undefined) data.expectedGuests = Math.max(0, Math.round(Number(body.expectedGuests) || 0))
   if (body.salesTotal !== undefined) data.salesTotal = roundMoney(Number(body.salesTotal) || 0)
   if (body.status !== undefined) {
