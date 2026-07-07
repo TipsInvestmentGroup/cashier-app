@@ -43,8 +43,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: `${product.name} cannot be sent to counter ${counterCode}` }, { status: 400 })
   }
 
+  // Event orders are restricted to that event's authorized-products menu —
+  // enforced here (not just hidden from the picker) since real money and
+  // inventory are on the line, not just UI convenience.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let eventProduct: any = null
+  if (order.eventId) {
+    eventProduct = await prisma.eventProduct.findFirst({ where: { eventId: order.eventId, productId } })
+    if (!eventProduct) return NextResponse.json({ error: `${product.name} is not authorized for this event` }, { status: 403 })
+  }
+
   const qty = Number(quantity)
-  const amount = roundMoney(product.sellingPrice * qty)
+  const unitPrice = eventProduct?.eventPrice ?? product.sellingPrice
+  const amount = roundMoney(unitPrice * qty)
 
   let item
   try {
@@ -53,7 +64,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         orderId,
         productId,
         productName: product.name,
-        unitPrice: product.sellingPrice,
+        unitPrice,
         quantity: qty,
         amount,
         extras: extras.length ? JSON.stringify(extras) : null,
@@ -61,6 +72,9 @@ export async function POST(req: NextRequest, { params }: Params) {
         clientRequestId: clientRequestId ?? null,
       },
     })
+    if (eventProduct) {
+      await prisma.eventProduct.update({ where: { id: eventProduct.id }, data: { quantitySold: { increment: qty } } })
+    }
   } catch (err) {
     // clientRequestId collision — a concurrent request already created this
     // exact item (the pre-check above missed it in a tight race).
@@ -92,10 +106,22 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const cancelReason = req.nextUrl.searchParams.get('reason')
   if (!itemId) return NextResponse.json({ error: 'itemId required' }, { status: 400 })
 
+  const existingItem = await prisma.posOrderItem.findUnique({ where: { id: itemId } })
+  const order = await prisma.posOrder.findUnique({ where: { id: orderId } })
+
   await prisma.posOrderItem.update({
     where: { id: itemId },
     data: { status: 'CANCELLED', cancelledBy: payload.userId, cancelReason: cancelReason || null },
   })
+
+  // Mirror the increment in POST above so a cancelled event-menu item doesn't
+  // leave EventProduct.quantitySold overstated.
+  if (existingItem && order?.eventId && existingItem.status !== 'CANCELLED') {
+    const eventProduct = await prisma.eventProduct.findFirst({ where: { eventId: order.eventId, productId: existingItem.productId } })
+    if (eventProduct) {
+      await prisma.eventProduct.update({ where: { id: eventProduct.id }, data: { quantitySold: { decrement: existingItem.quantity } } })
+    }
+  }
 
   const items = await prisma.posOrderItem.findMany({
     where: { orderId, status: { not: 'CANCELLED' } },

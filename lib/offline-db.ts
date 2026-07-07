@@ -45,6 +45,7 @@ export interface LocalOrder {
   tableId: string | null
   shiftId: string
   outletId: string
+  eventId?: string | null
   tableNumber?: number
   tableLabel?: string | null
   items: LocalOrderItem[]

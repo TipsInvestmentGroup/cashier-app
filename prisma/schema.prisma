@@ -16,6 +16,14 @@ datasource db {
 //   ScheduleRole:  WAITER | SUPERVISOR | BARTENDER | CASHIER | HOSTESS
 //   AssignSource:  AUTO | MANUAL
 //   AbsenceReason: LEAVE | ABSENT | OTHER
+//   EventExpense.paymentStatus: UNPAID | PARTIAL | PAID (same vocabulary as BillStatus)
+//   EventSponsor.sponsorshipType:   CASH | IN_KIND | MEDIA | OTHER
+//   EventSponsor.agreementStatus:   PENDING | SIGNED | FULFILLED
+//   EventTarget.type:               SALES | PROCUREMENT
+//   TicketBooking.paymentStatus:    UNPAID | PARTIAL | PAID
+//   TicketBooking.bookingStatus:    PENDING | CONFIRMED | CANCELLED
+//   EventTable.status:              AVAILABLE | RESERVED | OCCUPIED
+//   TableBooking.bookingStatus:     PENDING | CONFIRMED | CANCELLED
 
 model User {
   id          String   @id @default(cuid())
@@ -398,6 +406,7 @@ model Product {
   grnItems           GrnItem[]
   stockTransferItems StockTransferItem[]
   purchaseOrderItems PurchaseOrderItem[]
+  eventProducts      EventProduct[]
 
   @@index([name])
 }
@@ -894,6 +903,8 @@ model PosOrder {
   outlet        Outlet    @relation(fields: [outletId], references: [id])
   tableId       String?
   table         PosTable? @relation(fields: [tableId], references: [id])
+  eventId       String?   // set when this order was rung up against an event's authorized-products menu
+  event         Event?    @relation(fields: [eventId], references: [id])
   shiftId       String
   shift         PosShift  @relation(fields: [shiftId], references: [id])
   waiterId      String
@@ -926,6 +937,7 @@ model PosOrder {
   @@index([outletId])
   @@index([shiftId])
   @@index([waiterId])
+  @@index([eventId])
   @@index([status])
   @@index([createdAt])
 }
@@ -1113,6 +1125,8 @@ model OutletScheduleConfig {
 model Event {
   id             String   @id @default(cuid())
   name           String
+  description    String?
+  eventType      String?  // e.g. Wedding, Corporate, Concert, Private Party, Product Launch, Other
   clientName     String?
   location       String?
   date           DateTime // event day
@@ -1128,8 +1142,16 @@ model Event {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  staff    EventStaff[]
-  expenses EventExpense[]
+  staff         EventStaff[]
+  expenses      EventExpense[]
+  sponsors      EventSponsor[]
+  products      EventProduct[]
+  targets       EventTarget[]
+  ticketTypes   EventTicketType[]
+  tickets       TicketBooking[]
+  tables        EventTable[]
+  tableBookings TableBooking[]
+  posOrders     PosOrder[]
 
   @@index([date])
   @@index([status])
@@ -1154,16 +1176,165 @@ model EventStaff {
   @@index([staffId])
 }
 
-/// An expense line on an event (transport, equipment, hire, etc.).
+/// A budget/cost line on an event (transport, equipment, hire, etc.).
+/// `amount` is the actual cost; `estimatedCost` is the planned budget for the
+/// same line, so variance = estimatedCost - amount.
 model EventExpense {
+  id            String   @id @default(cuid())
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  category      String
+  description   String?
+  estimatedCost Float    @default(0)
+  amount        Float    @default(0) // actual cost
+  supplier      String?
+  paymentStatus String   @default("UNPAID") // UNPAID | PARTIAL | PAID
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  @@index([eventId])
+}
+
+/// A sponsor backing an event, with the value/items they're contributing.
+model EventSponsor {
+  id                String   @id @default(cuid())
+  eventId           String
+  event             Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sponsorName       String
+  contactPerson     String?
+  phone             String?
+  email             String?
+  sponsorshipType   String   @default("CASH") // CASH | IN_KIND | MEDIA | OTHER
+  sponsorshipValue  Float    @default(0)
+  itemsProvided     String?
+  agreementStatus   String   @default("PENDING") // PENDING | SIGNED | FULFILLED
+  notes             String?
+  createdById       String?
+  createdAt         DateTime @default(now())
+
+  @@index([eventId])
+}
+
+/// A product from the shared catalog authorized to be sold at an event, with
+/// event-specific pricing and planning quantities. Stock fields are planning
+/// inputs here — real stock movement wiring lands with the event POS phase.
+model EventProduct {
+  id                  String   @id @default(cuid())
+  eventId             String
+  event               Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  productId           String
+  product             Product  @relation(fields: [productId], references: [id])
+  productName         String   // snapshot at time of authorization
+  eventPrice          Float?   // override; null = use Product.sellingPrice
+  expectedQuantity    Float    @default(0)
+  procurementQuantity Float    @default(0)
+  stockAllocated      Float    @default(0)
+  stockReturned       Float    @default(0)
+  quantitySold        Float    @default(0)
+  createdAt           DateTime @default(now())
+
+  @@unique([eventId, productId])
+  @@index([eventId])
+}
+
+/// A sales or procurement target set for an event, compared against a
+/// (manually tracked or, where derivable, auto-suggested) actual value.
+model EventTarget {
   id          String   @id @default(cuid())
   eventId     String
   event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  category    String
-  description String?
-  amount      Float    @default(0)
-  createdById String?
+  type        String   // SALES | PROCUREMENT
+  name        String   // e.g. "Revenue Target", "Required Beer Stock"
+  targetValue Float    @default(0)
+  actualValue Float    @default(0)
+  unit        String?  // e.g. "TZS", "bottles", "crates", "guests"
+  notes       String?
   createdAt   DateTime @default(now())
 
   @@index([eventId])
+}
+
+/// A ticket type a manager defines for an event (Regular/VIP/VVIP or custom),
+/// with an optional capacity. Bookings against it are public (see
+/// TicketBooking) — capacity is enforced transactionally in lib/bookings.ts.
+model EventTicketType {
+  id                String   @id @default(cuid())
+  eventId           String
+  event             Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name              String
+  price             Float    @default(0)
+  quantityAvailable Int?     // null = unlimited
+  createdAt         DateTime @default(now())
+
+  bookings TicketBooking[]
+
+  @@index([eventId])
+}
+
+/// A customer's ticket booking, created either publicly (app/book/[eventId])
+/// or by a manager (walk-in/phone booking). Payment is tracked manually —
+/// there is no payment gateway integration.
+model TicketBooking {
+  id            String    @id @default(cuid())
+  eventId       String
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ticketTypeId  String
+  ticketType    EventTicketType @relation(fields: [ticketTypeId], references: [id])
+  bookingNumber String    @unique
+  fullName      String
+  phone         String
+  email         String?
+  quantity      Int       @default(1)
+  totalAmount   Float     @default(0)
+  paymentStatus String    @default("UNPAID") // UNPAID | PARTIAL | PAID
+  bookingStatus String    @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  checkedIn     Boolean   @default(false)
+  checkedInAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([eventId])
+  @@index([ticketTypeId])
+}
+
+/// A physical table a manager defines for an event (venue/layout varies per
+/// event, so tables are per-event, not a reusable outlet-wide registry).
+/// `status` doubles as the at-a-glance availability shown on the booking
+/// page and can be flipped manually (e.g. a walk-in occupies a table with no
+/// online booking).
+model EventTable {
+  id        String   @id @default(cuid())
+  eventId   String
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name      String   // "Table 1", "VIP Table A"
+  tableType String?
+  capacity  Int      @default(4)
+  price     Float    @default(0)
+  status    String   @default("AVAILABLE") // AVAILABLE | RESERVED | OCCUPIED
+  createdAt DateTime @default(now())
+
+  bookings TableBooking[]
+
+  @@index([eventId])
+}
+
+/// A customer's table reservation. Creating one flips the table's status to
+/// RESERVED (see lib/bookings.ts); cancelling frees it back to AVAILABLE.
+model TableBooking {
+  id              String   @id @default(cuid())
+  eventId         String
+  event           Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tableId         String
+  table           EventTable @relation(fields: [tableId], references: [id])
+  bookingNumber   String   @unique
+  name            String
+  phone           String
+  guests          Int      @default(1)
+  totalAmount     Float    @default(0)
+  depositPaid     Float    @default(0) // balance = totalAmount - depositPaid, computed not stored
+  specialRequests String?
+  bookingStatus   String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  createdAt       DateTime @default(now())
+
+  @@index([eventId])
+  @@index([tableId])
 }

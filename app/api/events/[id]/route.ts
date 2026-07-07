@@ -16,29 +16,107 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   const event = await db.event.findUnique({
     where: { id },
-    include: { staff: { orderBy: { staffName: 'asc' } }, expenses: { orderBy: { createdAt: 'asc' } } },
+    include: {
+      staff: { orderBy: { staffName: 'asc' } },
+      expenses: { orderBy: { createdAt: 'asc' } },
+      sponsors: { orderBy: { createdAt: 'asc' } },
+      products: { orderBy: { createdAt: 'asc' }, include: { product: { select: { category: true, sellingPrice: true, unitMeasure: true } } } },
+      targets: { orderBy: { createdAt: 'asc' } },
+      ticketTypes: { orderBy: { createdAt: 'asc' } },
+      tickets: { orderBy: { createdAt: 'desc' } },
+      tables: { orderBy: { createdAt: 'asc' } },
+      tableBookings: { orderBy: { createdAt: 'desc' } },
+    },
   })
   if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
 
+  // Once an event has real POS sales, those become the source of truth for
+  // "Event Sales" — the manual field stays as a fallback for events that
+  // never touch the event POS, and is left untouched in the response so the
+  // UI can tell the two apart.
+  const closedOrders = await prisma.posOrder.findMany({ where: { eventId: id, status: 'CLOSED' }, select: { totalAmount: true } })
+  const posOrderCount = closedOrders.length
+  const posSalesTotal = roundMoney(closedOrders.reduce((s: number, o: { totalAmount: number }) => s + (o.totalAmount || 0), 0))
+  const manualSalesTotal = roundMoney(event.salesTotal || 0)
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const totalExpenses = roundMoney(event.expenses.reduce((s: number, x: any) => s + (x.amount || 0), 0))
-  const salesTotal = roundMoney(event.salesTotal || 0)
-  const profit = roundMoney(salesTotal - totalExpenses)
-  const margin = salesTotal > 0 ? Math.round((profit / salesTotal) * 100) : 0
+  const totalActual = roundMoney(event.expenses.reduce((s: number, x: any) => s + (x.amount || 0), 0))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const totalEstimated = roundMoney(event.expenses.reduce((s: number, x: any) => s + (x.estimatedCost || 0), 0))
+  const budgetVariance = roundMoney(totalEstimated - totalActual)
+  const salesTotal = posOrderCount > 0 ? posSalesTotal : manualSalesTotal
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sponsorshipTotal = roundMoney(event.sponsors.reduce((s: number, x: any) => s + (x.sponsorshipValue || 0), 0))
+  const grossRevenue = roundMoney(salesTotal + sponsorshipTotal)
+  const profit = roundMoney(grossRevenue - totalActual)
+  const margin = grossRevenue > 0 ? Math.round((profit / grossRevenue) * 100) : 0
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const attended = event.staff.filter((s: any) => s.attended).length
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const staffSales = roundMoney(event.staff.reduce((s: number, x: any) => s + (x.salesAttributed || 0), 0))
 
+  // Target vs actual — achievement %, shortage/surplus computed server-side.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const targets = event.targets.map((t: any) => {
+    const achievementPct = t.targetValue > 0 ? Math.round((t.actualValue / t.targetValue) * 100) : 0
+    const diff = roundMoney(t.actualValue - t.targetValue)
+    return { ...t, achievementPct, shortage: diff < 0 ? roundMoney(-diff) : 0, surplus: diff > 0 ? diff : 0 }
+  })
+
+  // Ticket report — sold/remaining/revenue/checked-in/no-shows. `remaining`
+  // is null (unlimited) if any ticket type has no cap; the caller can't sum
+  // a finite remaining across a mix of capped and uncapped types.
+  const activeTickets = event.tickets.filter((t: { bookingStatus: string }) => t.bookingStatus !== 'CANCELLED')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ticketsSold = activeTickets.reduce((s: number, t: any) => s + (t.quantity || 0), 0)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ticketsRevenue = roundMoney(activeTickets.reduce((s: number, t: any) => s + (t.totalAmount || 0), 0))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ticketsCheckedIn = activeTickets.filter((t: any) => t.checkedIn).length
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ticketsNoShows = activeTickets.filter((t: any) => t.bookingStatus === 'CONFIRMED' && !t.checkedIn).length
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hasUncappedType = event.ticketTypes.some((tt: any) => tt.quantityAvailable == null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ticketsRemaining = hasUncappedType ? null : event.ticketTypes.reduce((sum: number, tt: any) => {
+    const soldForType = activeTickets.filter((t: { ticketTypeId: string }) => t.ticketTypeId === tt.id).reduce((s: number, t: { quantity: number }) => s + (t.quantity || 0), 0)
+    return sum + Math.max(0, (tt.quantityAvailable || 0) - soldForType)
+  }, 0)
+
+  // Table report — availability counts + deposit/balance rollup.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tablesAvailable = event.tables.filter((t: any) => t.status === 'AVAILABLE').length
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tablesReserved = event.tables.filter((t: any) => t.status === 'RESERVED').length
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tablesOccupied = event.tables.filter((t: any) => t.status === 'OCCUPIED').length
+  const activeTableBookings = event.tableBookings.filter((b: { bookingStatus: string }) => b.bookingStatus !== 'CANCELLED')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const totalDeposits = roundMoney(activeTableBookings.reduce((s: number, b: any) => s + (b.depositPaid || 0), 0))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const totalBalance = roundMoney(activeTableBookings.reduce((s: number, b: any) => s + ((b.totalAmount || 0) - (b.depositPaid || 0)), 0))
+
   // Active staff available to assign (for the picker).
   const allStaff = await prisma.user.findMany({
     where: { isActive: true }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' },
   })
+  // Active catalog products available to authorize (for the picker).
+  const allProducts = await prisma.product.findMany({
+    where: { isActive: true }, select: { id: true, name: true, category: true, sellingPrice: true, unitMeasure: true }, orderBy: { name: 'asc' },
+  })
 
   return NextResponse.json({
     ...event,
+    targets,
     allStaff,
-    report: { salesTotal, totalExpenses, profit, margin, staffCount: event.staff.length, attended, staffSales },
+    allProducts,
+    report: {
+      salesTotal, manualSalesTotal, posSalesTotal, posOrderCount, sponsorshipTotal, grossRevenue, totalExpenses: totalActual, profit, margin,
+      staffCount: event.staff.length, attended, staffSales,
+      budget: { totalEstimated, totalActual, variance: budgetVariance },
+      tickets: { sold: ticketsSold, remaining: ticketsRemaining, revenue: ticketsRevenue, checkedIn: ticketsCheckedIn, noShows: ticketsNoShows },
+      tables: { available: tablesAvailable, reserved: tablesReserved, occupied: tablesOccupied, totalDeposits, totalBalance },
+    },
   })
 }
 
@@ -56,6 +134,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = {}
   if (body.name !== undefined) data.name = String(body.name).trim()
+  if (body.description !== undefined) data.description = body.description?.trim() || null
+  if (body.eventType !== undefined) data.eventType = body.eventType?.trim() || null
   if (body.clientName !== undefined) data.clientName = body.clientName?.trim() || null
   if (body.location !== undefined) data.location = body.location?.trim() || null
   if (body.startTime !== undefined) data.startTime = body.startTime || null

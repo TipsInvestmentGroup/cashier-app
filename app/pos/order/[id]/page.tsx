@@ -72,6 +72,7 @@ interface Order {
   paidAmount: number
   createdAt: string
   outletId: string
+  eventId?: string | null
   table: { number: number; label: string | null } | null
   waiter: { name: string }
   shift: { name: string }
@@ -204,11 +205,12 @@ export default function OrderPage() {
     setOrder(data)
   }, [token, orderId, isLocalOrder, user?.name]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadMenu = useCallback(async () => {
+  const loadMenu = useCallback(async (eventId?: string | null) => {
     if (!token) return
     try {
-      const { data } = await getWithCache<{ grouped: Record<string, Product[]> }>('products', async () => {
-        const res = await apiFetch('/api/pos/products', { headers: { Authorization: `Bearer ${token}` } })
+      const url = eventId ? `/api/pos/products?eventId=${eventId}` : '/api/pos/products'
+      const { data } = await getWithCache<{ grouped: Record<string, Product[]> }>(eventId ? `products_event_${eventId}` : 'products', async () => {
+        const res = await apiFetch(url, { headers: { Authorization: `Bearer ${token}` } })
         if (!res.ok) throw new Error('Failed to load products')
         return res.json()
       })
@@ -272,6 +274,14 @@ export default function OrderPage() {
     const t = setInterval(check, ORDER_POLL_MS)
     return () => { cancelled = true; clearInterval(t) }
   }, [orderId])
+
+  // Once the order tells us it's tagged to an event, swap the menu to that
+  // event's authorized-products list only (see /api/pos/products?eventId=).
+  // Mirrors the counters effect below — both wait on a field that's only
+  // known after the order loads.
+  useEffect(() => {
+    if (order?.eventId) loadMenu(order.eventId)
+  }, [order?.eventId, loadMenu])
 
   // Counter list is outlet-specific (Mikocheni's Main Bar/VIP/Shisha/Kitchen
   // differs from other outlets), so it's fetched once the order tells us
@@ -549,6 +559,12 @@ export default function OrderPage() {
                 </button>
               )}
             </div>
+          </div>
+        )}
+
+        {order.eventId && (
+          <div className="mb-4 rounded-xl p-3 bg-indigo-50 border border-indigo-200 text-indigo-800 text-sm font-medium text-center">
+            🎉 Event menu — bidhaa zilizoruhusiwa kwa tukio hili tu
           </div>
         )}
 
