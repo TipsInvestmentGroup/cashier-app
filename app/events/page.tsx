@@ -44,11 +44,12 @@ interface TicketTypeRow { id: string; name: string; price: number; quantityAvail
 interface TicketBookingRow { id: string; ticketTypeId: string; bookingNumber: string; fullName: string; phone: string; email?: string; quantity: number; totalAmount: number; paymentStatus: string; bookingStatus: string; checkedIn: boolean }
 interface EventTableRow { id: string; name: string; tableType?: string; capacity: number; price: number; status: string }
 interface TableBookingRow { id: string; tableId: string; bookingNumber: string; name: string; phone: string; guests: number; totalAmount: number; depositPaid: number; specialRequests?: string; bookingStatus: string }
+interface OutletLite { id: string; name: string; isEventsOnly?: boolean }
 interface EventDetail extends EventRow {
-  description?: string; eventType?: string; notes?: string
+  description?: string; eventType?: string; notes?: string; outletId?: string | null; outlet?: OutletLite | null
   staff: EventStaff[]; expenses: EventExpense[]; sponsors: EventSponsor[]; products: EventProductRow[]; targets: EventTargetRow[]
   ticketTypes: TicketTypeRow[]; tickets: TicketBookingRow[]; tables: EventTableRow[]; tableBookings: TableBookingRow[]
-  allStaff: StaffLite[]; allProducts: ProductLite[]
+  allStaff: StaffLite[]; allProducts: ProductLite[]; allOutlets: OutletLite[]
   report: {
     salesTotal: number; manualSalesTotal: number; posSalesTotal: number; posOrderCount: number
     sponsorshipTotal: number; grossRevenue: number; totalExpenses: number; profit: number; margin: number; staffCount: number; attended: number; staffSales: number
@@ -220,6 +221,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
     date: format(parseISO(detail.date), 'yyyy-MM-dd'), location: detail.location || '',
     startTime: detail.startTime || '', endTime: detail.endTime || '',
     expectedGuests: String(detail.expectedGuests || ''), description: detail.description || '', notes: detail.notes || '',
+    outletId: detail.outletId || '',
   })
 
   const assignedIds = new Set(detail.staff.map((s) => s.staffId))
@@ -314,6 +316,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
       date: format(parseISO(detail.date), 'yyyy-MM-dd'), location: detail.location || '',
       startTime: detail.startTime || '', endTime: detail.endTime || '',
       expectedGuests: String(detail.expectedGuests || ''), description: detail.description || '', notes: detail.notes || '',
+      outletId: detail.outletId || '',
     })
     setEditOpen(true)
   }
@@ -344,6 +347,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
             </div>
             <p className="text-sm text-gray-500">{detail.clientName || 'No client'} · {format(parseISO(detail.date), 'EEEE dd MMM yyyy')}{detail.startTime ? ` · ${detail.startTime}${detail.endTime ? `–${detail.endTime}` : ''}` : ''}</p>
             {detail.location && <p className="text-xs text-gray-400">📍 {detail.location} · {detail.expectedGuests} guests expected</p>}
+            {detail.outlet && <p className="text-xs text-gray-400">🏬 {detail.outlet.name} — the MyPos event picker only offers this event to staff at this outlet</p>}
             {detail.description && <p className="text-xs text-gray-500 mt-1">{detail.description}</p>}
             {canManage && (
               <div className="flex items-center gap-3 mt-1.5">
@@ -371,6 +375,11 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                 </select>
               </Field>
               <Field label="Client"><input value={editForm.clientName} onChange={(e) => setEditForm({ ...editForm, clientName: e.target.value })} className={inputCls} /></Field>
+              <Field label="Outlet">
+                <select value={editForm.outletId} onChange={(e) => setEditForm({ ...editForm, outletId: e.target.value })} className={inputCls}>
+                  {detail.allOutlets.map((o) => <option key={o.id} value={o.id}>{o.name}{o.isEventsOnly ? ' (events-only)' : ''}</option>)}
+                </select>
+              </Field>
               <Field label="Date *"><input type="date" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })} className={inputCls} /></Field>
               <Field label="Location / Venue"><input value={editForm.location} onChange={(e) => setEditForm({ ...editForm, location: e.target.value })} className={inputCls} /></Field>
               <Field label="Start time"><input type="time" value={editForm.startTime} onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value })} className={inputCls} /></Field>
