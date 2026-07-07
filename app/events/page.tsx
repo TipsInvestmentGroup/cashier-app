@@ -5,6 +5,7 @@ import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card } from '@/components/ui/Card'
+import { NumberField, InlineNumberField } from '@/components/ui/NumberField'
 import { ExportBar } from '@/components/ExportBar'
 import { formatCurrency, STATUS_COLORS } from '@/lib/utils'
 import { EVENT_TYPES, EVENT_EXPENSE_CATEGORIES, EXPENSE_PAYMENT_STATUSES, SPONSORSHIP_TYPES, SPONSOR_AGREEMENT_STATUSES, EVENT_TARGET_TYPES } from '@/lib/scheduling'
@@ -163,7 +164,7 @@ export default function EventsPage() {
             <Field label="Location / Venue"><input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className={inputCls} /></Field>
             <Field label="Start time"><input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} className={inputCls} /></Field>
             <Field label="End time"><input type="time" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} className={inputCls} /></Field>
-            <Field label="Expected guests"><input type="number" min={0} value={form.expectedGuests} onChange={(e) => setForm({ ...form, expectedGuests: e.target.value })} className={inputCls} /></Field>
+            <Field label="Expected guests"><NumberField value={form.expectedGuests} onChange={(v) => setForm({ ...form, expectedGuests: v })} className={inputCls} /></Field>
           </div>
           <Field label="Description"><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} className={inputCls} /></Field>
           <Field label="Notes"><textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className={inputCls} /></Field>
@@ -344,7 +345,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
               </>
             ) : canManage ? (
               <div className="flex gap-1 mt-1">
-                <input value={salesEdit} onChange={(e) => setSalesEdit(e.target.value)} className="w-full px-2 py-1 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+                <NumberField value={salesEdit} onChange={setSalesEdit} className="w-full px-2 py-1 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
                 <button onClick={saveSales} className="px-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold">Save</button>
               </div>
             ) : <div className="text-lg font-bold text-gray-900">{formatCurrency(r.salesTotal)}</div>}
@@ -382,7 +383,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                     <td className="px-3 py-2 text-center"><input type="checkbox" checked={s.attended} disabled={!canManage} onChange={(e) => updateStaff(s.id, { attended: e.target.checked })} className="w-4 h-4 accent-indigo-600" /></td>
                     <td className="px-3 py-2 text-right">
                       {canManage ? (
-                        <input defaultValue={s.salesAttributed || ''} onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== s.salesAttributed) updateStaff(s.id, { salesAttributed: v }) }} placeholder="0" className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" />
+                        <InlineNumberField key={`${s.id}-${s.salesAttributed}`} defaultValue={s.salesAttributed} onCommit={(v) => { const n = Number(v) || 0; if (n !== s.salesAttributed) updateStaff(s.id, { salesAttributed: n }) }} placeholder="0" className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" />
                       ) : formatCurrency(s.salesAttributed)}
                     </td>
                     {canManage && <td className="px-3 py-2 text-right"><button onClick={() => removeStaff(s.id)} className="text-gray-400 hover:text-red-600"><X className="w-4 h-4" /></button></td>}
@@ -461,8 +462,8 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                 {EVENT_EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
               <input value={exp.description} onChange={(e) => setExp({ ...exp, description: e.target.value })} placeholder="Description" className="flex-1 min-w-[100px] px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={0} value={exp.estimatedCost} onChange={(e) => setExp({ ...exp, estimatedCost: e.target.value })} placeholder="Estimated" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={0} value={exp.amount} onChange={(e) => setExp({ ...exp, amount: e.target.value })} placeholder="Actual" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={exp.estimatedCost} onChange={(v) => setExp({ ...exp, estimatedCost: v })} placeholder="Estimated" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={exp.amount} onChange={(v) => setExp({ ...exp, amount: v })} placeholder="Actual" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <input value={exp.supplier} onChange={(e) => setExp({ ...exp, supplier: e.target.value })} placeholder="Supplier" className="w-28 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <select value={exp.paymentStatus} onChange={(e) => setExp({ ...exp, paymentStatus: e.target.value })} className="px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none">
                 {EXPENSE_PAYMENT_STATUSES.map((p) => <option key={p} value={p}>{p}</option>)}
@@ -519,7 +520,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
               <select value={sponsor.sponsorshipType} onChange={(e) => setSponsor({ ...sponsor, sponsorshipType: e.target.value })} className="px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none">
                 {SPONSORSHIP_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
-              <input type="number" min={0} value={sponsor.sponsorshipValue} onChange={(e) => setSponsor({ ...sponsor, sponsorshipValue: e.target.value })} placeholder="Value" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={sponsor.sponsorshipValue} onChange={(v) => setSponsor({ ...sponsor, sponsorshipValue: v })} placeholder="Value" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <input value={sponsor.itemsProvided} onChange={(e) => setSponsor({ ...sponsor, itemsProvided: e.target.value })} placeholder="Items/services" className="flex-1 min-w-[100px] px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <button onClick={addSponsor} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700">Add</button>
             </div>
@@ -544,23 +545,23 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                     <td className="px-3 py-2 font-medium text-gray-800">{p.productName}{p.product?.category ? <span className="text-gray-400 text-xs"> · {p.product.category}</span> : ''}</td>
                     <td className="px-3 py-2 text-right">
                       {canManage ? (
-                        <input defaultValue={p.eventPrice ?? ''} placeholder={String(p.product?.sellingPrice ?? '')} onBlur={(e) => updateProduct(p.id, { eventPrice: e.target.value })} className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" />
+                        <InlineNumberField key={`${p.id}-price-${p.eventPrice}`} defaultValue={p.eventPrice ?? ''} placeholder={String(p.product?.sellingPrice ?? '')} onCommit={(v) => updateProduct(p.id, { eventPrice: v })} className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" />
                       ) : formatCurrency(p.eventPrice ?? p.product?.sellingPrice ?? 0)}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {canManage ? <input defaultValue={p.expectedQuantity || ''} onBlur={(e) => updateProduct(p.id, { expectedQuantity: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.expectedQuantity}
+                      {canManage ? <InlineNumberField key={`${p.id}-exp-${p.expectedQuantity}`} defaultValue={p.expectedQuantity} onCommit={(v) => updateProduct(p.id, { expectedQuantity: Number(v) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.expectedQuantity}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {canManage ? <input defaultValue={p.procurementQuantity || ''} onBlur={(e) => updateProduct(p.id, { procurementQuantity: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.procurementQuantity}
+                      {canManage ? <InlineNumberField key={`${p.id}-proc-${p.procurementQuantity}`} defaultValue={p.procurementQuantity} onCommit={(v) => updateProduct(p.id, { procurementQuantity: Number(v) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.procurementQuantity}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {canManage ? <input defaultValue={p.stockAllocated || ''} onBlur={(e) => updateProduct(p.id, { stockAllocated: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.stockAllocated}
+                      {canManage ? <InlineNumberField key={`${p.id}-alloc-${p.stockAllocated}`} defaultValue={p.stockAllocated} onCommit={(v) => updateProduct(p.id, { stockAllocated: Number(v) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.stockAllocated}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {canManage ? <input defaultValue={p.stockReturned || ''} onBlur={(e) => updateProduct(p.id, { stockReturned: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.stockReturned}
+                      {canManage ? <InlineNumberField key={`${p.id}-ret-${p.stockReturned}`} defaultValue={p.stockReturned} onCommit={(v) => updateProduct(p.id, { stockReturned: Number(v) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.stockReturned}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {canManage ? <input defaultValue={p.quantitySold || ''} onBlur={(e) => updateProduct(p.id, { quantitySold: Number(e.target.value) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.quantitySold}
+                      {canManage ? <InlineNumberField key={`${p.id}-sold-${p.quantitySold}`} defaultValue={p.quantitySold} onCommit={(v) => updateProduct(p.id, { quantitySold: Number(v) || 0 })} className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : p.quantitySold}
                     </td>
                     {canManage && <td className="px-3 py-2 text-right"><button onClick={() => removeProduct(p.id)} className="text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button></td>}
                   </tr>
@@ -575,9 +576,9 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                 <option value="">Authorize product…</option>
                 {availableProducts.map((p) => <option key={p.id} value={p.id}>{p.name}{p.category ? ` (${p.category})` : ''}</option>)}
               </select>
-              <input type="number" min={0} value={productForm.eventPrice} onChange={(e) => setProductForm({ ...productForm, eventPrice: e.target.value })} placeholder="Event price" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={0} value={productForm.expectedQuantity} onChange={(e) => setProductForm({ ...productForm, expectedQuantity: e.target.value })} placeholder="Expected qty" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={0} value={productForm.procurementQuantity} onChange={(e) => setProductForm({ ...productForm, procurementQuantity: e.target.value })} placeholder="Procurement qty" className="w-28 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={productForm.eventPrice} onChange={(v) => setProductForm({ ...productForm, eventPrice: v })} placeholder="Event price" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={productForm.expectedQuantity} onChange={(v) => setProductForm({ ...productForm, expectedQuantity: v })} placeholder="Expected qty" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={productForm.procurementQuantity} onChange={(v) => setProductForm({ ...productForm, procurementQuantity: v })} placeholder="Procurement qty" className="w-28 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <button onClick={addProduct} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700">Authorize</button>
             </div>
           )}
@@ -609,7 +610,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                       <td className="px-3 py-2 font-medium text-gray-800">{t.name}{t.unit ? <span className="text-gray-400 text-xs"> ({t.unit})</span> : ''}</td>
                       <td className="px-3 py-2 text-right text-gray-600">{t.targetValue.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right">
-                        {canManage ? <input defaultValue={t.actualValue || ''} onBlur={(e) => updateTarget(t.id, { actualValue: Number(e.target.value) || 0 })} className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : t.actualValue.toLocaleString()}
+                        {canManage ? <InlineNumberField key={`${t.id}-${t.actualValue}`} defaultValue={t.actualValue} onCommit={(v) => updateTarget(t.id, { actualValue: Number(v) || 0 })} className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" /> : t.actualValue.toLocaleString()}
                       </td>
                       <td className={`px-3 py-2 text-right font-semibold ${t.achievementPct >= 100 ? 'text-green-700' : 'text-red-600'}`}>{t.achievementPct}%</td>
                       <td className="px-3 py-2 text-right">{t.surplus > 0 ? <span className="text-green-700">+{t.surplus.toLocaleString()}</span> : t.shortage > 0 ? <span className="text-red-600">-{t.shortage.toLocaleString()}</span> : '—'}</td>
@@ -627,7 +628,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                 {EVENT_TARGET_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
               <input value={target.name} onChange={(e) => setTarget({ ...target, name: e.target.value })} placeholder="Target name (e.g. Revenue Target)" className="flex-1 min-w-[140px] px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={0} value={target.targetValue} onChange={(e) => setTarget({ ...target, targetValue: e.target.value })} placeholder="Target value" className="w-28 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={target.targetValue} onChange={(v) => setTarget({ ...target, targetValue: v })} placeholder="Target value" className="w-28 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <input value={target.unit} onChange={(e) => setTarget({ ...target, unit: e.target.value })} placeholder="Unit" className="w-20 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <button onClick={addTarget} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700">Add</button>
             </div>
@@ -694,8 +695,8 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
           {canManage && (
             <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50/50">
               <input value={ticketType.name} onChange={(e) => setTicketType({ ...ticketType, name: e.target.value })} placeholder="Type name (e.g. VIP)" className="w-32 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={0} value={ticketType.price} onChange={(e) => setTicketType({ ...ticketType, price: e.target.value })} placeholder="Price" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={0} value={ticketType.quantityAvailable} onChange={(e) => setTicketType({ ...ticketType, quantityAvailable: e.target.value })} placeholder="Cap (blank = unlimited)" className="w-40 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={ticketType.price} onChange={(v) => setTicketType({ ...ticketType, price: v })} placeholder="Price" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={ticketType.quantityAvailable} onChange={(v) => setTicketType({ ...ticketType, quantityAvailable: v })} placeholder="Cap (blank = unlimited)" className="w-40 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <button onClick={addTicketType} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700">Add type</button>
             </div>
           )}
@@ -743,7 +744,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
                     <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatCurrency(b.totalAmount)}</td>
                     <td className="px-3 py-2 text-right">
                       {canManage ? (
-                        <input defaultValue={b.depositPaid || ''} onBlur={(e) => updateTableBooking(b.id, { depositPaid: Number(e.target.value) || 0 })} className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" />
+                        <InlineNumberField key={`${b.id}-${b.depositPaid}`} defaultValue={b.depositPaid} onCommit={(v) => updateTableBooking(b.id, { depositPaid: Number(v) || 0 })} className="w-20 px-2 py-1 border border-gray-200 rounded-lg text-xs text-right" />
                       ) : formatCurrency(b.depositPaid)}
                     </td>
                     <td className="px-3 py-2 text-right">{formatCurrency(b.totalAmount - b.depositPaid)}</td>
@@ -765,8 +766,8 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
             <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50/50">
               <input value={table.name} onChange={(e) => setTable({ ...table, name: e.target.value })} placeholder="Table name" className="w-28 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <input value={table.tableType} onChange={(e) => setTable({ ...table, tableType: e.target.value })} placeholder="Type (e.g. VIP)" className="w-28 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={1} value={table.capacity} onChange={(e) => setTable({ ...table, capacity: e.target.value })} placeholder="Capacity" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-              <input type="number" min={0} value={table.price} onChange={(e) => setTable({ ...table, price: e.target.value })} placeholder="Price" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={table.capacity} onChange={(v) => setTable({ ...table, capacity: v })} placeholder="Capacity" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
+              <NumberField value={table.price} onChange={(v) => setTable({ ...table, price: v })} placeholder="Price" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <button onClick={addTable} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700">Add table</button>
             </div>
           )}
