@@ -5,6 +5,7 @@ import { format, parseISO } from 'date-fns'
 import toast from 'react-hot-toast'
 import { Ticket, Armchair, PartyPopper } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
+import { NumberField } from '@/components/ui/NumberField'
 
 // Deliberately outside AppShell/auth — this is the one page in the app a
 // logged-out customer is meant to reach, via a link a manager shares from
@@ -111,7 +112,7 @@ export default function PublicBookingPage() {
                             </option>
                           ))}
                         </select>
-                        <input type="number" min={1} value={ticketForm.quantity} onChange={(e) => setTicketForm({ ...ticketForm, quantity: e.target.value })} placeholder="Number of tickets" className={inputCls} />
+                        <NumberField value={ticketForm.quantity} onChange={(v) => setTicketForm({ ...ticketForm, quantity: v })} placeholder="Number of tickets" className={inputCls} />
                         <input value={ticketForm.fullName} onChange={(e) => setTicketForm({ ...ticketForm, fullName: e.target.value })} placeholder="Full name" className={inputCls} />
                         <input value={ticketForm.phone} onChange={(e) => setTicketForm({ ...ticketForm, phone: e.target.value })} placeholder="Phone number" className={inputCls} />
                         <input value={ticketForm.email} onChange={(e) => setTicketForm({ ...ticketForm, email: e.target.value })} placeholder="Email (optional)" className={inputCls} />
@@ -131,10 +132,10 @@ export default function PublicBookingPage() {
                             <option key={t.id} value={t.id}>{t.name}{t.tableType ? ` (${t.tableType})` : ''} — seats {t.capacity} — {formatCurrency(t.price)}</option>
                           ))}
                         </select>
-                        <input type="number" min={1} value={tableForm.guests} onChange={(e) => setTableForm({ ...tableForm, guests: e.target.value })} placeholder="Number of guests" className={inputCls} />
+                        <NumberField value={tableForm.guests} onChange={(v) => setTableForm({ ...tableForm, guests: v })} placeholder="Number of guests" className={inputCls} />
                         <input value={tableForm.name} onChange={(e) => setTableForm({ ...tableForm, name: e.target.value })} placeholder="Name" className={inputCls} />
                         <input value={tableForm.phone} onChange={(e) => setTableForm({ ...tableForm, phone: e.target.value })} placeholder="Phone number" className={inputCls} />
-                        <input type="number" min={0} value={tableForm.depositPaid} onChange={(e) => setTableForm({ ...tableForm, depositPaid: e.target.value })} placeholder="Deposit you're paying (optional)" className={inputCls} />
+                        <NumberField value={tableForm.depositPaid} onChange={(v) => setTableForm({ ...tableForm, depositPaid: v })} placeholder="Deposit you're paying (optional)" className={inputCls} />
                         <textarea value={tableForm.specialRequests} onChange={(e) => setTableForm({ ...tableForm, specialRequests: e.target.value })} placeholder="Special requests (optional)" rows={2} className={inputCls} />
                         <button onClick={bookTable} disabled={submitting} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">{submitting ? 'Booking…' : 'Reserve Table'}</button>
                       </>
