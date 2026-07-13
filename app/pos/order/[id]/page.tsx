@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import { AppShell } from '@/components/Layout/AppShell'
+import { PosLeanShell } from '@/components/Layout/PosLeanShell'
 import { useAuth } from '@/contexts/AuthContext'
 import { buildBillHtml, printHtml, BILL_TYPES, BILL_TYPE_LABELS } from '@/lib/pos-receipt'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
@@ -505,7 +505,11 @@ export default function OrderPage() {
   })()
 
   if (!order) {
-    return <AppShell><div className="text-center py-16 text-gray-400">Inapakia...</div></AppShell>
+    return (
+      <PosLeanShell title="Order" onBack={() => router.back()}>
+        <div className="text-center py-16 text-gray-400">Inapakia...</div>
+      </PosLeanShell>
+    )
   }
 
   const pendingCount = order.items.filter(i => i.status === 'PENDING').length
@@ -515,23 +519,21 @@ export default function OrderPage() {
   const activeItems = order.items.filter(i => i.status !== 'PREPARED')
   const historyItems = order.items.filter(i => i.status === 'PREPARED')
 
-  return (
-    <AppShell>
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-4">
-          <button onClick={() => router.back()} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">←</button>
-          <div className="flex-1">
-            <h1 className="font-bold text-indigo-900 text-lg">
-              {order.table ? `Meza ${order.table.number}${order.table.label ? ` — ${order.table.label}` : ''}` : 'Order'}
-            </h1>
-            <p className="text-xs text-gray-500">{order.orderNo} · Shift {order.shift.name} · {order.waiter.name}</p>
-          </div>
-          <span className={`px-3 py-1 rounded-full text-xs font-bold ${isClosed ? 'bg-gray-100 text-gray-500' : order.status === 'READY' ? 'bg-green-600 text-white' : pendingCount > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-            {isClosed ? 'Imefungwa' : order.status === 'READY' ? '✓ Tayari kuchukua' : pendingCount > 0 ? `${pendingCount} pending` : 'Imetumwa'}
-          </span>
-        </div>
+  const statusBadge = (
+    <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${isClosed ? 'bg-gray-100 text-gray-500' : order.status === 'READY' ? 'bg-green-600 text-white' : pendingCount > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+      {isClosed ? 'Imefungwa' : order.status === 'READY' ? '✓ Tayari kuchukua' : pendingCount > 0 ? `${pendingCount} pending` : 'Imetumwa'}
+    </span>
+  )
 
+  return (
+    <PosLeanShell
+      title={order.table ? `Meza ${order.table.number}${order.table.label ? ` — ${order.table.label}` : ''}` : 'Order'}
+      subtitle={`${order.orderNo} · Shift ${order.shift.name} · ${order.waiter.name}`}
+      onBack={() => router.back()}
+      headerRight={statusBadge}
+    >
+      <div className="h-full overflow-y-auto p-3 sm:p-4">
+      <div className="max-w-2xl mx-auto">
         {/* Offline-queue state — a still-unsynced order or a chain the server
             genuinely rejected once reconnected (not a transient blip). */}
         {chainState === 'pending' && (
@@ -974,6 +976,7 @@ export default function OrderPage() {
           </div>
         )}
       </div>
-    </AppShell>
+      </div>
+    </PosLeanShell>
   )
 }
