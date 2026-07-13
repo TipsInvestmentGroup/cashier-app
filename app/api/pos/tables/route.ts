@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
       orders: {
         where: { status: { in: ['OPEN', 'SENT', 'READY'] } },
         select: {
-          id: true, orderNo: true, status: true, totalAmount: true,
+          id: true, orderNo: true, status: true, totalAmount: true, createdAt: true,
           waiterId: true, waiter: { select: { name: true } },
         },
         take: 1,
