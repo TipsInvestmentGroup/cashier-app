@@ -69,6 +69,8 @@ export default function SignedBillsPage() {
   const hasItems = itemRows.some((r) => r.productName && Number(r.quantity) > 0)
   const BILL_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: TYPE_COLOR[c.code] || 'bg-gray-600' }))
   const typeLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
+  // Edit/delete visibility: superuser always, cashier + r.mlay while the day allows it (server has final say).
+  const canManageBills = user?.email === 'johnonecmo@gmail.com' || user?.role === 'CASHIER' || user?.email === 'r.mlay@tips.co.tz'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -417,7 +419,7 @@ export default function SignedBillsPage() {
                     <th className="px-4 py-3 font-semibold">Staff</th>
                     <th className="px-4 py-3 font-semibold">Outlet</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
-                    <th className="px-4 py-3 font-semibold text-right">Actions</th>
+                    {canManageBills && <th className="px-4 py-3 font-semibold text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -436,20 +438,22 @@ export default function SignedBillsPage() {
                       <td className="px-4 py-3">
                         <Badge status={b.status}>{b.status}</Badge>
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                          <button onClick={() => openEdit(b)} title="Edit bill" className="text-gray-400 hover:text-indigo-600">
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => deleteBill(b)} title="Delete bill" className="text-gray-400 hover:text-red-600">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
+                      {canManageBills && (
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => openEdit(b)} title="Edit bill" className="text-gray-400 hover:text-indigo-600">
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => deleteBill(b)} title="Delete bill" className="text-gray-400 hover:text-red-600">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={9}><EmptyState icon="📋" title="No bills found" hint="Record a signed bill or adjust your filters." /></td></tr>
+                    <tr><td colSpan={canManageBills ? 9 : 8}><EmptyState icon="📋" title="No bills found" hint="Record a signed bill or adjust your filters." /></td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
@@ -457,7 +461,7 @@ export default function SignedBillsPage() {
                     <tr className="font-bold text-gray-900">
                       <td className="px-4 py-3" colSpan={4}>TOTAL ({filtered.length})</td>
                       <td className="px-4 py-3 text-indigo-700">{formatCurrency(totalAmount)}</td>
-                      <td className="px-4 py-3" colSpan={4}></td>
+                      <td className="px-4 py-3" colSpan={canManageBills ? 4 : 3}></td>
                     </tr>
                   </tfoot>
                 )}
