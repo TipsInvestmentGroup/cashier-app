@@ -7,6 +7,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate, BILL_TYPE_LABELS } from '@/lib/utils'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Modal } from '@/components/ui/Modal'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
@@ -14,6 +16,7 @@ import { SearchBox } from '@/components/SearchBox'
 import { MoneyInput } from '@/components/MoneyInput'
 import { PaymentStoryModal } from '@/components/PaymentStoryModal'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
+import { Pencil, Trash2 } from 'lucide-react'
 
 interface Bill {
   id: string; voucherNumber: string; date: string; billType: string; personName: string
@@ -40,6 +43,7 @@ const INIT_FORM = {
 export default function SignedBillsPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const confirm = useConfirm()
   const [bills, setBills] = useState<Bill[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [persons, setPersons] = useState<Person[]>([])
@@ -55,6 +59,9 @@ export default function SignedBillsPage() {
   const [form, setForm] = useState(INIT_FORM)
   const [limitWarning, setLimitWarning] = useState<{ exceeded: boolean; amount: number } | null>(null)
   const [storyBillId, setStoryBillId] = useState<string | null>(null)
+  const [editBillId, setEditBillId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState(INIT_FORM)
+  const [editSubmitting, setEditSubmitting] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [itemRows, setItemRows] = useState<ItemRow[]>([])
@@ -120,6 +127,50 @@ export default function SignedBillsPage() {
       toast.error(err instanceof Error ? err.message : 'Error saving bill')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const openEdit = (b: Bill) => {
+    setEditForm({
+      billType: b.billType, personId: '', personName: b.personName, amount: String(b.amount),
+      serviceStaff: b.serviceStaff || '', description: b.description || '',
+      dueDate: b.dueDate ? format(new Date(b.dueDate), 'yyyy-MM-dd') : '',
+      outletId: '', date: format(new Date(b.date), 'yyyy-MM-dd'),
+    })
+    setEditBillId(b.id)
+  }
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editBillId) return
+    if (!editForm.personName) return toast.error('Person name is required')
+    const amt = Number(editForm.amount)
+    if (!amt || amt <= 0) return toast.error('Amount must be > 0')
+    setEditSubmitting(true)
+    try {
+      await request(`/api/signed-bills/${editBillId}`, { method: 'PUT', body: JSON.stringify(editForm) })
+      toast.success('Bill updated')
+      setEditBillId(null)
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error updating bill')
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
+  const deleteBill = async (b: Bill) => {
+    if (!(await confirm({
+      title: 'Delete signed bill',
+      message: `Delete the bill for ${b.personName} (${formatCurrency(b.amount)})? This cannot be undone.`,
+      danger: true, confirmLabel: 'Delete',
+    }))) return
+    try {
+      await request(`/api/signed-bills/${b.id}`, { method: 'DELETE' })
+      toast.success('Bill deleted')
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error deleting bill')
     }
   }
 
@@ -366,6 +417,7 @@ export default function SignedBillsPage() {
                     <th className="px-4 py-3 font-semibold">Staff</th>
                     <th className="px-4 py-3 font-semibold">Outlet</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
+                    <th className="px-4 py-3 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -384,10 +436,20 @@ export default function SignedBillsPage() {
                       <td className="px-4 py-3">
                         <Badge status={b.status}>{b.status}</Badge>
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => openEdit(b)} title="Edit bill" className="text-gray-400 hover:text-indigo-600">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => deleteBill(b)} title="Delete bill" className="text-gray-400 hover:text-red-600">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={8}><EmptyState icon="📋" title="No bills found" hint="Record a signed bill or adjust your filters." /></td></tr>
+                    <tr><td colSpan={9}><EmptyState icon="📋" title="No bills found" hint="Record a signed bill or adjust your filters." /></td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
@@ -395,7 +457,7 @@ export default function SignedBillsPage() {
                     <tr className="font-bold text-gray-900">
                       <td className="px-4 py-3" colSpan={4}>TOTAL ({filtered.length})</td>
                       <td className="px-4 py-3 text-indigo-700">{formatCurrency(totalAmount)}</td>
-                      <td className="px-4 py-3" colSpan={3}></td>
+                      <td className="px-4 py-3" colSpan={4}></td>
                     </tr>
                   </tfoot>
                 )}
@@ -404,6 +466,52 @@ export default function SignedBillsPage() {
           )}
         </div>
       </div>
+
+      <Modal open={!!editBillId} onClose={() => setEditBillId(null)} title="Edit Signed Bill">
+        <form onSubmit={handleEditSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Person Name *</label>
+            <input type="text" value={editForm.personName}
+              onChange={(e) => setEditForm({ ...editForm, personName: e.target.value })}
+              className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
+              <input type="date" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
+                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Amount (TZS) *</label>
+              <MoneyInput value={editForm.amount} onChange={(v) => setEditForm({ ...editForm, amount: v })}
+                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Service Staff</label>
+            <select value={editForm.serviceStaff} onChange={(e) => setEditForm({ ...editForm, serviceStaff: e.target.value })}
+              className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+              <option value="">-- Select staff --</option>
+              {staffList.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+            <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+              className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" rows={2} />
+          </div>
+          <div className="flex gap-3">
+            <button type="submit" disabled={editSubmitting}
+              className="flex-1 py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-60">
+              {editSubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button type="button" onClick={() => setEditBillId(null)}
+              className="px-6 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <PaymentStoryModal billId={storyBillId} request={request} onClose={() => setStoryBillId(null)} />
     </AppShell>
