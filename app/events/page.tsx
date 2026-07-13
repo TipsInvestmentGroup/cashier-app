@@ -33,7 +33,7 @@ const AGREEMENT_CHIP: Record<string, string> = {
 }
 
 interface EventRow { id: string; name: string; clientName?: string; location?: string; date: string; startTime?: string; endTime?: string; expectedGuests: number; status: string; salesTotal: number; totalExpenses: number; profit: number; staffCount: number; attendedCount: number }
-interface StaffLite { id: string; name: string; role: string }
+interface StaffLite { id: string; name: string; role: string; isCasual?: boolean }
 interface ProductLite { id: string; name: string; category?: string; sellingPrice: number; unitMeasure: string }
 interface EventStaff { id: string; staffId: string; staffName: string; role: string; attended: boolean; salesAttributed: number; performanceNote?: string }
 interface EventExpense { id: string; category: string; description?: string; estimatedCost: number; amount: number; supplier?: string; paymentStatus: string }
@@ -463,7 +463,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
             <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50/50">
               <select value={addStaffId} onChange={(e) => setAddStaffId(e.target.value)} className="px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none">
                 <option value="">Add staff…</option>
-                {available.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.role})</option>)}
+                {available.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.role}){s.isCasual ? ' · Casual' : ''}</option>)}
               </select>
               <select value={addRole} onChange={(e) => setAddRole(e.target.value)} className="px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none">
                 {ROLES.map((role) => <option key={role} value={role}>{role}</option>)}

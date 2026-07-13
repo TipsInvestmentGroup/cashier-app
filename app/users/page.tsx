@@ -10,7 +10,7 @@ import { formatDate } from '@/lib/utils'
 import { VALID_ROLES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 
-interface User { id: string; name: string; email: string; role: string; position: string | null; hasPin: boolean; outlet?: { name: string } | null; isActive: boolean; createdAt: string }
+interface User { id: string; name: string; email: string; role: string; position: string | null; hasPin: boolean; outlet?: { name: string } | null; isActive: boolean; isCasual: boolean; createdAt: string }
 interface Outlet { id: string; name: string }
 
 const ROLES = VALID_ROLES
@@ -34,7 +34,8 @@ export default function UsersPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [showPw, setShowPw] = useState(false)
   const [showPin, setShowPin] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true, pin: '', position: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true, pin: '', position: '', isCasual: false })
+  const [staffFilter, setStaffFilter] = useState<'all' | 'permanent' | 'casual'>('all')
 
   const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && (user?.email || '').toLowerCase() === OWNER_EMAIL
@@ -47,7 +48,7 @@ export default function UsersPage() {
 
   useEffect(() => { load() }, [load])
 
-  if (user?.role !== 'ADMIN' && !isOwner) return (
+  if (!['ADMIN', 'DIRECTOR'].includes(user?.role || '') && !isOwner) return (
     <AppShell>
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -58,7 +59,7 @@ export default function UsersPage() {
     </AppShell>
   )
 
-  const resetForm = () => setForm({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true, pin: '', position: '' })
+  const resetForm = () => setForm({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true, pin: '', position: '', isCasual: false })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -81,7 +82,7 @@ export default function UsersPage() {
     setEditingId(u.id)
     setShowPw(false)
     setShowPin(false)
-    setForm({ name: u.name, email: u.email, password: '', role: u.role, outletId: '', isActive: u.isActive, pin: '', position: u.position || '' })
+    setForm({ name: u.name, email: u.email, password: '', role: u.role, outletId: '', isActive: u.isActive, pin: '', position: u.position || '', isCasual: u.isCasual })
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -113,31 +114,40 @@ export default function UsersPage() {
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-5">{editingId ? 'Edit User' : 'Create New User'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="flex items-center gap-2 p-3 bg-amber-50 border-2 border-amber-100 rounded-xl">
+                <input id="isCasual" type="checkbox" checked={form.isCasual} onChange={(e) => setForm({ ...form, isCasual: e.target.checked })} className="w-4 h-4" />
+                <label htmlFor="isCasual" className="text-sm font-semibold text-gray-700">Casual / temporary worker</label>
+                <span className="text-xs text-gray-500">— event-day or short-term labour. No login needed; can still be assigned to a roster shift or an event.</span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Full Name *</label>
                   <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required />
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Email *</label>
-                  <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">{editingId ? 'New Password (optional)' : 'Password *'}</label>
-                  <div className="relative">
-                    <input type={showPw ? 'text' : 'password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-                      autoComplete="new-password"
-                      className="w-full px-4 py-3 pr-12 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required={!editingId} minLength={editingId ? 0 : 6}
-                      placeholder={editingId ? 'Leave blank to keep current password' : ''} />
-                    <button type="button" onClick={() => setShowPw((s) => !s)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg" title={showPw ? 'Hide' : 'Show'}>
-                      {showPw ? '🙈' : '👁'}
-                    </button>
-                  </div>
-                  {editingId && <p className="text-xs text-gray-400 mt-1">The current password can&apos;t be displayed (it&apos;s encrypted). Leave blank to keep it unchanged, or type a new one — use 👁 to read what you set, then share it with the user.</p>}
-                </div>
+                {!form.isCasual && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">Email *</label>
+                      <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-gray-700 mb-1">{editingId ? 'New Password (optional)' : 'Password *'}</label>
+                      <div className="relative">
+                        <input type={showPw ? 'text' : 'password'} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
+                          autoComplete="new-password"
+                          className="w-full px-4 py-3 pr-12 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required={!editingId} minLength={editingId ? 0 : 6}
+                          placeholder={editingId ? 'Leave blank to keep current password' : ''} />
+                        <button type="button" onClick={() => setShowPw((s) => !s)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-lg" title={showPw ? 'Hide' : 'Show'}>
+                          {showPw ? '🙈' : '👁'}
+                        </button>
+                      </div>
+                      {editingId && <p className="text-xs text-gray-400 mt-1">The current password can&apos;t be displayed (it&apos;s encrypted). Leave blank to keep it unchanged, or type a new one — use 👁 to read what you set, then share it with the user.</p>}
+                    </div>
+                  </>
+                )}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Role *</label>
                   <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
@@ -153,7 +163,7 @@ export default function UsersPage() {
                     {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </select>
                 </div>
-                {form.role === 'WAITER' && (
+                {!form.isCasual && form.role === 'WAITER' && (
                   <>
                     <div>
                       <label className="block text-sm font-semibold text-gray-700 mb-1">MyPos Floor Role</label>
@@ -201,6 +211,15 @@ export default function UsersPage() {
           </div>
         )}
 
+        <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+          {([['all', 'All'], ['permanent', 'Permanent'], ['casual', 'Casual']] as [typeof staffFilter, string][]).map(([key, label]) => (
+            <button key={key} onClick={() => setStaffFilter(key)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${staffFilter === key ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16 text-gray-400">Loading...</div>
@@ -220,7 +239,9 @@ export default function UsersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {users.map((u) => (
+                  {users
+                    .filter((u) => staffFilter === 'all' || (staffFilter === 'casual' ? u.isCasual : !u.isCasual))
+                    .map((u) => (
                     <tr key={u.id} className="hover:bg-gray-50">
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-2">
@@ -228,9 +249,10 @@ export default function UsersPage() {
                             {u.name.charAt(0)}
                           </div>
                           <span className="font-medium text-gray-800">{u.name}</span>
+                          {u.isCasual && <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-amber-100 text-amber-700">Casual</span>}
                         </div>
                       </td>
-                      <td className="px-5 py-4 text-gray-600">{u.email}</td>
+                      <td className="px-5 py-4 text-gray-600">{u.isCasual ? '—' : u.email}</td>
                       <td className="px-5 py-4">
                         <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${ROLE_COLORS[u.role]}`}>{u.role}</span>
                       </td>

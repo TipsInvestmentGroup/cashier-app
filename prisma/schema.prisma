@@ -47,6 +47,10 @@ model User {
   position          String?
   pinFailedAttempts Int       @default(0)
   pinLockedUntil    DateTime?
+  // Casual/temporary worker (event day labour, outlet cover) — a real User
+  // record so scheduling/event-assignment logic works unchanged, but excluded
+  // from auto-rostering and from the permanent staff list by default.
+  isCasual          Boolean   @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
