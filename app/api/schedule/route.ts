@@ -35,16 +35,20 @@ export async function GET(req: NextRequest) {
   const where: Record<string, unknown> = { date: { gte: from, lte: to } }
   if (outletId) where.outletId = outletId
 
-  const [assignments, unavailability, config, serviceStaff, allStaff] = await Promise.all([
+  const [assignments, unavailability, config, serviceStaff, allStaff, casualStaff] = await Promise.all([
     db.scheduleAssignment.findMany({ where, orderBy: [{ date: 'asc' }, { shiftType: 'asc' }] }),
     db.staffUnavailability.findMany({ where: { date: { gte: from, lte: to } }, orderBy: { date: 'asc' } }),
     outletId ? db.outletScheduleConfig.findUnique({ where: { outletId } }) : null,
-    // Auto-schedulable service staff (role WAITER) at the selected outlet.
+    // Auto-schedulable service staff (role WAITER) at the selected outlet —
+    // casuals are excluded, they're only ever added to the roster manually.
     outletId
-      ? prisma.user.findMany({ where: { outletId, isActive: true, role: { in: SERVICE_ROLES } }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } })
+      ? prisma.user.findMany({ where: { outletId, isActive: true, role: { in: SERVICE_ROLES }, isCasual: false }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } })
       : Promise.resolve([]),
     // Everyone active — for manual assignment of any role / cross-outlet cover.
     prisma.user.findMany({ where: { isActive: true }, select: { id: true, name: true, role: true, outletId: true }, orderBy: { name: 'asc' } }),
+    // Casual/temporary workers — offered separately so a manager can add one
+    // to this week's roster on demand, without them auto-generating shifts.
+    prisma.user.findMany({ where: { isActive: true, isCasual: true }, select: { id: true, name: true, role: true, outletId: true }, orderBy: { name: 'asc' } }),
   ])
 
   return NextResponse.json({
@@ -54,6 +58,7 @@ export async function GET(req: NextRequest) {
     config: config || (outletId ? { outletId, ...DEFAULT_CONFIG } : null),
     serviceStaff,
     allStaff,
+    casualStaff,
   })
 }
 
@@ -93,9 +98,9 @@ async function generate(user: any, body: any) {
   const to = endOfDay(addDays(from, 6))
   const weekDows = Array.from({ length: 7 }, (_, i) => getDay(addDays(from, i)))
 
-  // Schedulable service staff at this outlet.
+  // Schedulable service staff at this outlet (casuals never auto-schedule).
   const staffUsers = await prisma.user.findMany({
-    where: { outletId, isActive: true, role: { in: SERVICE_ROLES } },
+    where: { outletId, isActive: true, role: { in: SERVICE_ROLES }, isCasual: false },
     select: { id: true, name: true },
   })
   if (staffUsers.length === 0) {

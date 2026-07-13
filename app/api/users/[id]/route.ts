@@ -18,7 +18,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { id } = await params
   const body = await req.json()
-  const { name, email, role, outletId, isActive, password, pin, position } = body
+  const { name, email, role, outletId, isActive, password, pin, position, isCasual } = body
   if (pin && !PIN_RE.test(String(pin))) return NextResponse.json({ error: 'PIN must be exactly 4 digits' }, { status: 400 })
   if (role !== undefined && !VALID_ROLES.includes(role)) return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
 
@@ -29,6 +29,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (role !== undefined) data.role = role
   if (outletId !== undefined) data.outletId = outletId || null
   if (isActive !== undefined) data.isActive = !!isActive
+  if (isCasual !== undefined) data.isCasual = !!isCasual
   if (password) data.password = await hashPassword(password)
   if (position !== undefined) data.position = position || null
   // Setting a new PIN also clears any active lockout — a manager handing out
@@ -39,7 +40,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const updated = await prisma.user.update({
       where: { id },
       data,
-      select: { id: true, name: true, email: true, role: true, position: true, outlet: true, isActive: true, createdAt: true },
+      select: { id: true, name: true, email: true, role: true, position: true, outlet: true, isActive: true, isCasual: true, createdAt: true },
     })
     await prisma.auditLog.create({ data: { userId: user.userId, action: 'UPDATE', entity: 'User', entityId: id, details: `Edited ${updated.email}` } })
     return NextResponse.json(updated)

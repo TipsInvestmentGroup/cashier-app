@@ -24,7 +24,7 @@ interface Assignment { id: string; date: string; shiftType: ShiftType; outletId:
 interface Unavail { id: string; staffId: string; staffName: string; date: string; shiftType: ShiftType | null; reason: string; note?: string }
 interface StaffLite { id: string; name: string; role: string; outletId?: string }
 interface SchedConfig { outletId: string; morningWeight: number; eveningWeight: number; weekendMultiplier: number; daysOffPerWeek: number }
-interface ScheduleData { weekStart: string; assignments: Assignment[]; unavailability: Unavail[]; config: SchedConfig | null; serviceStaff: StaffLite[]; allStaff: StaffLite[] }
+interface ScheduleData { weekStart: string; assignments: Assignment[]; unavailability: Unavail[]; config: SchedConfig | null; serviceStaff: StaffLite[]; allStaff: StaffLite[]; casualStaff: StaffLite[] }
 
 const dayKey = (d: Date | string) => format(typeof d === 'string' ? parseISO(d) : d, 'yyyy-MM-dd')
 
@@ -47,6 +47,9 @@ export default function SchedulePage() {
   const [absForm, setAbsForm] = useState({ staffId: '', date: format(new Date(), 'yyyy-MM-dd'), shiftType: '', reason: 'LEAVE', note: '' })
   const [cfgOpen, setCfgOpen] = useState(false)
   const [cfgForm, setCfgForm] = useState<SchedConfig | null>(null)
+  const [extraCasualIds, setExtraCasualIds] = useState<string[]>([])
+  const [addCasualOpen, setAddCasualOpen] = useState(false)
+  const [addCasualId, setAddCasualId] = useState('')
 
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
   const scheduleOutlets = outlets.filter((o) => !o.isEventsOnly)
@@ -62,6 +65,7 @@ export default function SchedulePage() {
   const load = useCallback(async () => {
     if (!outletId) return
     setLoading(true)
+    setExtraCasualIds([])
     try {
       const d = await request(`/api/schedule?outletId=${outletId}&weekStart=${format(weekStart, 'yyyy-MM-dd')}`)
       setData(d)
@@ -70,15 +74,32 @@ export default function SchedulePage() {
   }, [request, outletId, weekStart])
   useEffect(() => { load() }, [load])
 
-  // Rows = service staff at outlet ∪ anyone already scheduled/marked this week.
+  // Casuals never come back from serviceStaff (auto-schedule candidates), so
+  // track which ids are casual to badge them in the roster.
+  const casualIds = useMemo(() => new Set((data?.casualStaff || []).map((c) => c.id)), [data])
+
+  // Rows = service staff at outlet ∪ anyone already scheduled/marked this
+  // week ∪ casuals a manager has picked to add to this week's view.
   const rows = useMemo(() => {
     if (!data) return [] as { id: string; name: string }[]
     const m = new Map<string, string>()
     for (const s of data.serviceStaff) m.set(s.id, s.name)
     for (const a of data.assignments) if (!m.has(a.staffId)) m.set(a.staffId, a.staffName)
     for (const u of data.unavailability) if (!m.has(u.staffId)) m.set(u.staffId, u.staffName)
+    for (const id of extraCasualIds) {
+      if (!m.has(id)) { const c = data.casualStaff.find((c) => c.id === id); if (c) m.set(id, c.name) }
+    }
     return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
-  }, [data])
+  }, [data, extraCasualIds])
+
+  const availableCasuals = (data?.casualStaff || []).filter((c) => !rows.some((r) => r.id === c.id))
+
+  const addCasualToWeek = () => {
+    if (!addCasualId) return toast.error('Pick a casual worker')
+    setExtraCasualIds((prev) => [...prev, addCasualId])
+    setAddCasualId('')
+    setAddCasualOpen(false)
+  }
 
   const assignAt = (staffId: string, d: Date) => data?.assignments.filter((a) => a.staffId === staffId && dayKey(a.date) === dayKey(d)) || []
   const unavailAt = (staffId: string, d: Date) => data?.unavailability.filter((u) => u.staffId === staffId && dayKey(u.date) === dayKey(d)) || []
@@ -178,6 +199,9 @@ export default function SchedulePage() {
                 <button onClick={generate} disabled={busy} className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition disabled:opacity-60">
                   <Wand2 className="w-4 h-4" />{busy ? 'Generating…' : 'Auto-generate'}
                 </button>
+                <button onClick={() => setAddCasualOpen(true)} className="flex items-center gap-1.5 px-3 py-2 bg-amber-100 text-amber-700 rounded-xl text-sm font-semibold hover:bg-amber-200 transition">
+                  <UserMinus className="w-4 h-4 rotate-180" />Add casual worker
+                </button>
                 <button onClick={() => setAbsOpen(true)} className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">
                   <UserMinus className="w-4 h-4" />Mark unavailable
                 </button>
@@ -218,7 +242,10 @@ export default function SchedulePage() {
               <tbody className="divide-y divide-gray-50">
                 {rows.map((staff) => (
                   <tr key={staff.id} className="hover:bg-gray-50/50">
-                    <td className="px-3 py-2 font-medium text-gray-800 sticky left-0 bg-white">{staff.name}</td>
+                    <td className="px-3 py-2 font-medium text-gray-800 sticky left-0 bg-white">
+                      {staff.name}
+                      {casualIds.has(staff.id) && <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-700">Casual</span>}
+                    </td>
                     {weekDays.map((d, i) => {
                       const as = assignAt(staff.id, d)
                       const un = unavailAt(staff.id, d)
@@ -294,6 +321,25 @@ export default function SchedulePage() {
             {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <button onClick={submitAdd} className="w-full py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">Assign</button>
+        </Modal>
+      )}
+
+      {/* Add casual worker modal */}
+      {addCasualOpen && (
+        <Modal title="Add casual worker to this week" onClose={() => setAddCasualOpen(false)}>
+          {availableCasuals.length === 0 ? (
+            <p className="text-sm text-gray-500 mb-3">No available casual workers. Add one under Setup → Users (check &quot;Casual / temporary worker&quot;).</p>
+          ) : (
+            <>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Casual worker</label>
+              <select value={addCasualId} onChange={(e) => setAddCasualId(e.target.value)} className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm mb-4 focus:border-indigo-500 focus:outline-none">
+                <option value="">Select…</option>
+                {availableCasuals.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.role})</option>)}
+              </select>
+              <button onClick={addCasualToWeek} className="w-full py-2.5 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">Add to roster</button>
+              <p className="text-[11px] text-gray-400 mt-2">Adds them to this week&apos;s grid so you can click + to assign a shift. They won&apos;t be included in auto-generate.</p>
+            </>
+          )}
         </Modal>
       )}
 

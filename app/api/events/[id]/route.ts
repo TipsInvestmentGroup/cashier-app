@@ -99,7 +99,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Active staff available to assign (for the picker).
   const allStaff = await prisma.user.findMany({
-    where: { isActive: true }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' },
+    where: { isActive: true }, select: { id: true, name: true, role: true, isCasual: true }, orderBy: { name: 'asc' },
   })
   // Active catalog products available to authorize (for the picker).
   const allProducts = await prisma.product.findMany({
