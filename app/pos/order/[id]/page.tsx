@@ -6,7 +6,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { buildBillHtml, printHtml, BILL_TYPES, BILL_TYPE_LABELS } from '@/lib/pos-receipt'
 import { useUnlockedAudio } from '@/lib/audio-unlock'
 import { PushEnableBanner } from '@/components/PushEnableBanner'
-import { allowedCountersForCategory } from '@/lib/shared-constants'
+import { allowedCountersForCategory, SUPPLIER_POSITION, MANAGEMENT_ROLES } from '@/lib/shared-constants'
 import {
   apiFetch, NetworkError, addLocalItem, removeLocalItem, enqueueSendOrder,
   onQueueEvent, getChainState, getChainError, discardLocalOrder, retryChain,
@@ -175,6 +175,19 @@ export default function OrderPage() {
       return availableCounters.length === 1 ? availableCounters[0].code : ''
     })
   }, [selectedProduct, availableCounters])
+
+  // Mirrors the server's send/route.ts DIRECT+self-serve rule: a counter is
+  // instant-issue (no prep queue) for THIS staffer when its serviceModel is
+  // DIRECT and either nobody "owns" it, they ARE its owning position (e.g. a
+  // Bar Lady on Main Bar), or they're management. Used purely for copy/labels
+  // here — the actual skip-the-queue behavior already happens server-side.
+  const isInstantIssue = useCallback((counterCode: string | null) => {
+    const code = counterCode ?? 'MAIN'
+    const model = counters.find((c) => c.code === code)?.serviceModel
+    if (model !== 'DIRECT') return false
+    const ownerPosition = SUPPLIER_POSITION[code]
+    return !ownerPosition || user?.position === ownerPosition || MANAGEMENT_ROLES.includes(user?.role ?? '')
+  }, [counters, user?.position, user?.role])
 
   const loadOrder = useCallback(async () => {
     // A never-synced order lives only in IndexedDB until its CREATE_ORDER
@@ -392,8 +405,9 @@ export default function OrderPage() {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {
+        const wasInstant = allInstantIssue
         await loadOrder()
-        alert('✅ Imetumwa kwa counter!')
+        alert(wasInstant ? '✅ Bidhaa zimetolewa!' : '✅ Imetumwa kwa counter!')
       } else {
         const err = await res.json()
         alert(err.error ?? 'Hitilafu')
@@ -454,13 +468,19 @@ export default function OrderPage() {
     loadOrder()
   }
 
-  // ---- Payments (partial + balance) ----
+  // ---- Payments (partial + balance + split-across-methods) ----
   const [payModal, setPayModal] = useState(false)
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('CASH')
+  const [splitMode, setSplitMode] = useState(false)
+  const [splitLines, setSplitLines] = useState<{ method: string; amount: string }[]>([{ method: 'CASH', amount: '' }])
 
   const net = order ? order.totalAmount - order.discount : 0
   const balance = order ? net - order.paidAmount : 0
+
+  // Fully paid → the table's free again; head back to the Floor Map instead
+  // of leaving staff parked on a closed order screen for the next customer.
+  const backToFloorMap = () => setTimeout(() => router.push('/pos/tables'), 900)
 
   const recordPayment = async () => {
     if (!token || !order) return
@@ -479,6 +499,7 @@ export default function OrderPage() {
           alert('✅ Bili imelipwa kamili — meza imefungwa!')
           setPayModal(false)
           await loadOrder()
+          backToFloorMap()
         } else {
           alert(`Malipo yamepokewa. Baki: TSh ${Number(data.balance).toLocaleString()}`)
           setPayAmount('')
@@ -489,6 +510,47 @@ export default function OrderPage() {
       }
     } catch (err) {
       if (err instanceof NetworkError) alert('📴 Malipo yanahitaji mtandao — jaribu tena.')
+    }
+    setBusy(false)
+  }
+
+  const splitTotal = splitLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
+  const addSplitLine = () => setSplitLines((ls) => [...ls, { method: 'CASH', amount: '' }])
+  const removeSplitLine = (i: number) => setSplitLines((ls) => ls.filter((_, idx) => idx !== i))
+  const updateSplitLine = (i: number, patch: Partial<{ method: string; amount: string }>) =>
+    setSplitLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
+
+  const recordSplitPayment = async () => {
+    if (!token || !order) return
+    const lines = splitLines.filter((l) => (parseFloat(l.amount) || 0) > 0)
+    if (lines.length === 0) return alert('Weka angalau kiasi kimoja')
+    if (splitTotal > balance + 0.5) return alert(`Jumla imezidi baki (TSh ${balance.toLocaleString()})`)
+    setBusy(true)
+    try {
+      let settled = false
+      for (const line of lines) {
+        const res = await apiFetch(`/api/pos/orders/${orderId}/pay`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount: parseFloat(line.amount), method: line.method }),
+        })
+        const data = await res.json()
+        if (!res.ok) { alert(data.error ?? 'Hitilafu'); setBusy(false); await loadOrder(); return }
+        settled = data.settled
+      }
+      if (settled) {
+        alert('✅ Bili imelipwa kamili — meza imefungwa!')
+        setPayModal(false)
+        await loadOrder()
+        backToFloorMap()
+      } else {
+        alert('Malipo yamepokewa.')
+        setSplitLines([{ method: 'CASH', amount: '' }])
+        await loadOrder()
+      }
+    } catch (err) {
+      if (err instanceof NetworkError) alert('📴 Malipo yanahitaji mtandao — jaribu tena.')
+      await loadOrder()
     }
     setBusy(false)
   }
@@ -512,12 +574,17 @@ export default function OrderPage() {
     )
   }
 
-  const pendingCount = order.items.filter(i => i.status === 'PENDING').length
+  const pendingItems = order.items.filter(i => i.status === 'PENDING')
+  const pendingCount = pendingItems.length
   const isClosed = order.status === 'CLOSED' || order.status === 'CANCELLED'
   // Once a counter marks an item prepared/served, it's done — keep the main
   // list focused on what's still in flight and move served items to History.
   const activeItems = order.items.filter(i => i.status !== 'PREPARED')
   const historyItems = order.items.filter(i => i.status === 'PREPARED')
+  // When every pending item will skip the prep queue (e.g. a Bar Lady's own
+  // Main Bar order), "send" is really "issue now" — no prep step exists for
+  // this batch, so the button/copy should say so instead of implying a wait.
+  const allInstantIssue = pendingCount > 0 && pendingItems.every(i => isInstantIssue(i.counterCode))
 
   const statusBadge = (
     <span className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${isClosed ? 'bg-gray-100 text-gray-500' : order.status === 'READY' ? 'bg-green-600 text-white' : pendingCount > 0 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
@@ -777,15 +844,15 @@ export default function OrderPage() {
                   <button
                     onClick={sendOrder}
                     disabled={busy}
-                    className="w-full bg-amber-500 text-white py-3.5 rounded-xl font-bold text-base hover:bg-amber-600 active:scale-95 transition-all disabled:opacity-50"
+                    className={`w-full text-white py-3.5 rounded-xl font-bold text-base active:scale-95 transition-all disabled:opacity-50 ${allInstantIssue ? 'bg-green-600 hover:bg-green-700' : 'bg-amber-500 hover:bg-amber-600'}`}
                   >
-                    📤 Tuma kwa Counter ({pendingCount} bidhaa)
+                    {allInstantIssue ? `✅ Toa Bidhaa (${pendingCount})` : `📤 Tuma kwa Counter (${pendingCount} bidhaa)`}
                   </button>
                 )}
                 {order.items.length > 0 && pendingCount === 0 && balance > 0.5 && (
                   <>
                     <button
-                      onClick={() => { setPayAmount(String(balance)); setPayModal(true) }}
+                      onClick={() => { setPayAmount(String(balance)); setSplitMode(false); setSplitLines([{ method: 'CASH', amount: '' }]); setPayModal(true) }}
                       disabled={busy}
                       className="w-full bg-indigo-600 text-white py-3.5 rounded-xl font-bold text-base hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
                     >
@@ -820,43 +887,98 @@ export default function OrderPage() {
               </div>
             )}
 
-            {/* Payment modal — partial payments with running balance */}
+            {/* Payment modal — partial payments with running balance, or a
+                split-across-methods mode (e.g. half Cash, half M-Pesa). */}
             {payModal && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPayModal(false)}>
                 <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                  <h3 className="font-bold text-gray-800 text-lg mb-1">Pokea Malipo</h3>
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="font-bold text-gray-800 text-lg">Pokea Malipo</h3>
+                    <button
+                      onClick={() => setSplitMode((s) => !s)}
+                      className={`text-xs font-semibold px-2.5 py-1 rounded-full border-2 transition-colors ${splitMode ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-200 text-gray-600'}`}
+                    >
+                      {splitMode ? '✓ Gawanya Malipo' : 'Gawanya Malipo'}
+                    </button>
+                  </div>
                   <div className="text-sm text-gray-500 mb-4 space-y-0.5">
                     <div className="flex justify-between"><span>Jumla</span><span>TSh {net.toLocaleString()}</span></div>
                     {order.paidAmount > 0 && <div className="flex justify-between text-green-700"><span>Imelipwa</span><span>TSh {order.paidAmount.toLocaleString()}</span></div>}
                     <div className="flex justify-between font-bold text-gray-800"><span>Baki</span><span>TSh {balance.toLocaleString()}</span></div>
                   </div>
-                  <input
-                    type="number"
-                    min="0"
-                    value={payAmount}
-                    onChange={e => setPayAmount(e.target.value)}
-                    placeholder="Kiasi kinacholipwa sasa (TSh)"
-                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg mb-3 focus:outline-none focus:border-indigo-400"
-                    autoFocus
-                  />
-                  <div className="grid grid-cols-2 gap-2 mb-4">
-                    {PAY_METHODS.map(m => (
-                      <button
-                        key={m.code}
-                        onClick={() => setPayMethod(m.code)}
-                        className={`py-2.5 rounded-xl text-sm font-semibold border-2 transition-colors ${payMethod === m.code ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-200 text-gray-600'}`}
-                      >
-                        {m.label}
+
+                  {!splitMode ? (
+                    <>
+                      <input
+                        type="number"
+                        min="0"
+                        value={payAmount}
+                        onChange={e => setPayAmount(e.target.value)}
+                        placeholder="Kiasi kinacholipwa sasa (TSh)"
+                        className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg mb-3 focus:outline-none focus:border-indigo-400"
+                        autoFocus
+                      />
+                      <div className="grid grid-cols-2 gap-2 mb-4">
+                        {PAY_METHODS.map(m => (
+                          <button
+                            key={m.code}
+                            onClick={() => setPayMethod(m.code)}
+                            className={`py-2.5 rounded-xl text-sm font-semibold border-2 transition-colors ${payMethod === m.code ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-200 text-gray-600'}`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setPayModal(false)} className="border-2 border-gray-200 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50">Ghairi</button>
+                        <button onClick={recordPayment} disabled={busy} className="bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 disabled:opacity-50">
+                          {busy ? 'Inapokea...' : '✓ Pokea & Thibitisha'}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-3 text-center">Kupokea = kuthibitisha malipo. Ukilipa pungufu, baki litabaki kwenye bili.</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="space-y-2 mb-3">
+                        {splitLines.map((line, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <select
+                              value={line.method}
+                              onChange={e => updateSplitLine(i, { method: e.target.value })}
+                              className="border-2 border-gray-200 rounded-xl px-2 py-2.5 text-sm focus:outline-none focus:border-indigo-400"
+                            >
+                              {PAY_METHODS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
+                            </select>
+                            <input
+                              type="number"
+                              min="0"
+                              value={line.amount}
+                              onChange={e => updateSplitLine(i, { amount: e.target.value })}
+                              placeholder="Kiasi (TSh)"
+                              className="flex-1 border-2 border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-indigo-400"
+                            />
+                            {splitLines.length > 1 && (
+                              <button onClick={() => removeSplitLine(i)} className="text-gray-400 hover:text-rose-600 text-lg leading-none px-1">×</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={addSplitLine} className="w-full mb-3 text-sm font-semibold text-indigo-600 border-2 border-dashed border-indigo-200 rounded-xl py-2 hover:bg-indigo-50">
+                        + Ongeza njia ya malipo
                       </button>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button onClick={() => setPayModal(false)} className="border-2 border-gray-200 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50">Ghairi</button>
-                    <button onClick={recordPayment} disabled={busy} className="bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 disabled:opacity-50">
-                      {busy ? 'Inapokea...' : '✓ Pokea & Thibitisha'}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-gray-400 mt-3 text-center">Kupokea = kuthibitisha malipo. Ukilipa pungufu, baki litabaki kwenye bili.</p>
+                      <div className="flex justify-between text-sm font-semibold mb-4">
+                        <span className="text-gray-500">Jumla uliyoweka</span>
+                        <span className={splitTotal > balance + 0.5 ? 'text-rose-600' : 'text-gray-800'}>TSh {splitTotal.toLocaleString()}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setPayModal(false)} className="border-2 border-gray-200 text-gray-600 py-3 rounded-xl font-semibold hover:bg-gray-50">Ghairi</button>
+                        <button onClick={recordSplitPayment} disabled={busy} className="bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 disabled:opacity-50">
+                          {busy ? 'Inapokea...' : '✓ Pokea Zote'}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-gray-400 mt-3 text-center">Kila njia inatumwa kando — bili itafungwa pale jumla itakapofikia kiasi kinachotakiwa.</p>
+                    </>
+                  )}
                 </div>
               </div>
             )}
