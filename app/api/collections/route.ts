@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
+import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
 
   const collections = await prisma.dailyCollection.findMany({
     where,
-    include: { outlet: true, cashier: { select: { name: true } }, cancellations: true },
+    include: { outlet: true, cashier: { select: { name: true } }, cancellations: true, channels: true },
     orderBy: { date: 'desc' },
     take: 100,
   })
@@ -41,7 +42,12 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0, discountReason } = body
+  const { cash = 0, notes, outletId, date, staffName, systemSales = 0, discountReason } = body
+  // channelAmounts: { CRDB: 12000, CRDB_LIPA_HAPA: 5000, ... } — any active PaymentChannel code.
+  // Falls back to legacy crdb/stanbic/mpesa fields for any older caller that hasn't migrated.
+  const channelAmounts: Record<string, number> = body.channelAmounts && typeof body.channelAmounts === 'object'
+    ? body.channelAmounts
+    : { CRDB: Number(body.crdb) || 0, STANBIC: Number(body.stanbic) || 0, MPESA: Number(body.mpesa) || 0 }
   const discount = roundMoney(Number(body.discount) || 0)
   // Reconciliation inputs entered during the collection flow
   const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest) {
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
   const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 
-  const total = roundMoney(Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa))
+  const total = roundMoney(Number(cash) + sumChannelAmounts(channelAmounts))
   const usedOutletId = writeOutletId(user, outletId)
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
 
@@ -83,13 +89,14 @@ export async function POST(req: NextRequest) {
   const out = await prisma.$transaction(async (tx) => {
     const collection = await tx.dailyCollection.create({
       data: {
-        cash: roundMoney(cash), crdb: roundMoney(crdb), stanbic: roundMoney(stanbic), mpesa: roundMoney(mpesa),
+        cash: roundMoney(cash), ...legacyFixedFields(channelAmounts),
         total, staffName: staffName || null, systemSales: roundMoney(systemSales),
         discount, discountReason: discountReason || null,
         notes, outletId: usedOutletId, cashierId: user.userId, date: date ? new Date(date) : new Date(),
       },
       include: { outlet: true },
     })
+    await syncCollectionChannels(tx, collection.id, channelAmounts)
 
     await tx.auditLog.create({
       data: { userId: user.userId, action: 'CREATE', entity: 'DailyCollection', entityId: collection.id, details: `Total: ${total}` },

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { recomputeStaffLoss } from '@/lib/staff-loss'
+import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -38,9 +39,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const body = await req.json()
-  const { cash = 0, crdb = 0, stanbic = 0, mpesa = 0, notes, outletId, date, staffName, systemSales = 0, discountReason } = body
+  const { cash = 0, notes, outletId, date, staffName, systemSales = 0, discountReason } = body
+  // channelAmounts: { CRDB: 12000, CRDB_LIPA_HAPA: 5000, ... } — any active PaymentChannel code.
+  // Falls back to legacy crdb/stanbic/mpesa fields for any older caller that hasn't migrated.
+  const channelAmounts: Record<string, number> = body.channelAmounts && typeof body.channelAmounts === 'object'
+    ? body.channelAmounts
+    : { CRDB: Number(body.crdb) || 0, STANBIC: Number(body.stanbic) || 0, MPESA: Number(body.mpesa) || 0 }
   const discount = roundMoney(Number(body.discount) || 0)
-  const total = roundMoney(Number(cash) + Number(crdb) + Number(stanbic) + Number(mpesa))
+  const total = roundMoney(Number(cash) + sumChannelAmounts(channelAmounts))
   // Cashiers can never move a collection to another outlet.
   const usedOutletId = user.role === 'CASHIER' ? existing.outletId : (outletId || existing.outletId)
   const collDate = date ? new Date(date) : existing.date
@@ -66,13 +72,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const updated = await prisma.dailyCollection.update({
     where: { id },
     data: {
-      cash: roundMoney(cash), crdb: roundMoney(crdb), stanbic: roundMoney(stanbic), mpesa: roundMoney(mpesa),
+      cash: roundMoney(cash), ...legacyFixedFields(channelAmounts),
       total, staffName: staffName || null, systemSales: roundMoney(systemSales),
       discount, discountReason: discountReason || null,
       notes, outletId: usedOutletId, date: collDate,
     },
     include: { outlet: true },
   })
+  await syncCollectionChannels(prisma, id, channelAmounts)
 
   // Replace cancellations for this collection if the edit form sent them.
   if (Array.isArray(body.cancellations)) {

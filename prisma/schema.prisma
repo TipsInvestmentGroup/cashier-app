@@ -189,9 +189,28 @@ model DailyCollection {
   updatedAt  DateTime      @updatedAt
 
   cancellations Cancellation[]
+  channels      DailyCollectionChannel[]
 
   @@index([date])
   @@index([outletId])
+}
+
+// Per-channel amounts for a Daily Collection — lets Setup > Payment Channels
+// add new digital channels (e.g. "CRDB Lipa Hapa") without a code change.
+// The fixed crdb/stanbic/mpesa columns above are still dual-written for the
+// 3 default channels so older read paths keep working unmodified; readers
+// that want the full dynamic list should prefer these rows, falling back to
+// the fixed columns only when a collection has none (pre-migration rows).
+model DailyCollectionChannel {
+  id           String          @id @default(cuid())
+  collectionId String
+  collection   DailyCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  channelCode  String          // matches PaymentChannel.code (CRDB, STANBIC, MPESA, CRDB_LIPA_HAPA, ...)
+  amount       Float           @default(0)
+  createdAt    DateTime        @default(now())
+
+  @@unique([collectionId, channelCode])
+  @@index([collectionId])
 }
 
 model Person {

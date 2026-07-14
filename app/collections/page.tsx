@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
+import { channelAmountsFor, digitalTotal, sumChannelAmounts } from '@/lib/collection-channels-shared'
 import toast from 'react-hot-toast'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns'
 
@@ -31,14 +32,14 @@ interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
   staffName?: string; systemSales?: number; creditSales?: number; paymentsReceived?: number; discount?: number; discountReason?: string
   notes: string; outletId?: string; outlet: { id?: string; name: string }; cashier: { name: string }; cancellations?: Cancellation[]
+  channels?: { channelCode: string; amount: number }[]
 }
 interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean }
 interface SignedBill { id: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
 // signed-bill type → paid-bill category label
 const BILLTYPE_TO_CATEGORY: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', STAFF_LOSS: 'Staff Loss', TIPS: 'Sponsors & Partners' }
 // Cash the staff must physically hand over = System Sales − digital channels
-const cashRequired = (c: { systemSales?: number; crdb: number; stanbic: number; mpesa: number }) =>
-  (c.systemSales || 0) - c.crdb - c.stanbic - c.mpesa
+const cashRequired = (c: { systemSales?: number } & Parameters<typeof digitalTotal>[0]) => (c.systemSales || 0) - digitalTotal(c)
 const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 // Staff Loss = System Sales − Collection − Signed Bills (credit sales) − Paid Bills
 const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number; paymentsReceived?: number }) =>
@@ -68,6 +69,9 @@ export default function CollectionsPage() {
   const PAID_CATEGORIES = categories.filter((c) => c.isActive).map((c) => c.label)
   const SIGNED_TYPE_OPTS = categories.filter((c) => c.isActive)
   const METHOD_OPTS = channels.filter((c) => c.isActive)
+  // Digital collection boxes: any active Payment Channel except Cash — this is what
+  // makes Daily Collections' amount boxes dynamic (Setup > Payment Channels drives it).
+  const DIGITAL_CHANNELS = channels.filter((c) => c.isActive && c.code !== 'CASH')
   const labelToCode = (label: string) => categories.find((c) => c.label === label)?.code || label
   const codeToLabelCat = (code: string) => categories.find((c) => c.code === code)?.label || BILLTYPE_TO_CATEGORY[code] || code
   const [confirmedZero, setConfirmedZero] = useState(false)
@@ -86,16 +90,21 @@ export default function CollectionsPage() {
   const [statusLoading, setStatusLoading] = useState(false)
 
   const [form, setForm] = useState({
-    cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '',
+    cash: '', channelAmounts: {} as Record<string, string>, notes: '', staffName: '', systemSales: '',
     discount: '', discountReason: '',
     outletId: user?.outlet?.id || '', date: format(new Date(), 'yyyy-MM-dd'),
   })
+  const channelAmountsNum = Object.fromEntries(Object.entries(form.channelAmounts).map(([k, v]) => [k, Number(v) || 0]))
+  const getAmountBox = (code: string) => code === 'CASH' ? form.cash : (form.channelAmounts[code] || '')
+  const setAmountBox = (code: string, v: string) => {
+    if (code === 'CASH') setForm((f) => ({ ...f, cash: v }))
+    else setForm((f) => ({ ...f, channelAmounts: { ...f.channelAmounts, [code]: v } }))
+  }
 
-  const total = (Number(form.cash) || 0) + (Number(form.crdb) || 0) +
-    (Number(form.stanbic) || 0) + (Number(form.mpesa) || 0)
+  const total = (Number(form.cash) || 0) + sumChannelAmounts(channelAmountsNum)
 
-  // Cash required from staff = System Sales − (CRDB + Stanbic + M-PESA)
-  const cashRequiredForm = (Number(form.systemSales) || 0) - (Number(form.crdb) || 0) - (Number(form.stanbic) || 0) - (Number(form.mpesa) || 0)
+  // Cash required from staff = System Sales − digital channels
+  const cashRequiredForm = (Number(form.systemSales) || 0) - sumChannelAmounts(channelAmountsNum)
   const cancelTotalForm = cancelRows.reduce((s, r) => s + (r.sellingPrice * (Number(r.quantity) || 0)), 0)
 
   // Reconciliation: Staff Loss = System − Collection − Signed Bills − Paid Bills (Staff Loss only) − Discount
@@ -165,7 +174,7 @@ export default function CollectionsPage() {
         reason: r.reason, productId: r.productId || undefined, productName: r.productName,
         sellingPrice: r.sellingPrice, quantity: Number(r.quantity), amount: r.sellingPrice * (Number(r.quantity) || 0),
       }))
-      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, crdb: Number(form.crdb) || 0, stanbic: Number(form.stanbic) || 0, mpesa: Number(form.mpesa) || 0, signedBills, paidBills, cancellations })
+      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, channelAmounts: channelAmountsNum, signedBills, paidBills, cancellations })
       const res = editingId
         ? await request(`/api/collections/${editingId}`, { method: 'PUT', body: payload })
         : await request('/api/collections', { method: 'POST', body: payload })
@@ -174,7 +183,7 @@ export default function CollectionsPage() {
       } else {
         toast.success(editingId ? 'Collection updated!' : 'Collection saved — balanced, no loss.')
       }
-      setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+      setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
       setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
       setEditingId(null)
       setShowForm(false)
@@ -192,11 +201,11 @@ export default function CollectionsPage() {
 
   const startEdit = (c: Collection & { outletId?: string }) => {
     setEditingId(c.id)
+    const channelAmounts: Record<string, string> = {}
+    for (const [code, amt] of Object.entries(channelAmountsFor(c))) channelAmounts[code] = amt ? String(amt) : ''
     setForm({
       cash: c.cash ? String(c.cash) : '',
-      crdb: c.crdb ? String(c.crdb) : '',
-      stanbic: c.stanbic ? String(c.stanbic) : '',
-      mpesa: c.mpesa ? String(c.mpesa) : '',
+      channelAmounts,
       notes: c.notes || '',
       staffName: c.staffName || '',
       systemSales: c.systemSales ? String(c.systemSales) : '',
@@ -216,7 +225,7 @@ export default function CollectionsPage() {
 
   const newCollection = () => {
     setEditingId(null)
-    setForm({ cash: '', crdb: '', stanbic: '', mpesa: '', notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+    setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
     setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
     setShowForm((s) => !s)
   }
@@ -257,19 +266,23 @@ export default function CollectionsPage() {
 
   // Totals across the filtered records
   const totals = filtered.reduce(
-    (acc, c) => ({
-      cash: acc.cash + c.cash,
-      crdb: acc.crdb + c.crdb,
-      stanbic: acc.stanbic + c.stanbic,
-      mpesa: acc.mpesa + c.mpesa,
-      total: acc.total + c.total,
-      systemSales: acc.systemSales + (c.systemSales || 0),
-      creditSales: acc.creditSales + (c.creditSales || 0),
-      paymentsReceived: acc.paymentsReceived + (c.paymentsReceived || 0),
-      discount: acc.discount + (c.discount || 0),
-    }),
-    { cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, systemSales: 0, creditSales: 0, paymentsReceived: 0, discount: 0 }
+    (acc, c) => {
+      const amounts = channelAmountsFor(c)
+      const channelTotals = { ...acc.channels }
+      for (const [code, amt] of Object.entries(amounts)) channelTotals[code] = (channelTotals[code] || 0) + amt
+      return {
+        cash: acc.cash + c.cash,
+        total: acc.total + c.total,
+        systemSales: acc.systemSales + (c.systemSales || 0),
+        creditSales: acc.creditSales + (c.creditSales || 0),
+        paymentsReceived: acc.paymentsReceived + (c.paymentsReceived || 0),
+        discount: acc.discount + (c.discount || 0),
+        channels: channelTotals,
+      }
+    },
+    { cash: 0, total: 0, systemSales: 0, creditSales: 0, paymentsReceived: 0, discount: 0, channels: {} as Record<string, number> }
   )
+  const totalDigital = Object.values(totals.channels).reduce((s, v) => s + v, 0)
   // Discount + cancellations, per row (rejected cancellations don't count)
   const rowDiscountAndCancel = (c: Collection) =>
     (c.discount || 0) + (c.cancellations || []).filter((x) => x.status !== 'REJECTED').reduce((s, x) => s + (x.amount || 0), 0)
@@ -381,16 +394,17 @@ export default function CollectionsPage() {
   // ---- Exports (always include Outlet & By, regardless of on-screen columns) ----
   const rangeLabel = RANGE_OPTIONS.find((r) => r.key === range)?.label || 'Collections'
   const exportName = `tips-collections-${range}-${format(new Date(), 'yyyy-MM-dd')}`
-  const reqCash = (c: { systemSales?: number; crdb: number; stanbic: number; mpesa: number }) => cashRequired(c)
+  const reqCash = (c: Collection) => cashRequired(c)
 
   const exportCsv = () => {
     if (!filtered.length) return toast.error('Nothing to export')
-    const headers = ['Date', 'Outlet', 'Staff', 'Cash', 'CRDB', 'Stanbic', 'M-PESA', 'Total', 'System', 'Cash Req', 'Variance', 'By']
+    const headers = ['Date', 'Outlet', 'Staff', 'Cash', ...DIGITAL_CHANNELS.map((ch) => ch.label), 'Total', 'System', 'Cash Req', 'Variance', 'By']
     const dataRows = filtered.map((c) => {
       const v = rowLoss(c)
-      return [formatDateTime(c.date), c.outlet.name, c.staffName || '', c.cash, c.crdb, c.stanbic, c.mpesa, c.total, c.systemSales || 0, reqCash(c), v, c.cashier.name]
+      const amounts = channelAmountsFor(c)
+      return [formatDateTime(c.date), c.outlet.name, c.staffName || '', c.cash, ...DIGITAL_CHANNELS.map((ch) => amounts[ch.code] || 0), c.total, c.systemSales || 0, reqCash(c), v, c.cashier.name]
     })
-    dataRows.push(['TOTAL', '', '', totals.cash, totals.crdb, totals.stanbic, totals.mpesa, totals.total, totals.systemSales, totals.systemSales - totals.crdb - totals.stanbic - totals.mpesa, variance, ''])
+    dataRows.push(['TOTAL', '', '', totals.cash, ...DIGITAL_CHANNELS.map((ch) => totals.channels[ch.code] || 0), totals.total, totals.systemSales, totals.systemSales - totalDigital, variance, ''])
     const csv = [headers, ...dataRows]
       .map((r) => r.map((cell) => { const s = String(cell ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }).join(','))
       .join('\n')
@@ -417,12 +431,13 @@ export default function CollectionsPage() {
       doc.setTextColor(31, 41, 55)
       autoTable(doc, {
         startY: 30,
-        head: [['Date', 'Outlet', 'Staff', 'Cash', 'CRDB', 'Stanbic', 'M-PESA', 'Total', 'System', 'Cash Req', 'Variance', 'By']],
+        head: [['Date', 'Outlet', 'Staff', 'Cash', ...DIGITAL_CHANNELS.map((ch) => ch.label), 'Total', 'System', 'Cash Req', 'Variance', 'By']],
         body: filtered.map((c) => {
           const v = rowLoss(c)
-          return [formatDateTime(c.date), c.outlet.name, c.staffName || '-', n(c.cash), n(c.crdb), n(c.stanbic), n(c.mpesa), n(c.total), n(c.systemSales || 0), n(reqCash(c)), `${v > 0 ? '-' : v < 0 ? '+' : ''}${n(Math.abs(v))}`, c.cashier.name]
+          const amounts = channelAmountsFor(c)
+          return [formatDateTime(c.date), c.outlet.name, c.staffName || '-', n(c.cash), ...DIGITAL_CHANNELS.map((ch) => n(amounts[ch.code] || 0)), n(c.total), n(c.systemSales || 0), n(reqCash(c)), `${v > 0 ? '-' : v < 0 ? '+' : ''}${n(Math.abs(v))}`, c.cashier.name]
         }),
-        foot: [['TOTAL', '', '', n(totals.cash), n(totals.crdb), n(totals.stanbic), n(totals.mpesa), n(totals.total), n(totals.systemSales), n(totals.systemSales - totals.crdb - totals.stanbic - totals.mpesa), n(Math.abs(variance)), '']],
+        foot: [['TOTAL', '', '', n(totals.cash), ...DIGITAL_CHANNELS.map((ch) => n(totals.channels[ch.code] || 0)), n(totals.total), n(totals.systemSales), n(totals.systemSales - totalDigital), n(Math.abs(variance)), '']],
         headStyles: { fillColor: [79, 70, 229] },
         footStyles: { fillColor: [238, 242, 255], textColor: [31, 41, 55], fontStyle: 'bold' },
         styles: { fontSize: 8 },
@@ -497,21 +512,19 @@ export default function CollectionsPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                {[
-                  { key: 'cash', label: '💵 Cash', placeholder: '0' },
-                  { key: 'crdb', label: '🏦 CRDB Bank', placeholder: '0' },
-                  { key: 'stanbic', label: '🏛️ Stanbic', placeholder: '0' },
-                  { key: 'mpesa', label: '📱 M-PESA', placeholder: '0' },
-                ].map(({ key, label, placeholder }) => (
-                  <div key={key}>
+                {[{ code: 'CASH', label: '💵 Cash' }, ...DIGITAL_CHANNELS.map((ch) => ({ code: ch.code, label: `🏦 ${ch.label}` }))].map(({ code, label }) => (
+                  <div key={code}>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">{label}</label>
-                    <MoneyInput placeholder={placeholder}
-                      value={form[key as keyof typeof form] as string}
-                      onChange={(v) => setForm({ ...form, [key]: v })}
+                    <MoneyInput placeholder="0"
+                      value={getAmountBox(code)}
+                      onChange={(v) => setAmountBox(code, v)}
                       className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-medium" />
                   </div>
                 ))}
               </div>
+              {DIGITAL_CHANNELS.length === 0 && (
+                <p className="text-xs text-amber-600 -mt-2">No digital payment channels configured — add one under Setup &gt; Payment Channels.</p>
+              )}
 
               {/* Total */}
               <div className="bg-indigo-50 rounded-xl p-4 flex items-center justify-between">
@@ -528,7 +541,7 @@ export default function CollectionsPage() {
                   <p className={`text-xs mt-0.5 ${cashRequiredForm < 0 ? 'text-green-600' : 'text-amber-600'}`}>
                     {cashRequiredForm < 0
                       ? 'Cash collected is more than required by this amount'
-                      : 'System Sales − (CRDB + Stanbic + M-PESA)'}
+                      : 'System Sales − digital channels'}
                   </p>
                 </div>
                 <span className={`text-2xl font-bold ${cashRequiredForm < 0 ? 'text-green-700' : 'text-amber-700'}`}>{formatCurrency(Math.abs(cashRequiredForm))}</span>
@@ -780,9 +793,10 @@ export default function CollectionsPage() {
           </div>
           {[
             { label: '💵 Cash', value: totals.cash, color: 'text-green-700' },
-            { label: '🏦 CRDB', value: totals.crdb, color: 'text-blue-700' },
-            { label: '🏛️ Stanbic', value: totals.stanbic, color: 'text-purple-700' },
-            { label: '📱 M-PESA', value: totals.mpesa, color: 'text-yellow-700' },
+            ...DIGITAL_CHANNELS.map((ch, i) => ({
+              label: `🏦 ${ch.label}`, value: totals.channels[ch.code] || 0,
+              color: ['text-blue-700', 'text-purple-700', 'text-yellow-700', 'text-pink-700', 'text-teal-700'][i % 5],
+            })),
           ].map((s) => (
             <div key={s.label} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
               <p className="text-gray-500 text-xs font-medium">{s.label}</p>
@@ -861,9 +875,7 @@ export default function CollectionsPage() {
                     {!isCashier && <th className="px-5 py-3 font-semibold">Outlet</th>}
                     <th className="px-5 py-3 font-semibold">Staff</th>
                     <th className="px-5 py-3 font-semibold">Cash</th>
-                    <th className="px-5 py-3 font-semibold">CRDB</th>
-                    <th className="px-5 py-3 font-semibold">Stanbic</th>
-                    <th className="px-5 py-3 font-semibold">M-PESA</th>
+                    {DIGITAL_CHANNELS.map((ch) => <th key={ch.code} className="px-5 py-3 font-semibold">{ch.label}</th>)}
                     <th className="px-5 py-3 font-semibold">Total</th>
                     <th className="px-5 py-3 font-semibold">System</th>
                     <th className="px-5 py-3 font-semibold">Cash Req</th>
@@ -878,15 +890,16 @@ export default function CollectionsPage() {
                   {filtered.map((c) => {
                     const sys = c.systemSales || 0
                     const v = rowLoss(c) // + = staff loss, − = overage
+                    const amounts = channelAmountsFor(c)
                     return (
                     <tr key={c.id} className="hover:bg-gray-50">
                       <td className="px-5 py-4 text-gray-700">{formatDateTime(c.date)}</td>
                       {!isCashier && <td className="px-5 py-4 font-medium text-gray-800">{c.outlet.name}</td>}
                       <td className="px-5 py-4 text-gray-700">{c.staffName || '-'}</td>
                       <td className="px-5 py-4 text-green-700">{c.cash > 0 ? formatCurrency(c.cash) : '-'}</td>
-                      <td className="px-5 py-4 text-blue-700">{c.crdb > 0 ? formatCurrency(c.crdb) : '-'}</td>
-                      <td className="px-5 py-4 text-purple-700">{c.stanbic > 0 ? formatCurrency(c.stanbic) : '-'}</td>
-                      <td className="px-5 py-4 text-yellow-700">{c.mpesa > 0 ? formatCurrency(c.mpesa) : '-'}</td>
+                      {DIGITAL_CHANNELS.map((ch) => (
+                        <td key={ch.code} className="px-5 py-4 text-blue-700">{(amounts[ch.code] || 0) > 0 ? formatCurrency(amounts[ch.code]) : '-'}</td>
+                      ))}
                       <td className="px-5 py-4 font-bold text-gray-900">{formatCurrency(c.total)}</td>
                       <td className="px-5 py-4 text-gray-600">{sys > 0 ? formatCurrency(sys) : '-'}</td>
                       <td className="px-5 py-4 text-amber-700">{sys > 0 ? formatCurrency(cashRequired(c)) : '-'}</td>
@@ -914,7 +927,7 @@ export default function CollectionsPage() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={(isCashier ? 12 : 14) + (canAdd ? 1 : 0)}>
+                    <tr><td colSpan={9 + DIGITAL_CHANNELS.length + (isCashier ? 0 : 2) + (canAdd ? 1 : 0)}>
                       <EmptyState icon="🧾" title="No collections in this period" hint="Record a staff collection to get started." />
                     </td></tr>
                   )}
@@ -924,12 +937,12 @@ export default function CollectionsPage() {
                     <tr className="font-bold text-gray-900">
                       <td className="px-5 py-4" colSpan={isCashier ? 2 : 3}>TOTAL ({filtered.length})</td>
                       <td className="px-5 py-4 text-green-700">{formatCurrency(totals.cash)}</td>
-                      <td className="px-5 py-4 text-blue-700">{formatCurrency(totals.crdb)}</td>
-                      <td className="px-5 py-4 text-purple-700">{formatCurrency(totals.stanbic)}</td>
-                      <td className="px-5 py-4 text-yellow-700">{formatCurrency(totals.mpesa)}</td>
+                      {DIGITAL_CHANNELS.map((ch) => (
+                        <td key={ch.code} className="px-5 py-4 text-blue-700">{formatCurrency(totals.channels[ch.code] || 0)}</td>
+                      ))}
                       <td className="px-5 py-4 text-indigo-700 text-base">{formatCurrency(totals.total)}</td>
                       <td className="px-5 py-4 text-gray-700">{formatCurrency(totals.systemSales)}</td>
-                      <td className="px-5 py-4 text-amber-700">{formatCurrency(totals.systemSales - totals.crdb - totals.stanbic - totals.mpesa)}</td>
+                      <td className="px-5 py-4 text-amber-700">{formatCurrency(totals.systemSales - totalDigital)}</td>
                       <td className={`px-5 py-4 ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(variance))}</td>
                       <td className="px-5 py-4 text-rose-700">{formatCurrency(totals.discount + cancelTotalPeriod)}</td>
                       <td className="px-5 py-4 text-indigo-700">{formatCurrency(totals.creditSales)}</td>
