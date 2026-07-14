@@ -190,7 +190,6 @@ const TABS: TabConfig[] = [
 ]
 
 const SECTIONS: Section[] = ['Sales', 'Operations', 'Credit', 'Summary', 'Inventory']
-const PAYMENT_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA', 'SIGNED']
 
 function endpointFor(tabKey: string, params: URLSearchParams): string {
   const qs = params.toString()
@@ -271,10 +270,14 @@ export default function PosReportsPage() {
   const [staff, setStaff] = useState<StaffOption[]>([])
   const [counters, setCounters] = useState<Counter[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [channels, setChannels] = useState<{ code: string; isActive: boolean }[]>([])
+  // 'SIGNED' isn't a Payment Channel — it's a marker meaning "settled via a signed bill" — kept as a fixed extra option.
+  const PAYMENT_METHODS = [...channels.filter((c) => c.isActive).map((c) => c.code), 'SIGNED']
 
   useEffect(() => {
     request('/api/outlets').then(setOutlets).catch(() => {})
     request('/api/users').then((users: StaffOption[]) => setStaff(users.filter((u) => u.role === 'WAITER'))).catch(() => {})
+    request('/api/payment-channels').then(setChannels).catch(() => {})
   }, [request])
 
   useEffect(() => {

@@ -38,12 +38,9 @@ const COUNTER_ICONS: Record<string, string> = {
   MAIN: '🍹', BAR: '🍺', VIP: '👑', SHISHA: '💨', KITCHEN: '🍽',
 }
 const counterLabel = (code: string, label?: string) => `${COUNTER_ICONS[code] ?? '🔸'} ${label ?? code}`
-const PAY_METHODS = [
-  { code: 'CASH', label: '💵 Cash' },
-  { code: 'CRDB', label: '🏧 CRDB' },
-  { code: 'STANBIC', label: '🏦 Stanbic' },
-  { code: 'MPESA', label: '📱 M-Pesa' },
-]
+// Icon per known channel code; any new Payment Channel falls back to a generic card icon.
+const PAY_METHOD_ICONS: Record<string, string> = { CASH: '💵', CRDB: '🏧', STANBIC: '🏦', MPESA: '📱' }
+const payMethodLabel = (code: string, label: string) => `${PAY_METHOD_ICONS[code] ?? '💳'} ${label}`
 
 interface OrderItem {
   id: string
@@ -82,6 +79,7 @@ interface Order {
 }
 
 interface Counter { code: string; label: string; serviceModel: string }
+interface PayMethod { code: string; label: string; isActive: boolean }
 
 interface Product {
   id: string
@@ -140,6 +138,7 @@ export default function OrderPage() {
   const [products, setProducts] = useState<Record<string, Product[]>>({})
   const [extras, setExtras] = useState<string[]>([])
   const [counters, setCounters] = useState<Counter[]>([])
+  const [payMethods, setPayMethods] = useState<PayMethod[]>([])
   const [tab, setTab] = useState<'order' | 'menu'>('order')
   const [activeCategory, setActiveCategory] = useState('')
   const [search, setSearch] = useState('')
@@ -312,6 +311,19 @@ export default function OrderPage() {
       })
       .catch(() => {})
   }, [token, order?.outletId])
+
+  // Payment methods mirror Setup > Payment Channels — adding a channel there
+  // makes it payable here without a code change.
+  useEffect(() => {
+    if (!token) return
+    getWithCache<PayMethod[]>('payment_channels', async () => {
+      const res = await apiFetch('/api/payment-channels', { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) throw new Error('Failed to load payment channels')
+      return res.json()
+    })
+      .then(({ data }) => setPayMethods((data || []).filter((m) => m.isActive)))
+      .catch(() => {})
+  }, [token])
 
   // Keep watching this order while it's still active — this is the screen a
   // waiter naturally sits on after sending to the counter, so it needs its
@@ -919,13 +931,13 @@ export default function OrderPage() {
                         autoFocus
                       />
                       <div className="grid grid-cols-2 gap-2 mb-4">
-                        {PAY_METHODS.map(m => (
+                        {payMethods.map(m => (
                           <button
                             key={m.code}
                             onClick={() => setPayMethod(m.code)}
                             className={`py-2.5 rounded-xl text-sm font-semibold border-2 transition-colors ${payMethod === m.code ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-200 text-gray-600'}`}
                           >
-                            {m.label}
+                            {payMethodLabel(m.code, m.label)}
                           </button>
                         ))}
                       </div>
@@ -947,7 +959,7 @@ export default function OrderPage() {
                               onChange={e => updateSplitLine(i, { method: e.target.value })}
                               className="border-2 border-gray-200 rounded-xl px-2 py-2.5 text-sm focus:outline-none focus:border-indigo-400"
                             >
-                              {PAY_METHODS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
+                              {payMethods.map(m => <option key={m.code} value={m.code}>{payMethodLabel(m.code, m.label)}</option>)}
                             </select>
                             <input
                               type="number"
