@@ -266,9 +266,13 @@ export default function CollectionsPage() {
       systemSales: acc.systemSales + (c.systemSales || 0),
       creditSales: acc.creditSales + (c.creditSales || 0),
       paymentsReceived: acc.paymentsReceived + (c.paymentsReceived || 0),
+      discount: acc.discount + (c.discount || 0),
     }),
-    { cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, systemSales: 0, creditSales: 0, paymentsReceived: 0 }
+    { cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, systemSales: 0, creditSales: 0, paymentsReceived: 0, discount: 0 }
   )
+  // Discount + cancellations, per row (rejected cancellations don't count)
+  const rowDiscountAndCancel = (c: Collection) =>
+    (c.discount || 0) + (c.cancellations || []).filter((x) => x.status !== 'REJECTED').reduce((s, x) => s + (x.amount || 0), 0)
   // Net loss across the period (full formula): System − Collection − Signed − Paid
   const variance = totals.systemSales - totals.total - totals.creditSales - totals.paymentsReceived
   // Split per-row so shortfalls (→ staff loss) and overages are tracked separately
@@ -864,6 +868,8 @@ export default function CollectionsPage() {
                     <th className="px-5 py-3 font-semibold">System</th>
                     <th className="px-5 py-3 font-semibold">Cash Req</th>
                     <th className="px-5 py-3 font-semibold">Variance</th>
+                    <th className="px-5 py-3 font-semibold">Discount &amp; Cancel</th>
+                    <th className="px-5 py-3 font-semibold">Signed Bills</th>
                     {!isCashier && <th className="px-5 py-3 font-semibold">By</th>}
                     {canAdd && <th className="px-5 py-3 font-semibold text-right">Actions</th>}
                   </tr>
@@ -887,6 +893,8 @@ export default function CollectionsPage() {
                       <td className={`px-5 py-4 font-semibold ${sys === 0 ? 'text-gray-300' : v > 0 ? 'text-red-600' : v < 0 ? 'text-green-600' : 'text-gray-500'}`}>
                         {sys === 0 ? '-' : `${v > 0 ? '▼ ' : v < 0 ? '▲ ' : ''}${formatCurrency(Math.abs(v))}`}
                       </td>
+                      <td className="px-5 py-4 text-rose-700">{rowDiscountAndCancel(c) > 0 ? formatCurrency(rowDiscountAndCancel(c)) : '-'}</td>
+                      <td className="px-5 py-4 text-indigo-700">{(c.creditSales || 0) > 0 ? formatCurrency(c.creditSales || 0) : '-'}</td>
                       {!isCashier && <td className="px-5 py-4 text-gray-500">{c.cashier.name}</td>}
                       {canAdd && (
                         <td className="px-5 py-4 text-right whitespace-nowrap">
@@ -906,7 +914,7 @@ export default function CollectionsPage() {
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={(isCashier ? 10 : 12) + (canAdd ? 1 : 0)}>
+                    <tr><td colSpan={(isCashier ? 12 : 14) + (canAdd ? 1 : 0)}>
                       <EmptyState icon="🧾" title="No collections in this period" hint="Record a staff collection to get started." />
                     </td></tr>
                   )}
@@ -923,6 +931,8 @@ export default function CollectionsPage() {
                       <td className="px-5 py-4 text-gray-700">{formatCurrency(totals.systemSales)}</td>
                       <td className="px-5 py-4 text-amber-700">{formatCurrency(totals.systemSales - totals.crdb - totals.stanbic - totals.mpesa)}</td>
                       <td className={`px-5 py-4 ${variance > 0 ? 'text-red-700' : variance < 0 ? 'text-green-700' : 'text-gray-500'}`}>{formatCurrency(Math.abs(variance))}</td>
+                      <td className="px-5 py-4 text-rose-700">{formatCurrency(totals.discount + cancelTotalPeriod)}</td>
+                      <td className="px-5 py-4 text-indigo-700">{formatCurrency(totals.creditSales)}</td>
                       {!isCashier && <td className="px-5 py-4"></td>}
                       {canAdd && <td className="px-5 py-4"></td>}
                     </tr>
