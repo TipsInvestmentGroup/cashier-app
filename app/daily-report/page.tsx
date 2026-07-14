@@ -91,7 +91,7 @@ export default function DailyReportPage() {
       body: [
         ['System Sales', n(d.collection.systemSales)],
         ['Cash', n(d.collection.cash)],
-        ['Lipa Hapa — CRDB', n(d.collection.crdb)],
+        ['CRDB Bank Deposit', n(d.collection.crdb)],
         ['Stanbic', n(d.collection.stanbic)],
         ['M-PESA', n(d.collection.mpesa)],
         ['Variance (Collected − System)', n(d.collection.variance)],
@@ -249,7 +249,7 @@ export default function DailyReportPage() {
             <Section title="1 · Collection (Sales)">
               <Row label="System Sales" value={money(data.collection.systemSales)} bold />
               <Row label="Cash" value={money(data.collection.cash)} />
-              <Row label="Lipa Hapa — CRDB" value={money(data.collection.crdb)} />
+              <Row label="CRDB Bank Deposit" value={money(data.collection.crdb)} />
               <Row label="Stanbic" value={money(data.collection.stanbic)} />
               <Row label="M-PESA" value={money(data.collection.mpesa)} />
               <Row label="Total Collected" value={money(data.collection.total)} bold accent />
