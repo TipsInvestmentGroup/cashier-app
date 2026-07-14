@@ -102,7 +102,7 @@ export default function PaymentChannelsPage() {
             </div>
           )}
         </div>
-        <p className="text-xs text-gray-400">Daily-Collection Cash / CRDB / Stanbic / M-PESA boxes are fixed and not affected here.</p>
+        <p className="text-xs text-gray-400">Any active channel here (except Cash) also becomes a Daily Collection amount box automatically.</p>
       </div>
     </AppShell>
   )
