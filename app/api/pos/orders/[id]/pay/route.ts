@@ -6,7 +6,15 @@ import { settlePosOrder, canActOnOrder } from '@/lib/pos-close'
 
 type Params = { params: Promise<{ id: string }> }
 
-const METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
+// Same bootstrap defaults /api/payment-channels seeds on first read — covers
+// the edge case where nobody has opened that page yet on a fresh install.
+const DEFAULT_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
+
+async function isValidMethod(method: string): Promise<boolean> {
+  const count = await prisma.paymentChannel.count()
+  if (count === 0) return DEFAULT_METHODS.includes(method)
+  return !!(await prisma.paymentChannel.findFirst({ where: { code: method, isActive: true } }))
+}
 
 /**
  * POST /api/pos/orders/[id]/pay — record a (possibly partial) payment.
@@ -25,7 +33,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   const method: string = body.method
 
   if (!(amount > 0)) return NextResponse.json({ error: 'Weka kiasi sahihi' }, { status: 400 })
-  if (!METHODS.includes(method)) return NextResponse.json({ error: 'Njia ya malipo si sahihi' }, { status: 400 })
+  if (!(await isValidMethod(method))) return NextResponse.json({ error: 'Njia ya malipo si sahihi' }, { status: 400 })
 
   const orderForAuth = await prisma.posOrder.findUnique({ where: { id: orderId }, select: { outletId: true } })
   if (!orderForAuth) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
