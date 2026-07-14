@@ -3,33 +3,40 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
+import { getActiveDigitalChannels } from '@/lib/collection-channels'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
-// Daily-collection columns that map to fixed digital channels
-const COLLECTION_COL: Record<string, 'crdb' | 'stanbic' | 'mpesa'> = { CRDB: 'crdb', STANBIC: 'stanbic', MPESA: 'mpesa' }
+// Legacy fixed columns — only these 3 channels have a dedicated DailyCollection
+// column; used as a fallback for collections recorded before per-channel rows existed.
+const LEGACY_COLLECTION_COL: Record<string, 'crdb' | 'stanbic' | 'mpesa'> = { CRDB: 'crdb', STANBIC: 'stanbic', MPESA: 'mpesa' }
 
 /** Active digital channels (everything except CASH). */
-async function digitalChannels() {
-  const all = await prisma.paymentChannel.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } })
-  const list = all.filter((c) => c.code !== 'CASH')
-  if (list.length === 0) return [{ code: 'CRDB', label: 'CRDB' }, { code: 'STANBIC', label: 'Stanbic' }, { code: 'MPESA', label: 'M-PESA' }]
-  return list.map((c) => ({ code: c.code, label: c.label }))
-}
+const digitalChannels = getActiveDigitalChannels
 
-/** Auto "reported" amount for a channel = collection (if a fixed column) + paid bills via that channel. */
+/** Auto "reported" amount for a channel = collection (per-channel rows, falling
+ *  back to the legacy fixed column for pre-migration rows) + paid bills via that channel. */
 async function reportedFor(channel: string, dayStart: Date, dayEnd: Date, outletId?: string | null) {
   const range = { gte: dayStart, lte: dayEnd }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const f: any = { date: range }
   if (outletId) f.outletId = outletId
-  const col = COLLECTION_COL[channel]
-  const [coll, paid] = await Promise.all([
-    col ? prisma.dailyCollection.aggregate({ where: f, _sum: { [col]: true } }) : Promise.resolve({ _sum: {} as Record<string, number> }),
+
+  const [channelRows, paid] = await Promise.all([
+    prisma.dailyCollectionChannel.aggregate({ where: { channelCode: channel, collection: f }, _sum: { amount: true } }),
     prisma.paidBill.aggregate({ where: { ...f, paymentMethod: channel }, _sum: { amountPaid: true } }),
   ])
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const collAmt = col ? ((coll as any)._sum[col] || 0) : 0
+  let collAmt = channelRows._sum.amount || 0
+  // Fall back to the legacy fixed column only if this channel has no per-channel
+  // rows at all in range (i.e. every matching collection predates this table).
+  if (!collAmt) {
+    const col = LEGACY_COLLECTION_COL[channel]
+    if (col) {
+      const legacy = await prisma.dailyCollection.aggregate({ where: f, _sum: { [col]: true } })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      collAmt = (legacy._sum as any)[col] || 0
+    }
+  }
   return roundMoney(collAmt + (paid._sum.amountPaid || 0))
 }
 
