@@ -40,7 +40,6 @@ interface SignedBill { id: string; personName: string; amount: number; billType:
 const BILLTYPE_TO_CATEGORY: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', STAFF_LOSS: 'Staff Loss', TIPS: 'Sponsors & Partners' }
 // Cash the staff must physically hand over = System Sales − digital channels
 const cashRequired = (c: { systemSales?: number } & Parameters<typeof digitalTotal>[0]) => (c.systemSales || 0) - digitalTotal(c)
-const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 // Staff Loss = System Sales − Collection − Signed Bills (credit sales) − Paid Bills
 const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number; paymentsReceived?: number }) =>
   (c.systemSales || 0) - c.total - (c.creditSales || 0) - (c.paymentsReceived || 0)
@@ -66,6 +65,8 @@ export default function CollectionsPage() {
   const [allPersons, setAllPersons] = useState<Person[]>([])
   const [categories, setCategories] = useState<NamedCode[]>([])
   const [channels, setChannels] = useState<NamedCode[]>([])
+  const [cancelReasons, setCancelReasons] = useState<NamedCode[]>([])
+  const CANCEL_REASONS = cancelReasons.filter((r) => r.isActive).map((r) => r.label)
   const PAID_CATEGORIES = categories.filter((c) => c.isActive).map((c) => c.label)
   const SIGNED_TYPE_OPTS = categories.filter((c) => c.isActive)
   const METHOD_OPTS = channels.filter((c) => c.isActive)
@@ -120,7 +121,7 @@ export default function CollectionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [cols, outs, persons, prods, sbs, cats, chs, closures] = await Promise.all([
+    const [cols, outs, persons, prods, sbs, cats, chs, reasons, closures] = await Promise.all([
       request('/api/collections'),
       request('/api/outlets'),
       request('/api/persons'),
@@ -128,6 +129,7 @@ export default function CollectionsPage() {
       request('/api/signed-bills?status=UNPAID'),
       request('/api/person-categories'),
       request('/api/payment-channels'),
+      request('/api/cancellation-reasons'),
       request('/api/collections/close-day').catch(() => ({ closedDays: [] })),
     ])
     setCollections(cols)
@@ -136,6 +138,7 @@ export default function CollectionsPage() {
     setProducts((prods || []).filter((p: Product) => p.isActive))
     setSignedBillsList((sbs || []).filter((b: SignedBill) => b.status !== 'PAID'))
     setCategories(cats || [])
+    setCancelReasons(reasons || [])
     setChannels(chs || [])
     const all: Person[] = persons || []
     setAllPersons(all)
@@ -554,7 +557,7 @@ export default function CollectionsPage() {
                   <button type="button" onClick={() => setCancelRows([...cancelRows, { reason: CANCEL_REASONS[0], productId: '', productName: '', sellingPrice: 0, quantity: '' }])}
                     className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100">➕ Add Cancellation</button>
                 </div>
-                {cancelRows.length === 0 && <p className="text-xs text-gray-400">Record cancelled punches: Double Punch / Out of Stock / Wrong Punch.</p>}
+                {cancelRows.length === 0 && <p className="text-xs text-gray-400">Record cancelled punches: {CANCEL_REASONS.join(' / ') || 'add reasons under Setup > Cancellation Reasons'}.</p>}
                 {cancelRows.length > 0 && (
                   <div className="hidden sm:grid grid-cols-12 gap-2 text-[11px] font-semibold text-gray-400 mb-1">
                     <span className="col-span-3">Reason</span><span className="col-span-4">Product</span><span className="col-span-2">Qty</span><span className="col-span-2">Amount</span><span className="col-span-1"></span>
