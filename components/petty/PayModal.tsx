@@ -1,10 +1,9 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
-const METHODS = [{ value: 'CASH', label: 'Cash' }, { value: 'CRDB', label: 'CRDB' }, { value: 'STANBIC', label: 'Stanbic' }, { value: 'MPESA', label: 'M-PESA' }]
 const MAX_RECEIPT = 2 * 1024 * 1024 // 2MB
 
 export interface PayItem {
@@ -20,6 +19,14 @@ export function PayModal({ item, funds, defaultPayer, onClose, onPaid }: {
   const today = new Date().toISOString().slice(0, 10)
   const [form, setForm] = useState({ pettyType: item.pettyType || 'CASHIER', method: item.paymentMethod || 'CASH', payerName: defaultPayer, paidAt: today, fundId: funds[0]?.id || '', receiptUrl: '' })
   const [busy, setBusy] = useState(false)
+  const [methods, setMethods] = useState<{ value: string; label: string }[]>([])
+
+  useEffect(() => {
+    request('/api/payment-channels')
+      .then((chs: { code: string; label: string; isActive: boolean }[]) =>
+        setMethods((chs || []).filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label }))))
+      .catch(() => {})
+  }, [request])
 
   const onReceipt = (file?: File) => {
     if (!file) return setForm((f) => ({ ...f, receiptUrl: '' }))
@@ -77,7 +84,7 @@ export function PayModal({ item, funds, defaultPayer, onClose, onPaid }: {
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-1">Method</label>
           <div className="grid grid-cols-4 gap-2">
-            {METHODS.map((m) => (
+            {methods.map((m) => (
               <button key={m.value} type="button" onClick={() => setForm({ ...form, method: m.value })}
                 className={`py-2 rounded-xl text-xs font-medium transition ${form.method === m.value ? 'bg-indigo-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>{m.label}</button>
             ))}
