@@ -53,7 +53,6 @@ export async function POST(req: NextRequest) {
   const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
   const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; categoryBillType?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
-  const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
 
   const total = roundMoney(Number(cash) + sumChannelAmounts(channelAmounts))
   const usedOutletId = writeOutletId(user, outletId)
@@ -145,7 +144,7 @@ export async function POST(req: NextRequest) {
     for (const cn of cancelInput) {
       const qty = Number(cn.quantity) || 0
       const price = roundMoney(cn.sellingPrice)
-      const reason = CANCEL_REASONS.includes(cn.reason) ? cn.reason : (cn.reason || '')
+      const reason = cn.reason || ''
       if (!cn.productName || qty <= 0) continue
       await tx.cancellation.create({
         data: {

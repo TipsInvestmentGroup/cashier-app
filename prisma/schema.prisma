@@ -829,9 +829,19 @@ model PersonCategory {
   createdAt DateTime @default(now())
 }
 
-// Configurable payment channels (managed under Outlets). Used by Paid Bills &
-// Petty Cash method pickers (Daily-Collection channels are fixed columns).
+// Configurable payment channels (managed under Outlets). Used by Paid Bills,
+// Petty Cash, and Daily Collections amount boxes (see DailyCollectionChannel).
 model PaymentChannel {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  label     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// Configurable cancellation reasons (managed under Setup). Cancellation.reason
+// stores the label as free text — this table only drives the picker options.
+model CancellationReason {
   id        String   @id @default(cuid())
   code      String   @unique
   label     String

@@ -83,7 +83,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Replace cancellations for this collection if the edit form sent them.
   if (Array.isArray(body.cancellations)) {
-    const CANCEL_REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
     await prisma.cancellation.deleteMany({ where: { collectionId: id } })
     for (const cn of body.cancellations as { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[]) {
       const qty = Number(cn.quantity) || 0
@@ -92,7 +91,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       await prisma.cancellation.create({
         data: {
           collectionId: id,
-          reason: CANCEL_REASONS.includes(cn.reason) ? cn.reason : (cn.reason || ''),
+          reason: cn.reason || '',
           productId: cn.productId || null,
           productName: cn.productName,
           sellingPrice: price,
