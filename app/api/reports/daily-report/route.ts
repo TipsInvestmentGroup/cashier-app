@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { channelAmountsFor } from '@/lib/collection-channels-shared'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 /**
@@ -32,25 +33,34 @@ export async function GET(req: NextRequest) {
   // since a rejected bill is not a real debt.
   const signedWhere = { ...baseWhere, approvalStatus: { not: 'REJECTED' } }
 
-  const [collections, signedBills, paidBills, cancellations, pettyCash, outletRec] = await Promise.all([
-    prisma.dailyCollection.findMany({ where: baseWhere, include: { outlet: { select: { name: true } } } }),
+  const [collections, signedBills, paidBills, cancellations, pettyCash, outletRec, allChannels] = await Promise.all([
+    prisma.dailyCollection.findMany({ where: baseWhere, include: { outlet: { select: { name: true } }, channels: true } }),
     prisma.signedBill.findMany({ where: signedWhere, select: { billType: true, personName: true, serviceStaff: true, amount: true }, orderBy: { amount: 'desc' } }),
     prisma.paidBill.findMany({ where: baseWhere, select: { payerName: true, payerCategory: true, amountPaid: true, paymentMethod: true } }),
     prisma.cancellation.findMany({ where: { date: range, ...(outletId ? { outletId } : {}), status: { not: 'REJECTED' } }, select: { productName: true, staffName: true, quantity: true, amount: true, reason: true } }),
     prisma.pettyCash.findMany({ where: { date: range, ...(outletId ? { outletId } : {}) }, select: { purpose: true, requestedBy: true, department: true, amount: true, paymentMethod: true, status: true }, orderBy: { amount: 'desc' } }),
     outletId ? prisma.outlet.findUnique({ where: { id: outletId }, select: { name: true } }) : Promise.resolve(null),
+    prisma.paymentChannel.findMany({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
   ])
+  const channelLabel = (code: string) => allChannels.find((c) => c.code === code)?.label || code
 
-  // --- Collection totals (4 fixed channels) ---
+  // --- Collection totals: cash stays fixed, every digital channel is dynamic ---
+  const channelTotals: Record<string, number> = {}
   const collection = collections.reduce(
     (t, c) => {
       t.systemSales += c.systemSales || 0
-      t.cash += c.cash; t.crdb += c.crdb; t.stanbic += c.stanbic; t.mpesa += c.mpesa; t.total += c.total
+      t.cash += c.cash; t.total += c.total
+      for (const [code, amt] of Object.entries(channelAmountsFor(c))) channelTotals[code] = (channelTotals[code] || 0) + amt
       return t
     },
-    { systemSales: 0, cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0 }
+    { systemSales: 0, cash: 0, total: 0 }
   )
   const variance = roundMoney(collection.total - collection.systemSales)
+  // Order by the active-channel list first (so newly-disabled channels with historical amounts still show, appended after).
+  const channelCodesInOrder = [...allChannels.map((c) => c.code).filter((code) => code !== 'CASH'), ...Object.keys(channelTotals).filter((code) => !allChannels.some((c) => c.code === code))]
+  const collectionChannels = channelCodesInOrder
+    .map((code) => ({ code, label: channelLabel(code), amount: roundMoney(channelTotals[code] || 0) }))
+    .filter((c) => c.amount > 0 || allChannels.some((ch) => ch.code === c.code))
 
   // --- Signed bills by type + flat list ---
   const SIGNED_KEYS = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'TIPS', 'DJ', 'STAFF_LOSS']
@@ -62,16 +72,19 @@ export async function GET(req: NextRequest) {
   })
   const signedTotal = roundMoney(signedBills.reduce((s, b) => s + b.amount, 0))
 
-  // --- Paid bills (debts collected) by method ---
-  const paidByMethod: Record<string, number> = { CASH: 0, CRDB: 0, STANBIC: 0, MPESA: 0, OTHER: 0 }
+  // --- Paid bills (debts collected) by method — any active channel, else "Other" ---
+  const paidByMethodTotals: Record<string, number> = {}
   const paidRows = paidBills.map((p) => {
     const m = String(p.paymentMethod || '').toUpperCase()
-    const key = ['CASH', 'CRDB', 'STANBIC', 'MPESA'].includes(m) ? m : 'OTHER'
-    paidByMethod[key] += p.amountPaid
+    const key = allChannels.some((c) => c.code === m) ? m : 'OTHER'
+    paidByMethodTotals[key] = (paidByMethodTotals[key] || 0) + p.amountPaid
     return { name: p.payerName, category: p.payerCategory || '', method: m || 'OTHER', amount: roundMoney(p.amountPaid) }
   })
+  const paidByMethod = Object.entries(paidByMethodTotals).map(([code, amount]) => ({
+    code, label: code === 'OTHER' ? 'Other' : channelLabel(code), amount: roundMoney(amount),
+  }))
   const paidTotal = roundMoney(paidBills.reduce((s, p) => s + p.amountPaid, 0))
-  const paidCash = roundMoney(paidByMethod.CASH)
+  const paidCash = roundMoney(paidByMethodTotals.CASH || 0)
 
   // --- Cancellations ---
   const cancelRows = cancellations.map((c) => ({ product: c.productName, staff: c.staffName || '', qty: c.quantity, amount: roundMoney(c.amount), reason: c.reason }))
@@ -93,8 +106,7 @@ export async function GET(req: NextRequest) {
     generatedBy: user.name || '',
     collection: {
       systemSales: roundMoney(collection.systemSales),
-      cash: roundMoney(collection.cash), crdb: roundMoney(collection.crdb),
-      stanbic: roundMoney(collection.stanbic), mpesa: roundMoney(collection.mpesa),
+      cash: roundMoney(collection.cash), channels: collectionChannels,
       total: roundMoney(collection.total), variance,
     },
     signed: { byType: signedByType, rows: signedRows, total: signedTotal },

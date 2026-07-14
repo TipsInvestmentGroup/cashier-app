@@ -14,9 +14,9 @@ interface ReportData {
   date: string
   outletName: string
   generatedBy: string
-  collection: { systemSales: number; cash: number; crdb: number; stanbic: number; mpesa: number; total: number; variance: number }
+  collection: { systemSales: number; cash: number; channels: { code: string; label: string; amount: number }[]; total: number; variance: number }
   signed: { byType: Record<string, number>; rows: { type: string; name: string; staff: string; amount: number }[]; total: number }
-  paid: { byMethod: Record<string, number>; rows: { name: string; category: string; method: string; amount: number }[]; total: number; cash: number }
+  paid: { byMethod: { code: string; label: string; amount: number }[]; rows: { name: string; category: string; method: string; amount: number }[]; total: number; cash: number }
   cancellations: { rows: { product: string; staff: string; qty: number; amount: number; reason: string }[]; total: number }
   pettyCash: { rows: { purpose: string; by: string; dept: string; method: string; amount: number; status: string }[]; total: number; approved: number }
   cashInHand: number
@@ -91,9 +91,7 @@ export default function DailyReportPage() {
       body: [
         ['System Sales', n(d.collection.systemSales)],
         ['Cash', n(d.collection.cash)],
-        ['CRDB Bank Deposit', n(d.collection.crdb)],
-        ['Stanbic', n(d.collection.stanbic)],
-        ['M-PESA', n(d.collection.mpesa)],
+        ...d.collection.channels.map((c) => [c.label, n(c.amount)]),
         ['Variance (Collected − System)', n(d.collection.variance)],
       ],
       foot: [['TOTAL COLLECTED', n(d.collection.total)]], footStyles: foot([238, 242, 255]),
@@ -249,9 +247,7 @@ export default function DailyReportPage() {
             <Section title="1 · Collection (Sales)">
               <Row label="System Sales" value={money(data.collection.systemSales)} bold />
               <Row label="Cash" value={money(data.collection.cash)} />
-              <Row label="CRDB Bank Deposit" value={money(data.collection.crdb)} />
-              <Row label="Stanbic" value={money(data.collection.stanbic)} />
-              <Row label="M-PESA" value={money(data.collection.mpesa)} />
+              {data.collection.channels.map((c) => <Row key={c.code} label={c.label} value={money(c.amount)} />)}
               <Row label="Total Collected" value={money(data.collection.total)} bold accent />
               <Row label="Variance (Collected − System)"
                 value={money(data.collection.variance)}
