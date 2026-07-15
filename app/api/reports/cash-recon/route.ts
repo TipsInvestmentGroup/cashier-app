@@ -28,16 +28,16 @@ export async function GET(req: NextRequest) {
     prisma.dailyCollection.findMany({ where: f, select: { date: true, cash: true } }),
     prisma.paidBill.findMany({ where: { ...f, paymentMethod: 'CASH' }, select: { date: true, amountPaid: true } }),
     prisma.pettyCash.findMany({ where: { ...f, paymentMethod: 'CASH' }, select: { date: true, amount: true } }),
-    prisma.cashRecon.findMany({ where: f, select: { date: true, openingBalance: true, cashDeposited: true, verifiedAmount: true, verifiedBy: true } }),
+    prisma.cashRecon.findMany({ where: f, select: { date: true, openingBalance: true, cashDeposited: true, excessAmountPaid: true, verifiedAmount: true, verifiedBy: true } }),
   ])
 
-  type Day = { date: string; opening: number; collected: number; paidCash: number; expenses: number; deposited: number; verified: number; verifiedSet: boolean; verifiedBy: string }
+  type Day = { date: string; opening: number; collected: number; paidCash: number; expenses: number; deposited: number; excess: number; verified: number; verifiedSet: boolean; verifiedBy: string }
   const map = new Map<string, Day>()
   const dayKey = (d: Date) => new Date(d).toISOString().slice(0, 10)
   const g = (d: Date): Day => {
     const k = dayKey(d)
     let r = map.get(k)
-    if (!r) { r = { date: k, opening: 0, collected: 0, paidCash: 0, expenses: 0, deposited: 0, verified: 0, verifiedSet: false, verifiedBy: '' }; map.set(k, r) }
+    if (!r) { r = { date: k, opening: 0, collected: 0, paidCash: 0, expenses: 0, deposited: 0, excess: 0, verified: 0, verifiedSet: false, verifiedBy: '' }; map.set(k, r) }
     return r
   }
   for (const c of collections) g(c.date).collected += c.cash
@@ -45,22 +45,22 @@ export async function GET(req: NextRequest) {
   for (const e of petty) g(e.date).expenses += e.amount
   for (const r of recons) {
     const d = g(r.date)
-    d.opening += r.openingBalance; d.deposited += r.cashDeposited
+    d.opening += r.openingBalance; d.deposited += r.cashDeposited; d.excess += r.excessAmountPaid
     if (r.verifiedAmount != null) { d.verified += r.verifiedAmount; d.verifiedSet = true; if (r.verifiedBy) d.verifiedBy = r.verifiedBy }
   }
 
   const rows = [...map.values()].sort((a, b) => a.date.localeCompare(b.date)).map((r) => {
-    const closing = r.opening + r.collected + r.paidCash - r.expenses - r.deposited
+    const closing = r.opening + r.collected + r.paidCash - r.expenses - r.deposited - r.excess
     return { ...r, closing, variance: r.verifiedSet ? r.verified - closing : null }
   })
 
   const totals = rows.reduce(
     (t, r) => ({
       opening: t.opening + r.opening, collected: t.collected + r.collected, paidCash: t.paidCash + r.paidCash,
-      expenses: t.expenses + r.expenses, deposited: t.deposited + r.deposited, closing: t.closing + r.closing,
+      expenses: t.expenses + r.expenses, deposited: t.deposited + r.deposited, excess: t.excess + r.excess, closing: t.closing + r.closing,
       verified: t.verified + r.verified, variance: t.variance + (r.variance || 0),
     }),
-    { opening: 0, collected: 0, paidCash: 0, expenses: 0, deposited: 0, closing: 0, verified: 0, variance: 0 }
+    { opening: 0, collected: 0, paidCash: 0, expenses: 0, deposited: 0, excess: 0, closing: 0, verified: 0, variance: 0 }
   )
 
   return NextResponse.json({ rows, totals })

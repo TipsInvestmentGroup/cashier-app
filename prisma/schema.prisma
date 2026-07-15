@@ -776,17 +776,23 @@ model Cancellation {
 }
 
 model CashRecon {
-  id             String   @id @default(cuid())
-  date           DateTime @default(now())
-  outletId       String?
-  openingBalance Float    @default(0) // auto = previous day's closing
-  cashDeposited  Float    @default(0)
-  closingBalance Float    @default(0) // computed & stored so next day can auto-open
-  verifiedAmount Float?              // physical cash verified by an officer
-  verifiedBy     String?
-  notes          String?
-  cashierId      String
-  createdAt      DateTime @default(now())
+  id                String   @id @default(cuid())
+  date              DateTime @default(now())
+  outletId          String?
+  openingBalance    Float    @default(0) // auto = previous day's closing
+  cashDeposited     Float    @default(0)
+  excessAmountPaid  Float    @default(0) // reduces cash balance the same way cashDeposited does
+  excessReason      String?             // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS
+  excessStaffId     String?             // set when excessReason = STAFF_TIP
+  excessStaffName   String?
+  excessPersonId    String?             // set when excessReason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
+  excessPersonName  String?
+  closingBalance    Float    @default(0) // computed & stored so next day can auto-open
+  verifiedAmount    Float?              // physical cash verified by an officer
+  verifiedBy        String?
+  notes             String?
+  cashierId         String
+  createdAt         DateTime @default(now())
 
   @@index([date])
   @@index([outletId])
