@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
+import { EXCESS_REASON_VALUES } from '@/lib/excess-reasons'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
 import { findBestPersonMatch } from '@/lib/nameMatch'
 import { startOfDay, endOfDay, format } from 'date-fns'
@@ -76,6 +77,9 @@ export async function POST(req: NextRequest) {
   const signedInput: { billType: string; name: string; amount: number; personId?: string; confirmedNew?: boolean }[] = Array.isArray(body.signedBills) ? body.signedBills : []
   const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; categoryBillType?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
+  const excessReason: string | null = body.excessReason || null
+  const excessStaffId: string | null = body.excessStaffId || null
+  const excessPersonId: string | null = body.excessPersonId || null
 
   const total = roundMoney(Number(cash) + sumChannelAmounts(channelAmounts))
   const usedOutletId = writeOutletId(user, outletId)
@@ -108,7 +112,9 @@ export async function POST(req: NextRequest) {
 
   // All writes for one collection run atomically — a mid-way failure rolls back
   // the whole thing (no half-saved collections/bills/allocations).
-  const out = await prisma.$transaction(async (tx) => {
+  let out
+  try {
+  out = await prisma.$transaction(async (tx) => {
     const collection = await tx.dailyCollection.create({
       data: {
         cash: roundMoney(cash), ...legacyFixedFields(channelAmounts),
@@ -203,8 +209,35 @@ export async function POST(req: NextRequest) {
       staffLoss = { amount: lossAmount, voucher: voucherNumber, staffName }
     }
 
-    return { collection, signedTotal, paidTotal, paidStaffLoss, signedCreated, paidCreated, staffLoss }
-  }, { timeout: 20000 })
+    // 3b) Excess — the staff collected more than the formula required (negative
+    // "loss"). Requires a reason (shared with Cash Reconciliation) before saving.
+    let excess: { amount: number; reason: string } | null = null
+    if (lossAmount < 0) {
+      const excessAmount = roundMoney(Math.abs(lossAmount))
+      if (!excessReason || !EXCESS_REASON_VALUES.includes(excessReason)) {
+        throw new Error('Select a reason for the excess amount collected')
+      }
+      if (excessReason === 'STAFF_TIP' && !excessStaffId) throw new Error('Select the staff name for the excess amount collected')
+      if (excessReason === 'CUSTOMER_EXCESS' && !excessPersonId) throw new Error('Select the customer name for the excess amount collected')
+      const [staffRow, personRow] = await Promise.all([
+        excessStaffId ? tx.user.findUnique({ where: { id: excessStaffId }, select: { name: true } }) : null,
+        excessPersonId ? tx.person.findUnique({ where: { id: excessPersonId }, select: { name: true } }) : null,
+      ])
+      await tx.collectionExcess.create({
+        data: {
+          collectionId: collection.id, amount: excessAmount, reason: excessReason,
+          staffId: excessStaffId, staffName: staffRow?.name || null,
+          personId: excessPersonId, personName: personRow?.name || null,
+        },
+      })
+      excess = { amount: excessAmount, reason: excessReason }
+    }
 
-  return NextResponse.json({ ...out.collection, creditSales: out.signedTotal, paymentsReceived: out.paidStaffLoss, staffLoss: out.staffLoss, signedCreated: out.signedCreated, paidCreated: out.paidCreated, signedTotal: out.signedTotal, paidTotal: out.paidTotal, paidStaffLoss: out.paidStaffLoss }, { status: 201 })
+    return { collection, signedTotal, paidTotal, paidStaffLoss, signedCreated, paidCreated, staffLoss, excess }
+  }, { timeout: 20000 })
+  } catch (err: unknown) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Error saving collection' }, { status: 400 })
+  }
+
+  return NextResponse.json({ ...out.collection, creditSales: out.signedTotal, paymentsReceived: out.paidStaffLoss, staffLoss: out.staffLoss, excess: out.excess, signedCreated: out.signedCreated, paidCreated: out.paidCreated, signedTotal: out.signedTotal, paidTotal: out.paidTotal, paidStaffLoss: out.paidStaffLoss }, { status: 201 })
 }

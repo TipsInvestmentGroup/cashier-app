@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
-  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, type LucideIcon,
+  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, type LucideIcon,
 } from 'lucide-react'
 
 export type Tab = { href: string; label: string; icon: LucideIcon; roles: string[]; excludePositions?: string[] }
@@ -38,6 +38,7 @@ export const DAILY_TABS: Tab[] = [
   { href: '/collections', label: 'Daily Collections', icon: Wallet, roles: CASHIER_ROLES },
   { href: '/daily-report', label: 'Daily Report', icon: FileText, roles: CASHIER_ROLES },
   { href: '/excess-loss', label: 'Excess & Loss', icon: TrendingUp, roles: CASHIER_ROLES },
+  { href: '/excess-recon', label: 'Excess Recon', icon: ListChecks, roles: CASHIER_ROLES },
 ]
 
 export const BILLS_TABS: Tab[] = [
