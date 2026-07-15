@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
     const computed = await computeCash(startOfDay(day), endOfDay(day), outletId)
     const existing = await prisma.cashRecon.findFirst({
       where: { date: { gte: startOfDay(day), lte: endOfDay(day) }, ...(outletId ? { outletId } : {}) },
+      include: { excessItems: true },
     })
     const autoOpening = await previousClosing(day, outletId)
     return NextResponse.json({ computed, existing, autoOpening, canVerify: await canVerifyCash(user.email) })
@@ -73,28 +74,36 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const { date, outletId, cashDeposited = 0, notes } = body
-  const { excessAmountPaid = 0, excessReason, excessStaffId, excessPersonId } = body
+  const rawExcessItems: { amount: number; reason: string; staffId?: string; personId?: string }[] = Array.isArray(body.excessItems) ? body.excessItems : []
   const day = date ? new Date(date) : new Date()
   // Cashiers always reconcile their own outlet.
   const usedOutletId = writeOutletId(user, outletId)
 
-  const excess = roundMoney(excessAmountPaid)
-  if (excess > 0) {
-    const validReasons = ['KITCHEN_SALES', 'STAFF_TIP', 'CUSTOMER_EXCESS', 'OTHERS']
-    if (!validReasons.includes(excessReason)) {
-      return NextResponse.json({ error: 'A reason is required for the excess amount paid' }, { status: 400 })
+  const validReasons = ['KITCHEN_SALES', 'STAFF_TIP', 'CUSTOMER_EXCESS', 'OTHERS']
+  const excessItems = rawExcessItems
+    .map((it) => ({ amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
+    .filter((it) => it.amount > 0)
+
+  for (const it of excessItems) {
+    if (!validReasons.includes(it.reason)) {
+      return NextResponse.json({ error: 'A reason is required for each excess amount paid' }, { status: 400 })
     }
-    if (excessReason === 'STAFF_TIP' && !excessStaffId) {
+    if (it.reason === 'STAFF_TIP' && !it.staffId) {
       return NextResponse.json({ error: 'Select the staff name for the excess amount paid' }, { status: 400 })
     }
-    if (excessReason === 'CUSTOMER_EXCESS' && !excessPersonId) {
+    if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) {
       return NextResponse.json({ error: 'Select the customer name for the excess amount paid' }, { status: 400 })
     }
   }
-  const [excessStaff, excessPerson] = await Promise.all([
-    excess > 0 && excessReason === 'STAFF_TIP' && excessStaffId ? prisma.user.findUnique({ where: { id: excessStaffId }, select: { name: true } }) : null,
-    excess > 0 && excessReason === 'CUSTOMER_EXCESS' && excessPersonId ? prisma.person.findUnique({ where: { id: excessPersonId }, select: { name: true } }) : null,
+
+  const [staffRows, personRows] = await Promise.all([
+    prisma.user.findMany({ where: { id: { in: excessItems.filter((i) => i.staffId).map((i) => i.staffId as string) } }, select: { id: true, name: true } }),
+    prisma.person.findMany({ where: { id: { in: excessItems.filter((i) => i.personId).map((i) => i.personId as string) } }, select: { id: true, name: true } }),
   ])
+  const staffName = (id: string | null) => (id ? staffRows.find((s) => s.id === id)?.name || null : null)
+  const personName = (id: string | null) => (id ? personRows.find((p) => p.id === id)?.name || null : null)
+
+  const excess = roundMoney(excessItems.reduce((s, it) => s + it.amount, 0))
 
   // Opening = previous closing (auto). Closing computed & stored.
   const opening = await previousClosing(day, usedOutletId)
@@ -114,11 +123,6 @@ export async function POST(req: NextRequest) {
     openingBalance: opening,
     cashDeposited: deposited,
     excessAmountPaid: excess,
-    excessReason: excess > 0 ? excessReason : null,
-    excessStaffId: excess > 0 && excessReason === 'STAFF_TIP' ? excessStaffId : null,
-    excessStaffName: excessStaff?.name || null,
-    excessPersonId: excess > 0 && excessReason === 'CUSTOMER_EXCESS' ? excessPersonId : null,
-    excessPersonName: excessPerson?.name || null,
     closingBalance: closing,
     notes: notes || null,
     cashierId: user.userId,
@@ -133,13 +137,32 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const item = existing
-    ? await prisma.cashRecon.update({ where: { id: existing.id }, data })
-    : await prisma.cashRecon.create({ data })
-
-  await prisma.auditLog.create({
-    data: { userId: user.userId, action: existing ? 'UPDATE' : 'CREATE', entity: 'CashRecon', entityId: item.id, details: `Deposited ${deposited}${excess > 0 ? `, excess ${excess} (${excessReason})` : ''}, closing ${closing}` },
+  const item = await prisma.$transaction(async (tx) => {
+    const saved = existing
+      ? await tx.cashRecon.update({ where: { id: existing.id }, data })
+      : await tx.cashRecon.create({ data })
+    // Replace the day's excess items wholesale with what was just submitted.
+    await tx.cashReconExcess.deleteMany({ where: { cashReconId: saved.id } })
+    if (excessItems.length > 0) {
+      await tx.cashReconExcess.createMany({
+        data: excessItems.map((it) => ({
+          cashReconId: saved.id,
+          amount: it.amount,
+          reason: it.reason,
+          staffId: it.staffId,
+          staffName: staffName(it.staffId),
+          personId: it.personId,
+          personName: personName(it.personId),
+        })),
+      })
+    }
+    return saved
   })
 
-  return NextResponse.json(item, { status: 201 })
+  await prisma.auditLog.create({
+    data: { userId: user.userId, action: existing ? 'UPDATE' : 'CREATE', entity: 'CashRecon', entityId: item.id, details: `Deposited ${deposited}${excess > 0 ? `, excess ${excess} (${excessItems.length} item${excessItems.length === 1 ? '' : 's'})` : ''}, closing ${closing}` },
+  })
+
+  const withItems = await prisma.cashRecon.findUnique({ where: { id: item.id }, include: { excessItems: true } })
+  return NextResponse.json(withItems, { status: 201 })
 }

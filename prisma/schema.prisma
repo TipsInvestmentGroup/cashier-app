@@ -781,12 +781,7 @@ model CashRecon {
   outletId          String?
   openingBalance    Float    @default(0) // auto = previous day's closing
   cashDeposited     Float    @default(0)
-  excessAmountPaid  Float    @default(0) // reduces cash balance the same way cashDeposited does
-  excessReason      String?             // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS
-  excessStaffId     String?             // set when excessReason = STAFF_TIP
-  excessStaffName   String?
-  excessPersonId    String?             // set when excessReason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
-  excessPersonName  String?
+  excessAmountPaid  Float    @default(0) // sum of excessItems; reduces cash balance the same way cashDeposited does
   closingBalance    Float    @default(0) // computed & stored so next day can auto-open
   verifiedAmount    Float?              // physical cash verified by an officer
   verifiedBy        String?
@@ -794,8 +789,28 @@ model CashRecon {
   cashierId         String
   createdAt         DateTime @default(now())
 
+  excessItems       CashReconExcess[]
+
   @@index([date])
   @@index([outletId])
+}
+
+// One line item of "excess amount paid" within a day's cash reconciliation —
+// a day can have several, each with its own reason and (if applicable)
+// staff/customer. CashRecon.excessAmountPaid stores their sum for fast reads.
+model CashReconExcess {
+  id           String    @id @default(cuid())
+  cashReconId  String
+  cashRecon    CashRecon @relation(fields: [cashReconId], references: [id], onDelete: Cascade)
+  amount       Float
+  reason       String              // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS
+  staffId      String?             // set when reason = STAFF_TIP
+  staffName    String?
+  personId     String?             // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
+  personName   String?
+  createdAt    DateTime  @default(now())
+
+  @@index([cashReconId])
 }
 
 // Digital Payment Reconciliation — one row per digital channel per day+outlet.
