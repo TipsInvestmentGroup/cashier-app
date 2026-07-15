@@ -68,6 +68,7 @@ export async function GET(req: NextRequest) {
         paidBillsCash: roundMoney(paid._sum.amountPaid || 0),
         cashierExpenses: roundMoney(petty._sum.amount || 0),
         cashDeposited: r.cashDeposited,
+        excessAmountPaid: r.excessAmountPaid,
         closingBalance: r.closingBalance,
         verifiedAmount: r.verifiedAmount,
         notes: r.notes,
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
     })
   )
 
-  const zero = { openingBalance: 0, cashCollected: 0, paidBillsCash: 0, cashierExpenses: 0, cashDeposited: 0, closingBalance: 0 }
+  const zero = { openingBalance: 0, cashCollected: 0, paidBillsCash: 0, cashierExpenses: 0, cashDeposited: 0, excessAmountPaid: 0, closingBalance: 0 }
   const totals = rows.reduce(
     (acc, r) => ({
       openingBalance: roundMoney(acc.openingBalance + r.openingBalance),
@@ -83,6 +84,7 @@ export async function GET(req: NextRequest) {
       paidBillsCash: roundMoney(acc.paidBillsCash + r.paidBillsCash),
       cashierExpenses: roundMoney(acc.cashierExpenses + r.cashierExpenses),
       cashDeposited: roundMoney(acc.cashDeposited + r.cashDeposited),
+      excessAmountPaid: roundMoney(acc.excessAmountPaid + r.excessAmountPaid),
       closingBalance: roundMoney(acc.closingBalance + r.closingBalance),
     }),
     zero
