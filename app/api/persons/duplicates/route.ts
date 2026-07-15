@@ -33,5 +33,21 @@ export async function GET(req: NextRequest) {
   }
   const groups = [...byKey.values()].filter((g) => g.length > 1)
 
-  return NextResponse.json({ all, groups })
+  // Signed bills saved with a free-text name but never linked to a Person
+  // record (personId null). These silently fragment reports like Admin &
+  // Director Bills into a phantom row alongside the real, linked person.
+  const orphaned = await prisma.signedBill.groupBy({
+    by: ['personName', 'billType'],
+    where: { personId: null },
+    _count: { _all: true },
+    _sum: { amount: true },
+  })
+  const unlinked = orphaned.map((o) => ({
+    personName: o.personName,
+    billType: o.billType,
+    count: o._count._all,
+    totalAmount: o._sum.amount || 0,
+  }))
+
+  return NextResponse.json({ all, groups, unlinked })
 }
