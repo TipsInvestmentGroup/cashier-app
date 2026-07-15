@@ -145,3 +145,135 @@ export async function computePayrollReport(opts: { month?: string | null; outlet
 
   return { creditAccounts, staffLosses, rows, totals, period }
 }
+
+export interface AdminDirectorBillLine {
+  id: string
+  date: string
+  amount: number
+  dueDate: string | null
+  status: string
+  outletName: string
+  description: string | null
+}
+
+export interface AdminDirectorAccount {
+  personId: string | null
+  personName: string
+  billType: string
+  creditLimit: number
+  totalSignedBills: number
+  remainingBalance: number
+  amountExceeding: number
+  payrollPaid: number
+  deductionStatus: 'Within Limit' | 'Pending Deduction' | 'Deducted'
+  billCount: number
+  bills: AdminDirectorBillLine[]
+}
+
+/**
+ * Admin & Director Bills report: one row per person with their signed-bill
+ * total, credit limit, remaining balance, and payroll-deduction status,
+ * plus the underlying bills for drill-down. Reuses the same monthly/all-time
+ * modes as computePayrollReport.
+ */
+export async function computeAdminDirectorBills(opts: { month?: string | null; outletId?: string | null }) {
+  const monthParam = opts.month ?? null
+
+  let monthStart: Date | null = null
+  let monthEnd: Date | null = null
+  if (monthParam && monthParam !== 'all') {
+    const parsed = parse(monthParam, 'yyyy-MM', new Date())
+    if (isValid(parsed)) {
+      monthStart = startOfMonth(parsed)
+      monthEnd = endOfMonth(parsed)
+    }
+  }
+  const monthly = monthStart !== null
+
+  const where: Record<string, unknown> = {
+    billType: { in: ['ADMIN', 'DIRECTOR'] },
+  }
+  if (opts.outletId) where.outletId = opts.outletId
+  if (monthly) where.date = { gte: monthStart, lte: monthEnd }
+  else where.status = { not: 'PAID' }
+
+  const bills = await prisma.signedBill.findMany({
+    where,
+    include: {
+      person: { select: { creditLimit: true } },
+      outlet: { select: { name: true } },
+      payments: { select: { amountPaid: true, paymentMethod: true } },
+    },
+    orderBy: { date: 'desc' },
+  })
+
+  type Acc = {
+    personId: string | null
+    personName: string
+    billType: string
+    creditLimit: number
+    totalSignedBills: number
+    payrollPaid: number
+    billCount: number
+    bills: AdminDirectorBillLine[]
+  }
+  const map = new Map<string, Acc>()
+
+  for (const b of bills) {
+    const paid = b.payments.reduce((s, p) => s + p.amountPaid, 0)
+    const payrollPaid = b.payments.filter((p) => p.paymentMethod === 'PAYROLL').reduce((s, p) => s + p.amountPaid, 0)
+    const outstanding = b.amount - paid
+    const spentAmount = monthly ? b.amount : outstanding
+    if (spentAmount <= 0 && outstanding <= 0) continue
+    const key = `${b.personId || `name:${b.personName}`}|${b.billType}`
+    const limit = b.person?.creditLimit ?? 0
+    const cur = map.get(key) || {
+      personId: b.personId,
+      personName: b.personName,
+      billType: b.billType,
+      creditLimit: limit,
+      totalSignedBills: 0,
+      payrollPaid: 0,
+      billCount: 0,
+      bills: [],
+    }
+    cur.totalSignedBills += spentAmount
+    cur.payrollPaid += payrollPaid
+    cur.billCount += 1
+    cur.bills.push({
+      id: b.id,
+      date: b.date.toISOString(),
+      amount: b.amount,
+      dueDate: b.dueDate?.toISOString() ?? null,
+      status: b.status,
+      outletName: b.outlet.name,
+      description: b.description ?? null,
+    })
+    if (limit > cur.creditLimit) cur.creditLimit = limit
+    map.set(key, cur)
+  }
+
+  const accounts: AdminDirectorAccount[] = [...map.values()]
+    .map((a) => {
+      const amountExceeding = Math.max(0, a.totalSignedBills - a.creditLimit)
+      const remainingBalance = a.creditLimit - a.totalSignedBills
+      const deductionStatus: AdminDirectorAccount['deductionStatus'] =
+        amountExceeding <= 0 ? 'Within Limit' : a.payrollPaid >= amountExceeding ? 'Deducted' : 'Pending Deduction'
+      return { ...a, amountExceeding, remainingBalance, deductionStatus }
+    })
+    .sort((x, y) => y.amountExceeding - x.amountExceeding || y.totalSignedBills - x.totalSignedBills)
+
+  const totals = {
+    totalSignedBills: accounts.reduce((s, a) => s + a.totalSignedBills, 0),
+    totalExceeding: accounts.reduce((s, a) => s + a.amountExceeding, 0),
+    exceededCount: accounts.filter((a) => a.amountExceeding > 0).length,
+    pendingCount: accounts.filter((a) => a.deductionStatus === 'Pending Deduction').length,
+  }
+
+  const period = {
+    mode: monthly ? 'monthly' : 'all-time',
+    month: monthly ? monthParam : null,
+  }
+
+  return { accounts, totals, period }
+}

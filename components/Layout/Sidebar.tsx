@@ -23,11 +23,11 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 
   { href: '/targets', icon: Target, label: 'Targets', section: 'Targets', roles: ALL, match: ['/targets'] },
 
-  { href: '/signed-bills', icon: Receipt, label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
+  { href: '/signed-bills', icon: Receipt, label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/admin-director-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 
   { href: '/petty-cash', icon: Wallet, label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals', '/petty-payments'] },
 
-  { href: '/analytics', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/analytics', '/receivables', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/trends', '/payroll', '/reports', '/audit'] },
+  { href: '/analytics', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/analytics', '/receivables', '/admin-director-bills', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/trends', '/payroll', '/reports', '/audit'] },
 
   { href: '/setup', icon: Settings, label: 'Setup', section: 'Setup', roles: ALL, match: ['/setup', ...SETUP_TABS.map((t) => t.href)] },
 ]
