@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma'
 
 const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
 // Fixed cash-verification officers (besides the owner).
-export const CASH_VERIFIERS_FIXED = ['shabinam@tips.co.tz', 'siyer.mkama@tips.co.tz']
+export const CASH_VERIFIERS_FIXED = ['shabinam@tips.co.tz', 'siyer.mkama@tips.co.tz', 'derickjasselly@gmail.com']
 const SETTING_KEY = 'cashVerifierEmail'
 
 export function isOwner(email?: string) {
