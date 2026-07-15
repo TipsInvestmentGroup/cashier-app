@@ -15,6 +15,7 @@ interface Person {
   id: string; name: string; phone?: string; email?: string; type: string; creditLimit: number; isActive: boolean
 }
 interface Category { code: string; label: string; isActive: boolean }
+interface DupPerson { id: string; name: string; type: string; creditLimit: number; billCount: number }
 
 export default function PersonsPage() {
   const { request } = useApi()
@@ -32,6 +33,13 @@ export default function PersonsPage() {
   const [accessOpen, setAccessOpen] = useState(false)
   const [allUsers, setAllUsers] = useState<{ id: string; name: string; email: string }[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [dupAll, setDupAll] = useState<DupPerson[]>([])
+  const [dupGroups, setDupGroups] = useState<DupPerson[][]>([])
+  const [mergeSelected, setMergeSelected] = useState<string[]>([])
+  const [mergeKeepId, setMergeKeepId] = useState('')
+  const [mergeSearch, setMergeSearch] = useState('')
+  const [merging, setMerging] = useState(false)
   const PERSON_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label }))
   const catLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
   const catColor = (code: string) => BILL_TYPE_COLORS[code] || 'bg-gray-100 text-gray-700'
@@ -111,6 +119,59 @@ export default function PersonsPage() {
     }
   }
 
+  const bestKeepId = (group: DupPerson[]) =>
+    [...group].sort((a, b) => b.billCount - a.billCount || b.creditLimit - a.creditLimit)[0]?.id || ''
+
+  const openMerge = async () => {
+    setMergeOpen(true); setMergeSelected([]); setMergeKeepId(''); setMergeSearch('')
+    try {
+      const res = await request('/api/persons/duplicates')
+      setDupAll(res.all || []); setDupGroups(res.groups || [])
+    } catch {
+      toast.error('Could not load persons for merging')
+    }
+  }
+
+  const applyGroup = (group: DupPerson[]) => {
+    const ids = group.map((g) => g.id)
+    setMergeSelected(ids)
+    setMergeKeepId(bestKeepId(group))
+  }
+
+  const toggleMergeSelect = (id: string) => {
+    setMergeSelected((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      if (!next.includes(mergeKeepId)) setMergeKeepId(next[0] || '')
+      return next
+    })
+  }
+
+  const doMerge = async () => {
+    if (mergeSelected.length < 2 || !mergeKeepId) return toast.error('Select at least two people and who to keep')
+    const keep = dupAll.find((p) => p.id === mergeKeepId)
+    const mergeIds = mergeSelected.filter((id) => id !== mergeKeepId)
+    const ok = await confirm({
+      title: 'Merge people',
+      message: `Merge ${mergeIds.length} record(s) into "${keep?.name}"? Their signed/paid bills will move to "${keep?.name}", the highest credit limit among them will be kept, and the other record(s) will be deactivated. This cannot be undone.`,
+      confirmLabel: 'Merge',
+      danger: true,
+    })
+    if (!ok) return
+    setMerging(true)
+    try {
+      const res = await request('/api/persons/merge', { method: 'POST', body: JSON.stringify({ keepId: mergeKeepId, mergeIds }) })
+      toast.success(`Merged! ${res.signedBillsReassigned + res.paidBillsReassigned} bill(s) reassigned to "${keep?.name}"`)
+      setMergeSelected([]); setMergeKeepId('')
+      load()
+      const res2 = await request('/api/persons/duplicates')
+      setDupAll(res2.all || []); setDupGroups(res2.groups || [])
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error merging persons')
+    } finally {
+      setMerging(false)
+    }
+  }
+
   return (
     <AppShell>
       <SetupTabs />
@@ -125,6 +186,12 @@ export default function PersonsPage() {
               <button onClick={() => setAccessOpen(true)}
                 className="px-4 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:border-gray-300 transition">
                 🔐 Manage Access
+              </button>
+            )}
+            {canEditDelete && (
+              <button onClick={openMerge}
+                className="px-4 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:border-gray-300 transition">
+                🔀 Merge People
               </button>
             )}
             {canManage && (
@@ -270,6 +337,82 @@ export default function PersonsPage() {
                   .map((u) => <option key={u.id} value={u.email}>{u.name} ({u.email})</option>)}
               </select>
               <p className="text-xs text-gray-400 mt-1">Selecting a user grants them persons edit/delete; changing it instantly revokes the previous one.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge duplicate/related person records into one */}
+      {mergeOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={() => setMergeOpen(false)}>
+          <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 sticky top-0 bg-white">
+              <h3 className="font-bold text-gray-900">🔀 Merge People</h3>
+              <button onClick={() => setMergeOpen(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-sm text-gray-500">
+                Combine two or more records that are the same real person (e.g. different name spellings) into one.
+                Bills move to the kept record, and the highest credit limit among them is kept.
+              </p>
+
+              {dupGroups.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                  <p className="text-xs font-semibold text-amber-800">⚠️ Exact-name duplicates detected</p>
+                  {dupGroups.map((g, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-gray-700">{g.map((p) => p.name).join(' + ')} <span className="text-gray-400">({g.length})</span></span>
+                      <button onClick={() => applyGroup(g)} className="px-3 py-1 rounded-lg text-xs font-semibold bg-amber-600 text-white hover:bg-amber-700">
+                        Select
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div>
+                <input
+                  type="text"
+                  value={mergeSearch}
+                  onChange={(e) => setMergeSearch(e.target.value)}
+                  placeholder="Search people to select…"
+                  className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none mb-2"
+                />
+                <div className="max-h-56 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-50">
+                  {dupAll
+                    .filter((p) => !mergeSearch.trim() || p.name.toLowerCase().includes(mergeSearch.trim().toLowerCase()))
+                    .map((p) => (
+                      <label key={p.id} className="flex items-center gap-3 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50">
+                        <input type="checkbox" checked={mergeSelected.includes(p.id)} onChange={() => toggleMergeSelect(p.id)} className="w-4 h-4" />
+                        <span className="flex-1">{p.name} <span className="text-gray-400">· {p.type} · {p.billCount} bill(s){p.creditLimit > 0 ? ` · ${formatCurrency(p.creditLimit)}` : ''}</span></span>
+                      </label>
+                    ))}
+                  {dupAll.length === 0 && <p className="text-sm text-gray-400 text-center py-6">Loading…</p>}
+                </div>
+              </div>
+
+              {mergeSelected.length >= 2 && (
+                <div>
+                  <p className="text-sm font-semibold text-gray-700 mb-1">Keep which record?</p>
+                  <div className="space-y-1">
+                    {mergeSelected.map((id) => {
+                      const p = dupAll.find((x) => x.id === id)
+                      if (!p) return null
+                      return (
+                        <label key={id} className="flex items-center gap-2 text-sm">
+                          <input type="radio" name="keepId" checked={mergeKeepId === id} onChange={() => setMergeKeepId(id)} />
+                          {p.name} <span className="text-gray-400">({p.billCount} bill(s){p.creditLimit > 0 ? `, ${formatCurrency(p.creditLimit)}` : ''})</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <button onClick={doMerge} disabled={merging || mergeSelected.length < 2}
+                className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition disabled:opacity-50">
+                {merging ? 'Merging…' : `Merge ${mergeSelected.length >= 2 ? mergeSelected.length : ''} Selected`}
+              </button>
             </div>
           </div>
         </div>
