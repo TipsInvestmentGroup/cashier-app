@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, JWTPayload } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay } from 'date-fns'
+import { hasPermission, RESOURCES } from '@/lib/rbac'
 
 // Prisma client types for DayClosure are generated on deploy; assert to avoid local type drift.
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -16,8 +17,9 @@ const BLOCKED_EMAILS = ['r.mlay@tips.co.tz']
  *    and only for their own outlet.
  *  - BLOCKED_EMAILS: explicitly denied regardless of role.
  *  - Everyone else: no access. */
-async function checkAccess(user: JWTPayload, bill: { outletId: string; date: Date }): Promise<string | null> {
+async function checkAccess(user: JWTPayload, bill: { outletId: string; date: Date }, action: 'edit' | 'delete'): Promise<string | null> {
   if (user.email === SUPERUSER_EMAIL) return null
+  if (await hasPermission(user.email, user.userId, RESOURCES.SIGNED_BILLS, action)) return null
   if (BLOCKED_EMAILS.includes((user.email || '').toLowerCase())) return 'You are not authorized to edit or delete signed bills'
 
   const isCashier = user.role === 'CASHIER'
@@ -45,7 +47,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const existing = await prisma.signedBill.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Bill not found' }, { status: 404 })
 
-  const denied = await checkAccess(user, existing)
+  const denied = await checkAccess(user, existing, 'edit')
   if (denied) return NextResponse.json({ error: denied }, { status: 403 })
 
   const body = await req.json()
@@ -85,7 +87,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const existing = await prisma.signedBill.findUnique({ where: { id }, include: { payments: true } })
   if (!existing) return NextResponse.json({ error: 'Bill not found' }, { status: 404 })
 
-  const denied = await checkAccess(user, existing)
+  const denied = await checkAccess(user, existing, 'delete')
   if (denied) return NextResponse.json({ error: denied }, { status: 403 })
 
   if (existing.payments.length > 0) {

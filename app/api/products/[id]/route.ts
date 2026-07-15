@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { hasPermission, RESOURCES } from '@/lib/rbac'
 
 const MANAGERS = ['ADMIN', 'ACCOUNTANT', 'MANAGER']
 const UNITS = ['unit', 'kg', 'crate 24 bottle', 'crate 25 bottle', 'crate 6 bottle']
@@ -10,7 +11,9 @@ const UNITS = ['unit', 'kg', 'crate 24 bottle', 'crate 25 bottle', 'crate 6 bott
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!MANAGERS.includes(user.role)) return NextResponse.json({ error: 'You are not authorized to edit products' }, { status: 403 })
+  if (!MANAGERS.includes(user.role) && !(await hasPermission(user.email, user.userId, RESOURCES.PRODUCTS, 'edit'))) {
+    return NextResponse.json({ error: 'You are not authorized to edit products' }, { status: 403 })
+  }
 
   const { id } = await params
   const body = await req.json().catch(() => ({}))
@@ -36,7 +39,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!MANAGERS.includes(user.role)) return NextResponse.json({ error: 'You are not authorized to delete products' }, { status: 403 })
+  if (!MANAGERS.includes(user.role) && !(await hasPermission(user.email, user.userId, RESOURCES.PRODUCTS, 'delete'))) {
+    return NextResponse.json({ error: 'You are not authorized to delete products' }, { status: 403 })
+  }
 
   const { id } = await params
   const used = await prisma.cancellation.count({ where: { productId: id } })
