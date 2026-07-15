@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
+import { findDuplicatePersonByName } from '@/lib/persons-dedupe'
 
 /** Edit a person — owner / r.mlay / owner-chosen manager only. */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -11,6 +12,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const { id } = await params
   const body = await req.json()
+
+  if (body.name !== undefined) {
+    const dup = await findDuplicatePersonByName(body.name, id)
+    if (dup) return NextResponse.json({ error: `A person named "${dup.name}" already exists. Use Merge People instead of creating a duplicate.` }, { status: 409 })
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data: any = {}
   if (body.name !== undefined) data.name = body.name
