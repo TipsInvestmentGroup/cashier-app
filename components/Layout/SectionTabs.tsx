@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
-  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, type LucideIcon,
+  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, type LucideIcon,
 } from 'lucide-react'
 
 export type Tab = { href: string; label: string; icon: LucideIcon; roles: string[]; excludePositions?: string[] }
@@ -42,6 +42,7 @@ export const DAILY_TABS: Tab[] = [
 
 export const BILLS_TABS: Tab[] = [
   { href: '/signed-bills', label: 'Signed Bills', icon: FileSignature, roles: CASHIER_ROLES },
+  { href: '/admin-director-bills', label: 'Admin & Director Bills', icon: Briefcase, roles: MGMT },
   { href: '/paid-bills', label: 'Paid Bills', icon: CheckCircle2, roles: CASHIER_ROLES },
   { href: '/customer-bills', label: 'Customer Bills', icon: User, roles: CASHIER_ROLES },
   { href: '/tips-dj-bills', label: 'Tips & DJ Bills', icon: Gift, roles: CASHIER_ROLES },
@@ -57,6 +58,7 @@ export const PETTY_TABS: Tab[] = [
 export const FINANCE_TABS: Tab[] = [
   { href: '/analytics', label: 'Analytics', icon: LayoutDashboard, roles: MGMT },
   { href: '/receivables', label: 'Receivables', icon: TrendingUp, roles: MGMT },
+  { href: '/admin-director-bills', label: 'Admin & Director Bills', icon: Briefcase, roles: MGMT },
   { href: '/month-end', label: 'Month-End', icon: CalendarDays, roles: MGMT },
   { href: '/staff-scorecard', label: 'Staff Scorecard', icon: BarChart3, roles: MGMT },
   { href: '/outlet-comparison', label: 'Outlet Comparison', icon: Building2, roles: MGMT },
