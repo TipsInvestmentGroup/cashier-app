@@ -131,6 +131,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (user.role === 'CASHIER' && await isDayClosed(existing.outletId, existing.date)) {
     return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before deleting.' }, { status: 423 })
   }
+  const excess = await db.collectionExcess.findUnique({ where: { collectionId: id } })
+  if (excess && excess.paidAmount > 0) {
+    return NextResponse.json({ error: 'This collection has a settled excess amount in Excess Recon — it cannot be deleted.' }, { status: 409 })
+  }
 
   // Remove linked auto staff-loss (and its payments) first
   const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: `SL-${id}` } })

@@ -3,16 +3,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApi } from '@/hooks/useApi'
 import { MoneyInput } from '@/components/MoneyInput'
 import { formatCurrency } from '@/lib/utils'
+import { EXCESS_REASONS } from '@/lib/excess-reasons'
 import toast from 'react-hot-toast'
 
-const EXCESS_REASONS = [
-  { value: 'KITCHEN_SALES', label: 'Kitchen Sales' },
-  { value: 'STAFF_TIP', label: 'Staff Tip' },
-  { value: 'CUSTOMER_EXCESS', label: 'Customer Excess' },
-  { value: 'OTHERS', label: 'Others' },
-]
-
-interface ExcessItem { key: string; amount: string; reason: string; staffId: string; personId: string }
+interface ExcessItem { key: string; id?: string; amount: string; reason: string; staffId: string; personId: string; paidAmount: number }
 
 /** Inline Cash Reconciliation form (date + outlet fixed by the caller). */
 export function CashReconForm({ outletId, date, onSaved }: { outletId: string; date: string; onSaved: () => void }) {
@@ -29,7 +23,7 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const excessKeyRef = useRef(0)
-  const newExcessItem = (): ExcessItem => ({ key: `new-${excessKeyRef.current++}`, amount: '', reason: '', staffId: '', personId: '' })
+  const newExcessItem = (): ExcessItem => ({ key: `new-${excessKeyRef.current++}`, amount: '', reason: '', staffId: '', personId: '', paidAmount: 0 })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -47,7 +41,8 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
         setCashDeposited(String(res.existing.cashDeposited ?? ''))
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const items = (res.existing.excessItems || []).map((it: any) => ({
-          key: it.id, amount: String(it.amount), reason: it.reason, staffId: it.staffId || '', personId: it.personId || '',
+          key: it.id, id: it.id, amount: String(it.amount), reason: it.reason, staffId: it.staffId || '', personId: it.personId || '',
+          paidAmount: it.paidAmount || 0,
         }))
         setExcessItems(items)
         setNotes(res.existing.notes || '')
@@ -62,7 +57,11 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
   const addExcessItem = () => setExcessItems((items) => [...items, newExcessItem()])
   const updateExcessItem = (key: string, patch: Partial<ExcessItem>) =>
     setExcessItems((items) => items.map((it) => (it.key === key ? { ...it, ...patch } : it)))
-  const removeExcessItem = (key: string) => setExcessItems((items) => items.filter((it) => it.key !== key))
+  const removeExcessItem = (key: string) => {
+    const it = excessItems.find((i) => i.key === key)
+    if (it && it.paidAmount > 0) return toast.error('This excess item has recorded payments and cannot be removed — settle it from Excess Recon first.')
+    setExcessItems((items) => items.filter((i) => i.key !== key))
+  }
 
   const excess = excessItems.reduce((s, it) => s + (Number(it.amount) || 0), 0)
   const closing = autoOpening + computed.cashCollected + computed.paidBillsCash - computed.cashExpenses - (Number(cashDeposited) || 0) - excess
@@ -86,6 +85,7 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
           date, outletId, notes,
           cashDeposited: Number(cashDeposited) || 0,
           excessItems: activeItems.map((it) => ({
+            id: it.id,
             amount: Number(it.amount) || 0,
             reason: it.reason,
             ...(it.reason === 'STAFF_TIP' ? { staffId: it.staffId } : {}),
@@ -117,31 +117,36 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
           <label className="block text-sm font-semibold text-gray-700">Excess Amount Paid (TZS)</label>
           {excess > 0 && <span className="text-sm font-bold text-amber-800">Total: {formatCurrency(excess)}</span>}
         </div>
-        {excessItems.map((it) => (
+        {excessItems.map((it) => {
+          const locked = it.paidAmount > 0
+          return (
           <div key={it.key} className="bg-white border-2 border-gray-100 rounded-xl p-2.5 space-y-2">
+            {locked && (
+              <p className="text-xs font-semibold text-indigo-600">🔒 {formatCurrency(it.paidAmount)} already settled — edit/removal locked. Manage payments from Excess Recon.</p>
+            )}
             <div className="flex items-center gap-2">
-              <MoneyInput value={it.amount} onChange={(v) => updateExcessItem(it.key, { amount: v })}
-                className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold" placeholder="0" />
-              <button type="button" onClick={() => removeExcessItem(it.key)} title="Remove"
-                className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl bg-red-50 text-red-500 hover:bg-red-100">✕</button>
+              <MoneyInput value={it.amount} onChange={(v) => updateExcessItem(it.key, { amount: v })} disabled={locked}
+                className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold disabled:bg-gray-50 disabled:text-gray-500" placeholder="0" />
+              <button type="button" onClick={() => removeExcessItem(it.key)} title="Remove" disabled={locked}
+                className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-40 disabled:hover:bg-red-50">✕</button>
             </div>
             {Number(it.amount) > 0 && (
               <>
-                <select value={it.reason} onChange={(e) => updateExcessItem(it.key, { reason: e.target.value, staffId: '', personId: '' })}
-                  className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                <select value={it.reason} onChange={(e) => updateExcessItem(it.key, { reason: e.target.value, staffId: '', personId: '' })} disabled={locked}
+                  className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500">
                   <option value="">Select a reason…</option>
                   {EXCESS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
                 {it.reason === 'STAFF_TIP' && (
-                  <select value={it.staffId} onChange={(e) => updateExcessItem(it.key, { staffId: e.target.value })}
-                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                  <select value={it.staffId} onChange={(e) => updateExcessItem(it.key, { staffId: e.target.value })} disabled={locked}
+                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500">
                     <option value="">Select staff…</option>
                     {staffList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 )}
                 {it.reason === 'CUSTOMER_EXCESS' && (
-                  <select value={it.personId} onChange={(e) => updateExcessItem(it.key, { personId: e.target.value })}
-                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                  <select value={it.personId} onChange={(e) => updateExcessItem(it.key, { personId: e.target.value })} disabled={locked}
+                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500">
                     <option value="">Select customer…</option>
                     {customerList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
@@ -149,7 +154,8 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
               </>
             )}
           </div>
-        ))}
+          )
+        })}
         <button type="button" onClick={addExcessItem}
           className="w-full py-2 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl text-sm font-semibold hover:bg-amber-50">
           + Add Excess Amount

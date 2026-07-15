@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
+import { EXCESS_REASON_VALUES } from '@/lib/excess-reasons'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
@@ -74,18 +75,17 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const { date, outletId, cashDeposited = 0, notes } = body
-  const rawExcessItems: { amount: number; reason: string; staffId?: string; personId?: string }[] = Array.isArray(body.excessItems) ? body.excessItems : []
+  const rawExcessItems: { id?: string; amount: number; reason: string; staffId?: string; personId?: string }[] = Array.isArray(body.excessItems) ? body.excessItems : []
   const day = date ? new Date(date) : new Date()
   // Cashiers always reconcile their own outlet.
   const usedOutletId = writeOutletId(user, outletId)
 
-  const validReasons = ['KITCHEN_SALES', 'STAFF_TIP', 'CUSTOMER_EXCESS', 'OTHERS']
   const excessItems = rawExcessItems
-    .map((it) => ({ amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
+    .map((it) => ({ id: it.id || null, amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
     .filter((it) => it.amount > 0)
 
   for (const it of excessItems) {
-    if (!validReasons.includes(it.reason)) {
+    if (!EXCESS_REASON_VALUES.includes(it.reason)) {
       return NextResponse.json({ error: 'A reason is required for each excess amount paid' }, { status: 400 })
     }
     if (it.reason === 'STAFF_TIP' && !it.staffId) {
@@ -137,27 +137,46 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const item = await prisma.$transaction(async (tx) => {
+  let item
+  try {
+    item = await prisma.$transaction(async (tx) => {
     const saved = existing
       ? await tx.cashRecon.update({ where: { id: existing.id }, data })
       : await tx.cashRecon.create({ data })
-    // Replace the day's excess items wholesale with what was just submitted.
-    await tx.cashReconExcess.deleteMany({ where: { cashReconId: saved.id } })
-    if (excessItems.length > 0) {
-      await tx.cashReconExcess.createMany({
-        data: excessItems.map((it) => ({
-          cashReconId: saved.id,
-          amount: it.amount,
-          reason: it.reason,
-          staffId: it.staffId,
-          staffName: staffName(it.staffId),
-          personId: it.personId,
-          personName: personName(it.personId),
-        })),
-      })
+
+    // Sync the day's excess items with what was just submitted, but preserve
+    // paidAmount on rows that already have a settlement recorded (Excess Recon) —
+    // a wholesale delete+recreate would silently wipe recorded payments.
+    const priorItems = existing ? await tx.cashReconExcess.findMany({ where: { cashReconId: saved.id } }) : []
+    const incomingIds = new Set(excessItems.filter((it) => it.id).map((it) => it.id as string))
+    const toRemove = priorItems.filter((p) => !incomingIds.has(p.id))
+    const blockedRemoval = toRemove.find((p) => p.paidAmount > 0)
+    if (blockedRemoval) {
+      throw new Error(`Cannot remove an excess item that already has ${blockedRemoval.paidAmount} settled — clear its payments in Excess Recon first`)
+    }
+    if (toRemove.length > 0) {
+      await tx.cashReconExcess.deleteMany({ where: { id: { in: toRemove.map((p) => p.id) } } })
+    }
+    for (const it of excessItems) {
+      const fields = {
+        amount: it.amount,
+        reason: it.reason,
+        staffId: it.staffId,
+        staffName: staffName(it.staffId),
+        personId: it.personId,
+        personName: personName(it.personId),
+      }
+      if (it.id && priorItems.some((p) => p.id === it.id)) {
+        await tx.cashReconExcess.update({ where: { id: it.id }, data: fields })
+      } else {
+        await tx.cashReconExcess.create({ data: { cashReconId: saved.id, ...fields } })
+      }
     }
     return saved
-  })
+    })
+  } catch (err: unknown) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Error saving cash reconciliation' }, { status: 400 })
+  }
 
   await prisma.auditLog.create({
     data: { userId: user.userId, action: existing ? 'UPDATE' : 'CREATE', entity: 'CashRecon', entityId: item.id, details: `Deposited ${deposited}${excess > 0 ? `, excess ${excess} (${excessItems.length} item${excessItems.length === 1 ? '' : 's'})` : ''}, closing ${closing}` },

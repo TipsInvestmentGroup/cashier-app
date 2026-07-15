@@ -1,4 +1,5 @@
 import { roundMoney } from './utils'
+import { syncCollectionExcessAmount } from './collection-excess'
 
 // Loose type — works with both the prisma singleton and a transaction client,
 // and avoids depending on generated Prisma types (regenerated on deploy).
@@ -30,6 +31,10 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
 
   const voucher = `SL-${collectionId}`
   const sl = await db.signedBill.findUnique({ where: { voucherNumber: voucher } })
+
+  // Keep any existing excess record's amount in sync (never auto-creates one —
+  // that requires a cashier-selected reason). See lib/collection-excess.ts.
+  await syncCollectionExcessAmount(db, collectionId, shortfall < 0 ? Math.abs(shortfall) : 0)
 
   if (c.staffName && shortfall > 0) {
     const person = await db.person.findFirst({ where: { name: c.staffName, type: 'STAFF_LOSS' } })

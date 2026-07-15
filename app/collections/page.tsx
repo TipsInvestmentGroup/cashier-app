@@ -14,6 +14,7 @@ import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
 import { channelAmountsFor, digitalTotal, sumChannelAmounts } from '@/lib/collection-channels-shared'
 import { findBestPersonMatch } from '@/lib/nameMatch'
+import { EXCESS_REASONS } from '@/lib/excess-reasons'
 import toast from 'react-hot-toast'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns'
 
@@ -63,6 +64,10 @@ export default function CollectionsPage() {
   const [linkOpenIdx, setLinkOpenIdx] = useState<number | null>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [cancelRows, setCancelRows] = useState<{ reason: string; productId: string; productName: string; sellingPrice: number; quantity: string }[]>([])
+  const [excessReason, setExcessReason] = useState('')
+  const [excessStaffId, setExcessStaffId] = useState('')
+  const [excessPersonId, setExcessPersonId] = useState('')
+  const [staffPickList, setStaffPickList] = useState<{ id: string; name: string }[]>([])
   const [allPersons, setAllPersons] = useState<Person[]>([])
   const [categories, setCategories] = useState<NamedCode[]>([])
   const [channels, setChannels] = useState<NamedCode[]>([])
@@ -122,7 +127,7 @@ export default function CollectionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [cols, outs, persons, prods, sbs, cats, chs, reasons, closures] = await Promise.all([
+    const [cols, outs, persons, prods, sbs, cats, chs, reasons, closures, staffPick] = await Promise.all([
       request('/api/collections'),
       request('/api/outlets'),
       request('/api/persons'),
@@ -132,6 +137,7 @@ export default function CollectionsPage() {
       request('/api/payment-channels'),
       request('/api/cancellation-reasons'),
       request('/api/collections/close-day').catch(() => ({ closedDays: [] })),
+      request('/api/staff-list').catch(() => []),
     ])
     setCollections(cols)
     setClosedDays(closures?.closedDays || [])
@@ -141,6 +147,7 @@ export default function CollectionsPage() {
     setCategories(cats || [])
     setCancelReasons(reasons || [])
     setChannels(chs || [])
+    setStaffPickList(staffPick || [])
     const all: Person[] = persons || []
     setAllPersons(all)
     setStaff(all.filter((p) => p.type === 'STAFF_LOSS').sort((a, b) => a.name.localeCompare(b.name)))
@@ -198,6 +205,11 @@ export default function CollectionsPage() {
     e.preventDefault()
     if (total === 0) return toast.error('Enter at least one amount')
     if (!reconciled) return toast.error('Record signed bills & payments, or tick "No other bills" to confirm none.')
+    if (!editingId && lossPreview < 0) {
+      if (!excessReason) return toast.error('Select a reason for the excess amount collected')
+      if (excessReason === 'STAFF_TIP' && !excessStaffId) return toast.error('Select the staff name for the excess amount collected')
+      if (excessReason === 'CUSTOMER_EXCESS' && !excessPersonId) return toast.error('Select the customer name for the excess amount collected')
+    }
     setSubmitting(true)
     try {
       const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount), personId: r.personId, confirmedNew: r.confirmedNew }))
@@ -206,17 +218,23 @@ export default function CollectionsPage() {
         reason: r.reason, productId: r.productId || undefined, productName: r.productName,
         sellingPrice: r.sellingPrice, quantity: Number(r.quantity), amount: r.sellingPrice * (Number(r.quantity) || 0),
       }))
-      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, channelAmounts: channelAmountsNum, signedBills, paidBills, cancellations })
+      const excessFields = !editingId && lossPreview < 0
+        ? { excessReason, ...(excessReason === 'STAFF_TIP' ? { excessStaffId } : {}), ...(excessReason === 'CUSTOMER_EXCESS' ? { excessPersonId } : {}) }
+        : {}
+      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, channelAmounts: channelAmountsNum, signedBills, paidBills, cancellations, ...excessFields })
       const res = editingId
         ? await request(`/api/collections/${editingId}`, { method: 'PUT', body: payload })
         : await request('/api/collections', { method: 'POST', body: payload })
       if (res?.staffLoss) {
         toast.success(`Saved. Staff loss of ${formatCurrency(res.staffLoss.amount)} for ${res.staffLoss.staffName} → Payroll Deductions.`, { duration: 6000 })
+      } else if (res?.excess) {
+        toast.success(`Saved. Excess of ${formatCurrency(res.excess.amount)} recorded → Excess Recon.`, { duration: 6000 })
       } else {
         toast.success(editingId ? 'Collection updated!' : 'Collection saved — balanced, no loss.')
       }
       setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
       setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
+      setExcessReason(''); setExcessStaffId(''); setExcessPersonId('')
       setEditingId(null)
       setShowForm(false)
       load()
@@ -259,6 +277,7 @@ export default function CollectionsPage() {
     setEditingId(null)
     setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
     setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
+    setExcessReason(''); setExcessStaffId(''); setExcessPersonId('')
     setShowForm((s) => !s)
   }
 
@@ -761,6 +780,32 @@ export default function CollectionsPage() {
                     <p className="text-xs text-amber-600 mt-1">
                       Cancellations {formatCurrency(cancelTotalForm)} are pending — they will reduce this staff loss once approved.
                     </p>
+                  )}
+                </div>
+              )}
+
+              {/* Excess reason (required when the collection overage is negative-loss) */}
+              {!editingId && lossPreview < 0 && (
+                <div className="border-2 border-amber-100 bg-amber-50/40 rounded-xl p-4 space-y-2">
+                  <label className="block text-sm font-semibold text-gray-700">Excess Reason *</label>
+                  <select value={excessReason} onChange={(e) => { setExcessReason(e.target.value); setExcessStaffId(''); setExcessPersonId('') }}
+                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                    <option value="">Select a reason…</option>
+                    {EXCESS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                  {excessReason === 'STAFF_TIP' && (
+                    <select value={excessStaffId} onChange={(e) => setExcessStaffId(e.target.value)}
+                      className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">Select staff…</option>
+                      {staffPickList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  )}
+                  {excessReason === 'CUSTOMER_EXCESS' && (
+                    <select value={excessPersonId} onChange={(e) => setExcessPersonId(e.target.value)}
+                      className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">Select customer…</option>
+                      {allPersons.filter((p) => p.type === 'CUSTOMER').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
                   )}
                 </div>
               )}
