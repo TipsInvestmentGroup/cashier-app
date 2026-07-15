@@ -69,8 +69,9 @@ export default function SignedBillsPage() {
   const hasItems = itemRows.some((r) => r.productName && Number(r.quantity) > 0)
   const BILL_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: TYPE_COLOR[c.code] || 'bg-gray-600' }))
   const typeLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
-  // Edit/delete visibility: superuser always, cashier + r.mlay while the day allows it (server has final say).
-  const canManageBills = user?.email === 'johnonecmo@gmail.com' || user?.role === 'CASHIER' || user?.email === 'r.mlay@tips.co.tz'
+  // Edit/delete visibility: superuser always, cashier while the day allows it (server has final say).
+  // r.mlay@tips.co.tz explicitly blocked regardless of role.
+  const canManageBills = user?.email !== 'r.mlay@tips.co.tz' && (user?.email === 'johnonecmo@gmail.com' || user?.role === 'CASHIER')
 
   const load = useCallback(async () => {
     setLoading(true)

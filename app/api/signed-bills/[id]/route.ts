@@ -2,28 +2,28 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, JWTPayload } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
-import { startOfDay, endOfDay, addDays } from 'date-fns'
+import { startOfDay } from 'date-fns'
 
 // Prisma client types for DayClosure are generated on deploy; assert to avoid local type drift.
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
 
 const SUPERUSER_EMAIL = 'johnonecmo@gmail.com'
-const EXTENDED_WINDOW_EMAIL = 'r.mlay@tips.co.tz'
+const BLOCKED_EMAILS = ['r.mlay@tips.co.tz']
 
 /** Access policy for editing/deleting a Signed Bill:
  *  - johnonecmo@gmail.com: full access, always.
  *  - Cashier: only while the bill's business day is still open (not closed) for its outlet,
  *    and only for their own outlet.
- *  - r.mlay@tips.co.tz: same as cashier, plus a 1-day grace period after the day closes.
+ *  - BLOCKED_EMAILS: explicitly denied regardless of role.
  *  - Everyone else: no access. */
 async function checkAccess(user: JWTPayload, bill: { outletId: string; date: Date }): Promise<string | null> {
   if (user.email === SUPERUSER_EMAIL) return null
+  if (BLOCKED_EMAILS.includes((user.email || '').toLowerCase())) return 'You are not authorized to edit or delete signed bills'
 
   const isCashier = user.role === 'CASHIER'
-  const isExtended = user.email === EXTENDED_WINDOW_EMAIL
-  if (!isCashier && !isExtended) return 'You are not authorized to edit or delete signed bills'
+  if (!isCashier) return 'You are not authorized to edit or delete signed bills'
 
-  if (isCashier && user.outletId && bill.outletId !== user.outletId) {
+  if (user.outletId && bill.outletId !== user.outletId) {
     return 'You can only edit or delete bills from your own outlet'
   }
 
@@ -32,12 +32,6 @@ async function checkAccess(user: JWTPayload, bill: { outletId: string; date: Dat
     select: { date: true },
   })
   if (!closure) return null // day still open — everyone in this bracket may act
-
-  if (isExtended) {
-    const graceEnd = endOfDay(addDays(startOfDay(closure.date), 1))
-    if (new Date() <= graceEnd) return null
-    return 'The 1-day edit window after closing has expired'
-  }
 
   return 'This day has been closed. Ask a supervisor to reopen it before editing or deleting.'
 }
