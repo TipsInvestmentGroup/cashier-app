@@ -3,12 +3,15 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
 import { findDuplicatePersonByName } from '@/lib/persons-dedupe'
+import { hasPermission, RESOURCES } from '@/lib/rbac'
 
-/** Edit a person — owner / r.mlay / owner-chosen manager only. */
+/** Edit a person — owner / r.mlay / owner-chosen manager / RBAC-granted user. */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!(await canManagePersons(user.email))) return NextResponse.json({ error: 'You are not authorized to edit persons' }, { status: 403 })
+  if (!(await canManagePersons(user.email)) && !(await hasPermission(user.email, user.userId, RESOURCES.PERSONS, 'edit'))) {
+    return NextResponse.json({ error: 'You are not authorized to edit persons' }, { status: 403 })
+  }
 
   const { id } = await params
   const body = await req.json()
@@ -40,7 +43,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!(await canManagePersons(user.email))) return NextResponse.json({ error: 'You are not authorized to delete persons' }, { status: 403 })
+  if (!(await canManagePersons(user.email)) && !(await hasPermission(user.email, user.userId, RESOURCES.PERSONS, 'delete'))) {
+    return NextResponse.json({ error: 'You are not authorized to delete persons' }, { status: 403 })
+  }
 
   const { id } = await params
   const [signed, paid] = await Promise.all([

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { hasPermission, RESOURCES } from '@/lib/rbac'
 
 const MANAGERS = ['ADMIN', 'ACCOUNTANT', 'MANAGER']
 const UNITS = ['unit', 'kg', 'crate 24 bottle', 'crate 25 bottle', 'crate 6 bottle']
@@ -30,7 +31,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!MANAGERS.includes(user.role)) return NextResponse.json({ error: 'You are not authorized to add products' }, { status: 403 })
+  if (!MANAGERS.includes(user.role) && !(await hasPermission(user.email, user.userId, RESOURCES.PRODUCTS, 'add'))) {
+    return NextResponse.json({ error: 'You are not authorized to add products' }, { status: 403 })
+  }
 
   const body = await req.json().catch(() => ({}))
   const { name, buyingPrice, sellingPrice, unitMeasure, code } = body

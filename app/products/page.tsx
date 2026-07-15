@@ -10,6 +10,8 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
 import { MoneyInput } from '@/components/MoneyInput'
+import { ManageAccessModal } from '@/components/ManageAccessModal'
+import { ShieldCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface Product {
@@ -31,14 +33,22 @@ export default function ProductsPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({ ...INIT })
+  const [perms, setPerms] = useState({ canAdd: false, canEdit: false, canDelete: false })
+  const [accessOpen, setAccessOpen] = useState(false)
 
-  const canManage = ['ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(user?.role || '')
+  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const roleManager = ['ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(user?.role || '')
+  const canAdd = roleManager || perms.canAdd
+  const canEdit = roleManager || perms.canEdit
+  const canDelete = roleManager || perms.canDelete
+  const canManage = canAdd || canEdit || canDelete
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const its = await request('/api/products')
+      const [its, me] = await Promise.all([request('/api/products'), request('/api/permissions/me')])
       setItems(its || [])
+      setPerms({ canAdd: !!me?.PRODUCTS?.canAdd, canEdit: !!me?.PRODUCTS?.canEdit, canDelete: !!me?.PRODUCTS?.canDelete })
     } finally { setLoading(false) }
   }, [request])
 
@@ -94,12 +104,20 @@ export default function ProductsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Products</h1>
             <p className="text-gray-500 text-sm">Catalogue with codes, prices and unit measures</p>
           </div>
-          {canManage && (
-            <Button onClick={openNew} size="lg">➕ Create Product</Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canAdd && (
+              <Button onClick={openNew} size="lg">➕ Create Product</Button>
+            )}
+            {isOwner && (
+              <button onClick={() => setAccessOpen(true)} title="Manage Access (Add/Edit/Delete)"
+                className="p-3 bg-white border-2 border-gray-200 text-gray-600 rounded-xl hover:border-gray-300 transition">
+                <ShieldCheck className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
 
-        {showForm && canManage && (
+        {showForm && (canAdd || canEdit) && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">{editingId ? 'Edit Product' : 'New Product'}</h2>
             <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -176,9 +194,9 @@ export default function ProductsPage() {
                       </td>
                       {canManage && (
                         <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <button onClick={() => openEdit(p)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>
-                          <button onClick={() => toggleActive(p)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-50 text-gray-600 hover:bg-gray-100 mr-1">{p.isActive ? 'Disable' : 'Enable'}</button>
-                          <button onClick={() => remove(p)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>
+                          {canEdit && <button onClick={() => openEdit(p)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>}
+                          {canEdit && <button onClick={() => toggleActive(p)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-50 text-gray-600 hover:bg-gray-100 mr-1">{p.isActive ? 'Disable' : 'Enable'}</button>}
+                          {canDelete && <button onClick={() => remove(p)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>}
                         </td>
                       )}
                     </tr>
@@ -192,6 +210,11 @@ export default function ProductsPage() {
           )}
         </div>
       </div>
+
+      {isOwner && (
+        <ManageAccessModal open={accessOpen} onClose={() => setAccessOpen(false)} resource="PRODUCTS"
+          resourceLabel="Products" actions={['add', 'edit', 'delete']} request={request} />
+      )}
     </AppShell>
   )
 }

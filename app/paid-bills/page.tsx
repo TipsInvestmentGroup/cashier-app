@@ -13,10 +13,14 @@ import { SearchBox } from '@/components/SearchBox'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
+import { Modal } from '@/components/ui/Modal'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { ManageAccessModal } from '@/components/ManageAccessModal'
+import { Pencil, Trash2, ShieldCheck } from 'lucide-react'
 
 interface PaidBill {
   id: string; date: string; payerName: string; payerCategory?: string; amountPaid: number; paymentMethod: string
-  outlet: { name: string }; cashier: { name: string }; notes?: string; billRef?: string
+  outlet: { id: string; name: string }; cashier: { name: string }; notes?: string; billRef?: string
   signedBill?: { id: string; voucherNumber: string; amount: number; personName: string; date?: string; billType?: string }
 }
 interface Story {
@@ -40,6 +44,7 @@ const METHOD_COLOR: Record<string, string> = {
 export default function PaidBillsPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const confirm = useConfirm()
   const [paidBills, setPaidBills] = useState<PaidBill[]>([])
   const [signedBills, setSignedBills] = useState<SignedBill[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
@@ -65,6 +70,12 @@ export default function PaidBillsPage() {
   })
   const [categories, setCategories] = useState<Category[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
+  const [perms, setPerms] = useState({ canEdit: false, canDelete: false })
+  const [accessOpen, setAccessOpen] = useState(false)
+  const [editingBill, setEditingBill] = useState<PaidBill | null>(null)
+  const [editForm, setEditForm] = useState({ date: '', payerName: '', amountPaid: '', paymentMethod: 'CASH', notes: '', billRef: '', outletId: '' })
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const PAY_CATEGORIES = categories.filter((c) => c.isActive).map((c) => ({ label: c.label, type: c.code }))
   const PAYMENT_METHODS = channels.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: METHOD_COLOR[c.code] || 'bg-gray-100 text-gray-700' }))
     .concat([{ value: 'PAYROLL', label: 'Payroll', color: METHOD_COLOR.PAYROLL }])
@@ -72,13 +83,14 @@ export default function PaidBillsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [pb, sb, o, ps, cats, chs] = await Promise.all([
+    const [pb, sb, o, ps, cats, chs, me] = await Promise.all([
       request('/api/paid-bills'),
       request('/api/signed-bills?status=UNPAID'),
       request('/api/outlets'),
       request('/api/persons'),
       request('/api/person-categories'),
       request('/api/payment-channels'),
+      request('/api/permissions/me'),
     ])
     setPaidBills(pb)
     setSignedBills(sb.filter((b: SignedBill) => b.status !== 'PAID'))
@@ -86,6 +98,7 @@ export default function PaidBillsPage() {
     setPersons(ps || [])
     setCategories(cats || [])
     setChannels(chs || [])
+    setPerms({ canEdit: !!me?.PAID_BILLS?.canEdit, canDelete: !!me?.PAID_BILLS?.canDelete })
     if (o.length && !form.outletId) setForm((f) => ({ ...f, outletId: user?.outlet?.id || o[0].id }))
     setLoading(false)
   }, [request, user])
@@ -154,6 +167,48 @@ export default function PaidBillsPage() {
     }
   }
 
+  const openEdit = (p: PaidBill) => {
+    setEditForm({
+      date: format(new Date(p.date), 'yyyy-MM-dd'), payerName: p.payerName, amountPaid: String(p.amountPaid),
+      paymentMethod: p.paymentMethod, notes: p.notes || '', billRef: p.billRef || '', outletId: p.outlet.id,
+    })
+    setEditingBill(p)
+  }
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingBill) return
+    if (!editForm.payerName) return toast.error('Payer name required')
+    const amt = Number(editForm.amountPaid)
+    if (!amt || amt <= 0) return toast.error('Amount must be > 0')
+    setEditSubmitting(true)
+    try {
+      await request(`/api/paid-bills/${editingBill.id}`, { method: 'PUT', body: JSON.stringify({ ...editForm, amountPaid: amt }) })
+      toast.success('Payment updated')
+      setEditingBill(null)
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error updating payment')
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
+  const deletePayment = async (p: PaidBill) => {
+    if (!(await confirm({
+      title: 'Delete payment',
+      message: `Delete the payment of ${formatCurrency(p.amountPaid)} from ${p.payerName}? This cannot be undone.`,
+      danger: true, confirmLabel: 'Delete',
+    }))) return
+    try {
+      await request(`/api/paid-bills/${p.id}`, { method: 'DELETE' })
+      toast.success('Payment deleted')
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error deleting payment')
+    }
+  }
+
   const openStory = async (p: PaidBill) => {
     setStoryOpen(true); setStory(null); setCreditOnly(null)
     if (p.signedBill?.id) {
@@ -183,10 +238,18 @@ export default function PaidBillsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Paid Bills</h1>
             <p className="text-gray-500 text-sm">Record bill payments and debt recoveries</p>
           </div>
-          <button onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-5 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition shadow">
-            <span className="text-lg">+</span> Record Payment
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowForm(!showForm)}
+              className="flex items-center gap-2 px-5 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition shadow">
+              <span className="text-lg">+</span> Record Payment
+            </button>
+            {isOwner && (
+              <button onClick={() => setAccessOpen(true)} title="Manage Edit/Delete Access (Paid Bills)"
+                className="p-3 bg-white border-2 border-gray-200 text-gray-600 rounded-xl hover:border-gray-300 transition">
+                <ShieldCheck className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Search */}
@@ -373,6 +436,7 @@ export default function PaidBillsPage() {
                     <th className="px-4 py-3 font-semibold">Method</th>
                     <th className="px-4 py-3 font-semibold">Outlet</th>
                     <th className="px-4 py-3 font-semibold">By</th>
+                    {(perms.canEdit || perms.canDelete) && <th className="px-4 py-3 font-semibold text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -398,11 +462,27 @@ export default function PaidBillsPage() {
                         </td>
                         <td className="px-4 py-3 text-gray-500">{p.outlet.name}</td>
                         <td className="px-4 py-3 text-gray-500">{p.cashier.name}</td>
+                        {(perms.canEdit || perms.canDelete) && (
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                              {perms.canEdit && (
+                                <button onClick={() => openEdit(p)} title="Edit payment" className="text-gray-400 hover:text-indigo-600">
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                              )}
+                              {perms.canDelete && (
+                                <button onClick={() => deletePayment(p)} title="Delete payment" className="text-gray-400 hover:text-red-600">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={9}><EmptyState icon="✅" title="No payments in this period" hint="Recorded debt payments will appear here." /></td></tr>
+                    <tr><td colSpan={(perms.canEdit || perms.canDelete) ? 10 : 9}><EmptyState icon="✅" title="No payments in this period" hint="Recorded debt payments will appear here." /></td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
@@ -410,7 +490,7 @@ export default function PaidBillsPage() {
                     <tr className="font-bold text-gray-900">
                       <td className="px-4 py-3" colSpan={5}>TOTAL ({filtered.length})</td>
                       <td className="px-4 py-3 text-green-700">{formatCurrency(totalReceived)}</td>
-                      <td className="px-4 py-3" colSpan={3}></td>
+                      <td className="px-4 py-3" colSpan={(perms.canEdit || perms.canDelete) ? 4 : 3}></td>
                     </tr>
                   </tfoot>
                 )}
@@ -501,6 +581,70 @@ export default function PaidBillsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      <Modal open={!!editingBill} onClose={() => setEditingBill(null)} title="Edit Payment">
+        <form onSubmit={handleEditSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Payer Name *</label>
+            <input type="text" value={editForm.payerName}
+              onChange={(e) => setEditForm({ ...editForm, payerName: e.target.value })}
+              className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" required />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
+              <input type="date" value={editForm.date} onChange={(e) => setEditForm({ ...editForm, date: e.target.value })}
+                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Amount Paid (TZS) *</label>
+              <MoneyInput value={editForm.amountPaid} onChange={(v) => setEditForm({ ...editForm, amountPaid: v })}
+                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Method</label>
+              <select value={editForm.paymentMethod} onChange={(e) => setEditForm({ ...editForm, paymentMethod: e.target.value })}
+                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                {PAYMENT_METHODS.map((pm) => <option key={pm.value} value={pm.value}>{pm.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet</label>
+              <select value={editForm.outletId} onChange={(e) => setEditForm({ ...editForm, outletId: e.target.value })}
+                className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Bill Reference</label>
+            <input type="text" value={editForm.billRef} onChange={(e) => setEditForm({ ...editForm, billRef: e.target.value })}
+              className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Notes</label>
+            <textarea value={editForm.notes} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+              className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" rows={2} />
+          </div>
+          <div className="flex gap-3">
+            <button type="submit" disabled={editSubmitting}
+              className="flex-1 py-2.5 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition disabled:opacity-60">
+              {editSubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button type="button" onClick={() => setEditingBill(null)}
+              className="px-6 py-2.5 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {isOwner && (
+        <ManageAccessModal open={accessOpen} onClose={() => setAccessOpen(false)} resource="PAID_BILLS"
+          resourceLabel="Paid Bills" actions={['edit', 'delete']} request={request} />
       )}
     </AppShell>
   )

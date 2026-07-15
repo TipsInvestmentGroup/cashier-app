@@ -16,7 +16,8 @@ import { SearchBox } from '@/components/SearchBox'
 import { MoneyInput } from '@/components/MoneyInput'
 import { PaymentStoryModal } from '@/components/PaymentStoryModal'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Trash2, ShieldCheck } from 'lucide-react'
+import { ManageAccessModal } from '@/components/ManageAccessModal'
 
 interface Bill {
   id: string; voucherNumber: string; date: string; billType: string; personName: string
@@ -65,28 +66,34 @@ export default function SignedBillsPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [itemRows, setItemRows] = useState<ItemRow[]>([])
+  const [perms, setPerms] = useState<{ canEdit: boolean; canDelete: boolean }>({ canEdit: false, canDelete: false })
+  const [accessOpen, setAccessOpen] = useState(false)
   const itemsTotal = itemRows.reduce((s, r) => s + r.unitPrice * (Number(r.quantity) || 0), 0)
   const hasItems = itemRows.some((r) => r.productName && Number(r.quantity) > 0)
   const BILL_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: TYPE_COLOR[c.code] || 'bg-gray-600' }))
   const typeLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
-  // Edit/delete visibility: superuser always, cashier while the day allows it (server has final say).
-  // r.mlay@tips.co.tz explicitly blocked regardless of role.
-  const canManageBills = user?.email !== 'r.mlay@tips.co.tz' && (user?.email === 'johnonecmo@gmail.com' || user?.role === 'CASHIER')
+  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  // Edit/delete visibility: superuser always, cashier while the day allows it (server has final say),
+  // or an account explicitly granted access via Manage Access. r.mlay@tips.co.tz explicitly blocked otherwise.
+  const canManageBills = (user?.email !== 'r.mlay@tips.co.tz' && (user?.email === 'johnonecmo@gmail.com' || user?.role === 'CASHIER'))
+    || perms.canEdit || perms.canDelete
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [b, o, p, cats, prods] = await Promise.all([
+    const [b, o, p, cats, prods, me] = await Promise.all([
       request('/api/signed-bills'),
       request('/api/outlets'),
       request('/api/persons'),
       request('/api/person-categories'),
       request('/api/products'),
+      request('/api/permissions/me'),
     ])
     setBills(b)
     setOutlets(o)
     setPersons(p)
     setCategories(cats || [])
     setProducts((prods || []).filter((x: Product) => x.isActive))
+    setPerms({ canEdit: !!me?.SIGNED_BILLS?.canEdit, canDelete: !!me?.SIGNED_BILLS?.canDelete })
     if (o.length && !form.outletId) setForm((f) => ({ ...f, outletId: user?.outlet?.id || o[0].id }))
     setLoading(false)
   }, [request, user])
@@ -199,10 +206,18 @@ export default function SignedBillsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Signed Bills</h1>
             <p className="text-gray-500 text-sm">Record unpaid/credit sales vouchers</p>
           </div>
-          <button onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
-            <span className="text-lg">+</span> New Bill
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowForm(!showForm)}
+              className="flex items-center gap-2 px-5 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 transition shadow">
+              <span className="text-lg">+</span> New Bill
+            </button>
+            {isOwner && (
+              <button onClick={() => setAccessOpen(true)} title="Manage Edit/Delete Access (Signed Bills)"
+                className="p-3 bg-white border-2 border-gray-200 text-gray-600 rounded-xl hover:border-gray-300 transition">
+                <ShieldCheck className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {limitWarning?.exceeded && (
@@ -519,6 +534,11 @@ export default function SignedBillsPage() {
       </Modal>
 
       <PaymentStoryModal billId={storyBillId} request={request} onClose={() => setStoryBillId(null)} />
+
+      {isOwner && (
+        <ManageAccessModal open={accessOpen} onClose={() => setAccessOpen(false)} resource="SIGNED_BILLS"
+          resourceLabel="Signed Bills" actions={['edit', 'delete']} request={request} />
+      )}
     </AppShell>
   )
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { findDuplicatePersonByName } from '@/lib/persons-dedupe'
+import { hasPermission, RESOURCES } from '@/lib/rbac'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!['ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(user.role)) {
+  if (!['ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(user.role) && !(await hasPermission(user.email, user.userId, RESOURCES.PERSONS, 'add'))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

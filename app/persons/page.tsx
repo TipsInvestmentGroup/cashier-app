@@ -9,6 +9,8 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
+import { ManageAccessModal } from '@/components/ManageAccessModal'
+import { ShieldCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface Person {
@@ -32,6 +34,8 @@ export default function PersonsPage() {
   const [form, setForm] = useState({ name: '', phone: '', email: '', type: 'CUSTOMER', creditLimit: '0', isActive: true })
   const [managerEmail, setManagerEmail] = useState('')
   const [accessOpen, setAccessOpen] = useState(false)
+  const [rbacAccessOpen, setRbacAccessOpen] = useState(false)
+  const [perms, setPerms] = useState({ canAdd: false, canEdit: false, canDelete: false })
   const [allUsers, setAllUsers] = useState<{ id: string; name: string; email: string }[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [mergeOpen, setMergeOpen] = useState(false)
@@ -52,20 +56,23 @@ export default function PersonsPage() {
   const FIXED_MANAGER = 'r.mlay@tips.co.tz'
   const myEmail = (user?.email || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && myEmail === OWNER_EMAIL
-  const canEditDelete = !!myEmail && [OWNER_EMAIL, FIXED_MANAGER.toLowerCase(), managerEmail].filter(Boolean).includes(myEmail)
+  const canEditDelete = (!!myEmail && [OWNER_EMAIL, FIXED_MANAGER.toLowerCase(), managerEmail].filter(Boolean).includes(myEmail)) || perms.canEdit || perms.canDelete
 
   const q = search.trim().toLowerCase()
   const filtered = persons.filter((p) => !q || `${p.name} ${p.phone || ''} ${p.email || ''}`.toLowerCase().includes(q))
 
-  const canManage = ['ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(user?.role || '')
+  const canManage = ['ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(user?.role || '') || perms.canAdd
 
   const load = useCallback(async () => {
     setLoading(true)
     const params = filterType ? `?type=${filterType}` : ''
-    const [data, access, cats] = await Promise.all([request(`/api/persons${params}`), request('/api/persons-access'), request('/api/person-categories')])
+    const [data, access, cats, me] = await Promise.all([
+      request(`/api/persons${params}`), request('/api/persons-access'), request('/api/person-categories'), request('/api/permissions/me'),
+    ])
     setPersons(data)
     setManagerEmail((access?.managerEmail || '').toLowerCase())
     setCategories(cats || [])
+    setPerms({ canAdd: !!me?.PERSONS?.canAdd, canEdit: !!me?.PERSONS?.canEdit, canDelete: !!me?.PERSONS?.canDelete })
     setLoading(false)
   }, [request, filterType])
 
@@ -215,6 +222,12 @@ export default function PersonsPage() {
               <button onClick={() => setAccessOpen(true)}
                 className="px-4 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:border-gray-300 transition">
                 🔐 Manage Access
+              </button>
+            )}
+            {isOwner && (
+              <button onClick={() => setRbacAccessOpen(true)} title="Manage Access (Add/Edit/Delete)"
+                className="p-3 bg-white border-2 border-gray-200 text-gray-600 rounded-xl hover:border-gray-300 transition">
+                <ShieldCheck className="w-5 h-5" />
               </button>
             )}
             {canEditDelete && (
@@ -472,6 +485,11 @@ export default function PersonsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {isOwner && (
+        <ManageAccessModal open={rbacAccessOpen} onClose={() => setRbacAccessOpen(false)} resource="PERSONS"
+          resourceLabel="Persons" actions={['add', 'edit', 'delete']} request={request} />
       )}
     </AppShell>
   )
