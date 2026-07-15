@@ -13,6 +13,7 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
 import { channelAmountsFor, digitalTotal, sumChannelAmounts } from '@/lib/collection-channels-shared'
+import { findBestPersonMatch } from '@/lib/nameMatch'
 import toast from 'react-hot-toast'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns'
 
@@ -56,7 +57,7 @@ export default function CollectionsPage() {
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [staff, setStaff] = useState<Person[]>([])
   const [personNames, setPersonNames] = useState<string[]>([])
-  const [signedRows, setSignedRows] = useState<{ billType: string; name: string; amount: string }[]>([])
+  const [signedRows, setSignedRows] = useState<{ billType: string; name: string; amount: string; personId?: string; confirmedNew?: boolean }[]>([])
   const [paidRows, setPaidRows] = useState<{ category: string; payerName: string; amount: string; paymentMethod: string; signedBillId: string; linkQuery: string; selectedBillIds: string[] }[]>([])
   const [signedBillsList, setSignedBillsList] = useState<SignedBill[]>([])
   const [linkOpenIdx, setLinkOpenIdx] = useState<number | null>(null)
@@ -165,13 +166,41 @@ export default function CollectionsPage() {
     setPaidRows(n); setLinkOpenIdx(null)
   }
 
+  // Intelligent customer-name matching for a Signed Bill row: exact match links
+  // silently; a similar (near-duplicate) name asks the cashier to confirm before
+  // reusing the existing Person; no match at all is auto-created on save.
+  const resolveSignedName = async (i: number) => {
+    const row = signedRows[i]
+    const name = row.name.trim()
+    if (!name) return
+    const candidates = allPersons.filter((p) => p.type === row.billType)
+    const result = findBestPersonMatch(name, candidates)
+    if (result.kind === 'exact') {
+      setSignedRows((rows) => rows.map((r, idx) => idx === i ? { ...r, personId: result.match.id, confirmedNew: false } : r))
+      return
+    }
+    if (result.kind === 'similar') {
+      const same = await confirm({
+        title: 'Possible existing customer',
+        message: `A similar name "${result.match.name}" already exists. Is "${name}" the same person?`,
+        confirmLabel: 'Yes, same person', cancelLabel: 'No, new person',
+      })
+      setSignedRows((rows) => rows.map((r, idx) => {
+        if (idx !== i || r.name.trim() !== name) return r
+        return same ? { ...r, personId: result.match.id, confirmedNew: false } : { ...r, personId: undefined, confirmedNew: true }
+      }))
+      return
+    }
+    setSignedRows((rows) => rows.map((r, idx) => idx === i ? { ...r, personId: undefined, confirmedNew: true } : r))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (total === 0) return toast.error('Enter at least one amount')
     if (!reconciled) return toast.error('Record signed bills & payments, or tick "No other bills" to confirm none.')
     setSubmitting(true)
     try {
-      const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount) }))
+      const signedBills = signedRows.filter((r) => r.name && Number(r.amount) > 0).map((r) => ({ billType: r.billType, name: r.name, amount: Number(r.amount), personId: r.personId, confirmedNew: r.confirmedNew }))
       const paidBills = paidRows.filter((r) => r.payerName && Number(r.amount) > 0).map((r) => ({ payerName: r.payerName, amount: Number(r.amount), paymentMethod: r.paymentMethod, category: r.category, categoryBillType: labelToCode(r.category), signedBillId: r.signedBillId || undefined, selectedBillIds: r.selectedBillIds }))
       const cancellations = cancelRows.filter((r) => r.productName && Number(r.quantity) > 0).map((r) => ({
         reason: r.reason, productId: r.productId || undefined, productName: r.productName,
@@ -622,12 +651,14 @@ export default function CollectionsPage() {
                     {signedRows.length === 0 && <p className="text-xs text-gray-400">Add credit sales this staff served: Admin / Director / Tips / DJ / Customer / Staff Loss.</p>}
                     {signedRows.map((r, i) => (
                       <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
-                        <select value={r.billType} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, billType: e.target.value }; setSignedRows(n) }}
+                        <select value={r.billType} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, billType: e.target.value, personId: undefined, confirmedNew: false }; setSignedRows(n) }}
                           className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
                           {SIGNED_TYPE_OPTS.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
                         </select>
-                        <input list={`persons-${r.billType}`} placeholder="Name" value={r.name} onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, name: e.target.value }; setSignedRows(n) }}
-                          className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+                        <input list={`persons-${r.billType}`} placeholder="Name" value={r.name}
+                          onChange={(e) => { const n = [...signedRows]; n[i] = { ...r, name: e.target.value, personId: undefined, confirmedNew: false }; setSignedRows(n) }}
+                          onBlur={() => resolveSignedName(i)}
+                          className={`col-span-5 px-2 py-2 border-2 rounded-lg text-sm ${r.personId ? 'border-indigo-300 bg-indigo-50/40' : 'border-gray-200'}`} />
                         <MoneyInput placeholder="Amount" value={r.amount} onChange={(v) => { const n = [...signedRows]; n[i] = { ...r, amount: v }; setSignedRows(n) }}
                           className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
                         <button type="button" onClick={() => setSignedRows(signedRows.filter((_, x) => x !== i))} className="col-span-1 text-red-500 hover:text-red-700 font-bold">✕</button>

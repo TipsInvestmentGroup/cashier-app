@@ -4,7 +4,30 @@ import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
+import { findBestPersonMatch } from '@/lib/nameMatch'
 import { startOfDay, endOfDay, format } from 'date-fns'
+
+// Resolve a free-text signed-bill name to a Person: use an explicit personId from
+// the client when given (the cashier already confirmed it in the UI), otherwise
+// fuzzy-match against existing persons of the same type, and auto-create a new
+// Person when nothing matches so the entry is never missing from Accounts Receivable.
+async function resolvePerson(
+  tx: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  name: string, type: string, personId?: string | null, confirmedNew?: boolean
+) {
+  if (personId) {
+    const existing = await tx.person.findUnique({ where: { id: personId } })
+    if (existing) return existing
+  }
+  if (!confirmedNew) {
+    const candidates = await tx.person.findMany({ where: { type }, select: { id: true, name: true } })
+    const result = findBestPersonMatch(name, candidates)
+    if (result.kind === 'exact' || result.kind === 'similar') {
+      return tx.person.findUnique({ where: { id: result.match.id } })
+    }
+  }
+  return tx.person.create({ data: { name, type, isActive: true } })
+}
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -50,7 +73,7 @@ export async function POST(req: NextRequest) {
     : { CRDB: Number(body.crdb) || 0, STANBIC: Number(body.stanbic) || 0, MPESA: Number(body.mpesa) || 0 }
   const discount = roundMoney(Number(body.discount) || 0)
   // Reconciliation inputs entered during the collection flow
-  const signedInput: { billType: string; name: string; amount: number }[] = Array.isArray(body.signedBills) ? body.signedBills : []
+  const signedInput: { billType: string; name: string; amount: number; personId?: string; confirmedNew?: boolean }[] = Array.isArray(body.signedBills) ? body.signedBills : []
   const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; categoryBillType?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
 
@@ -109,7 +132,7 @@ export async function POST(req: NextRequest) {
       const amt = roundMoney(sb.amount)
       const type = String(sb.billType || '').toUpperCase()
       if (amt <= 0 || !type || !sb.name) continue
-      const person = await tx.person.findFirst({ where: { name: sb.name, type } })
+      const person = await resolvePerson(tx, sb.name, type, sb.personId, sb.confirmedNew)
       await tx.signedBill.create({
         data: {
           voucherNumber: `VCH-${collection.id}-${i}`, billType: type, personId: person?.id ?? null, personName: sb.name,
