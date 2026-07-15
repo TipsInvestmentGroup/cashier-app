@@ -16,6 +16,7 @@ interface Person {
 }
 interface Category { code: string; label: string; isActive: boolean }
 interface DupPerson { id: string; name: string; type: string; creditLimit: number; billCount: number }
+interface UnlinkedGroup { personName: string; billType: string; count: number; totalAmount: number }
 
 export default function PersonsPage() {
   const { request } = useApi()
@@ -40,6 +41,9 @@ export default function PersonsPage() {
   const [mergeKeepId, setMergeKeepId] = useState('')
   const [mergeSearch, setMergeSearch] = useState('')
   const [merging, setMerging] = useState(false)
+  const [unlinked, setUnlinked] = useState<UnlinkedGroup[]>([])
+  const [linkChoice, setLinkChoice] = useState<Record<string, string>>({})
+  const [linking, setLinking] = useState<string | null>(null)
   const PERSON_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label }))
   const catLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
   const catColor = (code: string) => BILL_TYPE_COLORS[code] || 'bg-gray-100 text-gray-700'
@@ -122,13 +126,40 @@ export default function PersonsPage() {
   const bestKeepId = (group: DupPerson[]) =>
     [...group].sort((a, b) => b.billCount - a.billCount || b.creditLimit - a.creditLimit)[0]?.id || ''
 
+  const loadDuplicates = async () => {
+    const res = await request('/api/persons/duplicates')
+    setDupAll(res.all || []); setDupGroups(res.groups || []); setUnlinked(res.unlinked || [])
+  }
+
   const openMerge = async () => {
     setMergeOpen(true); setMergeSelected([]); setMergeKeepId(''); setMergeSearch('')
     try {
-      const res = await request('/api/persons/duplicates')
-      setDupAll(res.all || []); setDupGroups(res.groups || [])
+      await loadDuplicates()
     } catch {
       toast.error('Could not load persons for merging')
+    }
+  }
+
+  const doLink = async (g: UnlinkedGroup) => {
+    const key = `${g.personName}|${g.billType}`
+    const personId = linkChoice[key]
+    if (!personId) return toast.error('Choose which person to link these bills to')
+    const person = dupAll.find((p) => p.id === personId)
+    const ok = await confirm({
+      title: 'Link bills',
+      message: `Link ${g.count} unlinked "${g.personName}" bill(s) totaling ${formatCurrency(g.totalAmount)} to "${person?.name}"?`,
+      confirmLabel: 'Link',
+    })
+    if (!ok) return
+    setLinking(key)
+    try {
+      const res = await request('/api/persons/link-bills', { method: 'POST', body: JSON.stringify({ personName: g.personName, billType: g.billType, personId }) })
+      toast.success(`Linked ${res.linked} bill(s) to "${person?.name}"`)
+      load(); loadDuplicates()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error linking bills')
+    } finally {
+      setLinking(null)
     }
   }
 
@@ -162,9 +193,7 @@ export default function PersonsPage() {
       const res = await request('/api/persons/merge', { method: 'POST', body: JSON.stringify({ keepId: mergeKeepId, mergeIds }) })
       toast.success(`Merged! ${res.signedBillsReassigned + res.paidBillsReassigned} bill(s) reassigned to "${keep?.name}"`)
       setMergeSelected([]); setMergeKeepId('')
-      load()
-      const res2 = await request('/api/persons/duplicates')
-      setDupAll(res2.all || []); setDupGroups(res2.groups || [])
+      load(); loadDuplicates()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error merging persons')
     } finally {
@@ -367,6 +396,33 @@ export default function PersonsPage() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {unlinked.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-3">
+                  <p className="text-xs font-semibold text-red-800">🔗 Unlinked bills — saved as free text, not connected to a person record</p>
+                  {unlinked.map((g) => {
+                    const key = `${g.personName}|${g.billType}`
+                    return (
+                      <div key={key} className="text-sm space-y-1.5">
+                        <p className="text-gray-700">
+                          <strong>{g.personName}</strong> <span className="text-gray-400">({g.billType})</span> — {g.count} bill(s), {formatCurrency(g.totalAmount)}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <select value={linkChoice[key] || ''} onChange={(e) => setLinkChoice({ ...linkChoice, [key]: e.target.value })}
+                            className="flex-1 px-2.5 py-1.5 border-2 border-gray-200 rounded-lg text-xs focus:border-indigo-500 focus:outline-none bg-white">
+                            <option value="">Link to which person?</option>
+                            {dupAll.filter((p) => p.type === g.billType).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                          <button onClick={() => doLink(g)} disabled={linking === key}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+                            {linking === key ? 'Linking…' : 'Link'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
 
