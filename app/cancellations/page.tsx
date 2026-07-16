@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, BILLS_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
@@ -29,9 +30,10 @@ const STATUS_STYLE: Record<string, string> = {
   PENDING: 'bg-orange-100 text-orange-700',
 }
 
-export default function CancellationsPage() {
+function CancellationsPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const searchParams = useSearchParams()
   const [items, setItems] = useState<Cancellation[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -76,6 +78,17 @@ export default function CancellationsPage() {
   }
 
   useEffect(() => { load() }, [load])
+
+  // Deep-link from the notification bell: it counts pending requests across
+  // all time, but this page defaults to "This Month" — widen the range so
+  // the pending items the bell counted are actually visible here.
+  useEffect(() => {
+    if (searchParams.get('pending') === '1') {
+      setRange('custom')
+      setCustomFrom('2000-01-01')
+      setStatusFilter('PENDING')
+    }
+  }, [searchParams])
 
   const act = async (id: string, action: 'approve' | 'reject') => {
     try {
@@ -304,5 +317,13 @@ export default function CancellationsPage() {
         </div>
       </div>
     </AppShell>
+  )
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<AppShell><div className="py-12 text-center text-gray-400">Loading…</div></AppShell>}>
+      <CancellationsPage />
+    </Suspense>
   )
 }

@@ -50,7 +50,10 @@ export function PendingBell() {
 
   if (!canApprove) return null
 
-  const go = (href: string) => { setOpen(false); router.push(href) }
+  // ?pending=1 tells the target page (customer-bills/tips-dj-bills/cancellations) to widen
+  // its date range to "all time" — the bell counts pending requests with no date filter,
+  // so a request older than the page's default "This Month" view would otherwise be invisible.
+  const go = (href: string) => { setOpen(false); router.push(`${href}?pending=1`) }
 
   return (
     <div ref={boxRef} className="relative">
