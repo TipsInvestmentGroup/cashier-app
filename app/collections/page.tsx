@@ -223,6 +223,7 @@ export default function CollectionsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!form.staffName) return toast.error('Please select a staff member before saving the collection.')
     if (total === 0) return toast.error('Enter at least one amount')
     if (!reconciled) return toast.error('Record signed bills & payments, or tick "No other bills" to confirm none.')
     if (lossPreview < 0) {
@@ -571,7 +572,7 @@ export default function CollectionsPage() {
               {/* Staff + System (POS) sales */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">👤 Staff (collected from)</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">👤 Staff (collected from) <span className="text-red-500">*</span></label>
                   <select value={form.staffName} onChange={(e) => {
                     const ns = e.target.value
                     // keep paid-bill payers in sync with the collecting staff
