@@ -16,7 +16,7 @@ const RANGES: { key: RangeKey; label: string }[] = [
 ]
 
 interface Outlet { id: string; name: string }
-interface StaffRow { id: string; date: string; outlet: string; staffName: string; systemSales: number; collection: number; signed: number; cancellations: number; discount: number; accounted: number; variance: number }
+interface StaffRow { id: string; date: string; outlet: string; staffName: string; reasonLabel?: string; systemSales: number; collection: number; signed: number; cancellations: number; discount: number; accounted: number; variance: number }
 interface CashRow { id: string; date: string; outlet: string; expected: number; verified: number; variance: number }
 interface DigitalRow { id: string; date: string; outlet: string; channel: string; reported: number; collected: number; variance: number }
 interface ReportData { staff: StaffRow[]; cash: CashRow[]; digital: DigitalRow[] }
@@ -128,10 +128,10 @@ function ExcessLossPage() {
         {!loading && data && (
           <>
             {/* 1 · Staff variance */}
-            <Section title={`1 · Daily Staff ${view === 'excess' ? 'Excess' : 'Loss'}`} subtitle="System sales vs collection + signed bills + cancellations + discount" total={sum(staff)} accent={accent}>
+            <Section title={`1 · Daily Staff ${view === 'excess' ? 'Excess' : 'Loss'}`} subtitle="Read from the Excess Recon ledger (excess) / auto staff-loss records (loss) — always matches Excess Recon" total={sum(staff)} accent={accent}>
               {staff.length === 0 ? <Empty>No staff {view} in this period</Empty> : (
-                <Table head={['Date', 'Outlet', 'Staff', 'System', 'Collection', 'Signed', 'Cancel', 'Discount', 'Accounted', view === 'excess' ? 'Excess' : 'Loss']}
-                  rows={staff.map((r) => [formatDate(r.date), r.outlet, r.staffName, formatCurrency(r.systemSales), formatCurrency(r.collection), formatCurrency(r.signed), formatCurrency(r.cancellations), formatCurrency(r.discount), formatCurrency(r.accounted), <span key="v" className={`font-bold ${amtClass}`}>{formatCurrency(abs(r.variance))}</span>])} />
+                <Table head={['Date', 'Outlet', 'Staff', ...(view === 'excess' ? ['Reason'] : []), 'System', 'Collection', 'Signed', 'Cancel', 'Discount', 'Accounted', view === 'excess' ? 'Excess' : 'Loss']}
+                  rows={staff.map((r) => [formatDate(r.date), r.outlet, r.staffName, ...(view === 'excess' ? [r.reasonLabel || '—'] : []), formatCurrency(r.systemSales), formatCurrency(r.collection), formatCurrency(r.signed), formatCurrency(r.cancellations), formatCurrency(r.discount), formatCurrency(r.accounted), <span key="v" className={`font-bold ${amtClass}`}>{formatCurrency(abs(r.variance))}</span>])} />
               )}
             </Section>
 

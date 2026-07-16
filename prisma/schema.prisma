@@ -208,7 +208,7 @@ model DailyCollection {
 
   cancellations Cancellation[]
   channels      DailyCollectionChannel[]
-  excess        CollectionExcess?
+  excessItems   CollectionExcess[]
 
   @@index([date])
   @@index([outletId])
@@ -834,20 +834,23 @@ model CashReconExcess {
 }
 
 // Excess recorded during a Daily Collection (staff collected more than the
-// formula required). One per collection — mirrors CashReconExcess's shape so
-// Excess Recon can merge both sources into a single Paid/Balance ledger.
+// formula required). A collection can have several — mirrors CashReconExcess's
+// shape/cardinality so Excess Recon can merge both sources into a single
+// Paid/Balance ledger.
 model CollectionExcess {
   id           String          @id @default(cuid())
-  collectionId String          @unique
+  collectionId String
   collection   DailyCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   amount       Float
-  reason       String              // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS
+  reason       String              // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | UNASSIGNED
   staffId      String?             // set when reason = STAFF_TIP
   staffName    String?
   personId     String?             // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
   personName   String?
   paidAmount   Float           @default(0) // settled via Excess Recon; balance = amount - paidAmount
   createdAt    DateTime        @default(now())
+
+  @@index([collectionId])
 }
 
 // Digital Payment Reconciliation — one row per digital channel per day+outlet.

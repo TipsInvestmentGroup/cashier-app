@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { recomputeStaffLoss } from '@/lib/staff-loss'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
+import { EXCESS_REASON_VALUES, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -105,7 +106,50 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   }
 
-  // Reconcile linked auto staff-loss — now also nets off approved cancellations.
+  // Sync submitted excess line items (upsert-by-id, preserving paidAmount and
+  // blocking removal of settled rows — same rule as Cash Recon's excessItems).
+  if (Array.isArray(body.excessItems)) {
+    const rawItems: { id?: string; amount: number; reason: string; staffId?: string; personId?: string }[] = body.excessItems
+    const items = rawItems
+      .map((it) => ({ id: it.id || null, amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
+      .filter((it) => it.amount > 0)
+    for (const it of items) {
+      if (!EXCESS_REASON_VALUES.includes(it.reason) || it.reason === UNASSIGNED_EXCESS_REASON) {
+        return NextResponse.json({ error: 'Select a reason for each excess amount collected' }, { status: 400 })
+      }
+      if (it.reason === 'STAFF_TIP' && !it.staffId) return NextResponse.json({ error: 'Select the staff name for the excess amount collected' }, { status: 400 })
+      if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) return NextResponse.json({ error: 'Select the customer name for the excess amount collected' }, { status: 400 })
+    }
+    const [staffRows, personRows] = await Promise.all([
+      prisma.user.findMany({ where: { id: { in: items.filter((i) => i.staffId).map((i) => i.staffId as string) } }, select: { id: true, name: true } }),
+      prisma.person.findMany({ where: { id: { in: items.filter((i) => i.personId).map((i) => i.personId as string) } }, select: { id: true, name: true } }),
+    ])
+    const priorItems = await db.collectionExcess.findMany({ where: { collectionId: id } })
+    const incomingIds = new Set(items.filter((it) => it.id).map((it) => it.id as string))
+    const toRemove = priorItems.filter((p: { id: string; paidAmount: number }) => !incomingIds.has(p.id))
+    const blockedRemoval = toRemove.find((p: { paidAmount: number }) => p.paidAmount > 0)
+    if (blockedRemoval) {
+      return NextResponse.json({ error: `Cannot remove an excess item that already has ${blockedRemoval.paidAmount} settled — clear its payments in Excess Recon first` }, { status: 409 })
+    }
+    if (toRemove.length > 0) {
+      await db.collectionExcess.deleteMany({ where: { id: { in: toRemove.map((p: { id: string }) => p.id) } } })
+    }
+    for (const it of items) {
+      const fields = {
+        amount: it.amount, reason: it.reason,
+        staffId: it.staffId, staffName: it.staffId ? staffRows.find((s) => s.id === it.staffId)?.name || null : null,
+        personId: it.personId, personName: it.personId ? personRows.find((p) => p.id === it.personId)?.name || null : null,
+      }
+      if (it.id && priorItems.some((p: { id: string }) => p.id === it.id)) {
+        await db.collectionExcess.update({ where: { id: it.id }, data: fields })
+      } else {
+        await db.collectionExcess.create({ data: { collectionId: id, ...fields } })
+      }
+    }
+  }
+
+  // Reconcile linked auto staff-loss — now also nets off approved cancellations,
+  // and true up excess line items to the recomputed total (see lib/collection-excess.ts).
   const shortfall = await recomputeStaffLoss(prisma, id)
   const staffLoss = staffName && shortfall > 0 ? { amount: shortfall, staffName } : null
 
@@ -131,8 +175,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (user.role === 'CASHIER' && await isDayClosed(existing.outletId, existing.date)) {
     return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before deleting.' }, { status: 423 })
   }
-  const excess = await db.collectionExcess.findUnique({ where: { collectionId: id } })
-  if (excess && excess.paidAmount > 0) {
+  const excessItems = await db.collectionExcess.findMany({ where: { collectionId: id } })
+  if (excessItems.some((it: { paidAmount: number }) => it.paidAmount > 0)) {
     return NextResponse.json({ error: 'This collection has a settled excess amount in Excess Recon — it cannot be deleted.' }, { status: 409 })
   }
 

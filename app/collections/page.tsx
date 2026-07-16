@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { Button } from '@/components/ui/Button'
@@ -9,12 +9,12 @@ import { CashReconForm } from '@/components/recon/CashReconForm'
 import { DigitalReconForm } from '@/components/recon/DigitalReconForm'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTime, roundMoney } from '@/lib/utils'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
 import { channelAmountsFor, digitalTotal, sumChannelAmounts } from '@/lib/collection-channels-shared'
 import { findBestPersonMatch } from '@/lib/nameMatch'
-import { EXCESS_REASONS } from '@/lib/excess-reasons'
+import { EXCESS_REASONS, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 import toast from 'react-hot-toast'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns'
 
@@ -30,12 +30,16 @@ interface Cancellation {
   id: string; reason: string; productId?: string | null; productName: string
   sellingPrice: number; quantity: number; amount: number; status?: string
 }
+interface CollectionExcessRow {
+  id: string; amount: number; reason: string; staffId?: string | null; staffName?: string | null; personId?: string | null; personName?: string | null; paidAmount: number
+}
 interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
   staffName?: string; systemSales?: number; creditSales?: number; paymentsReceived?: number; discount?: number; discountReason?: string
   notes: string; outletId?: string; outlet: { id?: string; name: string }; cashier: { name: string }; cancellations?: Cancellation[]
-  channels?: { channelCode: string; amount: number }[]
+  channels?: { channelCode: string; amount: number }[]; excessItems?: CollectionExcessRow[]
 }
+interface ExcessItem { key: string; id?: string; amount: string; reason: string; staffId: string; personId: string; paidAmount: number }
 interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean }
 interface SignedBill { id: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
 // signed-bill type → paid-bill category label
@@ -64,9 +68,9 @@ export default function CollectionsPage() {
   const [linkOpenIdx, setLinkOpenIdx] = useState<number | null>(null)
   const [products, setProducts] = useState<Product[]>([])
   const [cancelRows, setCancelRows] = useState<{ reason: string; productId: string; productName: string; sellingPrice: number; quantity: string }[]>([])
-  const [excessReason, setExcessReason] = useState('')
-  const [excessStaffId, setExcessStaffId] = useState('')
-  const [excessPersonId, setExcessPersonId] = useState('')
+  const [excessItems, setExcessItems] = useState<ExcessItem[]>([])
+  const excessKeyRef = useRef(0)
+  const newExcessItem = (amount = ''): ExcessItem => ({ key: `new-${excessKeyRef.current++}`, amount, reason: '', staffId: '', personId: '', paidAmount: 0 })
   const [staffPickList, setStaffPickList] = useState<{ id: string; name: string }[]>([])
   const [allPersons, setAllPersons] = useState<Person[]>([])
   const [categories, setCategories] = useState<NamedCode[]>([])
@@ -201,14 +205,31 @@ export default function CollectionsPage() {
     setSignedRows((rows) => rows.map((r, idx) => idx === i ? { ...r, personId: undefined, confirmedNew: true } : r))
   }
 
+  const activeExcessItems = excessItems.filter((it) => (Number(it.amount) || 0) > 0)
+  const excessItemsTotal = activeExcessItems.reduce((s, it) => s + (Number(it.amount) || 0), 0)
+  const excessRemaining = roundMoney(Math.abs(lossPreview) - excessItemsTotal)
+
+  const addExcessItem = () => setExcessItems((items) => [...items, newExcessItem(items.length === 0 ? String(Math.abs(lossPreview)) : '')])
+  const updateExcessItem = (key: string, patch: Partial<ExcessItem>) =>
+    setExcessItems((items) => items.map((it) => (it.key === key ? { ...it, ...patch } : it)))
+  const removeExcessItem = (key: string) => {
+    const it = excessItems.find((i) => i.key === key)
+    if (it && it.paidAmount > 0) return toast.error('This excess item has recorded payments and cannot be removed — settle it from Excess Recon first.')
+    setExcessItems((items) => items.filter((i) => i.key !== key))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (total === 0) return toast.error('Enter at least one amount')
     if (!reconciled) return toast.error('Record signed bills & payments, or tick "No other bills" to confirm none.')
-    if (!editingId && lossPreview < 0) {
-      if (!excessReason) return toast.error('Select a reason for the excess amount collected')
-      if (excessReason === 'STAFF_TIP' && !excessStaffId) return toast.error('Select the staff name for the excess amount collected')
-      if (excessReason === 'CUSTOMER_EXCESS' && !excessPersonId) return toast.error('Select the customer name for the excess amount collected')
+    if (lossPreview < 0) {
+      if (activeExcessItems.length === 0) return toast.error('Select a reason for the excess amount collected')
+      for (const it of activeExcessItems) {
+        if (!it.reason) return toast.error('Select a reason for each excess amount')
+        if (it.reason === 'STAFF_TIP' && !it.staffId) return toast.error('Select the staff name for the excess amount')
+        if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) return toast.error('Select the customer name for the excess amount')
+      }
+      if (!editingId && excessRemaining !== 0) return toast.error(`Excess reasons must add up to ${formatCurrency(Math.abs(lossPreview))} (${excessRemaining > 0 ? formatCurrency(excessRemaining) + ' left to allocate' : 'over by ' + formatCurrency(-excessRemaining)})`)
     }
     setSubmitting(true)
     try {
@@ -218,10 +239,12 @@ export default function CollectionsPage() {
         reason: r.reason, productId: r.productId || undefined, productName: r.productName,
         sellingPrice: r.sellingPrice, quantity: Number(r.quantity), amount: r.sellingPrice * (Number(r.quantity) || 0),
       }))
-      const excessFields = !editingId && lossPreview < 0
-        ? { excessReason, ...(excessReason === 'STAFF_TIP' ? { excessStaffId } : {}), ...(excessReason === 'CUSTOMER_EXCESS' ? { excessPersonId } : {}) }
-        : {}
-      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, channelAmounts: channelAmountsNum, signedBills, paidBills, cancellations, ...excessFields })
+      const excessItemsPayload = activeExcessItems.map((it) => ({
+        id: it.id, amount: Number(it.amount) || 0, reason: it.reason,
+        ...(it.reason === 'STAFF_TIP' ? { staffId: it.staffId } : {}),
+        ...(it.reason === 'CUSTOMER_EXCESS' ? { personId: it.personId } : {}),
+      }))
+      const payload = JSON.stringify({ ...form, cash: Number(form.cash) || 0, channelAmounts: channelAmountsNum, signedBills, paidBills, cancellations, excessItems: excessItemsPayload })
       const res = editingId
         ? await request(`/api/collections/${editingId}`, { method: 'PUT', body: payload })
         : await request('/api/collections', { method: 'POST', body: payload })
@@ -234,7 +257,7 @@ export default function CollectionsPage() {
       }
       setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
       setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
-      setExcessReason(''); setExcessStaffId(''); setExcessPersonId('')
+      setExcessItems([])
       setEditingId(null)
       setShowForm(false)
       load()
@@ -269,6 +292,10 @@ export default function CollectionsPage() {
       reason: cn.reason || CANCEL_REASONS[0], productId: cn.productId || '', productName: cn.productName,
       sellingPrice: cn.sellingPrice, quantity: String(cn.quantity),
     })))
+    setExcessItems((c.excessItems || []).map((it) => ({
+      key: it.id, id: it.id, amount: String(it.amount), reason: it.reason, staffId: it.staffId || '', personId: it.personId || '',
+      paidAmount: it.paidAmount || 0,
+    })))
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -277,7 +304,7 @@ export default function CollectionsPage() {
     setEditingId(null)
     setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
     setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
-    setExcessReason(''); setExcessStaffId(''); setExcessPersonId('')
+    setExcessItems([])
     setShowForm((s) => !s)
   }
 
@@ -784,29 +811,60 @@ export default function CollectionsPage() {
                 </div>
               )}
 
-              {/* Excess reason (required when the collection overage is negative-loss) */}
-              {!editingId && lossPreview < 0 && (
-                <div className="border-2 border-amber-100 bg-amber-50/40 rounded-xl p-4 space-y-2">
-                  <label className="block text-sm font-semibold text-gray-700">Excess Reason *</label>
-                  <select value={excessReason} onChange={(e) => { setExcessReason(e.target.value); setExcessStaffId(''); setExcessPersonId('') }}
-                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
-                    <option value="">Select a reason…</option>
-                    {EXCESS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-                  </select>
-                  {excessReason === 'STAFF_TIP' && (
-                    <select value={excessStaffId} onChange={(e) => setExcessStaffId(e.target.value)}
-                      className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
-                      <option value="">Select staff…</option>
-                      {staffPickList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  )}
-                  {excessReason === 'CUSTOMER_EXCESS' && (
-                    <select value={excessPersonId} onChange={(e) => setExcessPersonId(e.target.value)}
-                      className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
-                      <option value="">Select customer…</option>
-                      {allPersons.filter((p) => p.type === 'CUSTOMER').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  )}
+              {/* Excess reason(s) — split the overage across one or more reasons/people */}
+              {(lossPreview < 0 || excessItems.length > 0) && (
+                <div className="border-2 border-amber-100 bg-amber-50/40 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-semibold text-gray-700">Excess Reason(s) {lossPreview < 0 && '*'}</label>
+                    {lossPreview < 0 && (
+                      <span className={`text-xs font-bold ${excessRemaining === 0 ? 'text-green-700' : 'text-amber-800'}`}>
+                        {excessRemaining === 0 ? `Allocated: ${formatCurrency(excessItemsTotal)}` : `Remaining to allocate: ${formatCurrency(excessRemaining)}`}
+                      </span>
+                    )}
+                  </div>
+                  {excessItems.map((it) => {
+                    const locked = it.paidAmount > 0
+                    const unassigned = it.reason === UNASSIGNED_EXCESS_REASON
+                    return (
+                      <div key={it.key} className="bg-white border-2 border-gray-100 rounded-xl p-2.5 space-y-2">
+                        {locked && <p className="text-xs font-semibold text-indigo-600">🔒 {formatCurrency(it.paidAmount)} already settled — edit/removal locked. Manage payments from Excess Recon.</p>}
+                        {unassigned && !locked && <p className="text-xs font-semibold text-amber-700">⚠️ Auto-detected excess — assign a reason below.</p>}
+                        <div className="flex items-center gap-2">
+                          <MoneyInput value={it.amount} onChange={(v) => updateExcessItem(it.key, { amount: v })} disabled={locked}
+                            className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold disabled:bg-gray-50 disabled:text-gray-500" placeholder="0" />
+                          <button type="button" onClick={() => removeExcessItem(it.key)} title="Remove" disabled={locked}
+                            className="w-9 h-9 flex-shrink-0 flex items-center justify-center rounded-xl bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-40 disabled:hover:bg-red-50">✕</button>
+                        </div>
+                        {Number(it.amount) > 0 && (
+                          <>
+                            <select value={unassigned ? '' : it.reason} onChange={(e) => updateExcessItem(it.key, { reason: e.target.value, staffId: '', personId: '' })} disabled={locked}
+                              className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500">
+                              <option value="">Select a reason…</option>
+                              {EXCESS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                            </select>
+                            {it.reason === 'STAFF_TIP' && (
+                              <select value={it.staffId} onChange={(e) => updateExcessItem(it.key, { staffId: e.target.value })} disabled={locked}
+                                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500">
+                                <option value="">Select staff…</option>
+                                {staffPickList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              </select>
+                            )}
+                            {it.reason === 'CUSTOMER_EXCESS' && (
+                              <select value={it.personId} onChange={(e) => updateExcessItem(it.key, { personId: e.target.value })} disabled={locked}
+                                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500">
+                                <option value="">Select customer…</option>
+                                {allPersons.filter((p) => p.type === 'CUSTOMER').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                  <button type="button" onClick={addExcessItem}
+                    className="w-full py-2 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl text-sm font-semibold hover:bg-amber-50">
+                    + Add Excess Reason
+                  </button>
                 </div>
               )}
               {editingId && (
