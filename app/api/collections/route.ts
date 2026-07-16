@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
-import { EXCESS_REASON_VALUES } from '@/lib/excess-reasons'
+import { EXCESS_REASON_VALUES, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
 import { findBestPersonMatch } from '@/lib/nameMatch'
 import { startOfDay, endOfDay, format } from 'date-fns'
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 
   const collections = await prisma.dailyCollection.findMany({
     where,
-    include: { outlet: true, cashier: { select: { name: true } }, cancellations: true, channels: true },
+    include: { outlet: true, cashier: { select: { name: true } }, cancellations: true, channels: true, excessItems: true },
     orderBy: { date: 'desc' },
     take: 100,
   })
@@ -77,9 +77,7 @@ export async function POST(req: NextRequest) {
   const signedInput: { billType: string; name: string; amount: number; personId?: string; confirmedNew?: boolean }[] = Array.isArray(body.signedBills) ? body.signedBills : []
   const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; categoryBillType?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
-  const excessReason: string | null = body.excessReason || null
-  const excessStaffId: string | null = body.excessStaffId || null
-  const excessPersonId: string | null = body.excessPersonId || null
+  const excessItemsInput: { amount: number; reason: string; staffId?: string; personId?: string }[] = Array.isArray(body.excessItems) ? body.excessItems : []
 
   const total = roundMoney(Number(cash) + sumChannelAmounts(channelAmounts))
   const usedOutletId = writeOutletId(user, outletId)
@@ -210,27 +208,40 @@ export async function POST(req: NextRequest) {
     }
 
     // 3b) Excess — the staff collected more than the formula required (negative
-    // "loss"). Requires a reason (shared with Cash Reconciliation) before saving.
-    let excess: { amount: number; reason: string } | null = null
+    // "loss"). Requires a reason per item (shared with Cash Reconciliation) before
+    // saving, and can be split across multiple reasons/people.
+    let excess: { amount: number; items: number } | null = null
     if (lossAmount < 0) {
       const excessAmount = roundMoney(Math.abs(lossAmount))
-      if (!excessReason || !EXCESS_REASON_VALUES.includes(excessReason)) {
-        throw new Error('Select a reason for the excess amount collected')
+      const items = excessItemsInput
+        .map((it) => ({ amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
+        .filter((it) => it.amount > 0)
+      if (items.length === 0) throw new Error('Select a reason for the excess amount collected')
+      for (const it of items) {
+        if (!EXCESS_REASON_VALUES.includes(it.reason) || it.reason === UNASSIGNED_EXCESS_REASON) {
+          throw new Error('Select a reason for each excess amount collected')
+        }
+        if (it.reason === 'STAFF_TIP' && !it.staffId) throw new Error('Select the staff name for the excess amount collected')
+        if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) throw new Error('Select the customer name for the excess amount collected')
       }
-      if (excessReason === 'STAFF_TIP' && !excessStaffId) throw new Error('Select the staff name for the excess amount collected')
-      if (excessReason === 'CUSTOMER_EXCESS' && !excessPersonId) throw new Error('Select the customer name for the excess amount collected')
-      const [staffRow, personRow] = await Promise.all([
-        excessStaffId ? tx.user.findUnique({ where: { id: excessStaffId }, select: { name: true } }) : null,
-        excessPersonId ? tx.person.findUnique({ where: { id: excessPersonId }, select: { name: true } }) : null,
+      const itemsSum = roundMoney(items.reduce((s, it) => s + it.amount, 0))
+      if (itemsSum !== excessAmount) {
+        throw new Error(`Excess reasons must add up to ${excessAmount} (currently ${itemsSum})`)
+      }
+      const [staffRows, personRows] = await Promise.all([
+        tx.user.findMany({ where: { id: { in: items.filter((i) => i.staffId).map((i) => i.staffId as string) } }, select: { id: true, name: true } }),
+        tx.person.findMany({ where: { id: { in: items.filter((i) => i.personId).map((i) => i.personId as string) } }, select: { id: true, name: true } }),
       ])
-      await tx.collectionExcess.create({
-        data: {
-          collectionId: collection.id, amount: excessAmount, reason: excessReason,
-          staffId: excessStaffId, staffName: staffRow?.name || null,
-          personId: excessPersonId, personName: personRow?.name || null,
-        },
-      })
-      excess = { amount: excessAmount, reason: excessReason }
+      for (const it of items) {
+        await tx.collectionExcess.create({
+          data: {
+            collectionId: collection.id, amount: it.amount, reason: it.reason,
+            staffId: it.staffId, staffName: it.staffId ? staffRows.find((s: { id: string }) => s.id === it.staffId)?.name || null : null,
+            personId: it.personId, personName: it.personId ? personRows.find((p: { id: string }) => p.id === it.personId)?.name || null : null,
+          },
+        })
+      }
+      excess = { amount: excessAmount, items: items.length }
     }
 
     return { collection, signedTotal, paidTotal, paidStaffLoss, signedCreated, paidCreated, staffLoss, excess }

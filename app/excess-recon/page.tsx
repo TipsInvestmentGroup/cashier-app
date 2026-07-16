@@ -40,6 +40,10 @@ export default function ExcessReconPage() {
   const [payRow, setPayRow] = useState<Row | null>(null)
   const [payAmount, setPayAmount] = useState('')
   const [paying, setPaying] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchAmount, setBatchAmount] = useState('')
+  const [batching, setBatching] = useState(false)
 
   useEffect(() => {
     if (!isCashier) request('/api/outlets').then((o) => setOutlets(o || [])).catch(() => {})
@@ -67,6 +71,7 @@ export default function ExcessReconPage() {
 
   useEffect(() => { load() }, [load])
 
+  const rowKey = (r: Row) => `${r.source}-${r.id}`
   const visible = rows.filter((r) => statusFilter === 'ALL' || r.status === statusFilter)
   const totalExcess = visible.reduce((s, r) => s + r.excess, 0)
   const totalPaid = visible.reduce((s, r) => s + r.paid, 0)
@@ -74,6 +79,42 @@ export default function ExcessReconPage() {
 
   const openPay = (r: Row) => { setPayRow(r); setPayAmount(String(r.balance)) }
   const closePay = () => { setPayRow(null); setPayAmount('') }
+
+  const toggleSelect = (r: Row) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      const key = rowKey(r)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+  const selectedRows = visible
+    .filter((r) => r.status === 'PENDING' && selected.has(rowKey(r)))
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+  const selectedBalance = selectedRows.reduce((s, r) => s + r.balance, 0)
+
+  const openBatch = () => { setBatchOpen(true); setBatchAmount(String(selectedBalance)) }
+  const closeBatch = () => { setBatchOpen(false); setBatchAmount('') }
+
+  const submitBatch = async () => {
+    const amt = Number(batchAmount) || 0
+    if (amt <= 0) return toast.error('Enter a payment amount')
+    if (amt > selectedBalance) return toast.error(`Payment cannot exceed the combined balance of ${formatCurrency(selectedBalance)}`)
+    setBatching(true)
+    try {
+      await request('/api/excess-recon/settle-batch', {
+        method: 'POST',
+        body: JSON.stringify({ items: selectedRows.map((r) => ({ id: r.id, source: r.source })), amount: amt }),
+      })
+      toast.success(`Payment recorded across ${selectedRows.length} record(s)`)
+      setSelected(new Set())
+      closeBatch()
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error recording batch payment')
+    } finally { setBatching(false) }
+  }
 
   const submitPay = async () => {
     if (!payRow) return
@@ -148,6 +189,16 @@ export default function ExcessReconPage() {
 
         {loading && <div className="py-12 text-center text-gray-400">Loading…</div>}
 
+        {!loading && selectedRows.length > 0 && (
+          <div className="sticky top-2 z-20 bg-indigo-600 text-white rounded-2xl shadow-lg px-4 py-3 flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold">{selectedRows.length} selected · Balance {formatCurrency(selectedBalance)}</span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setSelected(new Set())} className="text-xs font-semibold text-indigo-100 hover:text-white">Clear</button>
+              <button onClick={openBatch} className="px-4 py-2 rounded-xl text-sm font-bold bg-white text-indigo-700 hover:bg-indigo-50">Pay Selected</button>
+            </div>
+          </div>
+        )}
+
         {!loading && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             {visible.length === 0 ? (
@@ -157,6 +208,7 @@ export default function ExcessReconPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr className="text-left text-gray-600">
+                      <th className="px-4 py-3 font-semibold w-8"></th>
                       <th className="px-4 py-3 font-semibold">Date</th>
                       <th className="px-4 py-3 font-semibold">Source</th>
                       {!isCashier && <th className="px-4 py-3 font-semibold">Outlet</th>}
@@ -171,7 +223,12 @@ export default function ExcessReconPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {visible.map((r) => (
-                      <tr key={`${r.source}-${r.id}`} className="hover:bg-gray-50">
+                      <tr key={rowKey(r)} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          {r.status === 'PENDING' && (
+                            <input type="checkbox" checked={selected.has(rowKey(r))} onChange={() => toggleSelect(r)} className="w-4 h-4" />
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
                         <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{SOURCE_LABEL[r.source]}</td>
                         {!isCashier && <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{r.outlet}</td>}
@@ -227,6 +284,36 @@ export default function ExcessReconPage() {
               <button onClick={closePay} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50">Cancel</button>
               <button onClick={submitPay} disabled={paying} className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-60">
                 {paying ? 'Saving…' : 'Save Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch payment modal */}
+      {batchOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4" onClick={closeBatch}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h3 className="font-bold text-gray-900">Record Batch Excess Payment</h3>
+              <p className="text-xs text-gray-500 mt-0.5">{selectedRows.length} record(s) selected</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 text-sm space-y-1 max-h-40 overflow-y-auto">
+              {selectedRows.map((r) => (
+                <div key={rowKey(r)} className="flex justify-between"><span className="text-gray-500">{r.person} · {r.reasonLabel} · {formatDate(r.date)}</span><span className="font-semibold">{formatCurrency(r.balance)}</span></div>
+              ))}
+              <div className="flex justify-between border-t border-gray-200 pt-1"><span className="text-gray-600">Combined balance</span><span className="font-bold text-red-700">{formatCurrency(selectedBalance)}</span></div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Payment Amount (TZS)</label>
+              <MoneyInput value={batchAmount} onChange={setBatchAmount}
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
+              <p className="text-xs text-gray-400 mt-1">Allocated across the selected records in order, oldest first — each capped at its own balance.</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={closeBatch} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50">Cancel</button>
+              <button onClick={submitBatch} disabled={batching} className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 disabled:opacity-60">
+                {batching ? 'Saving…' : 'Save Payment'}
               </button>
             </div>
           </div>

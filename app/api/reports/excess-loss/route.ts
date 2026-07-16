@@ -2,16 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { excessReasonLabel } from '@/lib/excess-reasons'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 /**
  * Cashier Excess & Loss report.
  *
- * Staff variance (per daily collection):
- *   accounted = collection(cash+crdb+stanbic+mpesa) + signed bills + cancellations + discount
- *   variance  = accounted − system sales
- *     variance > 0 → staff EXCESS (accounted for more than the system says)
- *     variance < 0 → staff LOSS   (shortfall)
+ * Staff variance is read directly off the same ledgers Excess Recon uses —
+ * NOT recomputed ad hoc — so the two views can never disagree:
+ *   - Excess rows  = CollectionExcess line items (a collection can have several).
+ *   - Loss rows    = the auto staff-loss SignedBill (voucherNumber SL-<collectionId>).
+ * Both are kept in sync by lib/staff-loss.ts's recomputeStaffLoss whenever a
+ * collection is edited or a linked cancellation is approved/rejected.
  *
  * Cashier cash-recon variance:   verified cash − expected closing balance.
  * Cashier digital-recon variance: collected (per channel) − system reported.
@@ -33,32 +35,47 @@ export async function GET(req: NextRequest) {
   const baseWhere: Record<string, unknown> = { date: range }
   if (outletId) baseWhere.outletId = outletId
 
-  const [collections, cashRecons, bankRecons, outlets] = await Promise.all([
-    prisma.dailyCollection.findMany({ where: baseWhere, include: { cancellations: true }, orderBy: { date: 'desc' } }),
+  const [collections, cashRecons, bankRecons, outlets, staffLossBills] = await Promise.all([
+    prisma.dailyCollection.findMany({ where: baseWhere, include: { cancellations: true, excessItems: true }, orderBy: { date: 'desc' } }),
     prisma.cashRecon.findMany({ where: baseWhere, orderBy: { date: 'desc' } }),
     prisma.bankRecon.findMany({ where: { ...baseWhere, channel: { not: null } }, orderBy: { date: 'desc' } }),
     prisma.outlet.findMany({ select: { id: true, name: true } }),
+    prisma.signedBill.findMany({ where: { billType: 'STAFF_LOSS', date: range, ...(outletId ? { outletId } : {}) } }),
   ])
   const outletName = (id?: string | null) => outlets.find((o) => o.id === id)?.name || '—'
+  const collectionById = new Map(collections.map((c) => [c.id, c]))
 
-  // --- Staff variance (per collection) ---
-  const staff = collections
-    .filter((c) => (c.systemSales || 0) > 0)
-    .map((c) => {
-      const collection = c.total
-      const signed = c.creditSales || 0
-      const cancellations = roundMoney((c.cancellations || []).filter((x) => x.status !== 'REJECTED').reduce((s, x) => s + (x.amount || 0), 0))
-      const discount = c.discount || 0
-      const accounted = roundMoney(collection + signed + cancellations + discount)
-      const variance = roundMoney(accounted - (c.systemSales || 0))
-      return {
-        id: c.id, date: c.date, outlet: outletName(c.outletId), staffName: c.staffName || '—',
-        systemSales: roundMoney(c.systemSales || 0), collection: roundMoney(collection),
-        signed: roundMoney(signed), cancellations, discount: roundMoney(discount),
-        accounted, variance,
-      }
-    })
-    .filter((r) => r.variance !== 0)
+  // Shared breakdown columns for a collection, regardless of which side (excess/loss) is driving the row.
+  const breakdown = (c: (typeof collections)[number]) => {
+    const cancellations = roundMoney((c.cancellations || []).filter((x) => x.status !== 'REJECTED').reduce((s, x) => s + (x.amount || 0), 0))
+    return {
+      systemSales: roundMoney(c.systemSales || 0), collection: roundMoney(c.total),
+      signed: roundMoney(c.creditSales || 0), cancellations, discount: roundMoney(c.discount || 0),
+    }
+  }
+
+  // --- Staff excess: one row per CollectionExcess line item (never recomputed — read straight from the ledger) ---
+  const excessRows = collections.flatMap((c) => (c.excessItems || []).map((it) => {
+    const b = breakdown(c)
+    return {
+      id: it.id, date: c.date, outlet: outletName(c.outletId), staffName: it.staffName || it.personName || c.staffName || '—',
+      reasonLabel: excessReasonLabel(it.reason),
+      ...b, accounted: roundMoney(b.collection + b.signed + b.cancellations + b.discount), variance: roundMoney(it.amount),
+    }
+  }))
+
+  // --- Staff loss: one row per auto staff-loss SignedBill (SL-<collectionId>) ---
+  const lossRows = staffLossBills.map((bill) => {
+    const collectionId = bill.voucherNumber.startsWith('SL-') ? bill.voucherNumber.slice(3) : null
+    const c = collectionId ? collectionById.get(collectionId) : undefined
+    const b = c ? breakdown(c) : { systemSales: 0, collection: 0, signed: 0, cancellations: 0, discount: 0 }
+    return {
+      id: bill.id, date: bill.date, outlet: outletName(bill.outletId), staffName: bill.personName || '—',
+      ...b, accounted: roundMoney(b.collection + b.signed + b.cancellations + b.discount), variance: roundMoney(-bill.amount),
+    }
+  })
+
+  const staff = [...excessRows, ...lossRows].filter((r) => r.variance !== 0)
 
   // --- Cashier cash-recon variance (verified vs expected) ---
   const cash = cashRecons
