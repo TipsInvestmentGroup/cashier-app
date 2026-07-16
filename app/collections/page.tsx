@@ -46,9 +46,12 @@ interface SignedBill { id: string; personName: string; amount: number; billType:
 const BILLTYPE_TO_CATEGORY: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', STAFF_LOSS: 'Staff Loss', TIPS: 'Sponsors & Partners' }
 // Cash the staff must physically hand over = System Sales − digital channels
 const cashRequired = (c: { systemSales?: number } & Parameters<typeof digitalTotal>[0]) => (c.systemSales || 0) - digitalTotal(c)
-// Staff Loss = System Sales − Collection − Signed Bills (credit sales) − Paid Bills
-const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number; paymentsReceived?: number }) =>
-  (c.systemSales || 0) - c.total - (c.creditSales || 0) - (c.paymentsReceived || 0)
+// Staff Loss = System Sales − Collection − Signed Bills − Paid Bills − Discount − Approved cancellations
+// (matches lib/staff-loss.ts's authoritative recompute — the same figure the excess/loss ledger settles on)
+const rowLoss = (c: { systemSales?: number; total: number; creditSales?: number; paymentsReceived?: number; discount?: number; cancellations?: Cancellation[] }) => {
+  const approvedCancel = (c.cancellations || []).filter((x) => x.status === 'APPROVED').reduce((s, x) => s + (x.amount || 0), 0)
+  return (c.systemSales || 0) - c.total - (c.creditSales || 0) - (c.paymentsReceived || 0) - (c.discount || 0) - approvedCancel
+}
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string }
 
@@ -364,8 +367,8 @@ export default function CollectionsPage() {
   // Discount + cancellations, per row (rejected cancellations don't count)
   const rowDiscountAndCancel = (c: Collection) =>
     (c.discount || 0) + (c.cancellations || []).filter((x) => x.status !== 'REJECTED').reduce((s, x) => s + (x.amount || 0), 0)
-  // Net loss across the period (full formula): System − Collection − Signed − Paid
-  const variance = totals.systemSales - totals.total - totals.creditSales - totals.paymentsReceived
+  // Net loss across the period (full formula, matching rowLoss): System − Collection − Signed − Paid − Discount − Approved cancellations
+  const variance = filtered.reduce((s, c) => s + rowLoss(c), 0)
   // Split per-row so shortfalls (→ staff loss) and overages are tracked separately
   const { shortfall: totalShortfall, overage: totalOverage } = filtered.reduce(
     (a, c) => {
