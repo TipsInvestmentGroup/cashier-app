@@ -4,9 +4,14 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { MoneyInput } from '@/components/MoneyInput'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
+import { EXCESS_REASONS } from '@/lib/excess-reasons'
+import { ManageAccessModal } from '@/components/ManageAccessModal'
+import { AddExcessModal } from '@/components/AddExcessModal'
+import { ShieldCheck, Pencil, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type RangeKey = 'today' | 'week' | 'month' | 'all' | 'custom'
@@ -18,16 +23,30 @@ type StatusFilter = 'ALL' | 'PENDING' | 'SETTLED'
 
 interface Row {
   id: string; source: 'CASH_RECON' | 'COLLECTION'; date: string; outlet: string; person: string
+  staffId: string | null; personId: string | null
   excess: number; reason: string; reasonLabel: string; paid: number; balance: number; status: 'PENDING' | 'SETTLED'
 }
 interface Outlet { id: string; name: string }
 
 const SOURCE_LABEL: Record<Row['source'], string> = { CASH_RECON: 'Cash Recon', COLLECTION: 'Collections' }
 
+const DEFAULT_PERMS = { canAdd: false, canEdit: false, canDelete: false, canSettle: false, canUnsettle: false }
+
 export default function ExcessReconPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const confirm = useConfirm()
   const isCashier = user?.role === 'CASHIER'
+  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+
+  const [perms, setPerms] = useState(DEFAULT_PERMS)
+  const [accessOpen, setAccessOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  const [editRow, setEditRow] = useState<Row | null>(null)
+  const [editForm, setEditForm] = useState({ amount: '', reason: '', staffId: '', personId: '' })
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [staffList, setStaffList] = useState<{ id: string; name: string }[]>([])
+  const [customerList, setCustomerList] = useState<{ id: string; name: string }[]>([])
 
   const [range, setRange] = useState<RangeKey>('month')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -47,6 +66,9 @@ export default function ExcessReconPage() {
 
   useEffect(() => {
     if (!isCashier) request('/api/outlets').then((o) => setOutlets(o || [])).catch(() => {})
+    request('/api/permissions/me').then((me) => setPerms(me?.EXCESS_RECON || DEFAULT_PERMS)).catch(() => {})
+    request('/api/staff-list').then((s) => setStaffList(s || [])).catch(() => {})
+    request('/api/persons?type=CUSTOMER').then((p) => setCustomerList(p || [])).catch(() => {})
   }, [isCashier, request])
 
   const load = useCallback(async () => {
@@ -71,6 +93,8 @@ export default function ExcessReconPage() {
 
   useEffect(() => { load() }, [load])
 
+  const roleCanSettle = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN'].includes(user?.role || '')
+  const canSettleUI = roleCanSettle || perms.canSettle
   const rowKey = (r: Row) => `${r.source}-${r.id}`
   const visible = rows.filter((r) => statusFilter === 'ALL' || r.status === statusFilter)
   const totalExcess = visible.reduce((s, r) => s + r.excess, 0)
@@ -132,13 +156,87 @@ export default function ExcessReconPage() {
     } finally { setPaying(false) }
   }
 
+  const openEdit = (r: Row) => {
+    setEditForm({ amount: String(r.excess), reason: r.reason, staffId: r.staffId || '', personId: r.personId || '' })
+    setEditRow(r)
+  }
+  const closeEdit = () => setEditRow(null)
+
+  const submitEdit = async () => {
+    if (!editRow) return
+    if (!editForm.amount || Number(editForm.amount) <= 0) return toast.error('Enter an amount greater than zero')
+    if (!editForm.reason) return toast.error('Select a reason')
+    if (editForm.reason === 'STAFF_TIP' && !editForm.staffId) return toast.error('Select the staff name')
+    if (editForm.reason === 'CUSTOMER_EXCESS' && !editForm.personId) return toast.error('Select the customer name')
+    setEditSubmitting(true)
+    try {
+      await request(`/api/excess-recon/${editRow.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          source: editRow.source, amount: Number(editForm.amount), reason: editForm.reason,
+          staffId: editForm.reason === 'STAFF_TIP' ? editForm.staffId : '',
+          personId: editForm.reason === 'CUSTOMER_EXCESS' ? editForm.personId : '',
+        }),
+      })
+      toast.success('Excess record updated')
+      closeEdit()
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error updating excess record')
+    } finally { setEditSubmitting(false) }
+  }
+
+  const deleteRow = async (r: Row) => {
+    if (!(await confirm({
+      title: 'Delete excess record', message: `Delete this excess record (${formatCurrency(r.excess)}) for ${r.person}? This cannot be undone.`,
+      danger: true, confirmLabel: 'Delete',
+    }))) return
+    try {
+      await request(`/api/excess-recon/${r.id}?source=${r.source}`, { method: 'DELETE' })
+      toast.success('Excess record deleted')
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error deleting excess record')
+    }
+  }
+
+  const unsettleRow = async (r: Row) => {
+    if (!(await confirm({
+      title: 'Unsettle payment', message: `Reset ${formatCurrency(r.paid)} paid back to unpaid for ${r.person}?`,
+      danger: true, confirmLabel: 'Unsettle',
+    }))) return
+    try {
+      await request(`/api/excess-recon/${r.id}`, { method: 'POST', body: JSON.stringify({ source: r.source, unsettle: true }) })
+      toast.success('Excess payment unsettled')
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error unsettling payment')
+    }
+  }
+
   return (
     <AppShell>
       <SectionTabs tabs={DAILY_TABS} />
       <div className="space-y-5">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Excess Recon</h1>
-          <p className="text-gray-500 text-sm">Excess recorded in Cash Reconciliation and Collections, consolidated with Paid/Balance settlement</p>
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Excess Recon</h1>
+            <p className="text-gray-500 text-sm">Excess recorded in Cash Reconciliation and Collections, consolidated with Paid/Balance settlement</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {perms.canAdd && (
+              <button onClick={() => setAddOpen(true)}
+                className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-medium text-sm hover:bg-indigo-700 transition">
+                + Add Excess
+              </button>
+            )}
+            {isOwner && (
+              <button onClick={() => setAccessOpen(true)} title="Manage Edit/Delete/Settle/Unsettle/Add Access"
+                className="p-2.5 bg-white border-2 border-gray-200 text-gray-600 rounded-xl hover:border-gray-300 transition">
+                <ShieldCheck className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Filters */}
@@ -243,11 +341,28 @@ export default function ExcessReconPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {r.status === 'PENDING' && (
-                            <button onClick={() => openPay(r)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700">
-                              Record Payment
-                            </button>
-                          )}
+                          <div className="flex items-center justify-end gap-2 flex-wrap">
+                            {r.status === 'PENDING' && canSettleUI && (
+                              <button onClick={() => openPay(r)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700">
+                                Record Payment
+                              </button>
+                            )}
+                            {r.paid > 0 && perms.canUnsettle && (
+                              <button onClick={() => unsettleRow(r)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100">
+                                Unsettle
+                              </button>
+                            )}
+                            {perms.canEdit && (
+                              <button onClick={() => openEdit(r)} title="Edit" className="text-gray-400 hover:text-indigo-600">
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            )}
+                            {perms.canDelete && r.paid <= 0 && (
+                              <button onClick={() => deleteRow(r)} title="Delete" className="text-gray-400 hover:text-red-600">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -319,6 +434,60 @@ export default function ExcessReconPage() {
           </div>
         </div>
       )}
+
+      {/* Edit modal */}
+      {editRow && (
+        <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-4" onClick={closeEdit}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h3 className="font-bold text-gray-900">Edit Excess Record</h3>
+              <p className="text-xs text-gray-500 mt-0.5">{editRow.person} · {formatDate(editRow.date)}</p>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Amount (TZS)</label>
+              <MoneyInput value={editForm.amount} onChange={(v) => setEditForm({ ...editForm, amount: v })}
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
+              {editRow.paid > 0 && <p className="text-xs text-gray-400 mt-1">Cannot be less than the {formatCurrency(editRow.paid)} already paid.</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Reason</label>
+              <select value={editForm.reason} onChange={(e) => setEditForm({ ...editForm, reason: e.target.value, staffId: '', personId: '' })}
+                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                <option value="">Select a reason…</option>
+                {EXCESS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+              </select>
+            </div>
+            {editForm.reason === 'STAFF_TIP' && (
+              <select value={editForm.staffId} onChange={(e) => setEditForm({ ...editForm, staffId: e.target.value })}
+                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                <option value="">Select staff…</option>
+                {staffList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            )}
+            {editForm.reason === 'CUSTOMER_EXCESS' && (
+              <select value={editForm.personId} onChange={(e) => setEditForm({ ...editForm, personId: e.target.value })}
+                className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                <option value="">Select customer…</option>
+                {customerList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+            <div className="flex gap-2">
+              <button onClick={closeEdit} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50">Cancel</button>
+              <button onClick={submitEdit} disabled={editSubmitting} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 disabled:opacity-60">
+                {editSubmitting ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isOwner && (
+        <ManageAccessModal open={accessOpen} onClose={() => setAccessOpen(false)} resource="EXCESS_RECON"
+          resourceLabel="Excess Recon" actions={['add', 'edit', 'delete', 'settle', 'unsettle']} request={request} />
+      )}
+
+      <AddExcessModal open={addOpen} onClose={() => setAddOpen(false)} onSaved={load}
+        outlets={outlets} isCashier={isCashier} defaultOutletId={outletId || user?.outlet?.id || ''} request={request} />
     </AppShell>
   )
 }

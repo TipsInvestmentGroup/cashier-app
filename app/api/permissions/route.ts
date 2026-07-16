@@ -25,13 +25,13 @@ export async function PUT(req: NextRequest) {
   if (!isOwner(user.email)) return NextResponse.json({ error: 'Only the system owner can change access grants' }, { status: 403 })
 
   const body = await req.json().catch(() => ({}))
-  const { resource, userId, canAdd, canEdit, canDelete } = body
+  const { resource, userId, canAdd, canEdit, canDelete, canSettle, canUnsettle } = body
   if (!resource || !VALID_RESOURCES.includes(resource)) return NextResponse.json({ error: 'Invalid resource' }, { status: 400 })
   if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 })
 
-  const grant = await setPermission(resource as Resource, userId, { canAdd: !!canAdd, canEdit: !!canEdit, canDelete: !!canDelete })
+  const grant = await setPermission(resource as Resource, userId, { canAdd: !!canAdd, canEdit: !!canEdit, canDelete: !!canDelete, canSettle: !!canSettle, canUnsettle: !!canUnsettle })
   await prisma.auditLog.create({
-    data: { userId: user.userId, action: 'UPDATE', entity: 'UserPermission', entityId: grant.id, details: `Set ${resource} access for user ${userId}: add=${!!canAdd} edit=${!!canEdit} delete=${!!canDelete}` },
+    data: { userId: user.userId, action: 'UPDATE', entity: 'UserPermission', entityId: grant.id, details: `Set ${resource} access for user ${userId}: add=${!!canAdd} edit=${!!canEdit} delete=${!!canDelete} settle=${!!canSettle} unsettle=${!!canUnsettle}` },
   })
   return NextResponse.json(grant)
 }

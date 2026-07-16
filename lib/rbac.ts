@@ -12,13 +12,14 @@ export const RESOURCES = {
   SIGNED_BILLS: 'SIGNED_BILLS',
   PERSONS: 'PERSONS',
   PRODUCTS: 'PRODUCTS',
+  EXCESS_RECON: 'EXCESS_RECON',
 } as const
 
 export type Resource = (typeof RESOURCES)[keyof typeof RESOURCES]
-export type Action = 'add' | 'edit' | 'delete'
+export type Action = 'add' | 'edit' | 'delete' | 'settle' | 'unsettle'
 
-const ACTION_FIELD: Record<Action, 'canAdd' | 'canEdit' | 'canDelete'> = {
-  add: 'canAdd', edit: 'canEdit', delete: 'canDelete',
+const ACTION_FIELD: Record<Action, 'canAdd' | 'canEdit' | 'canDelete' | 'canSettle' | 'canUnsettle'> = {
+  add: 'canAdd', edit: 'canEdit', delete: 'canDelete', settle: 'canSettle', unsettle: 'canUnsettle',
 }
 
 /** Owner always passes. Otherwise looks up the explicit grant row. */
@@ -39,11 +40,11 @@ export async function listPermissions(resource: Resource) {
 }
 
 /** Owner sets/changes a user's grant for a resource. */
-export async function setPermission(resource: Resource, userId: string, grants: { canAdd?: boolean; canEdit?: boolean; canDelete?: boolean }) {
+export async function setPermission(resource: Resource, userId: string, grants: { canAdd?: boolean; canEdit?: boolean; canDelete?: boolean; canSettle?: boolean; canUnsettle?: boolean }) {
   return prisma.userPermission.upsert({
     where: { userId_resource: { userId, resource } },
     update: grants,
-    create: { userId, resource, canAdd: !!grants.canAdd, canEdit: !!grants.canEdit, canDelete: !!grants.canDelete },
+    create: { userId, resource, canAdd: !!grants.canAdd, canEdit: !!grants.canEdit, canDelete: !!grants.canDelete, canSettle: !!grants.canSettle, canUnsettle: !!grants.canUnsettle },
   })
 }
 
@@ -52,13 +53,15 @@ export async function myPermissions(email: string | undefined, userId: string) {
   const owner = isOwner(email)
   const rows = owner ? [] : await prisma.userPermission.findMany({ where: { userId } })
   const byResource = new Map(rows.map((r) => [r.resource, r]))
-  const result: Record<Resource, { canAdd: boolean; canEdit: boolean; canDelete: boolean }> = {} as never
+  const result: Record<Resource, { canAdd: boolean; canEdit: boolean; canDelete: boolean; canSettle: boolean; canUnsettle: boolean }> = {} as never
   for (const resource of Object.values(RESOURCES)) {
     const row = byResource.get(resource)
     result[resource] = {
       canAdd: owner || !!row?.canAdd,
       canEdit: owner || !!row?.canEdit,
       canDelete: owner || !!row?.canDelete,
+      canSettle: owner || !!row?.canSettle,
+      canUnsettle: owner || !!row?.canUnsettle,
     }
   }
   return result

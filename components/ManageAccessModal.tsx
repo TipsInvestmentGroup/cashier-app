@@ -3,12 +3,14 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import toast from 'react-hot-toast'
 
-type Action = 'add' | 'edit' | 'delete'
-const ACTION_LABEL: Record<Action, string> = { add: 'Add', edit: 'Edit', delete: 'Delete' }
-const ACTION_FIELD: Record<Action, 'canAdd' | 'canEdit' | 'canDelete'> = { add: 'canAdd', edit: 'canEdit', delete: 'canDelete' }
+type Action = 'add' | 'edit' | 'delete' | 'settle' | 'unsettle'
+const ACTION_LABEL: Record<Action, string> = { add: 'Add', edit: 'Edit', delete: 'Delete', settle: 'Settle', unsettle: 'Unsettle' }
+const ACTION_FIELD: Record<Action, 'canAdd' | 'canEdit' | 'canDelete' | 'canSettle' | 'canUnsettle'> = {
+  add: 'canAdd', edit: 'canEdit', delete: 'canDelete', settle: 'canSettle', unsettle: 'canUnsettle',
+}
 
 interface UserLite { id: string; name: string; email: string }
-interface Grant { userId: string; canAdd: boolean; canEdit: boolean; canDelete: boolean; user: UserLite }
+interface Grant { userId: string; canAdd: boolean; canEdit: boolean; canDelete: boolean; canSettle: boolean; canUnsettle: boolean; user: UserLite }
 
 export function ManageAccessModal({
   open, onClose, resource, resourceLabel, actions, request,
@@ -47,6 +49,8 @@ export function ManageAccessModal({
       canAdd: current?.canAdd || false,
       canEdit: current?.canEdit || false,
       canDelete: current?.canDelete || false,
+      canSettle: current?.canSettle || false,
+      canUnsettle: current?.canUnsettle || false,
       [field]: !current?.[field],
     }
     setSavingKey(key)
