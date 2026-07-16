@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
 import { GlobalSearch } from './GlobalSearch'
 import { PendingBell } from './PendingBell'
 import { OfflineQueueBadge } from './OfflineQueueBadge'
@@ -34,6 +35,7 @@ export function PosLeanShell({
   children: React.ReactNode
 }) {
   const { user, isLoading, logout } = useAuth()
+  const { config } = useCompanyConfig()
   const router = useRouter()
   const pathname = usePathname()
   const { request } = useApi()
@@ -105,7 +107,7 @@ export function PosLeanShell({
           title="MyPos home"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/tips-logo.png" alt="Tips" className="w-full h-full object-contain p-0.5" />
+          <img src={config.logoUrl} alt={config.companyName} className="w-full h-full object-contain p-0.5" />
         </button>
 
         <div className="min-w-0 flex-1">

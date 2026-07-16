@@ -26,8 +26,10 @@ export const BILL_TYPE_LABELS: Record<string, string> = {
   DJ: 'DJ (In-house)', TIPS: 'Tips (In-house)', STAFF: 'Staff (In-house)',
 }
 
+import { formatReceiptAmount, getCurrencyLabel } from '@/lib/utils'
+
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string))
-const tsh = (n: number) => `${Math.round(n).toLocaleString('en-US')}/=`
+const tsh = (n: number) => formatReceiptAmount(n)
 
 export function buildBillHtml(o: BillOrder): string {
   const title = o.billType === 'CUSTOMER' ? "CUSTOMER'S BILL" : 'IN-HOUSE BILL'
@@ -79,7 +81,7 @@ ${o.outlet?.vrn ? `<p class="co">VRN : ${esc(o.outlet.vrn)}</p>` : ''}
 <hr class="dash"/>
 <table class="items">${rows}${extras.join('')}</table>
 <hr class="dash"/>
-<table class="tot"><tr><td>TOTAL Tsh</td><td class="amt">${tsh(net)}</td></tr></table>
+<table class="tot"><tr><td>TOTAL ${esc(getCurrencyLabel())}</td><td class="amt">${tsh(net)}</td></tr></table>
 <hr class="dash"/>
 <p class="foot">Hii sio risiti halali ya malipo, huu ni mchanganuo</p>
 <p class="bye">Karibu tena!</p>

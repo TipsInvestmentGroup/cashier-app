@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { MoneyInput } from '@/components/MoneyInput'
 import { EXCESS_REASONS } from '@/lib/excess-reasons'
+import { getCurrencyCode } from '@/lib/utils'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 
@@ -139,7 +140,7 @@ export function AddExcessModal({
         )}
 
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1">Amount (TZS)</label>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Amount ({getCurrencyCode()})</label>
           <MoneyInput value={amount} onChange={setAmount}
             className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold" placeholder="0" />
         </div>

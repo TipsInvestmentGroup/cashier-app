@@ -1,4 +1,5 @@
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
+import { DEFAULT_COMPANY_CONFIG, formatAmountLabel, type CompanyConfig } from '@/lib/company-config-shared'
 
 /** Round a monetary value to 2 decimals to avoid floating-point drift (e.g. 0.1+0.2). */
 export function roundMoney(n: number | string | null | undefined): number {
@@ -6,13 +7,35 @@ export function roundMoney(n: number | string | null | undefined): number {
   return Math.round(v * 100) / 100
 }
 
+// Module-level company config for CLIENT code (formatters, PDF letterheads),
+// defaulting to this deployment's live values so every render is correct
+// before any fetch completes. CompanyConfigProvider overwrites it once
+// /api/company-config loads (a no-op unless an Admin changed the defaults).
+// Server code must use lib/company-config.ts getCompanyConfig() instead.
+let clientConfig: CompanyConfig = DEFAULT_COMPANY_CONFIG
+
+export function setClientCompanyConfig(c: CompanyConfig) { clientConfig = c }
+export function getClientCompanyConfig(): CompanyConfig { return clientConfig }
+export function getCurrencyCode() { return clientConfig.currencyCode }
+export function getCurrencyLabel() { return clientConfig.currencyLabel }
+
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('en-TZ', {
+  return new Intl.NumberFormat(clientConfig.currencyLocale, {
     style: 'currency',
-    currency: 'TZS',
+    currency: clientConfig.currencyCode,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount)
+}
+
+/** "TSh 1,234" — the label-prefixed style used in PDFs and target cards. */
+export function formatAmount(n: number): string {
+  return formatAmountLabel(clientConfig, n)
+}
+
+/** "1,234/=" — the amount style used on printed 80mm bills. */
+export function formatReceiptAmount(n: number): string {
+  return `${Math.round(n).toLocaleString('en-US')}${clientConfig.receiptAmountSuffix}`
 }
 
 export function formatDate(date: Date | string): string {

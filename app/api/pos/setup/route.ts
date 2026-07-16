@@ -18,38 +18,20 @@ async function handle(req: NextRequest) {
 
   // serviceModel: DIRECT = seller serves immediately (Main Bar model);
   // PREP = queue → prepare → notify waiter to collect (VIP/Shisha/Kitchen model).
+  //
+  // The PosCounter rows in the database ARE each outlet's layout — this
+  // endpoint only bootstraps a generic starter set for an outlet that has no
+  // counters yet, and never modifies existing counters. (It previously keyed
+  // per-outlet layouts on literal outlet names, which silently broke for any
+  // renamed or new outlet.) Adjust a layout afterwards via PUT/POST on
+  // /api/pos/counters — e.g. relabel MAIN, deactivate BAR to merge it into
+  // MAIN, or add a VIP prep station.
   const DEFAULT_COUNTERS = [
     { code: 'MAIN', label: 'Main Counter', serviceModel: 'DIRECT' },
     { code: 'BAR', label: 'Bar Counter', serviceModel: 'DIRECT' },
     { code: 'SHISHA', label: 'Shisha Counter', serviceModel: 'PREP' },
     { code: 'KITCHEN', label: 'Kitchen Counter', serviceModel: 'PREP' },
   ]
-  // Mikocheni's real physical layout: one circular Main Bar (bar lady serves
-  // seated customers directly, no separate "Main" counter) + three prep
-  // stations. Reuses the MAIN code for the merged bar counter so existing
-  // order history tagged 'MAIN' stays meaningful; BAR is deactivated below
-  // rather than deleted, so its own history is untouched too.
-  const MIKOCHENI_COUNTERS = [
-    { code: 'MAIN', label: 'Main Bar', serviceModel: 'DIRECT' },
-    { code: 'VIP', label: 'VIP Counter', serviceModel: 'PREP' },
-    { code: 'SHISHA', label: 'Shisha Counter', serviceModel: 'PREP' },
-    { code: 'KITCHEN', label: 'Kitchen Counter', serviceModel: 'PREP' },
-  ]
-  // Coco Beach's real layout: one Drinks Counter (three bar ladies, no
-  // separate VIP station) + Kitchen + Shisha, both fed by bar ladies AND
-  // outside staff. Also merges MAIN+BAR like Mikocheni — see below.
-  const COCO_BEACH_COUNTERS = [
-    { code: 'MAIN', label: 'Drinks Counter', serviceModel: 'DIRECT' },
-    { code: 'SHISHA', label: 'Shisha Counter', serviceModel: 'PREP' },
-    { code: 'KITCHEN', label: 'Kitchen Counter', serviceModel: 'PREP' },
-  ]
-  const OUTLET_COUNTERS: Record<string, typeof DEFAULT_COUNTERS> = {
-    'Mikocheni Outlet': MIKOCHENI_COUNTERS,
-    'Coco Beach Outlet': COCO_BEACH_COUNTERS,
-  }
-  // Outlets with a merged MAIN+BAR layout — BAR is deactivated (not
-  // deleted) so its order history stays intact and queryable.
-  const MERGES_BAR_INTO_MAIN = new Set(['Mikocheni Outlet', 'Coco Beach Outlet'])
 
   let tablesCreated = 0
   let countersCreated = 0
@@ -62,18 +44,12 @@ async function handle(req: NextRequest) {
         tablesCreated++
       }
     }
-    const COUNTERS = OUTLET_COUNTERS[outlet.name] ?? DEFAULT_COUNTERS
-    for (const c of COUNTERS) {
-      const existing = await prisma.posCounter.findFirst({ where: { outletId: outlet.id, code: c.code } })
-      if (!existing) {
+    const existingCount = await prisma.posCounter.count({ where: { outletId: outlet.id } })
+    if (existingCount === 0) {
+      for (const c of DEFAULT_COUNTERS) {
         await prisma.posCounter.create({ data: { outletId: outlet.id, code: c.code, label: c.label, serviceModel: c.serviceModel } })
         countersCreated++
-      } else {
-        await prisma.posCounter.update({ where: { id: existing.id }, data: { label: c.label, serviceModel: c.serviceModel, isActive: true } })
       }
-    }
-    if (MERGES_BAR_INTO_MAIN.has(outlet.name)) {
-      await prisma.posCounter.updateMany({ where: { outletId: outlet.id, code: 'BAR' }, data: { isActive: false } })
     }
   }
 

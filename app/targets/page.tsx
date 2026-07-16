@@ -7,7 +7,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
-import { TARGETS, targetLevels, fmtTarget, type TargetDef } from '@/lib/targets'
+import { targetLevels, fmtTarget, targetDeptKey, TARGET_SCOPES, type TargetDef } from '@/lib/targets'
 import { formatDate } from '@/lib/utils'
 import { generateWarningLetters, type FlaggedItem } from '@/lib/warning-letter-pdf'
 import { generateRewardLetters } from '@/lib/reward-letter-pdf'
@@ -15,17 +15,16 @@ import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, sub
 import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2, Lock, Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const OUTLETS = ['All', 'Mikocheni', 'Coco'] as const
-const deptIcon = (d: string) => (d === 'Shisha Sales' ? Cigarette : d === 'Food Sales' ? UtensilsCrossed : Wallet)
+const deptIcon = (d: string) => { const k = targetDeptKey(d); return k === 'shisha' ? Cigarette : k === 'food' ? UtensilsCrossed : Wallet }
 const scopeIcon = (s: string) => (s === 'Per Outlet' ? Building2 : s === 'Per Manager' ? Crown : User)
-const deptKey = (d: string): 'collection' | 'shisha' | 'food' => (d === 'Shisha Sales' ? 'shisha' : d === 'Food Sales' ? 'food' : 'collection')
+const deptKey = targetDeptKey
 
 interface OutletRow { id: string; name: string }
 interface StaffRow { staffName: string; collection: number; shisha: number; food: number }
 interface Perf { outlets: OutletRow[]; byOutlet: Record<string, { collection: number; shisha: number; food: number }>; byStaff: Record<string, StaffRow[]> }
 
 interface UploadRow { id: string; date: string; staffName: string; value: number; outletId?: string; outlet?: { name: string } }
-interface LbMetric { department: string; unit: string; actual: number; target: number; pct: number }
+interface LbMetric { department: string; unit: string; unitLabel?: string; actual: number; target: number; pct: number }
 interface LbRow { rank: number; staff: string; outlet: string; overallPct: number; status: 'reward' | 'ontrack' | 'letter'; metrics: LbMetric[] }
 
 export default function TargetsPage() {
@@ -37,7 +36,9 @@ export default function TargetsPage() {
   const [view, setView] = useState<'targets' | 'performance' | 'leaderboard' | 'uploads'>('targets')
   const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly')
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
-  const [outlet, setOutlet] = useState<(typeof OUTLETS)[number]>('All')
+  const [outlet, setOutlet] = useState<string>('All')
+  const [targets, setTargets] = useState<TargetDef[]>([])
+  const [manageOpen, setManageOpen] = useState(false)
   const [perf, setPerf] = useState<Perf | null>(null)
   const [perfPrev, setPerfPrev] = useState<Perf | null>(null)
   const [loading, setLoading] = useState(false)
@@ -54,6 +55,15 @@ export default function TargetsPage() {
   const prevWin = period === 'weekly'
     ? { from: startOfWeek(subWeeks(win.from, 1), { weekStartsOn: 1 }), to: endOfWeek(subWeeks(win.from, 1), { weekStartsOn: 1 }) }
     : { from: startOfMonth(subMonths(win.from, 1)), to: endOfMonth(subMonths(win.from, 1)) }
+
+  const loadTargets = useCallback(async () => {
+    try { setTargets(await request('/api/targets') || []) } catch { /* view renders empty */ }
+  }, [request])
+  useEffect(() => { loadTargets() }, [loadTargets])
+
+  // Outlet filter chips — derived from the configured targets, not hardcoded.
+  const outletNames = [...new Set(targets.map((t) => t.outletName))]
+  const OUTLETS = ['All', ...outletNames]
 
   const loadPerf = useCallback(async () => {
     setLoading(true)
@@ -117,8 +127,8 @@ export default function TargetsPage() {
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not clear') }
   }
 
-  const groups = ['Mikocheni', 'Coco'].filter((o) => outlet === 'All' || o === outlet)
-  const dbOutlet = (g: string) => perf?.outlets.find((o) => o.name.toLowerCase().includes(g.toLowerCase()))
+  const groups = outletNames.filter((o) => outlet === 'All' || o === outlet)
+  const dbOutlet = (g: string) => perf?.outlets.find((o) => o.name === g)
 
   // Build the performance model once (drives summary, CSV and the tables).
   const model = (view === 'performance' && perf) ? groups.map((g) => {
@@ -126,7 +136,7 @@ export default function TargetsPage() {
     const totals = (o && perf.byOutlet[o.id]) || { collection: 0, shisha: 0, food: 0 }
     const staff = (o && perf.byStaff[o.id]) || []
     const prevStaff = (o && perfPrev?.byStaff[o.id]) || []
-    const items = TARGETS.filter((t) => t.outlet === g)
+    const items = targets.filter((t) => t.outletName === g)
     const outletTargets = items.filter((t) => t.scope !== 'Per Staff').map((t) => ({ t, lv: targetLevels(t, period, daysInMonth), actual: totals[deptKey(t.department)] }))
     const staffTargets = items.filter((t) => t.scope === 'Per Staff').map((t) => {
       const dk = deptKey(t.department); const lv = targetLevels(t, period, daysInMonth)
@@ -143,7 +153,7 @@ export default function TargetsPage() {
   model.forEach((m) => m.staffTargets.forEach((st) => st.rows.forEach((r) => {
     const lab = statusOf(r.actual, st.lv).label
     if (lab === 'Reward') flags.reward++
-    else if (lab === 'Letter') { flags.letter++; flaggedItems.push({ staff: r.name, outlet: m.g, department: st.t.department, unit: st.t.unit, actual: r.actual, target: st.lv.target, threshold: st.lv.letterBelow }) }
+    else if (lab === 'Letter') { flags.letter++; flaggedItems.push({ staff: r.name, outlet: m.g, department: st.t.department, unit: st.t.unit, unitLabel: st.t.unitLabel || undefined, actual: r.actual, target: st.lv.target, threshold: st.lv.letterBelow }) }
     else flags.onTrack++
   })))
   const periodLabel = period === 'weekly' ? `${format(win.from, 'dd MMM')} – ${format(win.to, 'dd MMM yyyy')}` : format(win.from, 'MMMM yyyy')
@@ -181,6 +191,12 @@ export default function TargetsPage() {
                   className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition ${period === p ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>{p}</button>
               ))}
             </div>
+            {isAdmin && (
+              <button onClick={() => setManageOpen(true)}
+                className="px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:border-gray-300 transition">
+                ⚙️ Manage Targets
+              </button>
+            )}
           </div>
         </div>
 
@@ -212,10 +228,10 @@ export default function TargetsPage() {
         </div>
 
         {view === 'targets' && groups.map((g) => {
-          const items = TARGETS.filter((t) => t.outlet === g)
+          const items = targets.filter((t) => t.outletName === g)
           return (
             <div key={g}>
-              <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400 mb-3">{g} Outlet</h2>
+              <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400 mb-3">{g}</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {items.map((t, i) => <TargetCard key={i} t={t} period={period} daysInMonth={daysInMonth} />)}
               </div>
@@ -244,7 +260,7 @@ export default function TargetsPage() {
 
             {model.map((m) => (
               <div key={m.g} className="space-y-3">
-                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400">{m.g} Outlet</h2>
+                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400">{m.g}</h2>
                 {!m.o && <p className="text-sm text-gray-400">No matching outlet found.</p>}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {m.outletTargets.map((x, i) => <ProgressCard key={i} t={x.t} actual={x.actual} levels={x.lv} />)}
@@ -256,7 +272,7 @@ export default function TargetsPage() {
         ))}
 
         {view === 'leaderboard' && (() => {
-          const shown = leaderboard.filter((r) => outlet === 'All' || r.outlet.toLowerCase().includes(outlet.toLowerCase()))
+          const shown = leaderboard.filter((r) => outlet === 'All' || r.outlet === outlet)
           const pctOf = (r: LbRow, dept: string) => r.metrics.find((m) => m.department === dept)?.pct
           const eligible = shown.filter((r) => r.status === 'reward')
           const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}`)
@@ -310,7 +326,7 @@ export default function TargetsPage() {
 
         {view === 'uploads' && (() => {
           const unit = uploadDept === 'SHISHA' ? 'COUNT' as const : 'TZS' as const
-          const shown = uploads.filter((r) => outlet === 'All' || (r.outlet?.name || '').toLowerCase().includes(outlet.toLowerCase()))
+          const shown = uploads.filter((r) => outlet === 'All' || r.outlet?.name === outlet)
           const total = shown.reduce((s, r) => s + r.value, 0)
           const isLocked = (r: UploadRow) => lockedDays.has(dayOf(r.date))
           const unlockedIds = shown.filter((r) => !isLocked(r)).map((r) => r.id)
@@ -391,7 +407,168 @@ export default function TargetsPage() {
           )
         })()}
       </div>
+
+      {isAdmin && manageOpen && (
+        <ManageTargetsModal request={request} onClose={() => setManageOpen(false)} onChanged={loadTargets} />
+      )}
     </AppShell>
+  )
+}
+
+interface ManagedTarget extends TargetDef { isActive: boolean }
+
+/** Admin CRUD for SalesTarget rows — what used to require a code edit. */
+function ManageTargetsModal({ request, onClose, onChanged }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  request: (url: string, opts?: any) => Promise<any>
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const confirm = useConfirm()
+  const [rows, setRows] = useState<ManagedTarget[]>([])
+  const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [edits, setEdits] = useState<Record<string, string>>({})
+  const [form, setForm] = useState({ outletId: '', scope: 'Per Staff', department: '', unit: 'TZS' as 'TZS' | 'COUNT', unitLabel: '', weeklyTarget: '' })
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [ts, os] = await Promise.all([request('/api/targets?all=1'), request('/api/outlets')])
+      setRows(ts || [])
+      setOutlets((os || []).filter((o: { isActive?: boolean }) => o.isActive !== false))
+    } finally { setLoading(false) }
+  }, [request])
+  useEffect(() => { load() }, [load])
+
+  const saveWeekly = async (t: ManagedTarget) => {
+    const raw = edits[t.id]
+    if (raw === undefined || Number(raw) === t.weeklyTarget) return
+    const weekly = Number(raw)
+    if (!Number.isFinite(weekly) || weekly <= 0) return toast.error('Weekly target must be > 0')
+    setBusy(true)
+    try {
+      await request(`/api/targets/${t.id}`, { method: 'PUT', body: JSON.stringify({ weeklyTarget: weekly }) })
+      toast.success('Target updated'); load(); onChanged()
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not save') } finally { setBusy(false) }
+  }
+
+  const toggleActive = async (t: ManagedTarget) => {
+    setBusy(true)
+    try {
+      await request(`/api/targets/${t.id}`, { method: 'PUT', body: JSON.stringify({ isActive: !t.isActive }) })
+      load(); onChanged()
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not update') } finally { setBusy(false) }
+  }
+
+  const remove = async (t: ManagedTarget) => {
+    if (!(await confirm({ title: 'Delete target', message: `Delete "${t.department} · ${t.scope}" for ${t.outletName}?`, danger: true, confirmLabel: 'Delete' }))) return
+    setBusy(true)
+    try {
+      await request(`/api/targets/${t.id}`, { method: 'DELETE' })
+      toast.success('Target deleted'); load(); onChanged()
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not delete') } finally { setBusy(false) }
+  }
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.outletId) return toast.error('Select an outlet')
+    if (!form.department.trim()) return toast.error('Department is required')
+    const weekly = Number(form.weeklyTarget)
+    if (!Number.isFinite(weekly) || weekly <= 0) return toast.error('Weekly target must be > 0')
+    setBusy(true)
+    try {
+      await request('/api/targets', { method: 'POST', body: JSON.stringify({ ...form, weeklyTarget: weekly }) })
+      toast.success('Target added')
+      setForm((f) => ({ ...f, department: '', unitLabel: '', weeklyTarget: '' }))
+      load(); onChanged()
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not add') } finally { setBusy(false) }
+  }
+
+  const selCls = 'px-2.5 py-2 border-2 border-gray-200 rounded-xl text-sm bg-white focus:border-indigo-500 focus:outline-none'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-3xl rounded-2xl shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+          <h3 className="font-bold text-gray-900">⚙️ Manage Sales Targets</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
+        </div>
+        <div className="p-4 space-y-4">
+          <form onSubmit={add} className="bg-gray-50 rounded-xl p-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+            <select value={form.outletId} onChange={(e) => setForm({ ...form, outletId: e.target.value })} className={`${selCls} col-span-2 sm:col-span-1`}>
+              <option value="">Outlet…</option>
+              {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+            <select value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} className={selCls}>
+              {TARGET_SCOPES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} placeholder="Department"
+              className={`${selCls} col-span-2 sm:col-span-1`} />
+            <select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value as 'TZS' | 'COUNT' })} className={selCls}>
+              <option value="TZS">Amount</option>
+              <option value="COUNT">Count</option>
+            </select>
+            {form.unit === 'COUNT'
+              ? <input value={form.unitLabel} onChange={(e) => setForm({ ...form, unitLabel: e.target.value })} placeholder="Unit (e.g. shisha)" className={selCls} />
+              : <span className="hidden sm:block" />}
+            <div className="flex gap-2 col-span-2 sm:col-span-1">
+              <input value={form.weeklyTarget} onChange={(e) => setForm({ ...form, weeklyTarget: e.target.value })} placeholder="Weekly" inputMode="numeric"
+                className={`${selCls} flex-1 min-w-0`} />
+              <button type="submit" disabled={busy} className="px-3 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">Add</button>
+            </div>
+          </form>
+
+          {loading ? (
+            <p className="py-8 text-center text-gray-400 text-sm">Loading…</p>
+          ) : (
+            <div className="overflow-x-auto border border-gray-100 rounded-xl">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600 text-[11px] uppercase tracking-wide">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Outlet</th>
+                    <th className="px-3 py-2 text-left">Scope</th>
+                    <th className="px-3 py-2 text-left">Department</th>
+                    <th className="px-3 py-2 text-right">Weekly Target</th>
+                    <th className="px-3 py-2 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {rows.map((t) => (
+                    <tr key={t.id} className={t.isActive ? 'hover:bg-gray-50' : 'opacity-50 hover:bg-gray-50'}>
+                      <td className="px-3 py-2 text-gray-700 whitespace-nowrap">{t.outletName}</td>
+                      <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{t.scope}</td>
+                      <td className="px-3 py-2 font-medium text-gray-800">{t.department}{t.unit === 'COUNT' ? <span className="text-gray-400 font-normal"> ({t.unitLabel || 'count'})</span> : ''}</td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          value={edits[t.id] ?? String(t.weeklyTarget)}
+                          onChange={(e) => setEdits({ ...edits, [t.id]: e.target.value })}
+                          onBlur={() => saveWeekly(t)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                          inputMode="numeric"
+                          className="w-32 px-2 py-1.5 border-2 border-gray-200 rounded-lg text-sm text-right focus:border-indigo-500 focus:outline-none"
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <button onClick={() => toggleActive(t)} disabled={busy}
+                          className="px-2.5 py-1 bg-gray-50 text-gray-600 text-xs font-semibold rounded-lg hover:bg-gray-100 mr-1">
+                          {t.isActive ? 'Disable' : 'Enable'}
+                        </button>
+                        <button onClick={() => remove(t)} disabled={busy}
+                          className="px-2.5 py-1 bg-red-50 text-red-700 text-xs font-semibold rounded-lg hover:bg-red-100">Delete</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {rows.length === 0 && <tr><td colSpan={5} className="text-center py-8 text-gray-400">No targets yet — add one above.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-xs text-gray-400">Weekly figures drive everything: daily = weekly ÷ 7, monthly = daily × days in month, letter &lt; ⅓, reward ≥ 80%. Edit a weekly figure and press Enter to save.</p>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -412,8 +589,8 @@ function ProgressCard({ t, actual, levels }: { t: TargetDef; actual: number; lev
         <Badge tone={st.tone}>{st.label}</Badge>
       </div>
       <div className="flex items-end justify-between">
-        <p className="text-xl font-bold text-gray-900">{fmtTarget(actual, t.unit)}</p>
-        <p className="text-xs text-gray-400">of {fmtTarget(levels.target, t.unit)} · {pct}%</p>
+        <p className="text-xl font-bold text-gray-900">{fmtTarget(actual, t.unit, t.unitLabel)}</p>
+        <p className="text-xs text-gray-400">of {fmtTarget(levels.target, t.unit, t.unitLabel)} · {pct}%</p>
       </div>
       <div className="h-2 bg-gray-100 rounded-full mt-2 overflow-hidden"><div className={`h-full ${st.bar}`} style={{ width: `${pct}%` }} /></div>
     </div>
@@ -426,7 +603,7 @@ function StaffTable({ t, levels, rows }: { t: TargetDef; levels: { target: numbe
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <span className="flex items-center gap-1.5 font-semibold text-gray-800 text-sm"><DeptIcon className="w-4 h-4 text-gray-400" /> {t.department} — per staff</span>
-        <span className="text-xs text-gray-400">Target {fmtTarget(levels.target, t.unit)}</span>
+        <span className="text-xs text-gray-400">Target {fmtTarget(levels.target, t.unit, t.unitLabel)}</span>
       </div>
       {rows.length === 0 ? (
         <p className="px-4 py-6 text-center text-sm text-gray-400">No staff activity in this window.</p>
@@ -442,11 +619,11 @@ function StaffTable({ t, levels, rows }: { t: TargetDef; levels: { target: numbe
                 <tr key={i} className="hover:bg-gray-50">
                   <td className="px-4 py-2 text-gray-400 font-semibold">{r.rank}</td>
                   <td className="px-4 py-2 font-medium text-gray-800">{r.name}</td>
-                  <td className="px-4 py-2 text-right text-gray-700">{fmtTarget(r.actual, t.unit)}</td>
+                  <td className="px-4 py-2 text-right text-gray-700">{fmtTarget(r.actual, t.unit, t.unitLabel)}</td>
                   <td className="px-4 py-2 text-right text-xs">
                     {r.prev === 0 && delta === 0
                       ? <span className="text-gray-300">—</span>
-                      : <span className={delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}>{delta > 0 ? '▲' : delta < 0 ? '▼' : '–'} {fmtTarget(Math.abs(delta), t.unit)}</span>}
+                      : <span className={delta > 0 ? 'text-green-600' : delta < 0 ? 'text-red-600' : 'text-gray-400'}>{delta > 0 ? '▲' : delta < 0 ? '▼' : '–'} {fmtTarget(Math.abs(delta), t.unit, t.unitLabel)}</span>}
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2 justify-end">
@@ -479,10 +656,10 @@ function TargetCard({ t, period, daysInMonth }: { t: TargetDef; period: 'weekly'
         <span className="w-8 h-8 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center flex-shrink-0"><DeptIcon className="w-4 h-4" /></span>
       </div>
       <p className="text-[11px] text-gray-400">{period === 'weekly' ? 'Weekly' : 'Monthly'} target</p>
-      <p className="text-xl font-bold text-indigo-700 tracking-tight leading-tight">{fmtTarget(target, t.unit)}</p>
+      <p className="text-xl font-bold text-indigo-700 tracking-tight leading-tight">{fmtTarget(target, t.unit, t.unitLabel)}</p>
       <div className="mt-2.5 space-y-1 text-xs">
-        <div className="flex items-center justify-between gap-2"><span className="text-green-700">🎯 Reward ≥</span><span className="font-semibold text-green-700">{fmtTarget(rewardFrom, t.unit)}</span></div>
-        <div className="flex items-center justify-between gap-2"><span className="text-red-600">⚠️ Letter &lt;</span><span className="font-semibold text-red-600">{fmtTarget(letterBelow, t.unit)}</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-green-700">🎯 Reward ≥</span><span className="font-semibold text-green-700">{fmtTarget(rewardFrom, t.unit, t.unitLabel)}</span></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-red-600">⚠️ Letter &lt;</span><span className="font-semibold text-red-600">{fmtTarget(letterBelow, t.unit, t.unitLabel)}</span></div>
         <div className="flex items-center justify-between border-t border-gray-100 pt-1 text-[11px]"><span className="text-gray-500">Reward</span><span className="text-gray-400 italic">Set by management</span></div>
       </div>
     </div>

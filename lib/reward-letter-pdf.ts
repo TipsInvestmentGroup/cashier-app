@@ -1,10 +1,13 @@
+import { formatAmount, getClientCompanyConfig } from '@/lib/utils'
+
 export interface RewardItem {
   staff: string
   outlet: string
-  achievements: { department: string; unit: string; actual: number; target: number; pct: number }[]
+  achievements: { department: string; unit: string; unitLabel?: string; actual: number; target: number; pct: number }[]
 }
 
-const fmt = (v: number, unit: string) => (unit === 'COUNT' ? `${Math.round(v).toLocaleString()} shisha` : 'TSh ' + Math.round(v).toLocaleString('en-US'))
+const fmt = (v: number, unit: string, unitLabel?: string) =>
+  unit === 'COUNT' ? `${Math.round(v).toLocaleString()} ${unitLabel || 'shisha'}` : formatAmount(v)
 
 /** One reward-eligibility / commendation letter per qualifying staff. */
 export async function generateRewardLetters(items: RewardItem[], periodLabel: string) {
@@ -20,9 +23,10 @@ export async function generateRewardLetters(items: RewardItem[], periodLabel: st
     if (!first) doc.addPage()
     first = false
 
+    const brand = getClientCompanyConfig()
     doc.setFillColor(22, 101, 52); doc.rect(0, 0, W, 22, 'F') // green band
-    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('tips', 14, 14)
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text('TIPS Lounge — Performance Management', W - 14, 14, { align: 'right' })
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text(brand.logoText, 14, 14)
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(brand.letterheadTitle, W - 14, 14, { align: 'right' })
 
     doc.setTextColor(31, 41, 55)
     doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text('REWARD ELIGIBILITY — LETTER OF COMMENDATION', 14, 36)
@@ -38,7 +42,7 @@ export async function generateRewardLetters(items: RewardItem[], periodLabel: st
     autoTable(doc, {
       startY: 88,
       head: [['Area', 'Target', 'Your Actual', 'Achieved']],
-      body: it.achievements.map((a) => [a.department, fmt(a.target, a.unit), fmt(a.actual, a.unit), `${a.pct}%`]),
+      body: it.achievements.map((a) => [a.department, fmt(a.target, a.unit, a.unitLabel), fmt(a.actual, a.unit, a.unitLabel), `${a.pct}%`]),
       styles: { fontSize: 9 }, headStyles: { fillColor: [22, 101, 52] }, margin: { left: 14, right: 14 },
     })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { CompanyConfigProvider } from "@/contexts/CompanyConfigContext";
 import { ConfirmProvider } from "@/components/ui/ConfirmProvider";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { Toaster } from "react-hot-toast";
@@ -35,12 +36,14 @@ export default function RootLayout({
     <html lang="en" className="h-full">
       <body className={`${inter.className} h-full bg-gray-50`}>
         <ServiceWorkerRegister />
-        <AuthProvider>
-          <ConfirmProvider>
-            {children}
-          </ConfirmProvider>
-          <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
-        </AuthProvider>
+        <CompanyConfigProvider>
+          <AuthProvider>
+            <ConfirmProvider>
+              {children}
+            </ConfirmProvider>
+            <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
+          </AuthProvider>
+        </CompanyConfigProvider>
       </body>
     </html>
   );

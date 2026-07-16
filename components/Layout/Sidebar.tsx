@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
 import { useApi } from '@/hooks/useApi'
 import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
@@ -35,6 +36,7 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname()
   const { user, logout } = useAuth()
+  const { config } = useCompanyConfig()
   const { request } = useApi()
 
   const visible = navItems.filter((n) => n.roles.includes(user?.role || ''))
@@ -64,9 +66,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
       <div className="p-6 border-b border-indigo-700">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <div className="w-12 h-12 rounded-xl bg-black flex items-center justify-center mb-2 overflow-hidden">
-          <img src="/tips-logo.png" alt="Tips" className="w-full h-full object-contain p-1" />
+          <img src={config.logoUrl} alt={config.companyName} className="w-full h-full object-contain p-1" />
         </div>
-        <h1 className="text-lg font-bold leading-tight">Cashier Manager</h1>
+        <h1 className="text-lg font-bold leading-tight">{config.appName}</h1>
         <p className="text-indigo-300 text-xs mt-1">{user?.outlet?.name || 'All Outlets'}</p>
       </div>
 

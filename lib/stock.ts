@@ -17,6 +17,7 @@ import { prisma } from './prisma'
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { roundMoney } from './utils'
 import { generateBillReference } from './bill-reference'
+import { getCompanyConfig } from './company-config'
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>
 
@@ -355,7 +356,7 @@ export async function createPurchaseOrder(opts: {
   const products = await prisma.product.findMany({ where: { id: { in: opts.items.map((i) => i.productId) } }, select: { id: true, name: true } })
   const productMap = new Map(products.map((p) => [p.id, p.name]))
 
-  const VAT_RATE = 0.18
+  const { vatRate: VAT_RATE } = await getCompanyConfig()
   const lineAmounts = opts.items.map((item) => roundMoney(item.quantity * item.unitPrice))
   const subtotal = roundMoney(lineAmounts.reduce((sum, a) => sum + a, 0))
   const vatAmount = roundMoney(subtotal * VAT_RATE)

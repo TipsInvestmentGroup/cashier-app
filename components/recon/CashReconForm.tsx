@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useApi } from '@/hooks/useApi'
 import { MoneyInput } from '@/components/MoneyInput'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, getCurrencyCode } from '@/lib/utils'
 import { EXCESS_REASONS } from '@/lib/excess-reasons'
 import toast from 'react-hot-toast'
 
@@ -109,12 +109,12 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
         <div className="flex justify-between border-t border-gray-200 pt-1"><span className="text-gray-600">Opening (auto)</span><span className="font-semibold">{formatCurrency(autoOpening)}</span></div>
       </div>
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Deposited to Bank (TZS) *</label>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Deposited to Bank ({getCurrencyCode()}) *</label>
         <MoneyInput value={cashDeposited} onChange={setCashDeposited} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-lg font-bold" placeholder="0" />
       </div>
       <div className="border-2 border-amber-100 bg-amber-50/40 rounded-xl p-3 space-y-3">
         <div className="flex items-center justify-between">
-          <label className="block text-sm font-semibold text-gray-700">Excess Amount Paid (TZS)</label>
+          <label className="block text-sm font-semibold text-gray-700">Excess Amount Paid ({getCurrencyCode()})</label>
           {excess > 0 && <span className="text-sm font-bold text-amber-800">Total: {formatCurrency(excess)}</span>}
         </div>
         {excessItems.map((it) => {
@@ -166,7 +166,7 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
         <span className={`text-xl font-bold ${closing < 0 ? 'text-red-700' : 'text-indigo-700'}`}>{formatCurrency(closing)}</span>
       </div>
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Verified (TZS) {canVerify ? '*' : <span className="text-gray-400 font-normal">— officers only</span>}</label>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Verified ({getCurrencyCode()}) {canVerify ? '*' : <span className="text-gray-400 font-normal">— officers only</span>}</label>
         {canVerify
           ? <MoneyInput value={verifiedAmount} onChange={setVerifiedAmount} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Physical cash counted" />
           : <div className="w-full px-3 py-2.5 border-2 border-gray-100 rounded-xl bg-gray-50 text-gray-500">{verified != null ? formatCurrency(verified) : 'Not yet verified'}</div>}

@@ -1,9 +1,14 @@
 import { prisma } from '@/lib/prisma'
 import { sendMail } from '@/lib/email'
 import { computePayrollReport, PayrollRow } from '@/lib/payroll'
+import { getCompanyConfig } from '@/lib/company-config'
+import { DEFAULT_COMPANY_CONFIG, formatAmountLabel } from '@/lib/company-config-shared'
 
+// Currency label comes from Company Preferences — set from config at the top
+// of sendPayrollReport, before any fmt() call.
+let cfg = DEFAULT_COMPANY_CONFIG
 function fmt(n: number) {
-  return 'TSh ' + new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 0 }).format(n)
+  return formatAmountLabel(cfg, n)
 }
 
 async function buildPdf(periodLabel: string, rows: PayrollRow[], total: number): Promise<Buffer | null> {
@@ -91,6 +96,7 @@ export async function sendPayrollReport(opts: {
   outletId?: string | null
   recipients?: string[]
 }) {
+  cfg = await getCompanyConfig()
   const report = await computePayrollReport({ month: opts.month, outletId: opts.outletId })
   const rows = report.rows
   const totals = report.totals

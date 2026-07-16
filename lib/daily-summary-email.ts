@@ -1,10 +1,15 @@
 import { prisma } from '@/lib/prisma'
 import { sendMail } from '@/lib/email'
 import { roundMoney } from '@/lib/utils'
+import { getCompanyConfig } from '@/lib/company-config'
+import { DEFAULT_COMPANY_CONFIG, formatAmountLabel } from '@/lib/company-config-shared'
 import { startOfDay, endOfDay, parse, isValid, format } from 'date-fns'
 
+// Currency label comes from Company Preferences — set from config at the top
+// of sendDailySummary, before any fmt() call.
+let cfg = DEFAULT_COMPANY_CONFIG
 function fmt(n: number) {
-  return 'TSh ' + new Intl.NumberFormat('en-TZ', { maximumFractionDigits: 0 }).format(n || 0)
+  return formatAmountLabel(cfg, n)
 }
 
 /**
@@ -13,6 +18,7 @@ function fmt(n: number) {
  * scheduled daily job.
  */
 export async function sendDailySummary(opts: { date?: string | null; outletId?: string | null; recipients?: string[] }) {
+  cfg = await getCompanyConfig()
   const parsed = opts.date ? parse(opts.date, 'yyyy-MM-dd', new Date()) : new Date()
   const day = isValid(parsed) ? parsed : new Date()
   const range = { gte: startOfDay(day), lte: endOfDay(day) }

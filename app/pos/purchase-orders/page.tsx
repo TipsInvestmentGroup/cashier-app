@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
 
 interface Supplier { id: string; name: string }
 interface Outlet { id: string; name: string }
@@ -63,6 +64,7 @@ const emptyLine = (): Line => ({ productId: '', purchaseUnit: 'Carton', packSize
 export default function PurchaseOrdersPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const { config } = useCompanyConfig()
 
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
@@ -133,9 +135,11 @@ export default function PurchaseOrdersPage() {
     }
   }
 
+  // Preview only — the server recomputes authoritative amounts from the same
+  // company-config VAT rate when the PO is created (lib/stock.ts).
   const lineAmounts = lines.map((l) => (parseFloat(l.quantity) || 0) * (parseFloat(l.unitPrice) || 0))
   const subtotal = lineAmounts.reduce((s, a) => s + a, 0)
-  const vatAmount = subtotal * 0.18
+  const vatAmount = subtotal * config.vatRate
   const total = subtotal + vatAmount
 
   const submitPo = async () => {
@@ -330,7 +334,7 @@ export default function PurchaseOrdersPage() {
 
               <div className="border-t border-gray-100 pt-3 mb-4 text-sm space-y-1">
                 <div className="flex justify-between text-gray-500"><span>Subtotal</span><span>{subtotal.toLocaleString()}</span></div>
-                <div className="flex justify-between text-gray-500"><span>VAT (18%)</span><span>{vatAmount.toLocaleString()}</span></div>
+                <div className="flex justify-between text-gray-500"><span>VAT ({Math.round(config.vatRate * 10000) / 100}%)</span><span>{vatAmount.toLocaleString()}</span></div>
                 <div className="flex justify-between font-bold text-gray-800"><span>Jumla</span><span>{total.toLocaleString()}</span></div>
               </div>
 

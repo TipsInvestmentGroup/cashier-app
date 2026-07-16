@@ -1,14 +1,18 @@
+import { formatAmount, getClientCompanyConfig } from '@/lib/utils'
+
 export interface FlaggedItem {
   staff: string
   outlet: string
   department: string
   unit: string // 'TZS' | 'COUNT'
+  unitLabel?: string // e.g. "shisha" when unit = COUNT
   actual: number
   target: number
   threshold: number // ⅓ minimum
 }
 
-const fmt = (v: number, unit: string) => (unit === 'COUNT' ? `${Math.round(v).toLocaleString()} shisha` : 'TSh ' + Math.round(v).toLocaleString('en-US'))
+const fmt = (v: number, unit: string, unitLabel?: string) =>
+  unit === 'COUNT' ? `${Math.round(v).toLocaleString()} ${unitLabel || 'shisha'}` : formatAmount(v)
 
 /**
  * Generates a multi-page PDF — one performance warning letter per flagged staff
@@ -36,9 +40,10 @@ export async function generateWarningLetters(items: FlaggedItem[], periodLabel: 
     if (!first) doc.addPage()
     first = false
 
+    const brand = getClientCompanyConfig()
     doc.setFillColor(31, 41, 55); doc.rect(0, 0, W, 22, 'F')
-    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('tips', 14, 14)
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text('TIPS Lounge — Performance Management', W - 14, 14, { align: 'right' })
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text(brand.logoText, 14, 14)
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(brand.letterheadTitle, W - 14, 14, { align: 'right' })
 
     doc.setTextColor(31, 41, 55)
     doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.text('PERFORMANCE WARNING LETTER', 14, 36)
@@ -54,7 +59,7 @@ export async function generateWarningLetters(items: FlaggedItem[], periodLabel: 
     autoTable(doc, {
       startY: 86,
       head: [['Area', 'Target', 'Minimum (⅓)', 'Your Actual', 'Shortfall']],
-      body: g.rows.map((r) => [r.department, fmt(r.target, r.unit), fmt(r.threshold, r.unit), fmt(r.actual, r.unit), fmt(Math.max(0, r.threshold - r.actual), r.unit)]),
+      body: g.rows.map((r) => [r.department, fmt(r.target, r.unit, r.unitLabel), fmt(r.threshold, r.unit, r.unitLabel), fmt(r.actual, r.unit, r.unitLabel), fmt(Math.max(0, r.threshold - r.actual), r.unit, r.unitLabel)]),
       styles: { fontSize: 9 }, headStyles: { fillColor: [31, 41, 55] }, margin: { left: 14, right: 14 },
     })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

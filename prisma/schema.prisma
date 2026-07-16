@@ -151,6 +151,7 @@ model Outlet {
   scheduleConfig      OutletScheduleConfig?
   events              Event[]
   excessRefunds       ExcessRefund[]
+  salesTargets        SalesTarget[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -170,6 +171,30 @@ model SalesMetric {
   @@index([date])
   @@index([department])
   @@index([outletId])
+}
+
+/// Admin-managed sales/KPI targets — replaces the old hard-coded TARGETS
+/// array in lib/targets.ts. weeklyTarget stores a 7-day figure; daily/monthly
+/// levels derive from it (see lib/targets.ts targetLevels). Seeded once with
+/// the previous hard-coded values on first read (see lib/sales-targets.ts).
+///   scope: Per Staff | Per Outlet | Per Manager
+///   unit:  TZS (currency) | COUNT (unitLabel names the thing counted)
+model SalesTarget {
+  id           String   @id @default(cuid())
+  outletId     String
+  outlet       Outlet   @relation(fields: [outletId], references: [id])
+  scope        String
+  department   String // e.g. "Total Collection", "Shisha Sales", "Food Sales"
+  unit         String   @default("TZS")
+  unitLabel    String? // e.g. "shisha" when unit = COUNT
+  weeklyTarget Float    @default(0)
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([outletId])
+  @@index([isActive])
 }
 
 /// Locks an uploaded sales day (outlet + department + date) so its SalesMetric

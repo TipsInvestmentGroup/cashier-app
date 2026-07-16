@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, readOutletScope } from '@/lib/auth'
 import { computeActuals } from '@/lib/target-actuals'
-import { TARGETS, targetLevels } from '@/lib/targets'
+import { targetLevels, targetDeptKey } from '@/lib/targets'
+import { loadActiveTargets } from '@/lib/sales-targets'
 import { parse, isValid, startOfWeek, endOfWeek } from 'date-fns'
 
 /**
@@ -20,21 +21,19 @@ export async function GET(req: NextRequest) {
   const from = parseD(searchParams.get('from')) || startOfWeek(new Date(), { weekStartsOn: 1 })
   const to = parseD(searchParams.get('to')) || endOfWeek(new Date(), { weekStartsOn: 1 })
 
-  const actuals = await computeActuals({ from, to, outletId })
+  const [actuals, allTargets] = await Promise.all([computeActuals({ from, to, outletId }), loadActiveTargets()])
 
-  const flagged: { staff: string; outlet: string; department: string; unit: string; actual: number; target: number; threshold: number }[] = []
-  for (const g of ['Mikocheni', 'Coco'] as const) {
-    const o = actuals.outlets.find((x) => x.name.toLowerCase().includes(g.toLowerCase()))
+  const flagged: { staff: string; outlet: string; department: string; unit: string; unitLabel?: string | null; actual: number; target: number; threshold: number }[] = []
+  for (const t of allTargets.filter((x) => x.scope === 'Per Staff')) {
+    const o = actuals.outlets.find((x) => x.id === t.outletId)
     if (!o) continue
     const staff = actuals.byStaff[o.id] || []
-    for (const t of TARGETS.filter((x) => x.outlet === g && x.scope === 'Per Staff')) {
-      const lv = targetLevels(t, period, days)
-      const dk: 'shisha' | 'food' | 'collection' = t.department === 'Shisha Sales' ? 'shisha' : t.department === 'Food Sales' ? 'food' : 'collection'
-      for (const s of staff) {
-        const actual = dk === 'shisha' ? s.shisha : dk === 'food' ? s.food : s.collection
-        if (actual > 0 && actual < lv.letterBelow) {
-          flagged.push({ staff: s.staffName, outlet: o.name, department: t.department, unit: t.unit, actual, target: lv.target, threshold: lv.letterBelow })
-        }
+    const lv = targetLevels(t, period, days)
+    const dk = targetDeptKey(t.department)
+    for (const s of staff) {
+      const actual = dk === 'shisha' ? s.shisha : dk === 'food' ? s.food : s.collection
+      if (actual > 0 && actual < lv.letterBelow) {
+        flagged.push({ staff: s.staffName, outlet: o.name, department: t.department, unit: t.unit, unitLabel: t.unitLabel, actual, target: lv.target, threshold: lv.letterBelow })
       }
     }
   }

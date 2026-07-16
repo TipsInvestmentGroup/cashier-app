@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, readOutletScope } from '@/lib/auth'
 import { computeActuals } from '@/lib/target-actuals'
-import { TARGETS, targetLevels } from '@/lib/targets'
+import { targetLevels, targetDeptKey } from '@/lib/targets'
+import { loadActiveTargets } from '@/lib/sales-targets'
 import { parse, isValid, startOfWeek, endOfWeek } from 'date-fns'
 
 /**
@@ -21,22 +22,26 @@ export async function GET(req: NextRequest) {
   const from = parseD(searchParams.get('from')) || startOfWeek(new Date(), { weekStartsOn: 1 })
   const to = parseD(searchParams.get('to')) || endOfWeek(new Date(), { weekStartsOn: 1 })
 
-  const actuals = await computeActuals({ from, to, outletId })
+  const [actuals, allTargets] = await Promise.all([computeActuals({ from, to, outletId }), loadActiveTargets()])
 
-  type Metric = { department: string; unit: string; actual: number; target: number; pct: number }
+  type Metric = { department: string; unit: string; unitLabel?: string | null; actual: number; target: number; pct: number }
   const rows: { staff: string; outlet: string; overallPct: number; status: 'reward' | 'ontrack' | 'letter'; metrics: Metric[] }[] = []
 
-  for (const g of ['Mikocheni', 'Coco'] as const) {
-    const o = actuals.outlets.find((x) => x.name.toLowerCase().includes(g.toLowerCase()))
+  const perStaffByOutlet = new Map<string, typeof allTargets>()
+  for (const t of allTargets.filter((t) => t.scope === 'Per Staff')) {
+    perStaffByOutlet.set(t.outletId, [...(perStaffByOutlet.get(t.outletId) || []), t])
+  }
+
+  for (const [oid, targets] of perStaffByOutlet) {
+    const o = actuals.outlets.find((x) => x.id === oid)
     if (!o) continue
     const staff = actuals.byStaff[o.id] || []
-    const targets = TARGETS.filter((t) => t.outlet === g && t.scope === 'Per Staff')
     for (const s of staff) {
       const metrics: Metric[] = targets.map((t) => {
-        const dk = t.department === 'Shisha Sales' ? 'shisha' : t.department === 'Food Sales' ? 'food' : 'collection'
+        const dk = targetDeptKey(t.department)
         const actual = dk === 'shisha' ? s.shisha : dk === 'food' ? s.food : s.collection
         const lv = targetLevels(t, period, days)
-        return { department: t.department, unit: t.unit, actual, target: lv.target, pct: lv.target > 0 ? Math.round((actual / lv.target) * 100) : 0 }
+        return { department: t.department, unit: t.unit, unitLabel: t.unitLabel, actual, target: lv.target, pct: lv.target > 0 ? Math.round((actual / lv.target) * 100) : 0 }
       })
       if (metrics.every((m) => m.actual === 0)) continue
       const overallPct = Math.round(metrics.reduce((a, m) => a + m.pct, 0) / metrics.length)
