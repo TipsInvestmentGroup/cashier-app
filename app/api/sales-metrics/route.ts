@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole, readOutletScope } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { SALES_METRIC_DEPARTMENTS } from '@/lib/shared-constants'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 // SalesMetric client types are generated on deploy; assert to avoid local drift.
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}))
   const department = String(body.department || '').toUpperCase()
-  if (!['SHISHA', 'FOOD'].includes(department)) return NextResponse.json({ error: 'department must be SHISHA or FOOD' }, { status: 400 })
+  if (!(SALES_METRIC_DEPARTMENTS as readonly string[]).includes(department)) return NextResponse.json({ error: 'department must be SHISHA or FOOD' }, { status: 400 })
   const outletId = body.outletId || null
   const rawRows: { date?: string; staffName?: string; value?: number | string }[] = Array.isArray(body.rows) ? body.rows : []
 

@@ -1,15 +1,18 @@
 // Staff scheduling domain logic — shift definitions and the transparent
 // auto-scheduler heuristic. Kept pure (no DB access) so it's easy to test and
-// reason about; the API route gathers data and calls generateWeekSchedule().
+// reason about; the API route gathers data (including the company's
+// schedule-config shift times/weekend days — see lib/schedule-config-db.ts)
+// and calls generateWeekSchedule().
+
+import { DEFAULT_SCHEDULE_CONFIG, type ShiftDef } from '@/lib/schedule-config-shared'
 
 export type ShiftType = 'MORNING' | 'EVENING'
 
 export const SHIFT_TYPES: ShiftType[] = ['MORNING', 'EVENING']
 
-export const SHIFT_DEFS: Record<ShiftType, { label: string; start: string; end: string }> = {
-  MORNING: { label: 'Morning', start: '09:00', end: '16:00' },
-  EVENING: { label: 'Evening', start: '16:00', end: '05:00' },
-}
+// Defaults only — the live shift times/labels are company-config-driven
+// (see lib/schedule-config-db.ts); these are the fallback if unset.
+export const SHIFT_DEFS: Record<ShiftType, ShiftDef> = DEFAULT_SCHEDULE_CONFIG.shiftDefs
 
 // Roles a manager can assign on the roster (and at events, in Phase 2).
 export const SCHEDULE_ROLES = ['WAITER', 'SUPERVISOR', 'BARTENDER', 'CASHIER', 'HOSTESS'] as const
@@ -77,8 +80,6 @@ export interface GeneratedAssignment {
   reason: string
 }
 
-const isWeekendDow = (dow: number) => dow === 5 || dow === 6 // Fri, Sat
-
 /**
  * Generate a fair, performance-aware weekly roster for ONE outlet.
  *
@@ -88,21 +89,28 @@ const isWeekendDow = (dow: number) => dow === 5 || dow === 6 // Fri, Sat
  *  2. Give each staff `daysOffPerWeek` rest days, staggered by staff index so
  *     not everyone rests the same day.
  *  3. Split the working staff between Morning and Evening in proportion to the
- *     expected-traffic weights (with a weekend uplift on Fri/Sat).
+ *     expected-traffic weights (with an uplift on the configured weekend days).
  *  4. Put the strongest performers on the busier (peak) shift so they get the
  *     most sales opportunity — but subtract a fairness penalty for every peak
  *     shift a staffer has already been given that week, so peak slots rotate.
  *
  * `weekDows[i]` is the JS day-of-week (0=Sun..6=Sat) for day i of the week,
- * letting the caller anchor the week on any start day.
+ * letting the caller anchor the week on any start day. `weekendDows` and
+ * `shiftDefs` come from the company's schedule config (defaults: Fri/Sat,
+ * Morning 09:00–16:00 / Evening 16:00–05:00) — see lib/schedule-config-db.ts.
  */
 export function generateWeekSchedule(opts: {
   staff: StaffInput[]
   unavailable: UnavailInput[]
   config: SchedConfig
   weekDows: number[] // length 7
+  weekendDows?: number[]
+  shiftDefs?: Record<ShiftType, ShiftDef>
 }): GeneratedAssignment[] {
   const { staff, unavailable, weekDows } = opts
+  const weekendDows = opts.weekendDows ?? DEFAULT_SCHEDULE_CONFIG.weekendDows
+  const shiftDefs = opts.shiftDefs ?? DEFAULT_SCHEDULE_CONFIG.shiftDefs
+  const isWeekendDow = (dow: number) => weekendDows.includes(dow)
   if (staff.length === 0) return []
 
   // Clamp defensively here too, not just at the API route that currently
@@ -190,13 +198,13 @@ export function generateWeekSchedule(opts: {
       peakGiven.set(s.id, (peakGiven.get(s.id) || 0) + 1)
       out.push({
         dayIndex: d, shiftType: peak, staffId: s.id, staffName: s.name,
-        reason: `Peak ${SHIFT_DEFS[peak].label} — performer (${Math.round(perfScore(s) * 100)}%)${isWeekendDow(dow) ? ', weekend' : ''}`,
+        reason: `Peak ${shiftDefs[peak].label} — performer (${Math.round(perfScore(s) * 100)}%)${isWeekendDow(dow) ? ', weekend' : ''}`,
       })
     }
     for (const s of toOff) {
       out.push({
         dayIndex: d, shiftType: off, staffId: s.id, staffName: s.name,
-        reason: `${SHIFT_DEFS[off].label} cover (perf ${Math.round(perfScore(s) * 100)}%)`,
+        reason: `${shiftDefs[off].label} cover (perf ${Math.round(perfScore(s) * 100)}%)`,
       })
     }
   }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { CREDIT_BILL_TYPES } from '@/lib/bill-types'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 /**
@@ -66,12 +67,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ kind: gb, key, creditLimit, rows, totals })
   }
 
-  const SIGNED_CREDIT = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'TIPS', 'DJ'] // exclude STAFF_LOSS (that IS the shortage)
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const collWhere: any = { date: range }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const signedWhere: any = { date: range, billType: { in: SIGNED_CREDIT } }
+  const signedWhere: any = { date: range, billType: { in: [...CREDIT_BILL_TYPES] } } // exclude STAFF_LOSS (that IS the shortage)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let paidWhere: any = { date: range }
 

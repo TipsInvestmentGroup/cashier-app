@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { approvalGate, BILL_TYPE_CODES, PAID_BILL_REPORT_KEYS, PAID_BILL_CATEGORY_MAP } from '@/lib/bill-types'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 /**
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
   // --- People groups (Customer / Admin / Director) — different columns ---
   if (gb === 'customer' || gb === 'admin' || gb === 'director') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sWhere: any = { date: range, billType: gb.toUpperCase(), OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] }
+    const sWhere: any = { date: range, billType: gb.toUpperCase(), ...approvalGate() }
     if (outletId) sWhere.outletId = outletId
 
     if (gb === 'customer') {
@@ -72,7 +73,7 @@ export async function GET(req: NextRequest) {
 
   const [collections, signedBills, paidBills] = await Promise.all([
     prisma.dailyCollection.findMany({ where, include: { outlet: { select: { name: true } } } }),
-    prisma.signedBill.findMany({ where: { ...where, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] }, select: { serviceStaff: true, billType: true, amount: true, outlet: { select: { name: true } } } }),
+    prisma.signedBill.findMany({ where: { ...where, ...approvalGate() }, select: { serviceStaff: true, billType: true, amount: true, outlet: { select: { name: true } } } }),
     prisma.paidBill.findMany({ where, select: { billRef: true, payerCategory: true, amountPaid: true, paymentMethod: true, outlet: { select: { name: true } } } }),
   ])
 
@@ -90,10 +91,8 @@ export async function GET(req: NextRequest) {
     paidCashTotal: number
     netCollection: number
   }
-  const SIGNED_KEYS = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'TIPS', 'DJ', 'STAFF_LOSS']
-  const PAID_KEYS = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'STAFF_LOSS', 'OTHER']
-  const blankSigned = () => Object.fromEntries([...SIGNED_KEYS, 'total'].map((k) => [k, 0]))
-  const blankPaid = () => Object.fromEntries([...PAID_KEYS, 'total'].map((k) => [k, 0]))
+  const blankSigned = () => Object.fromEntries([...BILL_TYPE_CODES, 'total'].map((k) => [k, 0]))
+  const blankPaid = () => Object.fromEntries([...PAID_BILL_REPORT_KEYS, 'total'].map((k) => [k, 0]))
 
   const rows = new Map<string, Row>()
   const rowFor = (staff: string, outletName = ''): Row => {
@@ -115,7 +114,7 @@ export async function GET(req: NextRequest) {
 
   for (const b of signedBills) {
     const type = String(b.billType).toUpperCase()
-    if (!SIGNED_KEYS.includes(type)) continue
+    if (!(BILL_TYPE_CODES as readonly string[]).includes(type)) continue
     const key = byOutlet ? (b.outlet?.name || '(No outlet)') : b.serviceStaff
     if (!key) continue
     const r = rowFor(key, b.outlet?.name || '')
@@ -123,11 +122,10 @@ export async function GET(req: NextRequest) {
     r.signed.total += b.amount
   }
 
-  const CAT_MAP: Record<string, string> = { 'Admin': 'ADMIN', 'Director': 'DIRECTOR', 'Customer': 'CUSTOMER', 'Staff Loss': 'STAFF_LOSS' }
   for (const p of paidBills) {
     const key = byOutlet ? (p.outlet?.name || '(No outlet)') : ((p.billRef && colStaff.get(p.billRef)) || '(Other payments)')
     const r = rowFor(key, p.outlet?.name || '')
-    const catKey = CAT_MAP[p.payerCategory || ''] || 'OTHER'
+    const catKey = PAID_BILL_CATEGORY_MAP[p.payerCategory || ''] || 'OTHER'
     r.paid[catKey] += p.amountPaid
     r.paid.total += p.amountPaid
     if (p.paymentMethod !== 'PAYROLL') r.paidCashTotal += p.amountPaid
@@ -147,5 +145,5 @@ export async function GET(req: NextRequest) {
     { systemSales: 0, cash: 0, crdb: 0, stanbic: 0, mpesa: 0, total: 0, signedTotal: 0, paidTotal: 0, netCollection: 0 }
   )
 
-  return NextResponse.json({ from: startOfDay(start).toISOString(), to: endOfDay(end).toISOString(), rows: list, totals, signedKeys: SIGNED_KEYS, paidKeys: PAID_KEYS })
+  return NextResponse.json({ from: startOfDay(start).toISOString(), to: endOfDay(end).toISOString(), rows: list, totals, signedKeys: BILL_TYPE_CODES, paidKeys: PAID_BILL_REPORT_KEYS })
 }

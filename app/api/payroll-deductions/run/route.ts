@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
+import { PAYROLL_ELIGIBLE_BILL_TYPES, STAFF_LOSS_TYPE } from '@/lib/bill-types'
 import { startOfMonth, endOfMonth, parse, isValid } from 'date-fns'
 
 /**
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
   const monthly = monthStart !== null
 
   const where: Record<string, unknown> = {
-    billType: { in: ['ADMIN', 'DIRECTOR', 'STAFF_LOSS'] },
+    billType: { in: [...PAYROLL_ELIGIBLE_BILL_TYPES] },
   }
   if (outletId) where.outletId = outletId
   if (monthly) where.date = { gte: monthStart, lte: monthEnd }
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest) {
 
   for (const g of groups.values()) {
     const totalOutstanding = g.bills.reduce((s, x) => s + x.outstanding, 0)
-    const isStaff = g.billType === 'STAFF_LOSS'
+    const isStaff = g.billType === STAFF_LOSS_TYPE
     const overLimit = isStaff ? totalOutstanding : Math.max(0, (monthly ? g.grossSpent : totalOutstanding) - g.creditLimit)
     // Still recoverable: in monthly mode subtract payroll already applied (gross-based);
     // all-time `outstanding` already nets prior payroll. Never exceed what is owed.

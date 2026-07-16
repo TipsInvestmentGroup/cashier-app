@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { approvalGate } from '@/lib/bill-types'
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'desc' },
     }),
     prisma.signedBill.findMany({
-      where: { ...outletFilter, date: dateFilter, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] },
+      where: { ...outletFilter, date: dateFilter, ...approvalGate() },
       include: { outlet: true, person: true },
       orderBy: { date: 'desc' },
     }),

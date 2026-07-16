@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
-import { EXCESS_REASON_VALUES } from '@/lib/excess-reasons'
+import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { generateBillReference } from '@/lib/bill-reference'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     .filter((it) => it.amount > 0)
 
   for (const it of excessItems) {
-    if (!EXCESS_REASON_VALUES.includes(it.reason)) {
+    if (!(await isValidExcessReasonCode(it.reason))) {
       return NextResponse.json({ error: 'A reason is required for each excess amount paid' }, { status: 400 })
     }
     if (it.reason === 'STAFF_TIP' && !it.staffId) {

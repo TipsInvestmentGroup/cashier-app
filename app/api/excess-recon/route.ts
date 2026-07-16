@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope } from '@/lib/auth'
-import { excessReasonLabel } from '@/lib/excess-reasons'
+import { excessReasonLabelDb } from '@/lib/excess-reasons-db'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
@@ -56,8 +56,8 @@ export async function GET(req: NextRequest) {
   const outlets = outletIds.length ? await prisma.outlet.findMany({ where: { id: { in: outletIds } }, select: { id: true, name: true } }) : []
   const outletName = (id: string | null) => (id ? outlets.find((o) => o.id === id)?.name || '—' : '—')
 
-  const rows: ExcessReconRow[] = [
-    ...cashItems.map((it) => {
+  const rows: ExcessReconRow[] = (await Promise.all([
+    ...cashItems.map(async (it) => {
       const balance = Math.max(0, it.amount - it.paidAmount)
       return {
         id: it.id, source: 'CASH_RECON' as const,
@@ -65,11 +65,11 @@ export async function GET(req: NextRequest) {
         outlet: outletName(it.cashRecon.outletId),
         person: it.staffName || it.personName || '—',
         staffId: it.staffId, personId: it.personId,
-        excess: it.amount, reason: it.reason, reasonLabel: excessReasonLabel(it.reason),
+        excess: it.amount, reason: it.reason, reasonLabel: await excessReasonLabelDb(it.reason),
         paid: it.paidAmount, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
       }
     }),
-    ...collectionItems.map((it) => {
+    ...collectionItems.map(async (it) => {
       const balance = Math.max(0, it.amount - it.paidAmount)
       return {
         id: it.id, source: 'COLLECTION' as const,
@@ -77,11 +77,11 @@ export async function GET(req: NextRequest) {
         outlet: it.collection.outlet?.name || '—',
         person: it.staffName || it.personName || it.collection.staffName || '—',
         staffId: it.staffId, personId: it.personId,
-        excess: it.amount, reason: it.reason, reasonLabel: excessReasonLabel(it.reason),
+        excess: it.amount, reason: it.reason, reasonLabel: await excessReasonLabelDb(it.reason),
         paid: it.paidAmount, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
       }
     }),
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  ])).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   return NextResponse.json(rows)
 }

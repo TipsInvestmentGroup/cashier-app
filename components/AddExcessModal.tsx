@@ -36,6 +36,7 @@ export function AddExcessModal({
   const [personId, setPersonId] = useState('')
   const [staffList, setStaffList] = useState<{ id: string; name: string }[]>([])
   const [customerList, setCustomerList] = useState<{ id: string; name: string }[]>([])
+  const [reasons, setReasons] = useState<{ value: string; label: string }[]>([...EXCESS_REASONS])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -43,8 +44,12 @@ export function AddExcessModal({
     setSource('COLLECTION'); setDate(format(new Date(), 'yyyy-MM-dd')); setOutletId(defaultOutletId)
     setCashReconId(null); setCollections([]); setCollectionId('')
     setAmount(''); setReason(''); setStaffId(''); setPersonId('')
-    Promise.all([request('/api/staff-list'), request('/api/persons?type=CUSTOMER')])
-      .then(([staff, persons]) => { setStaffList(staff || []); setCustomerList(persons || []) })
+    Promise.all([request('/api/staff-list'), request('/api/persons?type=CUSTOMER'), request('/api/excess-reasons')])
+      .then(([staff, persons, reasonRows]) => {
+        setStaffList(staff || []); setCustomerList(persons || [])
+        const active = (reasonRows || []).filter((r: { isActive: boolean }) => r.isActive)
+        if (active.length) setReasons(active.map((r: { code: string; label: string }) => ({ value: r.code, label: r.label })))
+      })
       .catch(() => {})
   }, [open, defaultOutletId, request])
 
@@ -149,7 +154,7 @@ export function AddExcessModal({
           <select value={reason} onChange={(e) => { setReason(e.target.value); setStaffId(''); setPersonId('') }}
             className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
             <option value="">Select a reason…</option>
-            {EXCESS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+            {reasons.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
         </div>
         {reason === 'STAFF_TIP' && (

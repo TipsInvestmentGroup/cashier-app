@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
-import { excessReasonLabel } from '@/lib/excess-reasons'
+import { UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { getExcessReasonLabelMap } from '@/lib/excess-reasons-db'
+import { STAFF_LOSS_TYPE } from '@/lib/bill-types'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 /**
@@ -35,15 +37,17 @@ export async function GET(req: NextRequest) {
   const baseWhere: Record<string, unknown> = { date: range }
   if (outletId) baseWhere.outletId = outletId
 
-  const [collections, cashRecons, bankRecons, outlets, staffLossBills] = await Promise.all([
+  const [collections, cashRecons, bankRecons, outlets, staffLossBills, reasonLabelMap] = await Promise.all([
     prisma.dailyCollection.findMany({ where: baseWhere, include: { cancellations: true, excessItems: true }, orderBy: { date: 'desc' } }),
     prisma.cashRecon.findMany({ where: baseWhere, orderBy: { date: 'desc' } }),
     prisma.bankRecon.findMany({ where: { ...baseWhere, channel: { not: null } }, orderBy: { date: 'desc' } }),
     prisma.outlet.findMany({ select: { id: true, name: true } }),
-    prisma.signedBill.findMany({ where: { billType: 'STAFF_LOSS', date: range, ...(outletId ? { outletId } : {}) } }),
+    prisma.signedBill.findMany({ where: { billType: STAFF_LOSS_TYPE, date: range, ...(outletId ? { outletId } : {}) } }),
+    getExcessReasonLabelMap(),
   ])
   const outletName = (id?: string | null) => outlets.find((o) => o.id === id)?.name || '—'
   const collectionById = new Map(collections.map((c) => [c.id, c]))
+  const reasonLabel = (code: string) => (code === UNASSIGNED_EXCESS_REASON ? 'Needs reason' : reasonLabelMap.get(code) || code)
 
   // Shared breakdown columns for a collection, regardless of which side (excess/loss) is driving the row.
   const breakdown = (c: (typeof collections)[number]) => {
@@ -59,7 +63,7 @@ export async function GET(req: NextRequest) {
     const b = breakdown(c)
     return {
       id: it.id, date: c.date, outlet: outletName(c.outletId), staffName: it.staffName || it.personName || c.staffName || '—',
-      reasonLabel: excessReasonLabel(it.reason),
+      reasonLabel: reasonLabel(it.reason),
       ...b, accounted: roundMoney(b.collection + b.signed + b.cancellations + b.discount), variance: roundMoney(it.amount),
     }
   }))

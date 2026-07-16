@@ -26,12 +26,13 @@ export const BILL_TYPE_LABELS: Record<string, string> = {
   DJ: 'DJ (In-house)', TIPS: 'Tips (In-house)', STAFF: 'Staff (In-house)',
 }
 
-import { formatReceiptAmount, getCurrencyLabel } from '@/lib/utils'
+import { formatReceiptAmount, getCurrencyLabel, getClientCompanyConfig } from '@/lib/utils'
 
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string))
 const tsh = (n: number) => formatReceiptAmount(n)
 
 export function buildBillHtml(o: BillOrder): string {
+  const brand = getClientCompanyConfig()
   const title = o.billType === 'CUSTOMER' ? "CUSTOMER'S BILL" : 'IN-HOUSE BILL'
   const outletShort = (o.outlet?.name || '').replace(/\s*outlet\s*$/i, '').toUpperCase()
   const company = o.outlet?.legalName ? `${o.outlet.legalName.toUpperCase()}${outletShort ? ` (${outletShort})` : ''}` : outletShort
@@ -83,8 +84,8 @@ ${o.outlet?.vrn ? `<p class="co">VRN : ${esc(o.outlet.vrn)}</p>` : ''}
 <hr class="dash"/>
 <table class="tot"><tr><td>TOTAL ${esc(getCurrencyLabel())}</td><td class="amt">${tsh(net)}</td></tr></table>
 <hr class="dash"/>
-<p class="foot">Hii sio risiti halali ya malipo, huu ni mchanganuo</p>
-<p class="bye">Karibu tena!</p>
+${brand.receiptDisclaimerText ? `<p class="foot">${esc(brand.receiptDisclaimerText)}</p>` : ''}
+${brand.receiptFooterText ? `<p class="bye">${esc(brand.receiptFooterText)}</p>` : ''}
 </body></html>`
 }
 

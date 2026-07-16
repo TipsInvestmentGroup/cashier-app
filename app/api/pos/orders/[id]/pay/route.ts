@@ -3,16 +3,13 @@ import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
 import { settlePosOrder, canActOnOrder } from '@/lib/pos-close'
+import { DEFAULT_PAYMENT_CHANNEL_CODES } from '@/lib/payment-channels-defaults'
 
 type Params = { params: Promise<{ id: string }> }
 
-// Same bootstrap defaults /api/payment-channels seeds on first read — covers
-// the edge case where nobody has opened that page yet on a fresh install.
-const DEFAULT_METHODS = ['CASH', 'CRDB', 'STANBIC', 'MPESA']
-
 async function isValidMethod(method: string): Promise<boolean> {
   const count = await prisma.paymentChannel.count()
-  if (count === 0) return DEFAULT_METHODS.includes(method)
+  if (count === 0) return DEFAULT_PAYMENT_CHANNEL_CODES.includes(method)
   return !!(await prisma.paymentChannel.findFirst({ where: { code: method, isActive: true } }))
 }
 

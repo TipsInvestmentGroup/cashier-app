@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
-import { EXCESS_REASON_VALUES, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { generateBillReference } from '@/lib/bill-reference'
 
 /** Attach a brand-new excess record to an existing Cash Recon day or Collection,
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   if (!source) return NextResponse.json({ error: 'source must be CASH_RECON or COLLECTION' }, { status: 400 })
   if (!parentId) return NextResponse.json({ error: 'Select the day/collection to attach this excess to' }, { status: 400 })
   if (amount <= 0) return NextResponse.json({ error: 'Amount must be greater than zero' }, { status: 400 })
-  if (!EXCESS_REASON_VALUES.includes(reason) || reason === UNASSIGNED_EXCESS_REASON) {
+  if (!(await isValidExcessReasonCode(reason))) {
     return NextResponse.json({ error: 'Select a valid reason' }, { status: 400 })
   }
   if (reason === 'STAFF_TIP' && !body.staffId) return NextResponse.json({ error: 'Select the staff name' }, { status: 400 })

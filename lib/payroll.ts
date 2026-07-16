@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { PAYROLL_ELIGIBLE_BILL_TYPES, CREDIT_LIMIT_BILL_TYPES, STAFF_LOSS_TYPE } from '@/lib/bill-types'
 import { startOfMonth, endOfMonth, parse, isValid } from 'date-fns'
 
 /**
@@ -37,7 +38,7 @@ export async function computePayrollReport(opts: { month?: string | null; outlet
   const monthly = monthStart !== null
 
   const where: Record<string, unknown> = {
-    billType: { in: ['ADMIN', 'DIRECTOR', 'STAFF_LOSS'] },
+    billType: { in: [...PAYROLL_ELIGIBLE_BILL_TYPES] },
   }
   if (opts.outletId) where.outletId = opts.outletId
   if (monthly) where.date = { gte: monthStart, lte: monthEnd }
@@ -88,7 +89,7 @@ export async function computePayrollReport(opts: { month?: string | null; outlet
   }
 
   const accounts = [...map.values()].map((a) => {
-    const isStaff = a.billType === 'STAFF_LOSS'
+    const isStaff = a.billType === STAFF_LOSS_TYPE
     const overLimit = isStaff ? a.outstanding : Math.max(0, a.spent - a.creditLimit)
     const recoverable = isStaff
       ? a.outstanding
@@ -100,11 +101,11 @@ export async function computePayrollReport(opts: { month?: string | null; outlet
   })
 
   const creditAccounts = accounts
-    .filter((a) => a.billType === 'ADMIN' || a.billType === 'DIRECTOR')
+    .filter((a) => (CREDIT_LIMIT_BILL_TYPES as readonly string[]).includes(a.billType))
     .sort((x, y) => y.overLimit - x.overLimit || y.spent - x.spent)
 
   const staffLosses = accounts
-    .filter((a) => a.billType === 'STAFF_LOSS' && a.outstanding > 0)
+    .filter((a) => a.billType === STAFF_LOSS_TYPE && a.outstanding > 0)
     .sort((x, y) => y.outstanding - x.outstanding)
 
   const rows: PayrollRow[] = [
@@ -121,7 +122,7 @@ export async function computePayrollReport(opts: { month?: string | null; outlet
     ...staffLosses.map((a) => ({
       personName: a.personName,
       category: 'Staff Loss',
-      billType: 'STAFF_LOSS',
+      billType: STAFF_LOSS_TYPE,
       creditLimit: 0,
       spent: a.outstanding,
       deduction: a.outstanding,
@@ -129,11 +130,11 @@ export async function computePayrollReport(opts: { month?: string | null; outlet
   ]
 
   const totals = {
-    overLimit: rows.filter((r) => r.billType !== 'STAFF_LOSS').reduce((s, r) => s + r.deduction, 0),
-    staffLoss: rows.filter((r) => r.billType === 'STAFF_LOSS').reduce((s, r) => s + r.deduction, 0),
+    overLimit: rows.filter((r) => r.billType !== STAFF_LOSS_TYPE).reduce((s, r) => s + r.deduction, 0),
+    staffLoss: rows.filter((r) => r.billType === STAFF_LOSS_TYPE).reduce((s, r) => s + r.deduction, 0),
     total: rows.reduce((s, r) => s + r.deduction, 0),
-    exceededCount: rows.filter((r) => r.billType !== 'STAFF_LOSS').length,
-    staffLossCount: rows.filter((r) => r.billType === 'STAFF_LOSS').length,
+    exceededCount: rows.filter((r) => r.billType !== STAFF_LOSS_TYPE).length,
+    staffLossCount: rows.filter((r) => r.billType === STAFF_LOSS_TYPE).length,
   }
 
   const period = {
@@ -191,7 +192,7 @@ export async function computeAdminDirectorBills(opts: { month?: string | null; o
   const monthly = monthStart !== null
 
   const where: Record<string, unknown> = {
-    billType: { in: ['ADMIN', 'DIRECTOR'] },
+    billType: { in: [...CREDIT_LIMIT_BILL_TYPES] },
   }
   if (opts.outletId) where.outletId = opts.outletId
   if (monthly) where.date = { gte: monthStart, lte: monthEnd }

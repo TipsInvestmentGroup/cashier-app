@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
+import { REQUEST_BILL_TYPE_GROUPS } from '@/lib/bill-types'
 
 const APPROVERS = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
@@ -10,16 +11,16 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!requireRole(user, APPROVERS)) return NextResponse.json({ total: 0, items: [] })
 
-  const [customer, tipsdj, cancellations, petty] = await Promise.all([
-    prisma.signedBill.count({ where: { billType: 'CUSTOMER', approvalStatus: 'PENDING' } }),
-    prisma.signedBill.count({ where: { billType: { in: ['TIPS', 'DJ'] }, approvalStatus: 'PENDING' } }),
+  const [groupCounts, cancellations, petty] = await Promise.all([
+    Promise.all(REQUEST_BILL_TYPE_GROUPS.map((g) =>
+      prisma.signedBill.count({ where: { billType: g.types.length === 1 ? g.types[0] : { in: g.types }, approvalStatus: 'PENDING' } })
+    )),
     prisma.cancellation.count({ where: { status: 'PENDING' } }),
     prisma.pettyCash.count({ where: { status: 'PENDING' } }),
   ])
 
   const items = [
-    { key: 'customer', label: 'Customer bills', count: customer, href: '/customer-bills' },
-    { key: 'tipsdj', label: 'Tips & DJ bills', count: tipsdj, href: '/tips-dj-bills' },
+    ...REQUEST_BILL_TYPE_GROUPS.map((g, i) => ({ key: g.key, label: g.label, count: groupCounts[i], href: g.href })),
     { key: 'cancellations', label: 'Cancellations', count: cancellations, href: '/cancellations' },
     { key: 'petty', label: 'Cash requests', count: petty, href: '/approvals' },
   ].filter((i) => i.count > 0)

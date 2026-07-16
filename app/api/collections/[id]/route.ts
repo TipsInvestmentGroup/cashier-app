@@ -5,7 +5,7 @@ import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { recomputeStaffLoss } from '@/lib/staff-loss'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
-import { EXCESS_REASON_VALUES, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { generateBillReference } from '@/lib/bill-reference'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
@@ -116,7 +116,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       .map((it) => ({ id: it.id || null, amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
       .filter((it) => it.amount > 0)
     for (const it of items) {
-      if (!EXCESS_REASON_VALUES.includes(it.reason) || it.reason === UNASSIGNED_EXCESS_REASON) {
+      if (!(await isValidExcessReasonCode(it.reason))) {
         return NextResponse.json({ error: 'Select a reason for each excess amount collected' }, { status: 400 })
       }
       if (it.reason === 'STAFF_TIP' && !it.staffId) return NextResponse.json({ error: 'Select the staff name for the excess amount collected' }, { status: 400 })

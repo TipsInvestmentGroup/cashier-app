@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { approvalGate } from '@/lib/bill-types'
 import { differenceInDays } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest) {
   // Request-type bills (Customer/Tips/DJ) only count once APPROVED; other types aren't gated.
   const where: Record<string, unknown> = {
     status: { not: 'PAID' },
-    OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }],
+    ...approvalGate(),
   }
   if (type) where.billType = type
   if (outletId) where.outletId = outletId

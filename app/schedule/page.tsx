@@ -9,15 +9,17 @@ import { ExportBar } from '@/components/ExportBar'
 import { format, addDays, startOfWeek, parseISO } from 'date-fns'
 import toast from 'react-hot-toast'
 import { CalendarClock, Wand2, UserMinus, Settings2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { SCHEDULE_ROLES, ABSENCE_REASONS, SCHEDULE_MANAGE_ROLES } from '@/lib/scheduling'
+import { DEFAULT_SCHEDULE_CONFIG } from '@/lib/schedule-config-shared'
 
 type ShiftType = 'MORNING' | 'EVENING'
-const SHIFTS: { key: ShiftType; label: string; time: string; chip: string }[] = [
-  { key: 'MORNING', label: 'Morning', time: '09:00–16:00', chip: 'bg-amber-100 text-amber-800 border-amber-200' },
-  { key: 'EVENING', label: 'Evening', time: '16:00–05:00', chip: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
-]
-const ROLES = ['WAITER', 'SUPERVISOR', 'BARTENDER', 'CASHIER', 'HOSTESS']
-const REASONS = ['LEAVE', 'ABSENT', 'OTHER']
-const MANAGE_ROLES = ['MANAGER', 'DIRECTOR', 'ADMIN']
+const SHIFT_CHIPS: Record<ShiftType, string> = {
+  MORNING: 'bg-amber-100 text-amber-800 border-amber-200',
+  EVENING: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+}
+const ROLES = SCHEDULE_ROLES
+const REASONS = ABSENCE_REASONS
+const MANAGE_ROLES = SCHEDULE_MANAGE_ROLES
 
 interface Outlet { id: string; name: string; isEventsOnly?: boolean }
 interface Assignment { id: string; date: string; shiftType: ShiftType; outletId: string; staffId: string; staffName: string; role: string; source: string; note?: string }
@@ -50,9 +52,17 @@ export default function SchedulePage() {
   const [extraCasualIds, setExtraCasualIds] = useState<string[]>([])
   const [addCasualOpen, setAddCasualOpen] = useState(false)
   const [addCasualId, setAddCasualId] = useState('')
+  const [shiftDefs, setShiftDefs] = useState(DEFAULT_SCHEDULE_CONFIG.shiftDefs)
 
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
   const scheduleOutlets = outlets.filter((o) => !o.isEventsOnly)
+  const SHIFTS = useMemo(() => (['MORNING', 'EVENING'] as ShiftType[]).map((key) => ({
+    key, label: shiftDefs[key].label, time: `${shiftDefs[key].start}–${shiftDefs[key].end}`, chip: SHIFT_CHIPS[key],
+  })), [shiftDefs])
+
+  useEffect(() => {
+    request('/api/schedule-config').then((cfg) => { if (cfg?.shiftDefs) setShiftDefs(cfg.shiftDefs) }).catch(() => {})
+  }, [request])
 
   useEffect(() => {
     request('/api/outlets').then((os: Outlet[]) => {

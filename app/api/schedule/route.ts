@@ -6,6 +6,7 @@ import {
   generateWeekSchedule, SERVICE_ROLES, SCHEDULE_MANAGE_ROLES, SHIFT_TYPES, SCHEDULE_ROLES,
   DEFAULT_CONFIG, type ShiftType,
 } from '@/lib/scheduling'
+import { getScheduleConfig } from '@/lib/schedule-config-db'
 import { startOfDay, endOfDay, addDays, getDay, parse, isValid, subDays } from 'date-fns'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -123,7 +124,10 @@ async function generate(user: any, body: any) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   })).filter((u: any) => u.dayIndex >= 0 && u.dayIndex <= 6)
 
-  const cfgRow = await db.outletScheduleConfig.findUnique({ where: { outletId } })
+  const [cfgRow, scheduleConfig] = await Promise.all([
+    db.outletScheduleConfig.findUnique({ where: { outletId } }),
+    getScheduleConfig(),
+  ])
   const config = {
     morningWeight: cfgRow?.morningWeight ?? DEFAULT_CONFIG.morningWeight,
     eveningWeight: cfgRow?.eveningWeight ?? DEFAULT_CONFIG.eveningWeight,
@@ -131,7 +135,10 @@ async function generate(user: any, body: any) {
     daysOffPerWeek: cfgRow?.daysOffPerWeek ?? DEFAULT_CONFIG.daysOffPerWeek,
   }
 
-  const generated = generateWeekSchedule({ staff, unavailable, config, weekDows })
+  const generated = generateWeekSchedule({
+    staff, unavailable, config, weekDows,
+    weekendDows: scheduleConfig.weekendDows, shiftDefs: scheduleConfig.shiftDefs,
+  })
 
   // Replace AUTO rows for this outlet/week, but PRESERVE manual overrides.
   const existing = await db.scheduleAssignment.findMany({ where: { outletId, date: { gte: from, lte: to } } })

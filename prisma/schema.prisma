@@ -1022,6 +1022,19 @@ model CancellationReason {
   createdAt DateTime @default(now())
 }
 
+/// Reasons for an "excess amount" (Cash Recon / Collections excess pickers).
+/// Seeded once with the four defaults (see lib/excess-reasons.ts). Two codes
+/// are permanently wired into the picker UI/validation — STAFF_TIP unlocks a
+/// staff picker, CUSTOMER_EXCESS a customer picker — that behavior is fixed
+/// engine logic and doesn't change if a company renames or adds reasons.
+model ExcessReason {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  label     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
 // ─── Bill Reference System ───────────────────────────────────────────────────
 // A fully configurable, metadata-driven bill-numbering engine (see
 // lib/bill-reference.ts). Scope is deliberately limited to "bills": SignedBill,

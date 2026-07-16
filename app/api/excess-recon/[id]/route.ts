@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
-import { EXCESS_REASON_VALUES, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
@@ -94,7 +94,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     data.amount = amount
   }
   if (body.reason !== undefined) {
-    if (!EXCESS_REASON_VALUES.includes(body.reason) || body.reason === UNASSIGNED_EXCESS_REASON) {
+    if (!(await isValidExcessReasonCode(body.reason))) {
       return NextResponse.json({ error: 'Select a valid reason' }, { status: 400 })
     }
     data.reason = body.reason

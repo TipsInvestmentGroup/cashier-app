@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { approvalGate, TOP_DEBTOR_BILL_TYPES } from '@/lib/bill-types'
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -45,13 +46,13 @@ export async function GET(req: NextRequest) {
       _sum: { total: true },
     }),
     prisma.signedBill.aggregate({
-      where: { ...outletFilter, status: { not: 'PAID' }, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] },
+      where: { ...outletFilter, status: { not: 'PAID' }, ...approvalGate() },
       _sum: { amount: true },
       _count: true,
     }),
     prisma.signedBill.groupBy({
       by: ['personName'],
-      where: { ...outletFilter, status: { not: 'PAID' }, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }], billType: { in: ['CUSTOMER', 'ADMIN', 'DIRECTOR'] } },
+      where: { ...outletFilter, status: { not: 'PAID' }, ...approvalGate(), billType: { in: [...TOP_DEBTOR_BILL_TYPES] } },
       _sum: { amount: true },
       orderBy: { _sum: { amount: 'desc' } },
       take: 5,
@@ -91,7 +92,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.signedBill.groupBy({
       by: ['outletId'],
-      where: { status: { not: 'PAID' }, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] },
+      where: { status: { not: 'PAID' }, ...approvalGate() },
       _sum: { amount: true },
     }),
   ])
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest) {
   // Outstanding signed bills grouped by category (Admin/Director/Customer/Tips/DJ/Staff Loss)
   const byTypeRaw = await prisma.signedBill.groupBy({
     by: ['billType'],
-    where: { ...outletFilter, status: { not: 'PAID' }, OR: [{ approvalStatus: 'APPROVED' }, { billType: { notIn: ['CUSTOMER', 'TIPS', 'DJ'] } }] },
+    where: { ...outletFilter, status: { not: 'PAID' }, ...approvalGate() },
     _sum: { amount: true },
   })
   const byBillType: Record<string, number> = {}

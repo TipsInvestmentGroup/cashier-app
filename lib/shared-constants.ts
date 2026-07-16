@@ -48,3 +48,8 @@ export function allowedCountersForCategory(category: string | null | undefined):
   if (cat.includes('FOOD')) return ['KITCHEN']
   return ['VIP', 'MAIN', 'BAR']
 }
+
+// SalesMetric.department — the two uploadable metric datasets (Shisha count,
+// Food amount; see components/UploadSalesModal.tsx and /api/sales-metrics*).
+// Unrelated to allowedCountersForCategory above (that's product routing).
+export const SALES_METRIC_DEPARTMENTS = ['SHISHA', 'FOOD'] as const

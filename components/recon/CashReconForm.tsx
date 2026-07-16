@@ -18,6 +18,7 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
   const [excessItems, setExcessItems] = useState<ExcessItem[]>([])
   const [staffList, setStaffList] = useState<{ id: string; name: string }[]>([])
   const [customerList, setCustomerList] = useState<{ id: string; name: string }[]>([])
+  const [reasons, setReasons] = useState<{ value: string; label: string }[]>([...EXCESS_REASONS])
   const [verifiedAmount, setVerifiedAmount] = useState('')
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
@@ -29,14 +30,17 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
     setLoading(true)
     try {
       const p = new URLSearchParams({ date }); if (outletId) p.set('outletId', outletId)
-      const [res, staff, persons] = await Promise.all([
+      const [res, staff, persons, reasonRows] = await Promise.all([
         request(`/api/cash-recon?${p}`),
         request('/api/staff-list'),
         request('/api/persons?type=CUSTOMER'),
+        request('/api/excess-reasons').catch(() => null),
       ])
       setComputed(res.computed || { cashCollected: 0, paidBillsCash: 0, cashExpenses: 0 })
       setAutoOpening(res.autoOpening || 0); setCanVerify(!!res.canVerify)
       setStaffList(staff || []); setCustomerList(persons || [])
+      const active = (reasonRows || []).filter((r: { isActive: boolean }) => r.isActive)
+      if (active.length) setReasons(active.map((r: { code: string; label: string }) => ({ value: r.code, label: r.label })))
       if (res.existing) {
         setCashDeposited(String(res.existing.cashDeposited ?? ''))
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,7 +139,7 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
                 <select value={it.reason} onChange={(e) => updateExcessItem(it.key, { reason: e.target.value, staffId: '', personId: '' })} disabled={locked}
                   className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500">
                   <option value="">Select a reason…</option>
-                  {EXCESS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  {reasons.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
                 {it.reason === 'STAFF_TIP' && (
                   <select value={it.staffId} onChange={(e) => updateExcessItem(it.key, { staffId: e.target.value })} disabled={locked}

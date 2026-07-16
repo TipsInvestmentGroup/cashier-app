@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { BILL_TYPE_CODES } from '@/lib/bill-types'
 import { channelAmountsFor } from '@/lib/collection-channels-shared'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
@@ -63,11 +64,10 @@ export async function GET(req: NextRequest) {
     .filter((c) => c.amount > 0 || allChannels.some((ch) => ch.code === c.code))
 
   // --- Signed bills by type + flat list ---
-  const SIGNED_KEYS = ['ADMIN', 'DIRECTOR', 'CUSTOMER', 'TIPS', 'DJ', 'STAFF_LOSS']
-  const signedByType: Record<string, number> = Object.fromEntries(SIGNED_KEYS.map((k) => [k, 0]))
+  const signedByType: Record<string, number> = Object.fromEntries(BILL_TYPE_CODES.map((k) => [k, 0]))
   const signedRows = signedBills.map((b) => {
     const type = String(b.billType).toUpperCase()
-    if (SIGNED_KEYS.includes(type)) signedByType[type] += b.amount
+    if ((BILL_TYPE_CODES as readonly string[]).includes(type)) signedByType[type] += b.amount
     return { type, name: b.personName, staff: b.serviceStaff || '', amount: roundMoney(b.amount) }
   })
   const signedTotal = roundMoney(signedBills.reduce((s, b) => s + b.amount, 0))

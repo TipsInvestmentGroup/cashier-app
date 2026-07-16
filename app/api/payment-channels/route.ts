@@ -2,13 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
-
-const DEFAULTS = [
-  { code: 'CASH', label: 'Cash' },
-  { code: 'CRDB', label: 'CRDB' },
-  { code: 'STANBIC', label: 'Stanbic' },
-  { code: 'MPESA', label: 'M-PESA' },
-]
+import { DEFAULT_PAYMENT_CHANNELS as DEFAULTS } from '@/lib/payment-channels-defaults'
 
 const toCode = (s: string) => String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 

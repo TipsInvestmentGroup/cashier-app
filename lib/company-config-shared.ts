@@ -16,6 +16,8 @@ export interface CompanyConfig {
   currencyLocale: string // Intl locale, e.g. "en-TZ"
   currencyLabel: string // short prefix used in emails/PDFs/targets, e.g. "TSh"
   receiptAmountSuffix: string // amount suffix on printed 80mm bills, e.g. "/="
+  receiptDisclaimerText: string // small-print line on printed 80mm bills (may be empty)
+  receiptFooterText: string // bold sign-off line on printed 80mm bills (may be empty)
   vatRate: number // 0.18 = 18%
 }
 
@@ -29,6 +31,8 @@ export const DEFAULT_COMPANY_CONFIG: CompanyConfig = {
   currencyLocale: 'en-TZ',
   currencyLabel: 'TSh',
   receiptAmountSuffix: '/=',
+  receiptDisclaimerText: 'Hii sio risiti halali ya malipo, huu ni mchanganuo',
+  receiptFooterText: 'Karibu tena!',
   vatRate: 0.18,
 }
 
@@ -46,8 +50,11 @@ export function normalizeCompanyConfig(raw: unknown): CompanyConfig {
     currencyCode: str('currencyCode'),
     currencyLocale: str('currencyLocale'),
     currencyLabel: str('currencyLabel'),
-    // Deliberately NOT trimmed-or-defaulted: an empty suffix is a valid choice.
+    // Deliberately NOT trimmed-or-defaulted: an empty value is a valid choice
+    // (e.g. a company that wants no disclaimer/footer line at all).
     receiptAmountSuffix: typeof r.receiptAmountSuffix === 'string' ? r.receiptAmountSuffix : DEFAULT_COMPANY_CONFIG.receiptAmountSuffix,
+    receiptDisclaimerText: typeof r.receiptDisclaimerText === 'string' ? r.receiptDisclaimerText : DEFAULT_COMPANY_CONFIG.receiptDisclaimerText,
+    receiptFooterText: typeof r.receiptFooterText === 'string' ? r.receiptFooterText : DEFAULT_COMPANY_CONFIG.receiptFooterText,
     vatRate: Number.isFinite(vat) && vat >= 0 && vat < 1 ? vat : DEFAULT_COMPANY_CONFIG.vatRate,
   }
 }

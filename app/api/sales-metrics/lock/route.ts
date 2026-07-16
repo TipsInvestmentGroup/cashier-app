@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole, writeOutletId } from '@/lib/auth'
+import { SALES_METRIC_DEPARTMENTS } from '@/lib/shared-constants'
 import { startOfDay, parse, isValid } from 'date-fns'
 
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   const { department, date, bodyOutletId } = parseInput(req, body)
   const outletId = writeOutletId(user, bodyOutletId)
-  if (!['SHISHA', 'FOOD'].includes(department) || !date || !outletId) return NextResponse.json({ error: 'department, date and outlet are required' }, { status: 400 })
+  if (!(SALES_METRIC_DEPARTMENTS as readonly string[]).includes(department) || !date || !outletId) return NextResponse.json({ error: 'department, date and outlet are required' }, { status: 400 })
 
   await db.salesMetricLock.upsert({
     where: { outletId_department_date: { outletId, department, date } },

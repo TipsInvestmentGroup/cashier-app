@@ -8,6 +8,7 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatDate } from '@/lib/utils'
 import { VALID_ROLES } from '@/lib/shared-constants'
+import { DEFAULT_FLOOR_POSITIONS } from '@/lib/floor-positions'
 import toast from 'react-hot-toast'
 
 interface User { id: string; name: string; email: string; role: string; position: string | null; hasPin: boolean; outlet?: { name: string } | null; isActive: boolean; isCasual: boolean; createdAt: string }
@@ -19,8 +20,6 @@ const ROLE_COLORS: Record<string, string> = {
   ACCOUNTANT: 'bg-green-100 text-green-700',
   MANAGER: 'bg-purple-100 text-purple-700', DIRECTOR: 'bg-orange-100 text-orange-700', ADMIN: 'bg-red-100 text-red-700',
 }
-// MyPOS floor role — shown on the staff PIN picker; informational only.
-const POSITIONS = ['OUTSIDE STAFF', 'BAR LADY', 'VIP BAR', 'SHISHA COUNTER', 'KITCHEN COUNTER']
 
 export default function UsersPage() {
   const { request } = useApi()
@@ -36,14 +35,16 @@ export default function UsersPage() {
   const [showPin, setShowPin] = useState(false)
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'CASHIER', outletId: '', isActive: true, pin: '', position: '', isCasual: false })
   const [staffFilter, setStaffFilter] = useState<'all' | 'permanent' | 'casual'>('all')
+  const [positions, setPositions] = useState<string[]>(DEFAULT_FLOOR_POSITIONS)
 
   const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && (user?.email || '').toLowerCase() === OWNER_EMAIL
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [u, o] = await Promise.all([request('/api/users'), request('/api/outlets')])
-    setUsers(u); setOutlets(o); setLoading(false)
+    const [u, o, pos] = await Promise.all([request('/api/users'), request('/api/outlets'), request('/api/floor-positions').catch(() => null)])
+    setUsers(u); setOutlets(o); if (Array.isArray(pos) && pos.length) setPositions(pos)
+    setLoading(false)
   }, [request])
 
   useEffect(() => { load() }, [load])
@@ -170,7 +171,7 @@ export default function UsersPage() {
                       <select value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })}
                         className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none">
                         <option value="">-- Not set --</option>
-                        {POSITIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                        {positions.map((p) => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
                     <div>

@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, type LucideIcon } from 'lucide-react'
+import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, type LucideIcon } from 'lucide-react'
 
 // The Setup groups, in the order they appear. Role-gated per group.
 export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles: string[] }[] = [
@@ -11,6 +11,7 @@ export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles:
   { href: '/person-categories', label: 'Categories', icon: Tag, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/payment-channels', label: 'Payment Channels', icon: CreditCard, roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
   { href: '/cancellation-reasons', label: 'Cancellation Reasons', icon: Ban, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
+  { href: '/excess-reasons', label: 'Excess Reasons', icon: Coins, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/bill-types', label: 'Bill Types', icon: Tags, roles: ['ADMIN', 'DIRECTOR'] },
   { href: '/bill-reference-settings', label: 'Bill References', icon: Hash, roles: ['ADMIN', 'DIRECTOR'] },
   { href: '/persons', label: 'Persons', icon: Users, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },

@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
-import { EXCESS_REASON_VALUES, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
 import { findBestPersonMatch } from '@/lib/nameMatch'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
         .filter((it) => it.amount > 0)
       if (items.length === 0) throw new Error('Select a reason for the excess amount collected')
       for (const it of items) {
-        if (!EXCESS_REASON_VALUES.includes(it.reason) || it.reason === UNASSIGNED_EXCESS_REASON) {
+        if (!(await isValidExcessReasonCode(it.reason))) {
           throw new Error('Select a reason for each excess amount collected')
         }
         if (it.reason === 'STAFF_TIP' && !it.staffId) throw new Error('Select the staff name for the excess amount collected')
