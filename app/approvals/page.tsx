@@ -9,6 +9,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
 import { PayModal, type PayFund } from '@/components/petty/PayModal'
 import toast from 'react-hot-toast'
+import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
 
 interface PettyCash {
   id: string; date: string; requestedBy: string; department?: string; functionName?: string; purpose: string
@@ -48,6 +49,7 @@ export default function ApprovalsPage() {
       await request(`/api/petty-cash/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) })
       toast.success(action === 'approve' ? 'Request approved' : 'Request rejected')
       load()
+      notifyPendingCountsChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error updating request')
     }

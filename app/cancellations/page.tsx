@@ -12,6 +12,7 @@ import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 import { CANCELLATION_APPROVERS } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
+import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
 
 interface Cancellation {
   id: string; date: string; reason: string; productName: string; sellingPrice: number
@@ -81,6 +82,7 @@ export default function CancellationsPage() {
       await request(`/api/cancellations/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) })
       toast.success(action === 'approve' ? 'Cancellation approved' : 'Cancellation rejected')
       load()
+      notifyPendingCountsChanged()
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Error updating') }
   }
 

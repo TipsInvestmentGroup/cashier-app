@@ -15,6 +15,7 @@ import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
+import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
 
 interface PettyCashItem { id?: string; detail: string; unit: number; unitCost: number; amount: number }
 interface PettyCash {
@@ -287,6 +288,7 @@ function PettyCashPage() {
       await request(`/api/petty-cash/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) })
       toast.success(action === 'approve' ? 'Request approved' : 'Request rejected')
       load()
+      notifyPendingCountsChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error updating request')
     }

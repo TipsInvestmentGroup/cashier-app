@@ -13,6 +13,7 @@ import { ExportBar } from '@/components/ExportBar'
 import { RangeKey, inRange } from '@/lib/dateRange'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
+import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
 
 interface BillItem { productName: string; quantity: number; amount: number }
 interface Bill {
@@ -88,6 +89,7 @@ export default function CustomerBillsPage() {
       await request(`/api/customer-bills/${id}`, { method: 'PATCH', body: JSON.stringify({ action }) })
       toast.success(action === 'approve' ? 'Bill approved' : 'Bill rejected')
       load()
+      notifyPendingCountsChanged()
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Error updating') }
   }
 
