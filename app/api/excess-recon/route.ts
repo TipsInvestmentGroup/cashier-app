@@ -11,6 +11,8 @@ export interface ExcessReconRow {
   date: string
   outlet: string
   person: string
+  staffId: string | null
+  personId: string | null
   excess: number
   reason: string
   reasonLabel: string
@@ -62,6 +64,7 @@ export async function GET(req: NextRequest) {
         date: it.cashRecon.date.toISOString(),
         outlet: outletName(it.cashRecon.outletId),
         person: it.staffName || it.personName || '—',
+        staffId: it.staffId, personId: it.personId,
         excess: it.amount, reason: it.reason, reasonLabel: excessReasonLabel(it.reason),
         paid: it.paidAmount, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
       }
@@ -73,6 +76,7 @@ export async function GET(req: NextRequest) {
         date: it.collection.date.toISOString(),
         outlet: it.collection.outlet?.name || '—',
         person: it.staffName || it.personName || it.collection.staffName || '—',
+        staffId: it.staffId, personId: it.personId,
         excess: it.amount, reason: it.reason, reasonLabel: excessReasonLabel(it.reason),
         paid: it.paidAmount, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
       }

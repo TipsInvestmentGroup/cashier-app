@@ -67,19 +67,23 @@ model User {
   permissions         UserPermission[]
 }
 
-/// Per-user, per-resource grant of Add/Edit/Delete, set only by the system
-/// owner (see lib/rbac.ts). Additive on top of existing role/email checks —
-/// the owner always has full access regardless of rows here.
+/// Per-user, per-resource grant of Add/Edit/Delete(/Settle/Unsettle for
+/// EXCESS_RECON), set only by the system owner (see lib/rbac.ts). Additive on
+/// top of existing role/email checks — the owner always has full access
+/// regardless of rows here. canSettle/canUnsettle are only meaningful for the
+/// EXCESS_RECON resource; other resources leave them false/unused.
 model UserPermission {
-  id        String   @id @default(cuid())
-  userId    String
-  resource  String   // 'PAID_BILLS' | 'SIGNED_BILLS' | 'PERSONS' | 'PRODUCTS'
-  canAdd    Boolean  @default(false)
-  canEdit   Boolean  @default(false)
-  canDelete Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  userId      String
+  resource    String   // 'PAID_BILLS' | 'SIGNED_BILLS' | 'PERSONS' | 'PRODUCTS' | 'EXCESS_RECON'
+  canAdd      Boolean  @default(false)
+  canEdit     Boolean  @default(false)
+  canDelete   Boolean  @default(false)
+  canSettle   Boolean  @default(false)
+  canUnsettle Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, resource])
 }
