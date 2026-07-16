@@ -47,6 +47,7 @@ export default function ExcessReconPage() {
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [staffList, setStaffList] = useState<{ id: string; name: string }[]>([])
   const [customerList, setCustomerList] = useState<{ id: string; name: string }[]>([])
+  const [reconciling, setReconciling] = useState(false)
 
   const [range, setRange] = useState<RangeKey>('month')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -200,6 +201,22 @@ export default function ExcessReconPage() {
     }
   }
 
+  const runReconcile = async () => {
+    if (!(await confirm({
+      title: 'Reconcile all collections',
+      message: 'Rescans every collection and backfills any missing excess/loss records (e.g. from before this ledger existed). Safe to run repeatedly — never touches already-settled amounts.',
+      confirmLabel: 'Reconcile',
+    }))) return
+    setReconciling(true)
+    try {
+      const res = await request('/api/excess-recon/reconcile', { method: 'POST', body: JSON.stringify({}) })
+      toast.success(`Scanned ${res.scanned} collection(s) — ${res.created} new excess record(s) created`, { duration: 6000 })
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error reconciling')
+    } finally { setReconciling(false) }
+  }
+
   const unsettleRow = async (r: Row) => {
     if (!(await confirm({
       title: 'Unsettle payment', message: `Reset ${formatCurrency(r.paid)} paid back to unpaid for ${r.person}?`,
@@ -228,6 +245,12 @@ export default function ExcessReconPage() {
               <button onClick={() => setAddOpen(true)}
                 className="px-4 py-2.5 bg-indigo-600 text-white rounded-xl font-medium text-sm hover:bg-indigo-700 transition">
                 + Add Excess
+              </button>
+            )}
+            {isOwner && (
+              <button onClick={runReconcile} disabled={reconciling} title="Backfill missing excess/loss records from existing collections"
+                className="px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium text-sm hover:border-gray-300 transition disabled:opacity-60">
+                {reconciling ? 'Reconciling…' : '↻ Reconcile Now'}
               </button>
             )}
             {isOwner && (
