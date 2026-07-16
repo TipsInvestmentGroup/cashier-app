@@ -7,7 +7,7 @@ import { canApprovePetty } from '@/lib/petty-access'
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canApprovePetty(user.email)) return NextResponse.json({ error: 'Only the designated approvers can approve or reject petty cash' }, { status: 403 })
+  if (!(await canApprovePetty(user.email))) return NextResponse.json({ error: 'Only the designated approvers can approve or reject petty cash' }, { status: 403 })
 
   const { id } = await params
   const { action } = await req.json().catch(() => ({}))

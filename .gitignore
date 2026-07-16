@@ -46,4 +46,10 @@ next-env.d.ts
 prisma/dev.db*
 /logs
 
+# real staff/customer data — never commit; see the matching *.json files
+# (without .local) for the committed placeholder shape each one expects.
+prisma/persons.seed.local.json
+prisma/waiter-roster.local.json
+prisma/team-roster.local.json
+
 .vercel

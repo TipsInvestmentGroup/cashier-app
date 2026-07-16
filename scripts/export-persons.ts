@@ -15,8 +15,10 @@ async function main() {
     select: { name: true, phone: true, type: true, creditLimit: true },
     orderBy: [{ type: 'asc' }, { name: 'asc' }],
   })
-  const out = join(process.cwd(), 'prisma', 'persons.seed.json')
+  // .local.json — real names/phones must never land in the committed
+  // persons.seed.json placeholder (see lib/seed-core.ts).
+  const out = join(process.cwd(), 'prisma', 'persons.seed.local.json')
   writeFileSync(out, JSON.stringify(persons, null, 2))
-  console.log(`Exported ${persons.length} persons to prisma/persons.seed.json`)
+  console.log(`Exported ${persons.length} persons to prisma/persons.seed.local.json`)
 }
 main().finally(() => prisma.$disconnect())

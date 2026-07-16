@@ -1,0 +1,5 @@
+[
+  { "email": "owner@example.com", "name": "Example Owner", "role": "ADMIN", "outlet": null },
+  { "email": "manager@example.com", "name": "Example Manager", "role": "MANAGER", "outlet": null },
+  { "email": "cashier@example.com", "name": "Example Cashier", "role": "CASHIER", "outlet": "Mikocheni Outlet" }
+]

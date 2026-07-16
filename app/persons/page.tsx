@@ -37,7 +37,8 @@ export default function PersonsPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', phone: '', email: '', type: 'CUSTOMER', creditLimit: '0', isActive: true, code: '', codeMode: 'AUTO' })
   const [assigningCodes, setAssigningCodes] = useState(false)
-  const [managerEmail, setManagerEmail] = useState('')
+  const [managers, setManagers] = useState<string[]>([])
+  const [pickManagers, setPickManagers] = useState<string[]>([])
   const [accessOpen, setAccessOpen] = useState(false)
   const [rbacAccessOpen, setRbacAccessOpen] = useState(false)
   const [perms, setPerms] = useState({ canAdd: false, canEdit: false, canDelete: false })
@@ -58,10 +59,9 @@ export default function PersonsPage() {
   const catColor = (code: string) => BILL_TYPE_COLORS[code] || 'bg-gray-100 text-gray-700'
 
   const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
-  const FIXED_MANAGER = 'r.mlay@tips.co.tz'
   const myEmail = (user?.email || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && myEmail === OWNER_EMAIL
-  const canEditDelete = (!!myEmail && [OWNER_EMAIL, FIXED_MANAGER.toLowerCase(), managerEmail].filter(Boolean).includes(myEmail)) || perms.canEdit || perms.canDelete
+  const canEditDelete = (!!myEmail && (myEmail === OWNER_EMAIL || managers.includes(myEmail))) || perms.canEdit || perms.canDelete
 
   const q = search.trim().toLowerCase()
   const filtered = persons.filter((p) => !q || `${p.name} ${p.phone || ''} ${p.email || ''}`.toLowerCase().includes(q))
@@ -75,7 +75,7 @@ export default function PersonsPage() {
       request(`/api/persons${params}`), request('/api/persons-access'), request('/api/person-categories'), request('/api/permissions/me'),
     ])
     setPersons(data)
-    setManagerEmail((access?.managerEmail || '').toLowerCase())
+    setManagers((access?.managers || []).map((e: string) => e.toLowerCase()))
     setCategories(cats || [])
     setPerms({ canAdd: !!me?.PERSONS?.canAdd, canEdit: !!me?.PERSONS?.canEdit, canDelete: !!me?.PERSONS?.canDelete })
     setLoading(false)
@@ -139,10 +139,14 @@ export default function PersonsPage() {
     }
   }
 
-  const saveAccess = async (email: string) => {
+  const toggleManager = (email: string) => {
+    const e = email.toLowerCase()
+    setPickManagers((list) => list.includes(e) ? list.filter((x) => x !== e) : [...list, e])
+  }
+  const saveAccess = async () => {
     try {
-      await request('/api/persons-access', { method: 'PUT', body: JSON.stringify({ email }) })
-      setManagerEmail(email.toLowerCase()); toast.success('Persons access updated')
+      await request('/api/persons-access', { method: 'PUT', body: JSON.stringify({ emails: pickManagers }) })
+      setManagers(pickManagers); toast.success('Persons access updated')
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error updating access')
     }
@@ -237,7 +241,7 @@ export default function PersonsPage() {
           </div>
           <div className="flex gap-2 flex-wrap">
             {isOwner && (
-              <button onClick={() => setAccessOpen(true)}
+              <button onClick={() => { setPickManagers(managers); setAccessOpen(true) }}
                 className="px-4 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:border-gray-300 transition">
                 🔐 Manage Access
               </button>
@@ -405,22 +409,23 @@ export default function PersonsPage() {
               <h3 className="font-bold text-gray-900">🔐 Persons Edit/Delete Access</h3>
               <button onClick={() => setAccessOpen(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
             </div>
-            <p className="text-sm text-gray-500">Only these accounts can edit or delete persons:</p>
-            <ul className="text-sm space-y-1">
-              <li className="flex items-center gap-2"><span className="text-green-600">●</span> <strong>Owner</strong> — {OWNER_EMAIL || 'not set'}</li>
-              <li className="flex items-center gap-2"><span className="text-green-600">●</span> <strong>Fixed</strong> — {FIXED_MANAGER}</li>
-              <li className="flex items-center gap-2"><span className="text-green-600">●</span> <strong>Chosen manager</strong> — {managerEmail || '(none)'}</li>
-            </ul>
+            <p className="text-sm text-gray-500">These accounts can edit or delete persons (the owner always can):</p>
+            <p className="text-sm"><span className="text-green-600">●</span> <strong>Owner</strong> — {OWNER_EMAIL || 'not set'}</p>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Choose the third manager (change anytime)</label>
-              <select value={managerEmail} onChange={(e) => saveAccess(e.target.value)}
-                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
-                <option value="">— None —</option>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Persons managers</label>
+              <div className="space-y-1 max-h-72 overflow-auto border-2 border-gray-100 rounded-xl p-2">
                 {allUsers
-                  .filter((u) => u.email.toLowerCase() !== OWNER_EMAIL && u.email.toLowerCase() !== FIXED_MANAGER.toLowerCase())
-                  .map((u) => <option key={u.id} value={u.email}>{u.name} ({u.email})</option>)}
-              </select>
-              <p className="text-xs text-gray-400 mt-1">Selecting a user grants them persons edit/delete; changing it instantly revokes the previous one.</p>
+                  .filter((u) => u.email.toLowerCase() !== OWNER_EMAIL)
+                  .map((u) => (
+                    <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 rounded px-2 py-1.5">
+                      <input type="checkbox" className="w-4 h-4" checked={pickManagers.includes(u.email.toLowerCase())} onChange={() => toggleManager(u.email)} />
+                      <span className="font-medium text-gray-800">{u.name}</span>
+                      <span className="text-gray-400">({u.email})</span>
+                    </label>
+                  ))}
+                {allUsers.length === 0 && <p className="text-sm text-gray-400 py-2">No users found.</p>}
+              </div>
+              <button onClick={saveAccess} className="w-full mt-3 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">Save Access</button>
             </div>
           </div>
         </div>

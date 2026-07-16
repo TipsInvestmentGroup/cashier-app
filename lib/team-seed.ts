@@ -1,24 +1,28 @@
 import bcrypt from 'bcryptjs'
+import fs from 'fs'
+import path from 'path'
 
 // The outlets the business runs. Add/rename here if needed.
 export const OUTLET_NAMES = ['Mikocheni Outlet', 'Coco Beach Outlet', 'Tips Events']
 
+interface TeamMember { email: string; name: string; role: string; outlet: string | null }
+
 /**
- * ⚠️ EDIT THIS ROSTER before running /api/admin/setup-team.
+ * Real names/emails never live in this file or in git — only in the
+ * gitignored prisma/team-roster.local.json. Edit that file (copy
+ * prisma/team-roster.json as a starting point) before running
+ * /api/admin/setup-team; a fresh clone without it falls back to the
+ * committed placeholder roster so setup still runs.
  * - role: ADMIN | MANAGER | DIRECTOR | ACCOUNTANT | CASHIER
  * - outlet: exact outlet name from OUTLET_NAMES, or null for "all outlets"
  * Emails are stored lowercase (log in with the lowercase email).
  */
-export const TEAM: { email: string; name: string; role: string; outlet: string | null }[] = [
-  { email: 'johnonecmo@gmail.com',        name: 'John (Owner)',      role: 'ADMIN',      outlet: null },
-  { email: 'john.onesmo@tips.co.tz',      name: 'John Onesmo',       role: 'ADMIN',      outlet: null },
-  { email: 'shabinam@tips.co.tz',         name: 'Shabinam',          role: 'ACCOUNTANT', outlet: null },
-  { email: 'alphonce.mvungi@tips.co.tz',  name: 'Alphonce Mvungi',   role: 'MANAGER',    outlet: null },
-  { email: 'r.mlay@tips.co.tz',           name: 'R. Mlay',           role: 'MANAGER',    outlet: null },
-  { email: 'siyer.mkama@tips.co.tz',      name: 'Siyer Mkama',       role: 'MANAGER',    outlet: null },
-  { email: 'bonzon@tips.co.tz',           name: 'Bonzon Yusuph Salim', role: 'CASHIER',  outlet: 'Coco Beach Outlet' },
-  { email: 'triphillus@tips.co.tz',       name: 'Triphillus',        role: 'CASHIER',    outlet: 'Mikocheni Outlet' },
-]
+export function loadTeamRoster(): TeamMember[] {
+  const local = path.join(process.cwd(), 'prisma', 'team-roster.local.json')
+  const sample = path.join(process.cwd(), 'prisma', 'team-roster.json')
+  const file = fs.existsSync(local) ? local : sample
+  return JSON.parse(fs.readFileSync(file, 'utf-8')) as TeamMember[]
+}
 
 /**
  * Idempotent team setup: ensures the outlets exist, then upserts each user.
@@ -38,7 +42,7 @@ export async function setupTeam(prisma: any, tempPassword: string) {
   let updated = 0
   const results: { email: string; action: string }[] = []
 
-  for (const u of TEAM) {
+  for (const u of loadTeamRoster()) {
     const email = u.email.trim().toLowerCase()
     const outletId = u.outlet ? (outletMap[u.outlet] || null) : null
     const existing = await prisma.user.findUnique({ where: { email } })

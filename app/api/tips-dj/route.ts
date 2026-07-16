@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canFileRequest(user.role, user.email)) return NextResponse.json({ error: 'You are not authorized to file Tips/DJ bill requests' }, { status: 403 })
+  if (!(await canFileRequest(user.role, user.email))) return NextResponse.json({ error: 'You are not authorized to file Tips/DJ bill requests' }, { status: 403 })
 
   const body = await req.json().catch(() => ({}))
   const billType = String(body.billType || '').toUpperCase()

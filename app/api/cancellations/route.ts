@@ -2,14 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
-
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
-// Accounts allowed to file a standalone cancellation request.
-const CANCEL_REQUESTERS = ['alphonce.mvungi@tips.co.tz']
-function canRequestCancellation(role: string, email?: string) {
-  const e = (email || '').toLowerCase()
-  return role === 'CASHIER' || CANCEL_REQUESTERS.includes(e) || (!!OWNER_EMAIL && e === OWNER_EMAIL)
-}
+import { canFileRequest } from '@/lib/request-access'
 
 /** List cancellations with their staff (via collection or direct), product and status. */
 export async function GET(req: NextRequest) {
@@ -41,7 +34,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!canRequestCancellation(user.role, user.email)) {
+  if (!(await canFileRequest(user.role, user.email))) {
     return NextResponse.json({ error: 'You are not authorized to file cancellation requests' }, { status: 403 })
   }
 

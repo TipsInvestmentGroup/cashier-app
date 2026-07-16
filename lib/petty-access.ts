@@ -1,9 +1,8 @@
 import { prisma } from '@/lib/prisma'
-import { DEPT_FIXED_MANAGERS, PETTY_APPROVERS } from '@/lib/shared-constants'
+import { getDeptManagers, getPettyApprovers } from '@/lib/approvals'
 
 const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
 
-export { DEPT_FIXED_MANAGERS, PETTY_APPROVERS }
 // Default accounts allowed to SUBMIT a petty-cash request (used until the owner customises the list).
 export const DEFAULT_PETTY_REQUESTERS = [
   'bonzon@tips.co.tz',
@@ -12,43 +11,26 @@ export const DEFAULT_PETTY_REQUESTERS = [
   'triphillus@tips.co.tz',
   'john.onesmo@tips.co.tz',
 ]
-const SETTING_KEY = 'departmentsManagerEmail'
 const REQUESTERS_KEY = 'pettyRequesterEmails'
 
 export function isOwner(email?: string) {
   return !!OWNER_EMAIL && (email || '').toLowerCase() === OWNER_EMAIL
 }
 
-/** The owner-configurable 4th departments/functions manager email. */
-export async function getDeptManagerEmail(): Promise<string> {
-  const s = await prisma.setting.findUnique({ where: { key: SETTING_KEY } })
-  return (s?.value || '').toLowerCase()
-}
-
-export async function setDeptManagerEmail(email: string) {
-  await prisma.setting.upsert({
-    where: { key: SETTING_KEY },
-    update: { value: email || null },
-    create: { key: SETTING_KEY, value: email || null },
-  })
-}
-
-/** Owner, the two fixed managers, or the owner-chosen 4th manager. */
+/** Owner or any configured departments/functions manager (see lib/approvals.ts). */
 export async function canManageDepartments(email?: string): Promise<boolean> {
   const e = (email || '').toLowerCase()
   if (!e) return false
   if (isOwner(e)) return true
-  if (DEPT_FIXED_MANAGERS.includes(e)) return true
-  const dyn = await getDeptManagerEmail()
-  return !!dyn && e === dyn
+  return (await getDeptManagers()).includes(e)
 }
 
-/** Only the two approvers (owner has override). */
-export function canApprovePetty(email?: string): boolean {
+/** Owner or any configured petty-cash approver (see lib/approvals.ts). */
+export async function canApprovePetty(email?: string): Promise<boolean> {
   const e = (email || '').toLowerCase()
   if (!e) return false
   if (isOwner(e)) return true
-  return PETTY_APPROVERS.includes(e)
+  return (await getPettyApprovers()).includes(e)
 }
 
 /** Who may disburse (pay out) approved petty-cash requests: cashier or accountant. */

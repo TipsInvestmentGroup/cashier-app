@@ -1,7 +1,19 @@
 import bcrypt from 'bcryptjs'
-import personsData from '../prisma/persons.seed.json'
+import fs from 'fs'
+import path from 'path'
 
 interface SeedPerson { name: string; phone: string | null; type: string; creditLimit: number }
+interface RosterEntry { name: string; position: 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR' | 'SHISHA COUNTER' | 'KITCHEN COUNTER'; outlet: string }
+
+// Real staff/customer names never live in this file or in git — only in the
+// gitignored `*.local.json` sibling. A fresh clone falls back to the small
+// placeholder file that IS committed, so seeding still works out of the box.
+function loadSeedJson<T>(basename: string): T {
+  const local = path.join(process.cwd(), 'prisma', `${basename}.local.json`)
+  const sample = path.join(process.cwd(), 'prisma', `${basename}.json`)
+  const file = fs.existsSync(local) ? local : sample
+  return JSON.parse(fs.readFileSync(file, 'utf-8')) as T
+}
 
 /**
  * Idempotent seeding shared by the CLI seed (prisma/seed.ts) and the
@@ -69,26 +81,20 @@ export async function seedCore(prisma: any) {
   // first seed; change per-person via Setup → Users once live.
   const slug = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '')
   const DEFAULT_PIN = '1234'
-  const waiterRoster: { name: string; position: 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR' | 'SHISHA COUNTER' | 'KITCHEN COUNTER'; outletId: string; outletTag: string }[] = [
-    // Mikocheni
-    ...[
-      ['Beatrice', 'BAR LADY'], ['Jazila', 'BAR LADY'], ['Nango Kaporo', 'OUTSIDE STAFF'], ['Amina', 'OUTSIDE STAFF'],
-      ['Martha Ajabu', 'OUTSIDE STAFF'], ['Shakira', 'OUTSIDE STAFF'], ['Jaf', 'OUTSIDE STAFF'], ['Glory', 'BAR LADY'],
-      ['Shukrani', 'OUTSIDE STAFF'], ['Stella', 'OUTSIDE STAFF'], ['Neema Damas', 'OUTSIDE STAFF'], ['Diana', 'BAR LADY'],
-      ['Scola', 'OUTSIDE STAFF'], ['Aishaa', 'OUTSIDE STAFF'], ['Marry J', 'OUTSIDE STAFF'], ['Brenda', 'BAR LADY'],
-      ['Innocent', 'OUTSIDE STAFF'], ['Cleo', 'OUTSIDE STAFF'], ['Dolis', 'OUTSIDE STAFF'], ['Agneta Zelamula', 'OUTSIDE STAFF'],
-      ['Vero', 'OUTSIDE STAFF'], ['Charz', 'OUTSIDE STAFF'], ['Christina', 'OUTSIDE STAFF'], ['Violeth', 'OUTSIDE STAFF'],
-      ['Abdul', 'VIP BAR'], ['Gift', 'OUTSIDE STAFF'], ['Derick', 'SHISHA COUNTER'], ['Babuu', 'KITCHEN COUNTER'],
-    ].map(([name, position]) => ({ name, position: position as 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR' | 'SHISHA COUNTER' | 'KITCHEN COUNTER', outletId: mikocheni.id, outletTag: 'mik' })),
-    // Coco Beach
-    ...[
-      ['Violet', 'OUTSIDE STAFF'], ['Christina', 'OUTSIDE STAFF'], ['Yasinta', 'OUTSIDE STAFF'], ['Inno', 'OUTSIDE STAFF'],
-      ['Amina', 'OUTSIDE STAFF'], ['Nango Kaporo', 'OUTSIDE STAFF'], ['Sabrina', 'OUTSIDE STAFF'], ['Nasra', 'OUTSIDE STAFF'],
-      ['Reny', 'OUTSIDE STAFF'], ['Warda', 'BAR LADY'], ['Tinna', 'OUTSIDE STAFF'], ['Manga', 'OUTSIDE STAFF'],
-      ['Lucy', 'OUTSIDE STAFF'], ['Jaffari', 'OUTSIDE STAFF'], ['Layla', 'OUTSIDE STAFF'], ['Charz', 'OUTSIDE STAFF'],
-      ['Salma', 'OUTSIDE STAFF'],
-    ].map(([name, position]) => ({ name, position: position as 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR', outletId: cocoBeach.id, outletTag: 'coco' })),
-  ]
+  // outletTag ('mik'/'coco') feeds the generated placeholder email below —
+  // kept exactly as before so re-running this against an already-seeded
+  // database still upserts the same existing users instead of creating new ones.
+  const OUTLET_BY_TAG: Record<string, { id: string; tag: string }> = {
+    mikocheni: { id: mikocheni.id, tag: 'mik' },
+    coco: { id: cocoBeach.id, tag: 'coco' },
+  }
+  const rosterData = loadSeedJson<RosterEntry[]>('waiter-roster')
+  const waiterRoster = rosterData.map((w) => ({
+    name: w.name,
+    position: w.position,
+    outletId: OUTLET_BY_TAG[w.outlet]?.id ?? mikocheni.id,
+    outletTag: OUTLET_BY_TAG[w.outlet]?.tag ?? 'mik',
+  }))
   const hashedDefaultPin = await bcrypt.hash(DEFAULT_PIN, 12)
   for (const w of waiterRoster) {
     const email = `${slug(w.name)}.${w.outletTag}@staff.internal`
@@ -106,7 +112,8 @@ export async function seedCore(prisma: any) {
   let personsCreated = 0
   const existing = await prisma.person.count()
   if (existing === 0) {
-    for (const p of personsData as SeedPerson[]) {
+    const personsData = loadSeedJson<SeedPerson[]>('persons.seed')
+    for (const p of personsData) {
       await prisma.person.create({
         data: { name: p.name, phone: p.phone ?? null, type: p.type, creditLimit: p.creditLimit ?? 0, isActive: true },
       })

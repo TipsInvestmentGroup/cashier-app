@@ -10,7 +10,6 @@ import { SearchBox } from '@/components/SearchBox'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { ExportBar } from '@/components/ExportBar'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
-import { CANCELLATION_APPROVERS } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
@@ -47,19 +46,20 @@ function CancellationsPage() {
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({ ...INIT })
-
-  const ownerEmail = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
-  const myEmail = (user?.email || '').toLowerCase()
-  const canApprove = CANCELLATION_APPROVERS.includes(myEmail) || (!!ownerEmail && myEmail === ownerEmail)
-  const canCreate = user?.role === 'CASHIER' || myEmail === 'alphonce.mvungi@tips.co.tz' || (!!ownerEmail && myEmail === ownerEmail)
+  const [canApprove, setCanApprove] = useState(false)
+  const [canCreate, setCanCreate] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [rows, persons, prods] = await Promise.all([request('/api/cancellations'), request('/api/persons'), request('/api/products')])
+      const [rows, persons, prods, access] = await Promise.all([
+        request('/api/cancellations'), request('/api/persons'), request('/api/products'), request('/api/cancellation-access'),
+      ])
       setItems(rows || [])
       setStaff((persons || []).filter((p: Staff) => p.type === 'STAFF_LOSS').sort((a: Staff, b: Staff) => a.name.localeCompare(b.name)))
       setProducts((prods || []).filter((p: Product) => p.isActive))
+      setCanApprove(!!access?.canApprove)
+      setCanCreate(!!access?.canCreate)
     } finally { setLoading(false) }
   }, [request])
 

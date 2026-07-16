@@ -1,0 +1,5 @@
+[
+  { "name": "Example Waiter", "position": "OUTSIDE STAFF", "outlet": "mikocheni" },
+  { "name": "Example Bar Lady", "position": "BAR LADY", "outlet": "mikocheni" },
+  { "name": "Example VIP Staff", "position": "VIP BAR", "outlet": "coco" }
+]

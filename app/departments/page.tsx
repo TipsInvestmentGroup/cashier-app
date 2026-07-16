@@ -18,8 +18,7 @@ export default function DepartmentsPage() {
   const [loading, setLoading] = useState(true)
   const [canManage, setCanManage] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
-  const [fixedManagers, setFixedManagers] = useState<string[]>([])
-  const [managerEmail, setManagerEmail] = useState('')
+  const [deptManagers, setDeptManagers] = useState<string[]>([])
 
   // new-item inputs
   const [newDept, setNewDept] = useState('')
@@ -31,7 +30,7 @@ export default function DepartmentsPage() {
   // Manage-access modal (owner only)
   const [accessOpen, setAccessOpen] = useState(false)
   const [allUsers, setAllUsers] = useState<SimpleUser[]>([])
-  const [pickEmail, setPickEmail] = useState('')
+  const [pickManagers, setPickManagers] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -43,8 +42,7 @@ export default function DepartmentsPage() {
       setFunctions(fns || [])
       setCanManage(!!access?.canManageDepartments)
       setIsOwner(!!access?.isOwner)
-      setFixedManagers(access?.deptFixedManagers || [])
-      setManagerEmail(access?.deptManagerEmail || '')
+      setDeptManagers((access?.deptManagers || []).map((e: string) => e.toLowerCase()))
     } finally { setLoading(false) }
   }, [request])
 
@@ -54,15 +52,20 @@ export default function DepartmentsPage() {
     try {
       const us = await request('/api/users')
       setAllUsers(us || [])
-      setPickEmail(managerEmail)
+      setPickManagers(deptManagers)
       setAccessOpen(true)
     } catch { toast.error('Could not load users') }
   }
 
+  const toggleManager = (email: string) => {
+    const e = email.toLowerCase()
+    setPickManagers((list) => list.includes(e) ? list.filter((x) => x !== e) : [...list, e])
+  }
+
   const saveAccess = async () => {
     try {
-      await request('/api/petty-access', { method: 'PUT', body: JSON.stringify({ email: pickEmail }) })
-      setManagerEmail(pickEmail)
+      await request('/api/petty-access', { method: 'PUT', body: JSON.stringify({ emails: pickManagers }) })
+      setDeptManagers(pickManagers)
       toast.success('Access updated')
       setAccessOpen(false)
     } catch (err: unknown) {
@@ -168,7 +171,7 @@ export default function DepartmentsPage() {
 
         {!canManage && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
-            👁️ View only. Editing is limited to the owner, the fixed managers, and the owner-chosen manager.
+            👁️ View only. Editing is limited to the owner and the configured department managers.
           </div>
         )}
 
@@ -221,16 +224,20 @@ export default function DepartmentsPage() {
               <p className="font-semibold text-gray-700">Always allowed:</p>
               <ul className="list-disc list-inside text-gray-500">
                 <li>Owner ({user?.email})</li>
-                {fixedManagers.map((m) => <li key={m}>{m}</li>)}
               </ul>
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">4th manager (you choose)</label>
-              <select value={pickEmail} onChange={(e) => setPickEmail(e.target.value)}
-                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
-                <option value="">— None —</option>
-                {allUsers.map((u) => <option key={u.id} value={u.email}>{u.name} ({u.email})</option>)}
-              </select>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">Department managers</label>
+              <div className="space-y-1 max-h-72 overflow-auto border-2 border-gray-100 rounded-xl p-2">
+                {allUsers.map((u) => (
+                  <label key={u.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 rounded px-2 py-1.5">
+                    <input type="checkbox" className="w-4 h-4" checked={pickManagers.includes(u.email.toLowerCase())} onChange={() => toggleManager(u.email)} />
+                    <span className="font-medium text-gray-800">{u.name}</span>
+                    <span className="text-gray-400">({u.email})</span>
+                  </label>
+                ))}
+                {allUsers.length === 0 && <p className="text-sm text-gray-400 py-2">No users found.</p>}
+              </div>
             </div>
             <button onClick={saveAccess}
               className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">

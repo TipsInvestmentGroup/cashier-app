@@ -4,23 +4,23 @@ import { getAuthUser, JWTPayload } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay } from 'date-fns'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
+import { getSignedBillsBlockedEmails } from '@/lib/approvals'
 
 // Prisma client types for DayClosure are generated on deploy; assert to avoid local type drift.
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
 
-const SUPERUSER_EMAIL = 'johnonecmo@gmail.com'
-const BLOCKED_EMAILS = ['r.mlay@tips.co.tz']
+const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
 
 /** Access policy for editing/deleting a Signed Bill:
- *  - johnonecmo@gmail.com: full access, always.
+ *  - The system owner: full access, always.
  *  - Cashier: only while the bill's business day is still open (not closed) for its outlet,
  *    and only for their own outlet.
- *  - BLOCKED_EMAILS: explicitly denied regardless of role.
+ *  - Configured blocked emails (see lib/approvals.ts): explicitly denied regardless of role.
  *  - Everyone else: no access. */
 async function checkAccess(user: JWTPayload, bill: { outletId: string; date: Date }, action: 'edit' | 'delete'): Promise<string | null> {
-  if (user.email === SUPERUSER_EMAIL) return null
+  if (!!OWNER_EMAIL && (user.email || '').toLowerCase() === OWNER_EMAIL) return null
   if (await hasPermission(user.email, user.userId, RESOURCES.SIGNED_BILLS, action)) return null
-  if (BLOCKED_EMAILS.includes((user.email || '').toLowerCase())) return 'You are not authorized to edit or delete signed bills'
+  if ((await getSignedBillsBlockedEmails()).includes((user.email || '').toLowerCase())) return 'You are not authorized to edit or delete signed bills'
 
   const isCashier = user.role === 'CASHIER'
   if (!isCashier) return 'You are not authorized to edit or delete signed bills'

@@ -2,11 +2,9 @@
 // components. Kept dependency-free (no prisma import) so client components
 // can import this file directly without pulling in server-only code.
 
-// Fixed users who can always manage Departments & Functions (besides the
-// owner) and who are the petty-cash / cancellation approvers.
-export const DEPT_FIXED_MANAGERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
-export const PETTY_APPROVERS = ['siyer.mkama@tips.co.tz', 'r.mlay@tips.co.tz']
-export const CANCELLATION_APPROVERS = PETTY_APPROVERS
+// Who can manage Departments & Functions, approve petty cash, and approve
+// cancellations now lives in lib/approvals.ts (Setting-table-backed, with
+// today's values as the seeded default) instead of being fixed here.
 
 // The full set of valid User.role values. The column itself is a plain
 // String (SQLite has no native enum support), so nothing in the schema
