@@ -29,7 +29,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Approving/rejecting a cancellation linked to a collection changes the
   // staff-loss formula (approved cancellations reduce the loss) — recompute it.
-  if (existing.collectionId) await recomputeStaffLoss(prisma, existing.collectionId)
+  // Wrapped in a transaction so bill-reference generation inside
+  // recomputeStaffLoss stays atomic with the SignedBill it creates.
+  if (existing.collectionId) await prisma.$transaction((tx) => recomputeStaffLoss(tx, existing.collectionId!))
 
   await prisma.auditLog.create({
     data: { userId: user.userId, action: status, entity: 'Cancellation', entityId: id, details: `${status} cancellation of ${existing.productName} by ${user.name}` },

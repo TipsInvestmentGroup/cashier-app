@@ -20,7 +20,8 @@ import { Pencil, Trash2, ShieldCheck } from 'lucide-react'
 import { ManageAccessModal } from '@/components/ManageAccessModal'
 
 interface Bill {
-  id: string; voucherNumber: string; date: string; billType: string; personName: string
+  id: string; voucherNumber?: string | null; displayReference?: string | null; legacyReference?: string | null
+  date: string; billType: string; personName: string
   amount: number; serviceStaff: string; description: string; status: string; seq?: number
   outlet: { name: string }; cashier: { name: string }; dueDate?: string
   limitExceeded?: boolean; exceededAmount?: number
@@ -127,7 +128,7 @@ export default function SignedBillsPage() {
         setLimitWarning({ exceeded: true, amount: res.exceededAmount })
         toast.error(`⚠️ Credit limit exceeded by ${formatCurrency(res.exceededAmount)}!`)
       } else {
-        toast.success(`Bill saved! Voucher: ${res.voucherNumber}`)
+        toast.success(`Bill saved! Reference: ${res.displayReference || res.voucherNumber}`)
       }
       setForm({ ...INIT_FORM, outletId: form.outletId })
       setItemRows([])
@@ -189,7 +190,7 @@ export default function SignedBillsPage() {
     if (filterType && b.billType !== filterType) return false
     if (filterStatus && b.status !== filterStatus) return false
     if (!inRange(b.date, range, customFrom, customTo)) return false
-    if (q && !(`${b.personName} ${b.voucherNumber} ${b.serviceStaff || ''}`.toLowerCase().includes(q))) return false
+    if (q && !(`${b.personName} ${b.voucherNumber || ''} ${b.displayReference || ''} ${b.legacyReference || ''} ${b.serviceStaff || ''}`.toLowerCase().includes(q))) return false
     return true
   })
 
@@ -428,6 +429,7 @@ export default function SignedBillsPage() {
                 <thead className="bg-gray-50">
                   <tr className="text-left text-gray-600">
                     <th className="px-4 py-3 font-semibold">#</th>
+                    <th className="px-4 py-3 font-semibold">Reference</th>
                     <th className="px-4 py-3 font-semibold">Date</th>
                     <th className="px-4 py-3 font-semibold">Type</th>
                     <th className="px-4 py-3 font-semibold">Person</th>
@@ -443,6 +445,10 @@ export default function SignedBillsPage() {
                     <tr key={b.id} onClick={() => setStoryBillId(b.id)} title="Click for the full payment story"
                       className="cursor-pointer hover:bg-indigo-50/60">
                       <td className="px-4 py-3 font-semibold text-gray-600">#{b.seq ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        <span className="font-mono text-xs">{b.displayReference || b.voucherNumber || '—'}</span>
+                        {b.legacyReference && <div className="text-[10px] text-gray-400">formerly {b.legacyReference}</div>}
+                      </td>
                       <td className="px-4 py-3 text-gray-600">{formatDate(b.date)}</td>
                       <td className="px-4 py-3">
                         <Badge billType={b.billType}>{typeLabel(b.billType)}</Badge>
@@ -469,13 +475,13 @@ export default function SignedBillsPage() {
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={canManageBills ? 9 : 8}><EmptyState icon="📋" title="No bills found" hint="Record a signed bill or adjust your filters." /></td></tr>
+                    <tr><td colSpan={canManageBills ? 10 : 9}><EmptyState icon="📋" title="No bills found" hint="Record a signed bill or adjust your filters." /></td></tr>
                   )}
                 </tbody>
                 {filtered.length > 0 && (
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr className="font-bold text-gray-900">
-                      <td className="px-4 py-3" colSpan={4}>TOTAL ({filtered.length})</td>
+                      <td className="px-4 py-3" colSpan={5}>TOTAL ({filtered.length})</td>
                       <td className="px-4 py-3 text-indigo-700">{formatCurrency(totalAmount)}</td>
                       <td className="px-4 py-3" colSpan={canManageBills ? 4 : 3}></td>
                     </tr>

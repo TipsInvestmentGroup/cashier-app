@@ -14,7 +14,7 @@ interface ReportData {
   period: { start: string; end: string; type: string }
   summary: { totalCollected: number; totalSigned: number; totalPaid: number; totalCancelled: number }
   collections: { id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number; outlet: { name: string }; cashier: { name: string } }[]
-  signedBills: { id: string; date: string; voucherNumber: string; billType: string; personName: string; amount: number; status: string; outlet: { name: string } }[]
+  signedBills: { id: string; date: string; voucherNumber?: string | null; displayReference?: string | null; legacyReference?: string | null; billType: string; personName: string; amount: number; status: string; outlet: { name: string } }[]
   paidBills: { id: string; date: string; payerName: string; amountPaid: number; paymentMethod: string; outlet: { name: string } }[]
   cancellations: { id: string; date: string; reason: string; productName: string; sellingPrice: number; quantity: number; amount: number; outletId?: string; collection?: { staffName?: string; outlet?: { name: string } } }[]
   products: { id: string; code: string; name: string; buyingPrice: number; sellingPrice: number; unitMeasure: string; isActive: boolean }[]
@@ -292,13 +292,14 @@ export default function ReportsPage() {
                 {activeTab === 'signed' && (
                   <div>
                     <div className="flex justify-end mb-3">
-                      <ExportBtns rows={data.signedBills.map((b) => ({ Date: formatDate(b.date), Voucher: b.voucherNumber, Type: b.billType, Person: b.personName, Amount: b.amount, Status: b.status, Outlet: b.outlet.name }))} filename="signed-bills" title="Signed Bills Report" />
+                      <ExportBtns rows={data.signedBills.map((b) => ({ Date: formatDate(b.date), Voucher: b.voucherNumber, Reference: b.displayReference || b.voucherNumber || '', Type: b.billType, Person: b.personName, Amount: b.amount, Status: b.status, Outlet: b.outlet.name }))} filename="signed-bills" title="Signed Bills Report" />
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50">
                           <tr className="text-left text-gray-600">
                             <th className="px-4 py-3 font-semibold">Date</th>
+                            <th className="px-4 py-3 font-semibold">Reference</th>
                             <th className="px-4 py-3 font-semibold">Type</th>
                             <th className="px-4 py-3 font-semibold">Person</th>
                             <th className="px-4 py-3 font-semibold">Amount</th>
@@ -310,6 +311,7 @@ export default function ReportsPage() {
                           {data.signedBills.map((b) => (
                             <tr key={b.id} className="hover:bg-gray-50">
                               <td className="px-4 py-3">{formatDate(b.date)}</td>
+                              <td className="px-4 py-3 font-mono text-xs text-gray-500">{b.displayReference || b.voucherNumber || '—'}</td>
                               <td className="px-4 py-3"><span className="px-2 py-1 rounded-lg text-xs font-semibold bg-indigo-100 text-indigo-700">{b.billType}</span></td>
                               <td className="px-4 py-3 font-medium">{b.personName}</td>
                               <td className="px-4 py-3 font-bold">{formatCurrency(b.amount)}</td>
@@ -317,7 +319,7 @@ export default function ReportsPage() {
                               <td className="px-4 py-3 text-gray-500">{b.outlet.name}</td>
                             </tr>
                           ))}
-                          {data.signedBills.length === 0 && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No data</td></tr>}
+                          {data.signedBills.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-gray-400">No data</td></tr>}
                         </tbody>
                       </table>
                     </div>

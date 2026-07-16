@@ -1,5 +1,7 @@
+import crypto from 'crypto'
 import { roundMoney } from './utils'
 import { UNASSIGNED_EXCESS_REASON } from './excess-reasons'
+import { generateBillReference } from './bill-reference'
 
 // Loose type — works with both the prisma singleton and a transaction client.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,6 +58,16 @@ export async function syncCollectionExcessTotal(db: DB, collectionId: string, ne
   if (unpaidRow) {
     await db.collectionExcess.update({ where: { id: unpaidRow.id }, data: { amount: roundMoney(unpaidRow.amount + delta) } })
   } else {
-    await db.collectionExcess.create({ data: { collectionId, amount: delta, reason: UNASSIGNED_EXCESS_REASON } })
+    const collection = await db.dailyCollection.findUnique({ where: { id: collectionId }, select: { outletId: true } })
+    const recordId = crypto.randomUUID()
+    const ref = await generateBillReference(db, {
+      recordId, sourceModel: 'CollectionExcess', billTypeCode: 'EXS', date: new Date(), personId: null, outletId: collection?.outletId ?? null,
+    })
+    await db.collectionExcess.create({
+      data: {
+        id: recordId, collectionId, amount: delta, reason: UNASSIGNED_EXCESS_REASON,
+        internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+      },
+    })
   }
 }

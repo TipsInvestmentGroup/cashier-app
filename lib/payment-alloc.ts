@@ -1,5 +1,7 @@
+import crypto from 'crypto'
 import { CATEGORY_TO_BILLTYPE } from '@/lib/categories'
 import { roundMoney } from '@/lib/utils'
+import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 
 // Accepts a PrismaClient or an interactive-transaction client.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,11 +56,20 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
     const remaining = roundMoney(b.amount - (agg._sum.amountPaid || 0))
     if (remaining <= 0) continue
     const pay = roundMoney(Math.min(remaining, leftover))
+    const recordId = crypto.randomUUID()
+    // Linked to a signed bill — its billType is the truest legacy signal for
+    // which Paid Bill type (PBA/PBD/PBS/PBC/PBJ/PBT) this payment plays.
+    const billTypeCode = await resolveBillTypeCodeFromLegacy(db, 'PAID_BILL', b.billType ?? null)
+    const ref = await generateBillReference(db, {
+      recordId, sourceModel: 'PaidBill', billTypeCode, date: a.date, personId: a.personId || null, outletId: a.outletId,
+    })
     await db.paidBill.create({
       data: {
+        id: recordId,
         signedBillId: b.id, personId: a.personId || null, payerCategory: a.category || null, payerName: a.payerName,
         amountPaid: pay, paymentMethod: a.paymentMethod, notes: a.notes || null, billRef: a.billRef || null,
         outletId: a.outletId, cashierId: a.cashierId, date: a.date,
+        internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
       },
     })
     const tot = (agg._sum.amountPaid || 0) + pay
@@ -69,12 +80,21 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
 
   // Anything left after all bills are settled → unlinked credit
   if (leftover > 0.0001) {
+    const recordId = crypto.randomUUID()
+    // No linked signed bill here — fall back to the category's mapped legacy
+    // code (resolveBillTypeCodeFromLegacy falls back to PBS if it can't resolve).
+    const billTypeCode = await resolveBillTypeCodeFromLegacy(db, 'PAID_BILL', type ?? null)
+    const ref = await generateBillReference(db, {
+      recordId, sourceModel: 'PaidBill', billTypeCode, date: a.date, personId: a.personId || null, outletId: a.outletId,
+    })
     await db.paidBill.create({
       data: {
+        id: recordId,
         signedBillId: null, personId: a.personId || null, payerCategory: a.category || null, payerName: a.payerName,
         amountPaid: leftover, paymentMethod: a.paymentMethod,
         notes: `${a.notes ? a.notes + ' · ' : ''}Unallocated credit`, billRef: a.billRef || null,
         outletId: a.outletId, cashierId: a.cashierId, date: a.date,
+        internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
       },
     })
   }

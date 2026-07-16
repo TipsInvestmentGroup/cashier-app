@@ -10,11 +10,15 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
 import { ManageAccessModal } from '@/components/ManageAccessModal'
+import { PERSON_NUMBERING_MODES } from '@/lib/bill-reference-defaults'
 import { ShieldCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+const humanizeCodeMode = (s: string) => s.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+
 interface Person {
   id: string; name: string; phone?: string; email?: string; type: string; creditLimit: number; isActive: boolean
+  code?: string | null; codeMode?: string
 }
 interface Category { code: string; label: string; isActive: boolean }
 interface DupPerson { id: string; name: string; type: string; creditLimit: number; billCount: number }
@@ -31,7 +35,8 @@ export default function PersonsPage() {
   const [filterType, setFilterType] = useState('')
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', phone: '', email: '', type: 'CUSTOMER', creditLimit: '0', isActive: true })
+  const [form, setForm] = useState({ name: '', phone: '', email: '', type: 'CUSTOMER', creditLimit: '0', isActive: true, code: '', codeMode: 'AUTO' })
+  const [assigningCodes, setAssigningCodes] = useState(false)
   const [managerEmail, setManagerEmail] = useState('')
   const [accessOpen, setAccessOpen] = useState(false)
   const [rbacAccessOpen, setRbacAccessOpen] = useState(false)
@@ -83,13 +88,13 @@ export default function PersonsPage() {
     if (isOwner) request('/api/users').then((u) => setAllUsers(u || [])).catch(() => {})
   }, [isOwner, request])
 
-  const resetForm = () => setForm({ name: '', phone: '', email: '', type: 'CUSTOMER', creditLimit: '0', isActive: true })
+  const resetForm = () => setForm({ name: '', phone: '', email: '', type: 'CUSTOMER', creditLimit: '0', isActive: true, code: '', codeMode: 'AUTO' })
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     try {
-      const payload = JSON.stringify({ ...form, creditLimit: Number(form.creditLimit) })
+      const payload = JSON.stringify({ ...form, creditLimit: Number(form.creditLimit), code: form.code.trim() })
       if (editingId) {
         await request(`/api/persons/${editingId}`, { method: 'PUT', body: payload })
         toast.success('Person updated!')
@@ -107,7 +112,7 @@ export default function PersonsPage() {
 
   const startEdit = (p: Person) => {
     setEditingId(p.id)
-    setForm({ name: p.name, phone: p.phone || '', email: p.email || '', type: p.type, creditLimit: String(p.creditLimit ?? 0), isActive: p.isActive })
+    setForm({ name: p.name, phone: p.phone || '', email: p.email || '', type: p.type, creditLimit: String(p.creditLimit ?? 0), isActive: p.isActive, code: p.code || '', codeMode: p.codeMode || 'AUTO' })
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -121,6 +126,19 @@ export default function PersonsPage() {
       toast.error(err instanceof Error ? err.message : 'Error deleting person')
     }
   }
+  const autoAssignCodes = async () => {
+    setAssigningCodes(true)
+    try {
+      const res = await request('/api/persons/bulk-assign-codes', { method: 'POST', body: JSON.stringify(filterType ? { type: filterType } : {}) })
+      toast.success(`Assigned codes to ${res.updated} person(s)`)
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error assigning codes')
+    } finally {
+      setAssigningCodes(false)
+    }
+  }
+
   const saveAccess = async (email: string) => {
     try {
       await request('/api/persons-access', { method: 'PUT', body: JSON.stringify({ email }) })
@@ -236,6 +254,12 @@ export default function PersonsPage() {
                 🔀 Merge People
               </button>
             )}
+            {canEditDelete && (
+              <button onClick={autoAssignCodes} disabled={assigningCodes}
+                className="px-4 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:border-gray-300 transition disabled:opacity-50">
+                {assigningCodes ? 'Assigning…' : '# Auto-assign codes'}
+              </button>
+            )}
             {canManage && (
               <Button onClick={newPerson} size="lg"><span className="text-lg">+</span> Add Person</Button>
             )}
@@ -296,6 +320,19 @@ export default function PersonsPage() {
                       placeholder="500000" />
                   </div>
                 )}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Code</label>
+                  <input type="text" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none"
+                    placeholder="Leave blank for auto-assign" />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Code Mode</label>
+                  <select value={form.codeMode} onChange={(e) => setForm({ ...form, codeMode: e.target.value })}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                    {PERSON_NUMBERING_MODES.map((m) => <option key={m} value={m}>{humanizeCodeMode(m)}</option>)}
+                  </select>
+                </div>
               </div>
               {editingId && (
                 <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
@@ -330,9 +367,14 @@ export default function PersonsPage() {
                 </div>
                 <div className="min-w-0">
                   <p className="font-semibold text-gray-900 truncate">{p.name}</p>
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-lg ${catColor(p.type)}`}>
-                    {catLabel(p.type)}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-lg ${catColor(p.type)}`}>
+                      {catLabel(p.type)}
+                    </span>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-lg bg-gray-100 text-gray-500" title="Person Code">
+                      # {p.code || '—'}
+                    </span>
+                  </div>
                 </div>
               </div>
               {p.phone && <p className="text-sm text-gray-500 mb-1">📞 {p.phone}</p>}

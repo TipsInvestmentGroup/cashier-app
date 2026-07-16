@@ -1,6 +1,8 @@
+import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
+import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { startOfMonth, endOfMonth, parse, isValid } from 'date-fns'
 
 /**
@@ -107,29 +109,46 @@ export async function POST(req: NextRequest) {
       const alloc = Math.min(remaining, bill.outstanding)
       if (alloc <= 0) continue
 
-      await prisma.paidBill.create({
-        data: {
-          signedBillId: bill.id,
-          personId: g.personId,
-          payerName: g.personName,
-          amountPaid: alloc,
-          paymentMethod: 'PAYROLL',
-          notes: `Payroll deduction (${periodLabel})`,
-          billRef: `PAYROLL-${periodLabel}`,
-          outletId: bill.outletId,
-          cashierId: user.userId,
-        },
-      })
+      // Reference generation (sequence counter + registry row) must be atomic
+      // with the PaidBill row itself — same reasoning as lib/bill-reference.ts.
+      await prisma.$transaction(async (tx) => {
+        const recordId = crypto.randomUUID()
+        // Always linked to a signedBillId here — g.billType is that signed
+        // bill's own billType (ADMIN | DIRECTOR | STAFF_LOSS), the truest
+        // legacy signal, same rule as lib/payment-alloc.ts.
+        const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'PAID_BILL', g.billType)
+        const ref = await generateBillReference(tx, {
+          recordId, sourceModel: 'PaidBill', billTypeCode, personId: g.personId, outletId: bill.outletId,
+        })
 
-      // Recompute and update bill status
-      const agg = await prisma.paidBill.aggregate({
-        where: { signedBillId: bill.id },
-        _sum: { amountPaid: true },
+        await tx.paidBill.create({
+          data: {
+            id: recordId,
+            signedBillId: bill.id,
+            personId: g.personId,
+            payerName: g.personName,
+            amountPaid: alloc,
+            paymentMethod: 'PAYROLL',
+            notes: `Payroll deduction (${periodLabel})`,
+            billRef: `PAYROLL-${periodLabel}`,
+            outletId: bill.outletId,
+            cashierId: user.userId,
+            internalBillId: ref.internalBillId,
+            displayReference: ref.displayReference,
+            billTypeConfigId: ref.billTypeConfigId,
+          },
+        })
+
+        // Recompute and update bill status
+        const agg = await tx.paidBill.aggregate({
+          where: { signedBillId: bill.id },
+          _sum: { amountPaid: true },
+        })
+        const bRow = await tx.signedBill.findUnique({ where: { id: bill.id }, select: { amount: true } })
+        const totalPaid = agg._sum.amountPaid || 0
+        const newStatus = bRow && totalPaid >= bRow.amount ? 'PAID' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID'
+        await tx.signedBill.update({ where: { id: bill.id }, data: { status: newStatus } })
       })
-      const bRow = await prisma.signedBill.findUnique({ where: { id: bill.id }, select: { amount: true } })
-      const totalPaid = agg._sum.amountPaid || 0
-      const newStatus = bRow && totalPaid >= bRow.amount ? 'PAID' : totalPaid > 0 ? 'PARTIAL' : 'UNPAID'
-      await prisma.signedBill.update({ where: { id: bill.id }, data: { status: newStatus } })
 
       remaining -= alloc
     }

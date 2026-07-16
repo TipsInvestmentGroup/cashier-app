@@ -51,13 +51,15 @@ export async function POST(req: NextRequest) {
   if (!amountPaid || Number(amountPaid) <= 0) return NextResponse.json({ error: 'Amount must be > 0' }, { status: 400 })
 
   // Allocate across the member's outstanding bills (selected first, then FIFO);
-  // any leftover is recorded as an unlinked credit.
-  const result = await allocatePayment(prisma, {
+  // any leftover is recorded as an unlinked credit. Wrapped in a transaction so
+  // the bill-reference sequence/registry writes inside allocatePayment stay
+  // atomic with the PaidBill row(s) it creates.
+  const result = await prisma.$transaction((tx) => allocatePayment(tx, {
     payerName, category: payerCategory || null, categoryBillType: categoryBillType || null, totalAmount: Number(amountPaid),
     selectedBillIds, paymentMethod: paymentMethod || 'CASH', outletId: usedOutletId,
     cashierId: user.userId, date: date ? new Date(date) : new Date(),
     billRef: billRef || null, notes: notes || null, personId: personId || null,
-  })
+  }))
 
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'CREATE', entity: 'PaidBill', entityId: null, details: `Payment ${amountPaid} for ${payerName}: ${result.billsPaid} bill(s) settled${result.leftover > 0 ? `, ${result.leftover} credit` : ''}` },

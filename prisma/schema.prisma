@@ -24,20 +24,29 @@ datasource db {
 //   TicketBooking.bookingStatus:    PENDING | CONFIRMED | CANCELLED
 //   EventTable.status:              AVAILABLE | RESERVED | OCCUPIED
 //   TableBooking.bookingStatus:     PENDING | CONFIRMED | CANCELLED
+//   Person.codeMode:                          AUTO | MANUAL | EMPLOYEE_NUMBER | CUSTOMER_NUMBER | MEMBERSHIP_NUMBER | SUPPLIER_CODE
+//   BillReferenceConfig.dateFormat:            YYMMDD | DDMMYY | YYYYMMDD | DD-MM-YYYY | MM-YYYY | CUSTOM
+//   BillReferenceConfig.separator:             "-" | "/" | "_" | "." | NONE
+//   BillReferenceConfig.personNumberingMode:   AUTO | MANUAL | EMPLOYEE_NUMBER | CUSTOMER_NUMBER | MEMBERSHIP_NUMBER | SUPPLIER_CODE
+//   BillReferenceConfig.sequenceResetRule:     NEVER | DAILY | MONTHLY | YEARLY | PER_PERSON | PER_BILL_TYPE
+//   BillReferenceComponent.type:               DATE | BILL_TYPE_CODE | PERSON_CODE | SEQUENCE | COMPANY_CODE | BRANCH_CODE | DEPARTMENT_CODE | COUNTER_CODE | OUTLET_CODE | STATIC_TEXT
+//   BillTypeConfig.category:                   SIGNED_BILL | PAID_BILL | EXCESS_PAYMENT | EXCESS_REFUND | LOSS_RECORD
+//   ExcessRefund.reason:                       OVERPAYMENT | DUPLICATE_PAYMENT | OTHER
+//   ExcessRefund.approvalStatus:                PENDING | APPROVED | REJECTED
 
 model User {
-  id          String   @id @default(cuid())
-  name        String
-  email       String   @unique
-  password    String
-  role        String
-  outletId    String?
-  outlet      Outlet?  @relation(fields: [outletId], references: [id])
-  isActive    Boolean  @default(true)
+  id                String    @id @default(cuid())
+  name              String
+  email             String    @unique
+  password          String
+  role              String
+  outletId          String?
+  outlet            Outlet?   @relation(fields: [outletId], references: [id])
+  isActive          Boolean   @default(true)
   // Forgot-password flow: a hashed, single-use token with a short expiry.
   // Never store the raw token — only its SHA-256 hash (see lib/auth.ts).
-  resetToken       String?   @unique
-  resetTokenExpiry DateTime?
+  resetToken        String?   @unique
+  resetTokenExpiry  DateTime?
   // Streamlined MyPOS staff login: WAITER accounts sign in by tapping their
   // name and entering a short numeric PIN instead of email+password. `pin`
   // is a bcrypt hash (same as `password`), never the raw digits. `position`
@@ -51,20 +60,21 @@ model User {
   // record so scheduling/event-assignment logic works unchanged, but excluded
   // from auto-rostering and from the permanent staff list by default.
   isCasual          Boolean   @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  dailyCollections  DailyCollection[]
-  signedBills       SignedBill[]
-  paidBills         PaidBill[]
-  auditLogs         AuditLog[]
-  posOrders         PosOrder[]
-  posWaiterSessions PosWaiterSession[]
+  dailyCollections    DailyCollection[]
+  signedBills         SignedBill[]
+  paidBills           PaidBill[]
+  auditLogs           AuditLog[]
+  posOrders           PosOrder[]
+  posWaiterSessions   PosWaiterSession[]
   scheduleAssignments ScheduleAssignment[]
   unavailabilities    StaffUnavailability[]
   eventStaff          EventStaff[]
   pushSubscriptions   PushSubscription[]
   permissions         UserPermission[]
+  excessRefunds       ExcessRefund[]
 }
 
 /// Per-user, per-resource grant of Add/Edit/Delete(/Settle/Unsettle for
@@ -75,7 +85,7 @@ model User {
 model UserPermission {
   id          String   @id @default(cuid())
   userId      String
-  resource    String   // 'PAID_BILLS' | 'SIGNED_BILLS' | 'PERSONS' | 'PRODUCTS' | 'EXCESS_RECON'
+  resource    String // 'PAID_BILLS' | 'SIGNED_BILLS' | 'PERSONS' | 'PRODUCTS' | 'EXCESS_RECON'
   canAdd      Boolean  @default(false)
   canEdit     Boolean  @default(false)
   canDelete   Boolean  @default(false)
@@ -117,25 +127,30 @@ model Outlet {
   legalName    String?
   tin          String?
   vrn          String?
+  // Optional code backing the BRANCH_CODE/COMPANY_CODE bill-reference
+  // components (see lib/bill-reference.ts). Falls back to a slugified
+  // Outlet.name when unset.
+  branchCode   String?
   createdAt    DateTime @default(now())
 
-  users            User[]
-  dailyCollections DailyCollection[]
-  signedBills      SignedBill[]
-  paidBills        PaidBill[]
-  posTables        PosTable[]
-  posShifts        PosShift[]
-  posCounters      PosCounter[]
-  posStockRequests PosStockRequest[]
-  stockLevels      StockLevel[]
-  stockTransfers   StockTransfer[]
-  posOrders        PosOrder[]
-  posBlockedItems  PosBlockedItem[]
-  dayClosures      DayClosure[]
-  salesMetrics     SalesMetric[]
+  users               User[]
+  dailyCollections    DailyCollection[]
+  signedBills         SignedBill[]
+  paidBills           PaidBill[]
+  posTables           PosTable[]
+  posShifts           PosShift[]
+  posCounters         PosCounter[]
+  posStockRequests    PosStockRequest[]
+  stockLevels         StockLevel[]
+  stockTransfers      StockTransfer[]
+  posOrders           PosOrder[]
+  posBlockedItems     PosBlockedItem[]
+  dayClosures         DayClosure[]
+  salesMetrics        SalesMetric[]
   scheduleAssignments ScheduleAssignment[]
   scheduleConfig      OutletScheduleConfig?
   events              Event[]
+  excessRefunds       ExcessRefund[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -146,7 +161,7 @@ model SalesMetric {
   date        DateTime
   outletId    String?
   outlet      Outlet?  @relation(fields: [outletId], references: [id])
-  department  String   // SHISHA | FOOD
+  department  String // SHISHA | FOOD
   staffName   String
   value       Float    @default(0) // shisha count, or food sales amount (TZS)
   createdById String?
@@ -161,13 +176,13 @@ model SalesMetric {
 /// rows can't be deleted/re-uploaded. Any uploader can lock; only an Admin
 /// (super user) can unlock.
 model SalesMetricLock {
-  id          String   @id @default(cuid())
-  outletId    String?
-  department  String
-  date        DateTime
-  lockedBy    String
-  lockedById  String?
-  lockedAt    DateTime @default(now())
+  id         String   @id @default(cuid())
+  outletId   String?
+  department String
+  date       DateTime
+  lockedBy   String
+  lockedById String?
+  lockedAt   DateTime @default(now())
 
   @@unique([outletId, department, date])
   @@index([department])
@@ -189,26 +204,26 @@ model DayClosure {
 }
 
 model DailyCollection {
-  id         String        @id @default(cuid())
-  date       DateTime      @default(now())
-  cash       Float         @default(0)
-  crdb       Float         @default(0)
-  stanbic    Float         @default(0)
-  mpesa      Float         @default(0)
-  total      Float         @default(0)
+  id               String   @id @default(cuid())
+  date             DateTime @default(now())
+  cash             Float    @default(0)
+  crdb             Float    @default(0)
+  stanbic          Float    @default(0)
+  mpesa            Float    @default(0)
+  total            Float    @default(0)
   staffName        String?
-  systemSales      Float         @default(0)
-  creditSales      Float         @default(0)
-  paymentsReceived Float         @default(0)
-  discount         Float         @default(0)     // authorized discount — reduces staff loss
+  systemSales      Float    @default(0)
+  creditSales      Float    @default(0)
+  paymentsReceived Float    @default(0)
+  discount         Float    @default(0) // authorized discount — reduces staff loss
   discountReason   String?
-  notes      String?
-  outletId   String
-  outlet     Outlet        @relation(fields: [outletId], references: [id])
-  cashierId  String
-  cashier    User          @relation(fields: [cashierId], references: [id])
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  notes            String?
+  outletId         String
+  outlet           Outlet   @relation(fields: [outletId], references: [id])
+  cashierId        String
+  cashier          User     @relation(fields: [cashierId], references: [id])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   cancellations Cancellation[]
   channels      DailyCollectionChannel[]
@@ -228,7 +243,7 @@ model DailyCollectionChannel {
   id           String          @id @default(cuid())
   collectionId String
   collection   DailyCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  channelCode  String          // matches PaymentChannel.code (CRDB, STANBIC, MPESA, CRDB_LIPA_HAPA, ...)
+  channelCode  String // matches PaymentChannel.code (CRDB, STANBIC, MPESA, CRDB_LIPA_HAPA, ...)
   amount       Float           @default(0)
   createdAt    DateTime        @default(now())
 
@@ -246,36 +261,72 @@ model Person {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
-  signedBills SignedBill[]
-  paidBills   PaidBill[]
+  // Bill Reference System — the "Person Code/Number" component (see
+  // lib/bill-reference.ts). codeMode governs how `code` was/should be
+  // populated: AUTO (assigned by the shared sequence engine) | MANUAL |
+  // EMPLOYEE_NUMBER | CUSTOMER_NUMBER | MEMBERSHIP_NUMBER | SUPPLIER_CODE.
+  // Scoped unique per `type` (not globally) so e.g. customer #14 and staff
+  // #14 can coexist without forcing one to skip ahead.
+  code     String?
+  codeMode String  @default("AUTO")
 
+  signedBills   SignedBill[]
+  paidBills     PaidBill[]
+  excessRefunds ExcessRefund[]
+
+  @@unique([type, code])
   @@index([type])
 }
 
 model SignedBill {
-  id            String     @id @default(cuid())
-  date          DateTime   @default(now())
-  voucherNumber String     @unique
-  billType      String
-  personId      String?
-  person        Person?    @relation(fields: [personId], references: [id])
-  personName    String
-  amount        Float
-  serviceStaff  String?
-  description   String?
-  dueDate       DateTime?
-  status        String     @default("UNPAID")
+  id             String    @id @default(cuid())
+  date           DateTime  @default(now())
+  // Legacy voucher — kept (not dropped) because it's overloaded today as a
+  // deterministic idempotency key for auto-generated bills (see
+  // lib/staff-loss.ts, app/api/collections/route.ts). New auto-created bills
+  // use `autoKey` for that role instead; `voucherNumber` becomes read-only
+  // legacy/display data once a bill has been migrated (see legacyReference).
+  voucherNumber  String?   @unique
+  // Idempotency key for auto-generated bills (e.g. "SL-<collectionId>",
+  // "VCH-<collectionId>-<i>") — replaces voucherNumber's old lookup role.
+  autoKey        String?   @unique
+  billType       String
+  personId       String?
+  person         Person?   @relation(fields: [personId], references: [id])
+  personName     String
+  amount         Float
+  serviceStaff   String?
+  description    String?
+  dueDate        DateTime?
+  status         String    @default("UNPAID")
   approvalStatus String    @default("PENDING") // PENDING | APPROVED | REJECTED (used for Tips/DJ bill requests)
-  approvedBy    String?
-  outletId      String
-  outlet        Outlet     @relation(fields: [outletId], references: [id])
-  cashierId     String
-  cashier       User       @relation(fields: [cashierId], references: [id])
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  approvedBy     String?
+  outletId       String
+  outlet         Outlet    @relation(fields: [outletId], references: [id])
+  cashierId      String
+  cashier        User      @relation(fields: [cashierId], references: [id])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  payments      PaidBill[]
-  items         BillItem[]
+  // Bill Reference System (see lib/bill-reference.ts). internalBillId is the
+  // permanent, never-changing system id ("B-YYYYMMDD-NNNNNN");
+  // displayReference is the admin-configurable, human-facing reference.
+  // Nullable until the one-time backfill (scripts/backfill-bill-references.ts
+  // / the Bill Reference Settings page's Data Migration panel) completes in
+  // each environment, then tightened to NOT NULL in a follow-up deploy.
+  // legacyReference preserves the old voucherNumber value verbatim so an
+  // already-printed paper bill stays searchable after migration.
+  internalBillId         String?         @unique
+  displayReference       String?         @unique
+  legacyReference        String?
+  billTypeConfigId       String?
+  billTypeConfig         BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
+  // Replaces the fragile `voucherNumber.startsWith('SL-')` string-parse
+  // (see app/api/reports/excess-loss/route.ts) with an explicit column.
+  autoSourceCollectionId String?
+
+  payments PaidBill[]
+  items    BillItem[]
 
   @@index([date])
   @@index([billType])
@@ -302,23 +353,34 @@ model BillItem {
 }
 
 model PaidBill {
-  id            String        @id @default(cuid())
-  date          DateTime      @default(now())
+  id            String      @id @default(cuid())
+  date          DateTime    @default(now())
+  // Free-text/correlation field — NOT the Bill Reference System's reference.
+  // Also doubles as a correlation key ("COL-<collectionId>",
+  // "PAYROLL-<periodLabel>") and a report-grouping key
+  // (app/api/reports/daily-cashier/route.ts) — left untouched by design.
   billRef       String?
   signedBillId  String?
-  signedBill    SignedBill?   @relation(fields: [signedBillId], references: [id])
+  signedBill    SignedBill? @relation(fields: [signedBillId], references: [id])
   personId      String?
-  person        Person?       @relation(fields: [personId], references: [id])
+  person        Person?     @relation(fields: [personId], references: [id])
   payerCategory String?
   payerName     String
   amountPaid    Float
   paymentMethod String
   notes         String?
   outletId      String
-  outlet        Outlet        @relation(fields: [outletId], references: [id])
+  outlet        Outlet      @relation(fields: [outletId], references: [id])
   cashierId     String
-  cashier       User          @relation(fields: [cashierId], references: [id])
-  createdAt     DateTime      @default(now())
+  cashier       User        @relation(fields: [cashierId], references: [id])
+  createdAt     DateTime    @default(now())
+
+  // Bill Reference System (see lib/bill-reference.ts / SignedBill above).
+  internalBillId   String?         @unique
+  displayReference String?         @unique
+  legacyReference  String?
+  billTypeConfigId String?
+  billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
 
   @@index([date])
   @@index([outletId])
@@ -330,13 +392,13 @@ model PettyCash {
   date          DateTime @default(now())
   requestedBy   String
   department    String?
-  functionName  String?                      // e.g. Purchases of | Allowance | Transport
+  functionName  String? // e.g. Purchases of | Allowance | Transport
   purpose       String
   amount        Float    @default(0)
-  paymentMethod String                       // CASH | CRDB | STANBIC | MPESA (actual disbursement method)
+  paymentMethod String // CASH | CRDB | STANBIC | MPESA (actual disbursement method)
   payeeName     String?
   payeeAccount  String?
-  paymentStatus String?  @default("UNPAID")   // PAID | UNPAID — has the cash actually been paid out
+  paymentStatus String?  @default("UNPAID") // PAID | UNPAID — has the cash actually been paid out
   approvedBy    String?
   status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
   outletId      String?
@@ -344,14 +406,14 @@ model PettyCash {
   createdAt     DateTime @default(now())
 
   // Payment module — which fund disburses and the disbursement record.
-  pettyType     String   @default("CASHIER") // CASHIER (drawer) | ACCOUNTANT (allocated fund)
-  fundId        String?                      // set when paid from an accountant PettyFund
-  paidAt        DateTime?
-  paidById      String?
-  paidByName    String?
-  receiptUrl    String?                      // payment receipt (image/pdf data URL or link)
+  pettyType  String    @default("CASHIER") // CASHIER (drawer) | ACCOUNTANT (allocated fund)
+  fundId     String? // set when paid from an accountant PettyFund
+  paidAt     DateTime?
+  paidById   String?
+  paidByName String?
+  receiptUrl String? // payment receipt (image/pdf data URL or link)
 
-  items         PettyCashItem[]
+  items PettyCashItem[]
 
   @@index([date])
   @@index([status])
@@ -362,17 +424,17 @@ model PettyCash {
 // A management-allocated petty-cash fund operated by an Accountant. Payments
 // against approved requests draw down this fund; replenishments top it up.
 model PettyFund {
-  id             String   @id @default(cuid())
-  name           String                       // e.g. "Accountant Fund — HQ"
-  ownerId        String?                      // accountant who operates the fund
+  id             String    @id @default(cuid())
+  name           String // e.g. "Accountant Fund — HQ"
+  ownerId        String? // accountant who operates the fund
   ownerName      String?
   outletId       String?
-  openingBalance Float    @default(0)
-  depositDate    DateTime?                    // date the petty cash was deposited/allocated
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
+  openingBalance Float     @default(0)
+  depositDate    DateTime? // date the petty cash was deposited/allocated
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
 
-  txns           PettyFundTxn[]
+  txns PettyFundTxn[]
 
   @@index([outletId])
 }
@@ -383,9 +445,9 @@ model PettyFundTxn {
   id            String    @id @default(cuid())
   fundId        String
   fund          PettyFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
-  type          String                         // REPLENISH | PAYMENT | ADJUST
-  amount        Float                          // signed delta
-  pettyCashId   String?                        // links a PAYMENT to the request it settled
+  type          String // REPLENISH | PAYMENT | ADJUST
+  amount        Float // signed delta
+  pettyCashId   String? // links a PAYMENT to the request it settled
   note          String?
   createdById   String?
   createdByName String?
@@ -428,21 +490,21 @@ model PettyFunction {
 
 // Product catalogue (managed in /products).
 model Product {
-  id           String   @id @default(cuid())
-  code         String   @unique // auto-generated, human-readable e.g. COC-001
-  name         String
-  category     String?           // e.g. "Beers", "Spirits", "Soft Drinks"
-  buyingPrice  Float    @default(0)
-  sellingPrice Float    @default(0)
-  unitMeasure  String            // unit | kg | crate 24 bottle | crate 25 bottle | crate 6 bottle
-  isActive     Boolean  @default(true)
+  id              String   @id @default(cuid())
+  code            String   @unique // auto-generated, human-readable e.g. COC-001
+  name            String
+  category        String? // e.g. "Beers", "Spirits", "Soft Drinks"
+  buyingPrice     Float    @default(0)
+  sellingPrice    Float    @default(0)
+  unitMeasure     String // unit | kg | crate 24 bottle | crate 25 bottle | crate 6 bottle
+  isActive        Boolean  @default(true)
   // Counter stock tracking (see StockLevel/StockLedgerEntry below). WEIGHT
   // items (e.g. shisha flavours) are counted in grams; gramsPerServing
   // converts a gram reading into sellable servings, same conversion the
   // business already does by hand on paper stock-take sheets.
-  trackingMode    String @default("UNIT") // UNIT | WEIGHT
+  trackingMode    String   @default("UNIT") // UNIT | WEIGHT
   gramsPerServing Float?
-  createdAt    DateTime @default(now())
+  createdAt       DateTime @default(now())
 
   cancellations      Cancellation[]
   billItems          BillItem[]
@@ -486,7 +548,7 @@ model StockLevel {
   product     Product    @relation(fields: [productId], references: [id])
   outletId    String?
   outlet      Outlet?    @relation(fields: [outletId], references: [id])
-  counterCode String?    // MAIN | VIP | SHISHA | KITCHEN
+  counterCode String? // MAIN | VIP | SHISHA | KITCHEN
   warehouseId String?
   warehouse   Warehouse? @relation(fields: [warehouseId], references: [id])
   quantity    Float      @default(0)
@@ -504,16 +566,16 @@ model StockLevel {
 model StockLedgerEntry {
   id           String     @id @default(cuid())
   productId    String
-  productName  String     // snapshot, same pattern as PosOrderItem.productName
+  productName  String // snapshot, same pattern as PosOrderItem.productName
   outletId     String?
   counterCode  String?
   warehouseId  String?
   warehouse    Warehouse? @relation(fields: [warehouseId], references: [id])
-  type         String     // RESTOCK | SALE | ADJUSTMENT | GRN_RECEIVE | TRANSFER_OUT | TRANSFER_IN | BREAKAGE
-  quantity     Float      // signed — negative for sales/deductions/outflows
+  type         String // RESTOCK | SALE | ADJUSTMENT | GRN_RECEIVE | TRANSFER_OUT | TRANSFER_IN | BREAKAGE
+  quantity     Float // signed — negative for sales/deductions/outflows
   balanceAfter Float
   note         String?
-  refType      String?    // "PosOrderItem" | "Grn" | "StockTransfer"
+  refType      String? // "PosOrderItem" | "Grn" | "StockTransfer"
   refId        String?
   createdById  String
   createdAt    DateTime   @default(now())
@@ -530,7 +592,7 @@ model Supplier {
   contactPerson String?
   phone         String?
   email         String?
-  paymentTerms  String?  // e.g. "30 days", "Cash on delivery"
+  paymentTerms  String? // e.g. "30 days", "Cash on delivery"
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
 
@@ -548,7 +610,7 @@ model PurchaseOrder {
   supplierId      String
   supplier        Supplier  @relation(fields: [supplierId], references: [id])
   status          String    @default("DRAFT")
-  outletIds       String    // JSON array — informational, a PO can be for more than one outlet
+  outletIds       String // JSON array — informational, a PO can be for more than one outlet
   orderDate       DateTime  @default(now())
   expectedDate    DateTime?
   subtotal        Float     @default(0)
@@ -572,18 +634,18 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderItem {
-  id              String        @id @default(cuid())
-  purchaseOrderId String
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  productId       String
-  product         Product       @relation(fields: [productId], references: [id])
-  productName     String        // snapshot, same pattern as PosOrderItem.productName
-  purchaseUnit    String        // "Carton", "Bottle", "Case" — the unit the supplier sells in
-  packSize        Float         @default(1) // pieces per purchase unit
-  quantity        Float         // quantity in purchaseUnit, e.g. 10 cartons
-  unitPrice       Float
-  amount          Float
-  quantityReceived Float        @default(0) // running total across all GRNs against this line, in purchaseUnit
+  id               String        @id @default(cuid())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product       @relation(fields: [productId], references: [id])
+  productName      String // snapshot, same pattern as PosOrderItem.productName
+  purchaseUnit     String // "Carton", "Bottle", "Case" — the unit the supplier sells in
+  packSize         Float         @default(1) // pieces per purchase unit
+  quantity         Float // quantity in purchaseUnit, e.g. 10 cartons
+  unitPrice        Float
+  amount           Float
+  quantityReceived Float         @default(0) // running total across all GRNs against this line, in purchaseUnit
 
   @@index([purchaseOrderId])
 }
@@ -628,12 +690,12 @@ model GrnItem {
   purchaseOrderItemId String?
   productId           String
   product             Product  @relation(fields: [productId], references: [id])
-  productName         String   // snapshot, same convention as StockLedgerEntry.productName
-  purchaseUnit        String   // e.g. "Carton", "Piece", "Kg"
+  productName         String // snapshot, same convention as StockLedgerEntry.productName
+  purchaseUnit        String // e.g. "Carton", "Piece", "Kg"
   packSize            Float    @default(1) // pieces (or grams) per purchaseUnit
-  quantityOrdered     Float    // quantity in purchaseUnit, e.g. 10 (Cartons)
-  piecesReceived      Float    // derived: quantityOrdered * packSize, in stock units
-  unitCost            Float?   // optional, per purchaseUnit — not used by stock math
+  quantityOrdered     Float // quantity in purchaseUnit, e.g. 10 (Cartons)
+  piecesReceived      Float // derived: quantityOrdered * packSize, in stock units
+  unitCost            Float? // optional, per purchaseUnit — not used by stock math
   createdAt           DateTime @default(now())
 
   @@index([grnId])
@@ -669,7 +731,7 @@ model StockTransferItem {
   productId   String
   product     Product       @relation(fields: [productId], references: [id])
   productName String
-  quantity    Float         // stock units (pieces/grams) — no pack conversion here
+  quantity    Float // stock units (pieces/grams) — no pack conversion here
   createdAt   DateTime      @default(now())
 
   @@index([transferId])
@@ -685,16 +747,16 @@ model StockTransferItem {
 /// monthly Main Store count (warehouseId set) — exactly one of the two is
 /// set per row, same convention StockLevel already uses.
 model StockCountSession {
-  id            String   @id @default(cuid())
-  scope         String   @default("COUNTER_DAILY") // COUNTER_DAILY | STORE_MONTHLY
-  outletId      String?
-  counterCode   String?
-  warehouseId   String?
-  countDate     DateTime @default(now())
-  status        String   @default("IN_PROGRESS") // IN_PROGRESS | SUBMITTED
-  conductedById String
-  totalLossValue Float   @default(0)
-  createdAt     DateTime @default(now())
+  id             String   @id @default(cuid())
+  scope          String   @default("COUNTER_DAILY") // COUNTER_DAILY | STORE_MONTHLY
+  outletId       String?
+  counterCode    String?
+  warehouseId    String?
+  countDate      DateTime @default(now())
+  status         String   @default("IN_PROGRESS") // IN_PROGRESS | SUBMITTED
+  conductedById  String
+  totalLossValue Float    @default(0)
+  createdAt      DateTime @default(now())
 
   items        StockCountItem[]
   attributions StockLossAttribution[]
@@ -713,17 +775,17 @@ model StockCountItem {
   sessionId        String
   session          StockCountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   productId        String
-  productName      String            // snapshot
+  productName      String // snapshot
   openingBalance   Float
   receivings       Float             @default(0)
   transfersIn      Float             @default(0)
   transfersOut     Float             @default(0) // always 0 today — no counter→store returns yet
-  closingSystem    Float             // = opening + receivings + transfersIn − transfersOut
+  closingSystem    Float // = opening + receivings + transfersIn − transfersOut
   closingPhysical  Float             @default(0) // the actual count — units, or grams if trackingMode=WEIGHT
   posSalesQty      Float             @default(0) // pulled from the SALE ledger entries in the same window
   expectedSalesQty Float             @default(0) // = closingSystem − closingPhysical
   varianceQty      Float             @default(0) // = posSalesQty − expectedSalesQty
-  unitCost         Float             // Product.buyingPrice at count time
+  unitCost         Float // Product.buyingPrice at count time
   varianceValue    Float             @default(0) // = (varianceQty − discountQty − breakageQty) * unitCost
   discountQty      Float             @default(0) // authorised discounts, excluded from "loss"
   breakageQty      Float             @default(0)
@@ -740,7 +802,7 @@ model StockLossAttribution {
   sessionId String
   session   StockCountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   staffId   String
-  staffName String            // snapshot
+  staffName String // snapshot
   amount    Float
   note      String?
   createdAt DateTime          @default(now())
@@ -755,9 +817,9 @@ model StockLossAttribution {
 model Breakage {
   id           String   @id @default(cuid())
   productId    String
-  productName  String   // snapshot
+  productName  String // snapshot
   quantity     Float
-  reason       String   // BROKEN | EXPIRED | DAMAGED | LOST
+  reason       String // BROKEN | EXPIRED | DAMAGED | LOST
   outletId     String?
   counterCode  String?
   warehouseId  String?
@@ -767,6 +829,13 @@ model Breakage {
   note         String?
   reportedById String
   createdAt    DateTime @default(now())
+
+  // Bill Reference System — Breakage plays the "Loss Record" (LOS) bill
+  // type (see lib/bill-reference.ts).
+  internalBillId   String?         @unique
+  displayReference String?         @unique
+  billTypeConfigId String?
+  billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
 
   @@index([outletId, counterCode])
   @@index([warehouseId])
@@ -779,8 +848,8 @@ model Cancellation {
   date         DateTime         @default(now())
   collectionId String?
   collection   DailyCollection? @relation(fields: [collectionId], references: [id])
-  reason       String           // Double Punch | Out of Stock | Wrong Punch
-  staffName    String?          // set directly for standalone requests (collection ones use collection.staffName)
+  reason       String // Double Punch | Out of Stock | Wrong Punch
+  staffName    String? // set directly for standalone requests (collection ones use collection.staffName)
   productId    String?
   product      Product?         @relation(fields: [productId], references: [id])
   productName  String
@@ -799,20 +868,20 @@ model Cancellation {
 }
 
 model CashRecon {
-  id                String   @id @default(cuid())
-  date              DateTime @default(now())
-  outletId          String?
-  openingBalance    Float    @default(0) // auto = previous day's closing
-  cashDeposited     Float    @default(0)
-  excessAmountPaid  Float    @default(0) // sum of excessItems; reduces cash balance the same way cashDeposited does
-  closingBalance    Float    @default(0) // computed & stored so next day can auto-open
-  verifiedAmount    Float?              // physical cash verified by an officer
-  verifiedBy        String?
-  notes             String?
-  cashierId         String
-  createdAt         DateTime @default(now())
+  id               String   @id @default(cuid())
+  date             DateTime @default(now())
+  outletId         String?
+  openingBalance   Float    @default(0) // auto = previous day's closing
+  cashDeposited    Float    @default(0)
+  excessAmountPaid Float    @default(0) // sum of excessItems; reduces cash balance the same way cashDeposited does
+  closingBalance   Float    @default(0) // computed & stored so next day can auto-open
+  verifiedAmount   Float? // physical cash verified by an officer
+  verifiedBy       String?
+  notes            String?
+  cashierId        String
+  createdAt        DateTime @default(now())
 
-  excessItems       CashReconExcess[]
+  excessItems CashReconExcess[]
 
   @@index([date])
   @@index([outletId])
@@ -822,17 +891,24 @@ model CashRecon {
 // a day can have several, each with its own reason and (if applicable)
 // staff/customer. CashRecon.excessAmountPaid stores their sum for fast reads.
 model CashReconExcess {
-  id           String    @id @default(cuid())
-  cashReconId  String
-  cashRecon    CashRecon @relation(fields: [cashReconId], references: [id], onDelete: Cascade)
-  amount       Float
-  reason       String              // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS
-  staffId      String?             // set when reason = STAFF_TIP
-  staffName    String?
-  personId     String?             // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
-  personName   String?
-  paidAmount   Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount
-  createdAt    DateTime  @default(now())
+  id          String    @id @default(cuid())
+  cashReconId String
+  cashRecon   CashRecon @relation(fields: [cashReconId], references: [id], onDelete: Cascade)
+  amount      Float
+  reason      String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS
+  staffId     String? // set when reason = STAFF_TIP
+  staffName   String?
+  personId    String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
+  personName  String?
+  paidAmount  Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount
+  createdAt   DateTime  @default(now())
+
+  // Bill Reference System — plays the "Excess Payment" (EXS) bill type
+  // alongside CollectionExcess (see lib/bill-reference.ts).
+  internalBillId   String?         @unique
+  displayReference String?         @unique
+  billTypeConfigId String?
+  billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
 
   @@index([cashReconId])
 }
@@ -846,34 +922,41 @@ model CollectionExcess {
   collectionId String
   collection   DailyCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   amount       Float
-  reason       String              // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | UNASSIGNED
-  staffId      String?             // set when reason = STAFF_TIP
+  reason       String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | UNASSIGNED
+  staffId      String? // set when reason = STAFF_TIP
   staffName    String?
-  personId     String?             // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
+  personId     String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
   personName   String?
   paidAmount   Float           @default(0) // settled via Excess Recon; balance = amount - paidAmount
   createdAt    DateTime        @default(now())
+
+  // Bill Reference System — plays the "Excess Payment" (EXS) bill type
+  // alongside CashReconExcess (see lib/bill-reference.ts).
+  internalBillId   String?         @unique
+  displayReference String?         @unique
+  billTypeConfigId String?
+  billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
 
   @@index([collectionId])
 }
 
 // Digital Payment Reconciliation — one row per digital channel per day+outlet.
 model BankRecon {
-  id             String   @id @default(cuid())
-  date           DateTime @default(now())
-  outletId       String?
-  channel        String?              // digital channel code (CRDB | STANBIC | MPESA | …); null = legacy total
-  reportedAmount Float    @default(0) // auto: collections + paid bills for this channel (system "collected")
-  openingBalance Float?               // account opening balance (cashier)
-  closingBalance Float?               // account closing balance (cashier) — required = closing − opening
-  verifiedAmount Float?               // verified collected amount by an officer (null = not yet verified)
-  verifiedOpening Float?              // opening balance verified by an officer
-  verifiedClosing Float?              // closing balance verified by an officer
-  reason         String?              // reason for variance
-  reportedBy     String?
-  verifiedBy     String?
-  cashierId      String
-  createdAt      DateTime @default(now())
+  id              String   @id @default(cuid())
+  date            DateTime @default(now())
+  outletId        String?
+  channel         String? // digital channel code (CRDB | STANBIC | MPESA | …); null = legacy total
+  reportedAmount  Float    @default(0) // auto: collections + paid bills for this channel (system "collected")
+  openingBalance  Float? // account opening balance (cashier)
+  closingBalance  Float? // account closing balance (cashier) — required = closing − opening
+  verifiedAmount  Float? // verified collected amount by an officer (null = not yet verified)
+  verifiedOpening Float? // opening balance verified by an officer
+  verifiedClosing Float? // closing balance verified by an officer
+  reason          String? // reason for variance
+  reportedBy      String?
+  verifiedBy      String?
+  cashierId       String
+  createdAt       DateTime @default(now())
 
   @@index([date])
   @@index([outletId])
@@ -914,6 +997,138 @@ model CancellationReason {
   createdAt DateTime @default(now())
 }
 
+// ─── Bill Reference System ───────────────────────────────────────────────────
+// A fully configurable, metadata-driven bill-numbering engine (see
+// lib/bill-reference.ts). Scope is deliberately limited to "bills": SignedBill,
+// PaidBill, CashReconExcess/CollectionExcess (Excess Payment), Breakage (Loss
+// Record), and ExcessRefund. PO/GRN/Transfer/Booking/PosOrder numbering is a
+// separate, untouched system.
+//   BillReferenceConfig.dateFormat:          YYMMDD | DDMMYY | YYYYMMDD | DD-MM-YYYY | MM-YYYY | CUSTOM
+//   BillReferenceConfig.separator:           "-" | "/" | "_" | "." | NONE
+//   BillReferenceConfig.personNumberingMode: AUTO | MANUAL | EMPLOYEE_NUMBER | CUSTOMER_NUMBER | MEMBERSHIP_NUMBER | SUPPLIER_CODE
+//   BillReferenceConfig.sequenceResetRule:   NEVER | DAILY | MONTHLY | YEARLY | PER_PERSON | PER_BILL_TYPE
+//   BillReferenceComponent.type:             DATE | BILL_TYPE_CODE | PERSON_CODE | SEQUENCE | COMPANY_CODE | BRANCH_CODE | DEPARTMENT_CODE | COUNTER_CODE | OUTLET_CODE | STATIC_TEXT
+//   BillTypeConfig.category:                 SIGNED_BILL | PAID_BILL | EXCESS_PAYMENT | EXCESS_REFUND | LOSS_RECORD
+
+/// Singleton settings row (id is always the literal "default" — enforced by
+/// application code, never by end users).
+model BillReferenceConfig {
+  id                  String   @id @default("default")
+  dateFormat          String   @default("YYMMDD")
+  customDateFormat    String? // date-fns token string, used when dateFormat = CUSTOM
+  separator           String   @default("-")
+  numberPadding       Int      @default(3) // 3 -> 001, 4 -> 0001, 5 -> 00001
+  personNumberingMode String   @default("AUTO")
+  sequenceResetRule   String   @default("NEVER")
+  updatedById         String?
+  updatedAt           DateTime @updatedAt
+  createdAt           DateTime @default(now())
+
+  components BillReferenceComponent[]
+}
+
+/// One row per component slot. `order` drives the admin drag-and-drop
+/// position; `label` is the admin-renameable display name.
+model BillReferenceComponent {
+  id          String              @id @default(cuid())
+  configId    String              @default("default")
+  config      BillReferenceConfig @relation(fields: [configId], references: [id])
+  type        String // DATE | BILL_TYPE_CODE | PERSON_CODE | SEQUENCE | COMPANY_CODE | BRANCH_CODE | DEPARTMENT_CODE | COUNTER_CODE | OUTLET_CODE | STATIC_TEXT
+  label       String
+  order       Int
+  isEnabled   Boolean             @default(true)
+  staticValue String? // only used when type = STATIC_TEXT
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@unique([configId, type])
+  @@index([configId, order])
+}
+
+/// The seeded bill types (15 defaults — see lib/bill-reference-defaults.ts).
+/// `prefix`/`name` are freely admin-editable. `legacyBillTypeCode` bridges to
+/// the OLD SignedBill.billType vocabulary (ADMIN | DIRECTOR | CUSTOMER |
+/// STAFF_LOSS | TIPS | DJ) so the one-time backfill can resolve historical rows.
+model BillTypeConfig {
+  id                 String   @id @default(cuid())
+  code               String   @unique // SBA|SBD|SBS|SBC|SBJ|SBT|PBA|PBD|PBS|PBC|PBJ|PBT|EXS|EXR|LOS
+  name               String
+  prefix             String
+  category           String // SIGNED_BILL | PAID_BILL | EXCESS_PAYMENT | EXCESS_REFUND | LOSS_RECORD
+  legacyBillTypeCode String? // ADMIN | DIRECTOR | CUSTOMER | STAFF_LOSS | TIPS | DJ | null
+  isActive           Boolean  @default(true)
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  signedBills        SignedBill[]
+  paidBills          PaidBill[]
+  cashReconExcesses  CashReconExcess[]
+  collectionExcesses CollectionExcess[]
+  breakages          Breakage[]
+  excessRefunds      ExcessRefund[]
+}
+
+/// Generic atomic counter keyed by a single opaque scopeKey string built by
+/// lib/bill-reference.ts (e.g. "BT:<billTypeId>:ALL", "BT:<billTypeId>:D:20260716",
+/// "INTERNAL:20260716", "PERSONCODE:CUSTOMER"). No FK — the internal-bill-id
+/// and person-code counters share this same table via their own scopeKey
+/// prefixes, so no fake "bill type" rows are needed for them.
+model BillSequenceCounter {
+  id        String   @id @default(cuid())
+  scopeKey  String   @unique
+  lastValue Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+/// Cross-table registry — every issued reference gets one row here, written
+/// in the SAME transaction as the source record. This gives TRUE global
+/// uniqueness across all 6 source tables (each also keeps its own @unique as
+/// defense-in-depth) and is the single collision point the generation
+/// engine's retry loop uses to "auto-advance to the next sequence" on conflict.
+model BillReferenceRegistry {
+  id               String   @id @default(cuid())
+  internalBillId   String   @unique
+  displayReference String   @unique
+  sourceModel      String // SignedBill | PaidBill | CashReconExcess | CollectionExcess | Breakage | ExcessRefund
+  sourceId         String
+  billTypeId       String
+  createdAt        DateTime @default(now())
+
+  @@index([sourceModel, sourceId])
+}
+
+/// Minimal Excess Refund (EXR) record — nothing plays this role today. Mirrors
+/// CashReconExcess/CollectionExcess's shape enough to hold a reference and
+/// participate in reporting, without their settle-batch machinery (a refund is
+/// a one-shot outward payment, not a receivable to collect against).
+model ExcessRefund {
+  id               String          @id @default(cuid())
+  date             DateTime        @default(now())
+  internalBillId   String          @unique
+  displayReference String          @unique
+  billTypeConfigId String?
+  billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
+  amount           Float
+  personId         String?
+  person           Person?         @relation(fields: [personId], references: [id])
+  personName       String
+  reason           String // OVERPAYMENT | DUPLICATE_PAYMENT | OTHER
+  outletId         String
+  outlet           Outlet          @relation(fields: [outletId], references: [id])
+  refundedById     String
+  refundedBy       User            @relation(fields: [refundedById], references: [id])
+  approvalStatus   String          @default("PENDING") // PENDING | APPROVED | REJECTED
+  approvedBy       String?
+  notes            String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([date])
+  @@index([outletId])
+  @@index([personId])
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String
@@ -943,12 +1158,12 @@ model PosTable {
   outletId  String
   outlet    Outlet   @relation(fields: [outletId], references: [id])
   number    Int
-  label     String?  // e.g. "VIP 1", "Outside 3"
+  label     String? // e.g. "VIP 1", "Outside 3"
   capacity  Int      @default(4)
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  orders    PosOrder[]
+  orders PosOrder[]
 
   @@unique([outletId, number])
   @@index([outletId])
@@ -956,15 +1171,15 @@ model PosTable {
 
 // One shift per outlet per day — KWANZA, PILI, TATU, NNE.
 model PosShift {
-  id        String    @id @default(cuid())
-  outletId  String
-  outlet    Outlet    @relation(fields: [outletId], references: [id])
-  name      String    // KWANZA | PILI | TATU | NNE
-  date      DateTime
-  openedAt  DateTime  @default(now())
-  closedAt  DateTime?
-  openedBy  String    // userId
-  closedBy  String?   // userId
+  id       String    @id @default(cuid())
+  outletId String
+  outlet   Outlet    @relation(fields: [outletId], references: [id])
+  name     String // KWANZA | PILI | TATU | NNE
+  date     DateTime
+  openedAt DateTime  @default(now())
+  closedAt DateTime?
+  openedBy String // userId
+  closedBy String? // userId
 
   orders         PosOrder[]
   waiterSessions PosWaiterSession[]
@@ -975,19 +1190,19 @@ model PosShift {
 
 // One counter/station per outlet (matches the 4-counter setup).
 model PosCounter {
-  id          String   @id @default(cuid())
-  outletId    String
-  outlet      Outlet   @relation(fields: [outletId], references: [id])
-  code        String   // MAIN | BAR | SHISHA | KITCHEN
-  label       String   // "Main Counter" | "Bar" | "Shisha" | "Kitchen"
-  printerName String?  // default printer assigned to this counter
+  id           String   @id @default(cuid())
+  outletId     String
+  outlet       Outlet   @relation(fields: [outletId], references: [id])
+  code         String // MAIN | BAR | SHISHA | KITCHEN
+  label        String // "Main Counter" | "Bar" | "Shisha" | "Kitchen"
+  printerName  String? // default printer assigned to this counter
   // PREP   → kitchen/VIP model: items queue at the counter, are prepared, and
   //          the waiter is notified to collect (order goes READY).
   // DIRECT → counter-service model (Main Bar): seller serves immediately, so
   //          sent items skip the queue and are marked PREPARED at once.
-  serviceModel String  @default("PREP") // PREP | DIRECT
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  serviceModel String   @default("PREP") // PREP | DIRECT
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
 
   @@unique([outletId, code])
   @@index([outletId])
@@ -995,38 +1210,38 @@ model PosCounter {
 
 // One bill per table per visit. Closing it feeds into DailyCollection.
 model PosOrder {
-  id            String    @id @default(cuid())
-  orderNo       String    @unique // ORD-20260619-001
-  outletId      String
-  outlet        Outlet    @relation(fields: [outletId], references: [id])
-  tableId       String?
-  table         PosTable? @relation(fields: [tableId], references: [id])
-  eventId       String?   // set when this order was rung up against an event's authorized-products menu
-  event         Event?    @relation(fields: [eventId], references: [id])
-  shiftId       String
-  shift         PosShift  @relation(fields: [shiftId], references: [id])
-  waiterId      String
-  waiter        User      @relation(fields: [waiterId], references: [id])
-  status        String    @default("OPEN") // OPEN | SENT | READY | CLOSED | CANCELLED | VOID
+  id              String    @id @default(cuid())
+  orderNo         String    @unique // ORD-20260619-001
+  outletId        String
+  outlet          Outlet    @relation(fields: [outletId], references: [id])
+  tableId         String?
+  table           PosTable? @relation(fields: [tableId], references: [id])
+  eventId         String? // set when this order was rung up against an event's authorized-products menu
+  event           Event?    @relation(fields: [eventId], references: [id])
+  shiftId         String
+  shift           PosShift  @relation(fields: [shiftId], references: [id])
+  waiterId        String
+  waiter          User      @relation(fields: [waiterId], references: [id])
+  status          String    @default("OPEN") // OPEN | SENT | READY | CLOSED | CANCELLED | VOID
   // CUSTOMER → prints "CUSTOMER'S BILL"; the rest are in-house → "IN-HOUSE BILL".
-  billType      String    @default("CUSTOMER") // CUSTOMER | ADMIN | DIRECTOR | DJ | TIPS | STAFF
-  discount      Float     @default(0)
-  discountReason String?  // why the discount was applied — captured for reporting
-  totalAmount   Float     @default(0)
-  paidAmount    Float     @default(0)
-  paymentMethod String?   // CASH | CRDB | STANBIC | MPESA | SIGNED
-  signedBillId  String?   // set when paymentMethod = SIGNED → links to cashier SignedBill
-  closedAt      DateTime?
-  closedBy      String?   // userId
-  voidReason    String?   // why the order was cancelled/voided
-  notes         String?
+  billType        String    @default("CUSTOMER") // CUSTOMER | ADMIN | DIRECTOR | DJ | TIPS | STAFF
+  discount        Float     @default(0)
+  discountReason  String? // why the discount was applied — captured for reporting
+  totalAmount     Float     @default(0)
+  paidAmount      Float     @default(0)
+  paymentMethod   String? // CASH | CRDB | STANBIC | MPESA | SIGNED
+  signedBillId    String? // set when paymentMethod = SIGNED → links to cashier SignedBill
+  closedAt        DateTime?
+  closedBy        String? // userId
+  voidReason      String? // why the order was cancelled/voided
+  notes           String?
   // Offline-queue idempotency key (see lib/offline-queue.ts) — lets a retried
   // "create order" sync request return the already-created row instead of
   // making a duplicate if the first attempt actually succeeded but its
   // response never reached the client. Null for orders created while online.
-  clientRequestId String? @unique
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  clientRequestId String?   @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   items     PosOrderItem[]
   printLogs PosPrintLog[]
@@ -1048,8 +1263,8 @@ model PosPayment {
   orderId        String
   order          PosOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   amount         Float
-  method         String   // CASH | CRDB | STANBIC | MPESA
-  receivedById   String   // userId of staff who received & verified the payment
+  method         String // CASH | CRDB | STANBIC | MPESA
+  receivedById   String // userId of staff who received & verified the payment
   receivedByName String
   note           String?
   createdAt      DateTime @default(now())
@@ -1059,26 +1274,26 @@ model PosPayment {
 
 // Individual items on an order. counterCode tells the system which printer to use.
 model PosOrderItem {
-  id          String   @id @default(cuid())
-  orderId     String
-  order       PosOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId   String
-  product     Product  @relation(fields: [productId], references: [id])
-  productName String   // snapshot at time of order (price may change later)
-  unitPrice   Float
-  quantity    Float    @default(1)
-  amount      Float    // unitPrice * quantity
-  extras      String?  // JSON array e.g. ["Barafu","Straw"]
-  counterCode String?  // MAIN | BAR | SHISHA | KITCHEN — which counter prints this
-  status      String   @default("PENDING") // PENDING | SENT | PREPARED | CANCELLED
-  sentAt      DateTime?
-  preparedAt  DateTime? // when the counter marked it ready/served
-  preparedBy  String?   // userId of counter staff who marked it ready
-  cancelledBy String?  // userId
-  cancelReason String?  // why the item was cancelled — captured for reporting
+  id              String    @id @default(cuid())
+  orderId         String
+  order           PosOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product   @relation(fields: [productId], references: [id])
+  productName     String // snapshot at time of order (price may change later)
+  unitPrice       Float
+  quantity        Float     @default(1)
+  amount          Float // unitPrice * quantity
+  extras          String? // JSON array e.g. ["Barafu","Straw"]
+  counterCode     String? // MAIN | BAR | SHISHA | KITCHEN — which counter prints this
+  status          String    @default("PENDING") // PENDING | SENT | PREPARED | CANCELLED
+  sentAt          DateTime?
+  preparedAt      DateTime? // when the counter marked it ready/served
+  preparedBy      String? // userId of counter staff who marked it ready
+  cancelledBy     String? // userId
+  cancelReason    String? // why the item was cancelled — captured for reporting
   // Offline-queue idempotency key — see PosOrder.clientRequestId.
-  clientRequestId String? @unique
-  createdAt   DateTime @default(now())
+  clientRequestId String?   @unique
+  createdAt       DateTime  @default(now())
 
   @@index([orderId])
   @@index([productId])
@@ -1091,10 +1306,10 @@ model PosStockRequest {
   id              String    @id @default(cuid())
   outletId        String
   outlet          Outlet    @relation(fields: [outletId], references: [id])
-  fromCounter     String    // VIP | MAIN — counter that's out of stock and asking
-  toCounter       String    // MAIN | VIP — counter being asked to supply
+  fromCounter     String // VIP | MAIN — counter that's out of stock and asking
+  toCounter       String // MAIN | VIP — counter being asked to supply
   productId       String
-  productName     String    // snapshot at request time (price/name may change later)
+  productName     String // snapshot at request time (price/name may change later)
   quantity        Float     @default(1)
   note            String?
   status          String    @default("PENDING") // PENDING | FULFILLED
@@ -1113,10 +1328,10 @@ model PosPrintLog {
   id          String   @id @default(cuid())
   orderId     String
   order       PosOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  counterCode String   // BAR | SHISHA | KITCHEN | CASHIER
+  counterCode String // BAR | SHISHA | KITCHEN | CASHIER
   printedAt   DateTime @default(now())
-  printedBy   String   // userId
-  items       String   // JSON snapshot of items on this print job
+  printedBy   String // userId
+  items       String // JSON snapshot of items on this print job
 
   @@index([orderId])
 }
@@ -1151,7 +1366,7 @@ model PosBlockedItem {
   outlet    Outlet   @relation(fields: [outletId], references: [id])
   productId String
   product   Product  @relation(fields: [productId], references: [id])
-  blockedBy String   // userId
+  blockedBy String // userId
   reason    String?
   createdAt DateTime @default(now())
 
@@ -1166,15 +1381,15 @@ model PosBlockedItem {
 model ScheduleAssignment {
   id          String   @id @default(cuid())
   date        DateTime // the calendar day the shift starts
-  shiftType   String   // MORNING | EVENING
+  shiftType   String // MORNING | EVENING
   outletId    String
   outlet      Outlet   @relation(fields: [outletId], references: [id])
   staffId     String
   staff       User     @relation(fields: [staffId], references: [id])
-  staffName   String   // denormalized for fast display & export
+  staffName   String // denormalized for fast display & export
   role        String   @default("WAITER") // WAITER | SUPERVISOR | BARTENDER | CASHIER | HOSTESS
-  source      String   @default("AUTO")   // AUTO | MANUAL (manager override)
-  note        String?  // e.g. auto-scheduler reasoning, or override note
+  source      String   @default("AUTO") // AUTO | MANUAL (manager override)
+  note        String? // e.g. auto-scheduler reasoning, or override note
   createdById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1194,7 +1409,7 @@ model StaffUnavailability {
   staff       User     @relation(fields: [staffId], references: [id])
   staffName   String
   date        DateTime
-  shiftType   String?  // null = whole day | MORNING | EVENING
+  shiftType   String? // null = whole day | MORNING | EVENING
   reason      String   @default("OTHER") // LEAVE | ABSENT | OTHER
   note        String?
   createdById String?
@@ -1210,10 +1425,10 @@ model OutletScheduleConfig {
   id                String   @id @default(cuid())
   outletId          String   @unique
   outlet            Outlet   @relation(fields: [outletId], references: [id])
-  morningWeight     Float    @default(1)   // expected traffic weight — Morning
+  morningWeight     Float    @default(1) // expected traffic weight — Morning
   eveningWeight     Float    @default(1.6) // Evening is usually busier (nightlife)
   weekendMultiplier Float    @default(1.4) // Fri/Sat uplift on both shifts
-  daysOffPerWeek    Int      @default(1)   // rest days per staff per week
+  daysOffPerWeek    Int      @default(1) // rest days per staff per week
   updatedAt         DateTime @updatedAt
 }
 
@@ -1224,15 +1439,15 @@ model Event {
   id             String   @id @default(cuid())
   name           String
   description    String?
-  eventType      String?  // e.g. Wedding, Corporate, Concert, Private Party, Product Launch, Other
+  eventType      String? // e.g. Wedding, Corporate, Concert, Private Party, Product Launch, Other
   clientName     String?
   location       String?
   date           DateTime // event day
-  startTime      String?  // "18:00"
-  endTime        String?  // "23:00"
+  startTime      String? // "18:00"
+  endTime        String? // "23:00"
   expectedGuests Int      @default(0)
   status         String   @default("PLANNED") // PLANNED | CONFIRMED | COMPLETED | CANCELLED
-  salesTotal     Float    @default(0)         // event revenue
+  salesTotal     Float    @default(0) // event revenue
   notes          String?
   outletId       String?
   outlet         Outlet?  @relation(fields: [outletId], references: [id])
@@ -1295,20 +1510,20 @@ model EventExpense {
 
 /// A sponsor backing an event, with the value/items they're contributing.
 model EventSponsor {
-  id                String   @id @default(cuid())
-  eventId           String
-  event             Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  sponsorName       String
-  contactPerson     String?
-  phone             String?
-  email             String?
-  sponsorshipType   String   @default("CASH") // CASH | IN_KIND | MEDIA | OTHER
-  sponsorshipValue  Float    @default(0)
-  itemsProvided     String?
-  agreementStatus   String   @default("PENDING") // PENDING | SIGNED | FULFILLED
-  notes             String?
-  createdById       String?
-  createdAt         DateTime @default(now())
+  id               String   @id @default(cuid())
+  eventId          String
+  event            Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sponsorName      String
+  contactPerson    String?
+  phone            String?
+  email            String?
+  sponsorshipType  String   @default("CASH") // CASH | IN_KIND | MEDIA | OTHER
+  sponsorshipValue Float    @default(0)
+  itemsProvided    String?
+  agreementStatus  String   @default("PENDING") // PENDING | SIGNED | FULFILLED
+  notes            String?
+  createdById      String?
+  createdAt        DateTime @default(now())
 
   @@index([eventId])
 }
@@ -1322,8 +1537,8 @@ model EventProduct {
   event               Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   productId           String
   product             Product  @relation(fields: [productId], references: [id])
-  productName         String   // snapshot at time of authorization
-  eventPrice          Float?   // override; null = use Product.sellingPrice
+  productName         String // snapshot at time of authorization
+  eventPrice          Float? // override; null = use Product.sellingPrice
   expectedQuantity    Float    @default(0)
   procurementQuantity Float    @default(0)
   stockAllocated      Float    @default(0)
@@ -1341,11 +1556,11 @@ model EventTarget {
   id          String   @id @default(cuid())
   eventId     String
   event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  type        String   // SALES | PROCUREMENT
-  name        String   // e.g. "Revenue Target", "Required Beer Stock"
+  type        String // SALES | PROCUREMENT
+  name        String // e.g. "Revenue Target", "Required Beer Stock"
   targetValue Float    @default(0)
   actualValue Float    @default(0)
-  unit        String?  // e.g. "TZS", "bottles", "crates", "guests"
+  unit        String? // e.g. "TZS", "bottles", "crates", "guests"
   notes       String?
   createdAt   DateTime @default(now())
 
@@ -1361,7 +1576,7 @@ model EventTicketType {
   event             Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   name              String
   price             Float    @default(0)
-  quantityAvailable Int?     // null = unlimited
+  quantityAvailable Int? // null = unlimited
   createdAt         DateTime @default(now())
 
   bookings TicketBooking[]
@@ -1373,22 +1588,22 @@ model EventTicketType {
 /// or by a manager (walk-in/phone booking). Payment is tracked manually —
 /// there is no payment gateway integration.
 model TicketBooking {
-  id            String    @id @default(cuid())
+  id            String          @id @default(cuid())
   eventId       String
-  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event         Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
   ticketTypeId  String
   ticketType    EventTicketType @relation(fields: [ticketTypeId], references: [id])
-  bookingNumber String    @unique
+  bookingNumber String          @unique
   fullName      String
   phone         String
   email         String?
-  quantity      Int       @default(1)
-  totalAmount   Float     @default(0)
-  paymentStatus String    @default("UNPAID") // UNPAID | PARTIAL | PAID
-  bookingStatus String    @default("PENDING") // PENDING | CONFIRMED | CANCELLED
-  checkedIn     Boolean   @default(false)
+  quantity      Int             @default(1)
+  totalAmount   Float           @default(0)
+  paymentStatus String          @default("UNPAID") // UNPAID | PARTIAL | PAID
+  bookingStatus String          @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  checkedIn     Boolean         @default(false)
   checkedInAt   DateTime?
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime        @default(now())
 
   @@index([eventId])
   @@index([ticketTypeId])
@@ -1403,7 +1618,7 @@ model EventTable {
   id        String   @id @default(cuid())
   eventId   String
   event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  name      String   // "Table 1", "VIP Table A"
+  name      String // "Table 1", "VIP Table A"
   tableType String?
   capacity  Int      @default(4)
   price     Float    @default(0)
@@ -1418,20 +1633,20 @@ model EventTable {
 /// A customer's table reservation. Creating one flips the table's status to
 /// RESERVED (see lib/bookings.ts); cancelling frees it back to AVAILABLE.
 model TableBooking {
-  id              String   @id @default(cuid())
+  id              String     @id @default(cuid())
   eventId         String
-  event           Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event           Event      @relation(fields: [eventId], references: [id], onDelete: Cascade)
   tableId         String
   table           EventTable @relation(fields: [tableId], references: [id])
-  bookingNumber   String   @unique
+  bookingNumber   String     @unique
   name            String
   phone           String
-  guests          Int      @default(1)
-  totalAmount     Float    @default(0)
-  depositPaid     Float    @default(0) // balance = totalAmount - depositPaid, computed not stored
+  guests          Int        @default(1)
+  totalAmount     Float      @default(0)
+  depositPaid     Float      @default(0) // balance = totalAmount - depositPaid, computed not stored
   specialRequests String?
-  bookingStatus   String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED
-  createdAt       DateTime @default(now())
+  bookingStatus   String     @default("PENDING") // PENDING | CONFIRMED | CANCELLED
+  createdAt       DateTime   @default(now())
 
   @@index([eventId])
   @@index([tableId])

@@ -1,5 +1,7 @@
+import crypto from 'crypto'
 import { roundMoney } from './utils'
 import { syncCollectionExcessTotal } from './collection-excess'
+import { generateBillReference, resolveBillTypeCodeFromLegacy } from './bill-reference'
 
 // Loose type — works with both the prisma singleton and a transaction client,
 // and avoids depending on generated Prisma types (regenerated on deploy).
@@ -30,7 +32,7 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
   )
 
   const voucher = `SL-${collectionId}`
-  const sl = await db.signedBill.findUnique({ where: { voucherNumber: voucher } })
+  const sl = await db.signedBill.findUnique({ where: { autoKey: voucher } })
 
   // Keep the collection's excess line items in sync with the recomputed total —
   // never silently drops a newly-emerged excess. See lib/collection-excess.ts.
@@ -47,12 +49,20 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
         data: { amount: shortfall, personName: c.staffName, personId: person?.id ?? null, serviceStaff: c.staffName, outletId: c.outletId, date: c.date, status },
       })
     } else {
+      const recordId = crypto.randomUUID()
+      const billTypeCode = await resolveBillTypeCodeFromLegacy(db, 'SIGNED_BILL', 'STAFF_LOSS')
+      const ref = await generateBillReference(db, {
+        recordId, sourceModel: 'SignedBill', billTypeCode, date: c.date, personId: person?.id ?? null, outletId: c.outletId,
+      })
       await db.signedBill.create({
         data: {
-          voucherNumber: voucher, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: c.staffName,
+          id: recordId,
+          autoKey: voucher, voucherNumber: ref.displayReference, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: c.staffName,
           amount: shortfall, serviceStaff: c.staffName,
           description: `Auto staff loss (recomputed): collection ${collectionId}`,
           status: 'UNPAID', date: c.date, outletId: c.outletId, cashierId: c.cashierId,
+          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+          autoSourceCollectionId: collectionId,
         },
       })
     }

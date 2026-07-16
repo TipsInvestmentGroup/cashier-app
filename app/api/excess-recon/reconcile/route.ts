@@ -30,7 +30,9 @@ export async function POST(req: NextRequest) {
   let failed = 0
   for (const c of collections) {
     try {
-      await recomputeStaffLoss(prisma, c.id)
+      // Wrapped in a transaction so bill-reference generation inside
+      // recomputeStaffLoss stays atomic with the SignedBill it creates.
+      await prisma.$transaction((tx) => recomputeStaffLoss(tx, c.id))
       scanned++
     } catch {
       failed++

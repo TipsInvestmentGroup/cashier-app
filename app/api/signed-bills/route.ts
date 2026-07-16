@@ -1,7 +1,9 @@
+import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole, readOutletScope, writeOutletId } from '@/lib/auth'
-import { generateVoucherNumber, roundMoney } from '@/lib/utils'
+import { roundMoney } from '@/lib/utils'
+import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 
 const CAN_WRITE = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
@@ -77,8 +79,6 @@ export async function POST(req: NextRequest) {
   const itemsTotal = roundMoney(itemsInput.reduce((s, it) => s + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0), 0))
   const finalAmount = roundMoney(itemsInput.length ? itemsTotal : Number(amount))
 
-  const voucherNumber = generateVoucherNumber()
-
   let limitExceeded = false
   let exceededAmount = 0
 
@@ -97,34 +97,50 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const bill = await prisma.signedBill.create({
-    data: {
-      billType,
-      personId: personId || null,
-      personName,
-      amount: finalAmount,
-      serviceStaff,
-      description,
-      dueDate: dueDate ? new Date(dueDate) : null,
-      voucherNumber,
-      outletId: usedOutletId,
-      cashierId: user.userId,
-      date: date ? new Date(date) : new Date(),
-    },
-    include: { outlet: true, person: true },
-  })
+  const billDate = date ? new Date(date) : new Date()
 
-  // Create the line items
-  for (const it of itemsInput) {
-    const qty = Number(it.quantity) || 0
-    const price = roundMoney(it.unitPrice)
-    await prisma.billItem.create({
-      data: {
-        signedBillId: bill.id, productId: it.productId || null, productName: it.productName,
-        unitPrice: price, quantity: qty, amount: roundMoney(price * qty),
-      },
+  const bill = await prisma.$transaction(async (tx) => {
+    const recordId = crypto.randomUUID()
+    const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', billType)
+    const ref = await generateBillReference(tx, {
+      recordId, sourceModel: 'SignedBill', billTypeCode, date: billDate, personId: personId || null, outletId: usedOutletId,
     })
-  }
+
+    const created = await tx.signedBill.create({
+      data: {
+        id: recordId,
+        billType,
+        personId: personId || null,
+        personName,
+        amount: finalAmount,
+        serviceStaff,
+        description,
+        dueDate: dueDate ? new Date(dueDate) : null,
+        voucherNumber: ref.displayReference,
+        internalBillId: ref.internalBillId,
+        displayReference: ref.displayReference,
+        billTypeConfigId: ref.billTypeConfigId,
+        outletId: usedOutletId,
+        cashierId: user.userId,
+        date: billDate,
+      },
+      include: { outlet: true, person: true },
+    })
+
+    // Create the line items
+    for (const it of itemsInput) {
+      const qty = Number(it.quantity) || 0
+      const price = roundMoney(it.unitPrice)
+      await tx.billItem.create({
+        data: {
+          signedBillId: created.id, productId: it.productId || null, productName: it.productName,
+          unitPrice: price, quantity: qty, amount: roundMoney(price * qty),
+        },
+      })
+    }
+
+    return created
+  })
 
   return NextResponse.json({ ...bill, limitExceeded, exceededAmount }, { status: 201 })
 }

@@ -16,7 +16,8 @@ import { TrendingDown, Clock } from 'lucide-react'
 const AGING_FILL: Record<string, string> = { '0-30': '#16a34a', '31-60': '#d97706', '61-90': '#ea580c', '90+': '#dc2626' }
 
 interface Receivable {
-  id: string; date: string; voucherNumber: string; billType: string; personName: string
+  id: string; date: string; voucherNumber?: string | null; displayReference?: string | null; legacyReference?: string | null
+  billType: string; personName: string
   amount: number; balance: number; totalPaid: number; daysOutstanding: number
   isOverdue: boolean; aging: string; dueDate?: string; outlet: { name: string }; description?: string; seq?: number
 }
@@ -70,7 +71,7 @@ export default function ReceivablesPage() {
     if (filterAging && r.aging !== filterAging) return false
     if (filterOverdue && !r.isOverdue) return false
     if (filterOutlet && r.outlet.name !== filterOutlet) return false
-    if (q && !(`${r.personName} ${r.voucherNumber}`.toLowerCase().includes(q))) return false
+    if (q && !(`${r.personName} ${r.voucherNumber || ''} ${r.displayReference || ''} ${r.legacyReference || ''}`.toLowerCase().includes(q))) return false
     return true
   })
 
@@ -83,6 +84,7 @@ export default function ReceivablesPage() {
   const exportRows = filtered.map((r) => ({
     Date: formatDate(r.date),
     '#': r.seq ?? '',
+    Reference: r.displayReference || r.voucherNumber || '',
     Type: BILL_TYPE_LABELS[r.billType] || r.billType,
     Person: r.personName,
     Original: r.amount,
@@ -215,7 +217,10 @@ export default function ReceivablesPage() {
                   {filtered.map((r) => (
                     <tr key={r.id} onClick={() => setStoryBillId(r.id)} title="Click for the full payment story"
                       className={`cursor-pointer hover:bg-indigo-50/60 ${r.isOverdue ? 'bg-red-50/40' : ''}`}>
-                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">{formatDate(r.date)} · <span className="font-semibold">#{r.seq ?? '—'}</span></td>
+                      <td className="px-4 py-3 text-xs text-gray-600 whitespace-nowrap">
+                        {formatDate(r.date)} · <span className="font-semibold">#{r.seq ?? '—'}</span>
+                        {(r.displayReference || r.voucherNumber) && <div className="font-mono text-[10px] text-gray-400">{r.displayReference || r.voucherNumber}</div>}
+                      </td>
                       <td className="px-4 py-3">
                         <Badge billType={r.billType}>{BILL_TYPE_LABELS[r.billType]}</Badge>
                       </td>

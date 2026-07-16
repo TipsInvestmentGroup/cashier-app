@@ -66,7 +66,11 @@ export async function GET(req: NextRequest) {
 
   // --- Staff loss: one row per auto staff-loss SignedBill (SL-<collectionId>) ---
   const lossRows = staffLossBills.map((bill) => {
-    const collectionId = bill.voucherNumber.startsWith('SL-') ? bill.voucherNumber.slice(3) : null
+    // autoSourceCollectionId is the explicit column (see lib/staff-loss.ts);
+    // falls back to parsing the legacy voucherNumber for pre-migration rows
+    // that haven't been backfilled yet.
+    const collectionId = bill.autoSourceCollectionId
+      ?? (bill.voucherNumber?.startsWith('SL-') ? bill.voucherNumber.slice(3) : null)
     const c = collectionId ? collectionById.get(collectionId) : undefined
     const b = c ? breakdown(c) : { systemSales: 0, collection: 0, signed: 0, cancellations: 0, discount: 0 }
     return {

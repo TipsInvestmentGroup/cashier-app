@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
@@ -6,6 +7,7 @@ import { roundMoney } from '@/lib/utils'
 import { EXCESS_REASON_VALUES, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
 import { findBestPersonMatch } from '@/lib/nameMatch'
+import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 // Resolve a free-text signed-bill name to a Person: use an explicit personId from
@@ -137,11 +139,18 @@ export async function POST(req: NextRequest) {
       const type = String(sb.billType || '').toUpperCase()
       if (amt <= 0 || !type || !sb.name) continue
       const person = await resolvePerson(tx, sb.name, type, sb.personId, sb.confirmedNew)
+      const recordId = crypto.randomUUID()
+      const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', type)
+      const ref = await generateBillReference(tx, {
+        recordId, sourceModel: 'SignedBill', billTypeCode, date: collDate, personId: person?.id ?? null, outletId: usedOutletId,
+      })
       await tx.signedBill.create({
         data: {
-          voucherNumber: `VCH-${collection.id}-${i}`, billType: type, personId: person?.id ?? null, personName: sb.name,
+          id: recordId,
+          autoKey: `VCH-${collection.id}-${i}`, voucherNumber: ref.displayReference, billType: type, personId: person?.id ?? null, personName: sb.name,
           amount: amt, serviceStaff: staffName || null, description: `Recorded during daily collection ${collection.id}`,
           status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
+          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
         },
       })
       signedTotal += amt
@@ -192,19 +201,27 @@ export async function POST(req: NextRequest) {
     let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
     if (staffName && lossAmount > 0) {
       const person = await tx.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
-      const voucherNumber = `SL-${collection.id}`
+      const autoKey = `SL-${collection.id}`
+      const recordId = crypto.randomUUID()
+      const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', 'STAFF_LOSS')
+      const ref = await generateBillReference(tx, {
+        recordId, sourceModel: 'SignedBill', billTypeCode, date: collDate, personId: person?.id ?? null, outletId: usedOutletId,
+      })
       const bill = await tx.signedBill.create({
         data: {
-          voucherNumber, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: staffName,
+          id: recordId,
+          autoKey, voucherNumber: ref.displayReference, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: staffName,
           amount: lossAmount, serviceStaff: staffName,
           description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid·staffloss ${paidStaffLoss} − discount ${discount} (collection ${collection.id})`,
           status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
+          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+          autoSourceCollectionId: collection.id,
         },
       })
       await tx.auditLog.create({
         data: { userId: user.userId, action: 'CREATE', entity: 'SignedBill', entityId: bill.id, details: `Auto staff loss ${lossAmount} for ${staffName}` },
       })
-      staffLoss = { amount: lossAmount, voucher: voucherNumber, staffName }
+      staffLoss = { amount: lossAmount, voucher: ref.displayReference, staffName }
     }
 
     // 3b) Excess — the staff collected more than the formula required (negative
@@ -233,11 +250,17 @@ export async function POST(req: NextRequest) {
         tx.person.findMany({ where: { id: { in: items.filter((i) => i.personId).map((i) => i.personId as string) } }, select: { id: true, name: true } }),
       ])
       for (const it of items) {
+        const recordId = crypto.randomUUID()
+        const ref = await generateBillReference(tx, {
+          recordId, sourceModel: 'CollectionExcess', billTypeCode: 'EXS', date: collDate, personId: it.personId, outletId: usedOutletId,
+        })
         await tx.collectionExcess.create({
           data: {
+            id: recordId,
             collectionId: collection.id, amount: it.amount, reason: it.reason,
             staffId: it.staffId, staffName: it.staffId ? staffRows.find((s: { id: string }) => s.id === it.staffId)?.name || null : null,
             personId: it.personId, personName: it.personId ? personRows.find((p: { id: string }) => p.id === it.personId)?.name || null : null,
+            internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
           },
         })
       }

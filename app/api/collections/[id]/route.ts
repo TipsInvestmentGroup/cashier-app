@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
@@ -5,6 +6,7 @@ import { roundMoney } from '@/lib/utils'
 import { recomputeStaffLoss } from '@/lib/staff-loss'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
 import { EXCESS_REASON_VALUES, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { generateBillReference } from '@/lib/bill-reference'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -143,14 +145,29 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (it.id && priorItems.some((p: { id: string }) => p.id === it.id)) {
         await db.collectionExcess.update({ where: { id: it.id }, data: fields })
       } else {
-        await db.collectionExcess.create({ data: { collectionId: id, ...fields } })
+        // Small dedicated transaction — the bill-reference generation must be
+        // atomic with this row's creation (see lib/bill-reference.ts).
+        await prisma.$transaction(async (tx) => {
+          const recordId = crypto.randomUUID()
+          const ref = await generateBillReference(tx, {
+            recordId, sourceModel: 'CollectionExcess', billTypeCode: 'EXS', date: collDate, personId: it.personId, outletId: usedOutletId,
+          })
+          await tx.collectionExcess.create({
+            data: {
+              id: recordId, collectionId: id, ...fields,
+              internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+            },
+          })
+        })
       }
     }
   }
 
   // Reconcile linked auto staff-loss — now also nets off approved cancellations,
   // and true up excess line items to the recomputed total (see lib/collection-excess.ts).
-  const shortfall = await recomputeStaffLoss(prisma, id)
+  // Wrapped in a transaction so the bill-reference generation inside
+  // recomputeStaffLoss stays atomic with the SignedBill it creates.
+  const shortfall = await prisma.$transaction((tx) => recomputeStaffLoss(tx, id))
   const staffLoss = staffName && shortfall > 0 ? { amount: shortfall, staffName } : null
 
   await prisma.auditLog.create({
@@ -181,7 +198,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   }
 
   // Remove linked auto staff-loss (and its payments) first
-  const sl = await prisma.signedBill.findUnique({ where: { voucherNumber: `SL-${id}` } })
+  const sl = await prisma.signedBill.findUnique({ where: { autoKey: `SL-${id}` } })
   if (sl) {
     await prisma.paidBill.deleteMany({ where: { signedBillId: sl.id } })
     await prisma.signedBill.delete({ where: { id: sl.id } })

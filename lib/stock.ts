@@ -12,9 +12,11 @@
 // field in the tuple, so it can't be used to look up rows where some of
 // those fields are null by design; every lookup here goes through
 // findFirst + update-by-id instead (see getStockLevel/upsertStockLevel).
+import crypto from 'crypto'
 import { prisma } from './prisma'
 import type { Prisma, PrismaClient } from '@prisma/client'
 import { roundMoney } from './utils'
+import { generateBillReference } from './bill-reference'
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>
 
@@ -661,11 +663,20 @@ export async function reportBreakage(opts: {
     }
 
     const valueLost = roundMoney(opts.quantity * product.buyingPrice)
+
+    // Bill Reference System — Breakage plays the "Loss Record" (LOS) bill type.
+    const recordId = crypto.randomUUID()
+    const ref = await generateBillReference(tx, {
+      recordId, sourceModel: 'Breakage', billTypeCode: 'LOS', date: new Date(), outletId: opts.outletId ?? null,
+    })
+
     const breakage = await tx.breakage.create({
       data: {
+        id: recordId,
         productId: opts.productId, productName: product.name, quantity: opts.quantity, reason: opts.reason,
         outletId: opts.outletId ?? null, counterCode: opts.counterCode ?? null, warehouseId: opts.warehouseId ?? null,
         unitCost: product.buyingPrice, valueLost, photoUrl: opts.photoUrl || null, note: opts.note || null, reportedById: opts.userId,
+        internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
       },
     })
 

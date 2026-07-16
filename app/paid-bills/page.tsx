@@ -21,7 +21,8 @@ import { Pencil, Trash2, ShieldCheck } from 'lucide-react'
 interface PaidBill {
   id: string; date: string; payerName: string; payerCategory?: string; amountPaid: number; paymentMethod: string
   outlet: { id: string; name: string }; cashier: { name: string }; notes?: string; billRef?: string
-  signedBill?: { id: string; voucherNumber: string; amount: number; personName: string; date?: string; billType?: string }
+  displayReference?: string | null; legacyReference?: string | null
+  signedBill?: { id: string; voucherNumber?: string | null; displayReference?: string | null; legacyReference?: string | null; amount: number; personName: string; date?: string; billType?: string }
 }
 interface Story {
   bill: { id: string; date: string; billType: string; personName: string; serviceStaff?: string; amount: number; status: string; description?: string; outlet?: { name: string }; cashier?: { name: string } }
@@ -224,7 +225,7 @@ export default function PaidBillsPage() {
   const q = search.trim().toLowerCase()
   const filtered = paidBills.filter((p) => {
     if (!inRange(p.date, range, customFrom, customTo)) return false
-    if (q && !(`${p.payerName} ${p.billRef || ''} ${p.signedBill?.voucherNumber || ''}`.toLowerCase().includes(q))) return false
+    if (q && !(`${p.payerName} ${p.billRef || ''} ${p.displayReference || ''} ${p.legacyReference || ''} ${p.signedBill?.voucherNumber || ''} ${p.signedBill?.displayReference || ''} ${p.signedBill?.legacyReference || ''}`.toLowerCase().includes(q))) return false
     return true
   })
   const totalReceived = filtered.reduce((s, p) => s + p.amountPaid, 0)
@@ -446,7 +447,10 @@ export default function PaidBillsPage() {
                       <tr key={p.id} onClick={() => openStory(p)} title="Click for the full payment story"
                         className="hover:bg-indigo-50/60 cursor-pointer">
                         <td className="px-4 py-3 text-gray-600">{formatDate(p.date)}</td>
-                        <td className="px-4 py-3 font-medium text-gray-800">{p.payerName}</td>
+                        <td className="px-4 py-3 font-medium text-gray-800">
+                          {p.payerName}
+                          {p.displayReference && <div className="font-mono text-[10px] font-normal text-gray-400">{p.displayReference}</div>}
+                        </td>
                         <td className="px-4 py-3 text-gray-600">{p.payerCategory || '-'}</td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
                           {p.signedBill

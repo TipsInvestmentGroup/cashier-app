@@ -1,9 +1,11 @@
+import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
 import { EXCESS_REASON_VALUES } from '@/lib/excess-reasons'
+import { generateBillReference } from '@/lib/bill-reference'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
@@ -169,7 +171,16 @@ export async function POST(req: NextRequest) {
       if (it.id && priorItems.some((p) => p.id === it.id)) {
         await tx.cashReconExcess.update({ where: { id: it.id }, data: fields })
       } else {
-        await tx.cashReconExcess.create({ data: { cashReconId: saved.id, ...fields } })
+        const recordId = crypto.randomUUID()
+        const ref = await generateBillReference(tx, {
+          recordId, sourceModel: 'CashReconExcess', billTypeCode: 'EXS', date: day, personId: it.personId, outletId: usedOutletId,
+        })
+        await tx.cashReconExcess.create({
+          data: {
+            id: recordId, cashReconId: saved.id, ...fields,
+            internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+          },
+        })
       }
     }
     return saved

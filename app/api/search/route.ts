@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   const [persons, bills, petty, products] = await Promise.all([
     safe(prisma.person.findMany({ where: { name: like }, take: 5, select: { id: true, name: true, type: true } }), []),
     safe(prisma.signedBill.findMany({
-      where: { ...outletWhere, OR: [{ personName: like }, { voucherNumber: like }] },
+      where: { ...outletWhere, OR: [{ personName: like }, { voucherNumber: like }, { displayReference: like }, { legacyReference: like }] },
       take: 6, orderBy: { date: 'desc' },
       select: { id: true, personName: true, billType: true, amount: true, status: true },
     }), []),
