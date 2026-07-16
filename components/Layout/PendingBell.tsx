@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { Bell } from 'lucide-react'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import { PENDING_COUNTS_CHANGED } from '@/lib/pendingBellEvents'
 
 const APPROVERS = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 interface Item { key: string; label: string; count: number; href: string }
@@ -25,14 +26,19 @@ export function PendingBell() {
     catch { /* ignore */ }
   }, [request, canApprove])
 
-  // Load on mount, on focus, and every 60s.
+  // Load on mount, on focus, every 60s, and whenever a request is approved/rejected anywhere in the app.
   useEffect(() => {
     if (!canApprove) return
     load()
     const onFocus = () => load()
     window.addEventListener('focus', onFocus)
+    window.addEventListener(PENDING_COUNTS_CHANGED, onFocus)
     const id = setInterval(load, 60000)
-    return () => { window.removeEventListener('focus', onFocus); clearInterval(id) }
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener(PENDING_COUNTS_CHANGED, onFocus)
+      clearInterval(id)
+    }
   }, [load, canApprove])
 
   // Close on outside click
