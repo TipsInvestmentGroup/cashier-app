@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Search } from 'lucide-react'
 import { useApi } from '@/hooks/useApi'
 
 interface FieldDef { id: string; key: string; label: string; fieldType: string; isRequired: boolean }
@@ -27,6 +28,7 @@ export function StageGridRenderer({ stage, onSubmit, batchMode }: Props) {
   const { request } = useApi()
   const [staffOptions, setStaffOptions] = useState<Option[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [search, setSearch] = useState('')
   const [rows, setRows] = useState<Record<string, Record<string, string>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -40,7 +42,14 @@ export function StageGridRenderer({ stage, onSubmit, batchMode }: Props) {
     if (next.has(id)) next.delete(id); else next.add(id)
     return next
   })
-  const visibleStaff = batchMode ? staffOptions.filter((s) => selected.has(s.id)) : staffOptions
+
+  const query = search.trim().toLowerCase()
+  const matchesSearch = (s: Option) => !query || s.name.toLowerCase().includes(query)
+  // In the chip picker, keep an already-selected chip visible even if it no
+  // longer matches what's typed — losing track of who's picked mid-search
+  // would be worse than a slightly longer chip list.
+  const chipOptions = useMemo(() => staffOptions.filter((s) => matchesSearch(s) || selected.has(s.id)), [staffOptions, query, selected])
+  const visibleStaff = (batchMode ? staffOptions.filter((s) => selected.has(s.id)) : staffOptions).filter(matchesSearch)
 
   const setCell = (staffId: string, fieldId: string, value: string) =>
     setRows((prev) => ({ ...prev, [staffId]: { ...prev[staffId], [fieldId]: value } }))
@@ -57,16 +66,24 @@ export function StageGridRenderer({ stage, onSubmit, batchMode }: Props) {
 
   return (
     <div className="space-y-3">
+      <div className="relative">
+        <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search staff by name…"
+          className="w-full pl-9 pr-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white" />
+      </div>
+
       {batchMode && (
         <div className="bg-white rounded-2xl border border-gray-100 p-3">
           <p className="text-xs font-semibold text-gray-500 mb-2">Select staff for this batch ({selected.size} selected)</p>
           <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-            {staffOptions.map((s) => (
+            {chipOptions.map((s) => (
               <button key={s.id} onClick={() => toggleStaff(s.id)}
                 className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${selected.has(s.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                 {s.name}
               </button>
             ))}
+            {chipOptions.length === 0 && <p className="text-xs text-gray-400 py-1">No staff match "{search}"</p>}
           </div>
         </div>
       )}
@@ -80,8 +97,10 @@ export function StageGridRenderer({ stage, onSubmit, batchMode }: Props) {
             </tr>
           </thead>
           <tbody>
-            {visibleStaff.length === 0 && batchMode && (
-              <tr><td colSpan={fields.length + 1} className="px-3 py-6 text-center text-xs text-gray-400">Select staff above to start entering this batch</td></tr>
+            {visibleStaff.length === 0 && (
+              <tr><td colSpan={fields.length + 1} className="px-3 py-6 text-center text-xs text-gray-400">
+                {batchMode && selected.size === 0 ? 'Select staff above to start entering this batch' : `No staff match "${search}"`}
+              </td></tr>
             )}
             {visibleStaff.map((staff) => (
               <tr key={staff.id} className="border-b border-gray-50">
