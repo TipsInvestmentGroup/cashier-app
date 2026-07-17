@@ -45,7 +45,7 @@ export default function ReportsPage() {
   const [reportView, setReportView] = useState('summary')
 
   useEffect(() => {
-    request('/api/outlets').then(setOutlets).catch(console.error)
+    request('/api/outlets').then(setOutlets).catch(() => {})
   }, [request])
 
   const loadReport = useCallback(async () => {

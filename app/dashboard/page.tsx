@@ -57,7 +57,7 @@ export default function DashboardPage() {
   useEffect(() => {
     request('/api/dashboard')
       .then(setData)
-      .catch(console.error)
+      .catch(() => {})
       .finally(() => setLoading(false))
     request('/api/reports/variance-alerts').then((r) => setVariances(r.items || [])).catch(() => {})
     request('/api/targets/warning-letters').then((r) => setWarnings(r)).catch(() => {})
