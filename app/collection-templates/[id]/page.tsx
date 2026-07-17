@@ -11,9 +11,9 @@ const FIELD_TYPES = ['NUMBER', 'TEXT', 'SELECT', 'STAFF_PICKER', 'PERSON_PICKER'
 const ENTRY_MODES: { value: string; label: string; enabled: boolean }[] = [
   { value: 'SINGLE_STAFF', label: 'Single Staff (one form, save, next staff)', enabled: true },
   { value: 'MULTI_STAFF_GRID', label: 'Multi-Staff Grid (all staff, one screen, one save)', enabled: true },
-  { value: 'BATCH', label: 'Batch Entry — coming in a later phase', enabled: false },
-  { value: 'EXCEL_IMPORT', label: 'Excel Import — coming in a later phase', enabled: false },
-  { value: 'POS_SYNC', label: 'POS Auto Sync — coming in a later phase', enabled: false },
+  { value: 'BATCH', label: 'Batch Entry (select staff, fill together)', enabled: true },
+  { value: 'EXCEL_IMPORT', label: 'Excel Import (upload a spreadsheet)', enabled: true },
+  { value: 'POS_SYNC', label: 'POS Auto Sync — not connected yet', enabled: true },
 ]
 const SECTION_PRESETS = ['SALES', 'PAYMENT_CHANNELS', 'BILLS', 'DISCOUNTS', 'CANCELLATIONS', 'RETURNS', 'REFUNDS', 'EXCESS', 'CASH_RECON', 'BANK_DEPOSITS', 'CUSTOMER_DETAILS', 'REFERENCE_NUMBERS', 'REMARKS', 'ATTACHMENTS']
 const RULE_TYPES: { value: string; label: string; help: string }[] = [
@@ -32,6 +32,24 @@ interface FieldState { _k: string; id?: string; key: string; label: string; fiel
 interface SectionState { _k: string; id?: string; key: string; label: string; isMandatory: boolean; fields: FieldState[] }
 interface StageState { _k: string; id?: string; key: string; label: string; isOptional: boolean; entryMode: string; sections: SectionState[] }
 interface RuleState { _k: string; id?: string; ruleType: string; config: string; isActive: boolean }
+
+function TemplateEditorSkeleton() {
+  return (
+    <div className="max-w-4xl space-y-6 animate-pulse">
+      <div className="h-8 w-48 bg-gray-100 rounded" />
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
+        <div className="h-9 w-full bg-gray-100 rounded-xl" />
+        <div className="h-9 w-full bg-gray-100 rounded-xl" />
+      </div>
+      {[0, 1].map((i) => (
+        <div key={i} className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
+          <div className="h-9 w-1/2 bg-gray-100 rounded-xl" />
+          <div className="h-16 w-full bg-gray-50 rounded-xl" />
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function move<T>(arr: T[], index: number, dir: -1 | 1): T[] {
   const target = index + dir
@@ -136,7 +154,7 @@ export default function CollectionTemplateEditorPage() {
     } finally { setSaving(false) }
   }
 
-  if (loading) return <AppShell><SetupTabs /><div className="py-10 text-center text-gray-400">Loading…</div></AppShell>
+  if (loading) return <AppShell><SetupTabs /><TemplateEditorSkeleton /></AppShell>
 
   return (
     <AppShell>

@@ -10,17 +10,23 @@ interface Option { id: string; name: string }
 interface Props {
   stage: StageDef
   onSubmit: (rows: { staffId: string; values: Record<string, string> }[]) => Promise<void>
+  /** BATCH mode: start with nobody selected and require picking a subset of
+   *  staff before the grid appears, instead of showing every active staff
+   *  member (MULTI_STAFF_GRID's behavior) right away. */
+  batchMode?: boolean
 }
 
 /**
- * MULTI_STAFF_GRID entry mode: one table, every active staff member as a
- * row, every non-picker field as a column. STAFF_PICKER/PERSON_PICKER
- * columns are skipped — the row's staff IS the staff picker in this mode.
- * Rows left entirely blank are just not submitted (see the grid API route).
+ * MULTI_STAFF_GRID / BATCH entry mode: one table, every non-picker field as
+ * a column. In MULTI_STAFF_GRID every active staff member is a row from the
+ * start; in BATCH the cashier first picks which staff this batch covers.
+ * STAFF_PICKER/PERSON_PICKER columns are skipped — the row's staff IS the
+ * staff picker in this mode. Rows left entirely blank are not submitted.
  */
-export function StageGridRenderer({ stage, onSubmit }: Props) {
+export function StageGridRenderer({ stage, onSubmit, batchMode }: Props) {
   const { request } = useApi()
   const [staffOptions, setStaffOptions] = useState<Option[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [rows, setRows] = useState<Record<string, Record<string, string>>>({})
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -28,6 +34,13 @@ export function StageGridRenderer({ stage, onSubmit }: Props) {
   const fields = stage.sections.flatMap((s) => s.fields).filter((f) => f.fieldType !== 'STAFF_PICKER' && f.fieldType !== 'PERSON_PICKER')
 
   useEffect(() => { request('/api/staff-list').then(setStaffOptions).catch(() => {}) }, [request])
+
+  const toggleStaff = (id: string) => setSelected((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const visibleStaff = batchMode ? staffOptions.filter((s) => selected.has(s.id)) : staffOptions
 
   const setCell = (staffId: string, fieldId: string, value: string) =>
     setRows((prev) => ({ ...prev, [staffId]: { ...prev[staffId], [fieldId]: value } }))
@@ -44,6 +57,20 @@ export function StageGridRenderer({ stage, onSubmit }: Props) {
 
   return (
     <div className="space-y-3">
+      {batchMode && (
+        <div className="bg-white rounded-2xl border border-gray-100 p-3">
+          <p className="text-xs font-semibold text-gray-500 mb-2">Select staff for this batch ({selected.size} selected)</p>
+          <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+            {staffOptions.map((s) => (
+              <button key={s.id} onClick={() => toggleStaff(s.id)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${selected.has(s.id) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="overflow-x-auto bg-white rounded-2xl border border-gray-100">
         <table className="w-full text-sm">
           <thead>
@@ -53,7 +80,10 @@ export function StageGridRenderer({ stage, onSubmit }: Props) {
             </tr>
           </thead>
           <tbody>
-            {staffOptions.map((staff) => (
+            {visibleStaff.length === 0 && batchMode && (
+              <tr><td colSpan={fields.length + 1} className="px-3 py-6 text-center text-xs text-gray-400">Select staff above to start entering this batch</td></tr>
+            )}
+            {visibleStaff.map((staff) => (
               <tr key={staff.id} className="border-b border-gray-50">
                 <td className="px-3 py-1.5 font-medium text-gray-700 whitespace-nowrap sticky left-0 bg-white">{staff.name}</td>
                 {fields.map((f) => (

@@ -43,7 +43,8 @@ export function StageRenderer({ stage, initialValues, onSubmit }: Props) {
 
   const set = (fieldId: string, v: string) => setValues((prev) => ({ ...prev, [fieldId]: v }))
 
-  const submit = async () => {
+  const submit = async (e?: React.FormEvent) => {
+    e?.preventDefault()
     setError(null)
     for (const f of fields) {
       if (f.isRequired && !values[f.id]) { setError(`"${f.label}" is required`); return }
@@ -56,7 +57,7 @@ export function StageRenderer({ stage, initialValues, onSubmit }: Props) {
   }
 
   return (
-    <div className="space-y-4">
+    <form onSubmit={submit} className="space-y-4">
       {needsManualStaffPicker && (
         <div>
           <label className="text-xs font-semibold text-gray-500">Staff</label>
@@ -119,10 +120,10 @@ export function StageRenderer({ stage, initialValues, onSubmit }: Props) {
 
       {error && <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{error}</div>}
 
-      <button onClick={submit} disabled={submitting}
+      <button type="submit" disabled={submitting}
         className="w-full py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
         {submitting ? 'Saving…' : `Save "${stage.label}"`}
       </button>
-    </div>
+    </form>
   )
 }

@@ -15,10 +15,13 @@ interface GridRowInput { staffId: string; values: Record<string, unknown> }
  * folding grid submission into the existing working endpoint sidesteps it
  * and keeps the API surface smaller anyway):
  *  - SINGLE_STAFF: body = { staffId?, staffName?, values }
- *  - MULTI_STAFF_GRID: body = { rows: [{ staffId, values }, ...] } — one
- *    CollectionStageRecord per row, all in one transaction (mirrors the
- *    single-transaction pattern the legacy /api/collections route uses).
- *    Rows with no values filled in are silently skipped.
+ *  - MULTI_STAFF_GRID / BATCH / EXCEL_IMPORT: body = { rows: [{ staffId,
+ *    values }, ...] } — one CollectionStageRecord per row, all in one
+ *    transaction (mirrors the single-transaction pattern the legacy
+ *    /api/collections route uses). These three entry modes all produce the
+ *    same row shape (a full roster, a picked subset, or a parsed
+ *    spreadsheet respectively) so they share this one code path. Rows with
+ *    no values filled in are silently skipped.
  * Runs the CollectionValidationRule engine (lib/collection-validation.ts) via
  * lib/collection-stage-submit.ts for every row. A rule that requires sign-off
  * (e.g. discount over its limit) doesn't block the save — it marks the
@@ -45,7 +48,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   try {
     if (Array.isArray(body.rows)) {
-      if (stage.entryMode !== 'MULTI_STAFF_GRID') return NextResponse.json({ error: 'This stage is not configured for grid entry' }, { status: 400 })
+      const GRID_MODES = ['MULTI_STAFF_GRID', 'BATCH', 'EXCEL_IMPORT']
+      if (!GRID_MODES.includes(stage.entryMode)) return NextResponse.json({ error: 'This stage is not configured for bulk (row-based) entry' }, { status: 400 })
 
       const rows: GridRowInput[] = body.rows
       const nonEmptyRows = rows.filter((r) => r.staffId && r.values && Object.values(r.values).some((v) => v !== undefined && v !== null && v !== ''))
