@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
+import { seedStandardCollectionTemplate } from './collection-template-seed'
 
 interface SeedPerson { name: string; phone: string | null; type: string; creditLimit: number }
 interface RosterEntry { name: string; position: 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR' | 'SHISHA COUNTER' | 'KITCHEN COUNTER'; outlet: string }
@@ -47,6 +48,11 @@ export async function seedCore(prisma: any) {
     update: {},
     create: { name: 'Main Store' },
   })
+
+  // Collection Workflow Engine: Company + "Standard Staff Collection" template
+  // metadata, and backfills both sales outlets' defaultTemplateId. Purely
+  // additive — DailyCollection storage/behavior is unchanged.
+  await seedStandardCollectionTemplate(prisma, [mikocheni.id, cocoBeach.id])
 
   const users = [
     { email: 'admin@lounge.com', name: 'System Admin', role: 'ADMIN', pass: 'admin123', outletId: null },

@@ -33,6 +33,12 @@ datasource db {
 //   BillTypeConfig.category:                   SIGNED_BILL | PAID_BILL | EXCESS_PAYMENT | EXCESS_REFUND | LOSS_RECORD
 //   ExcessRefund.reason:                       OVERPAYMENT | DUPLICATE_PAYMENT | OTHER
 //   ExcessRefund.approvalStatus:                PENDING | APPROVED | REJECTED
+//   CollectionStage.entryMode:      SINGLE_STAFF | MULTI_STAFF_GRID | BATCH | EXCEL_IMPORT | POS_SYNC
+//   CollectionField.fieldType:      NUMBER | TEXT | SELECT | STAFF_PICKER | PERSON_PICKER | DATE | BOOLEAN
+//   CollectionValidationRule.ruleType: STAGE_SEQUENCE | CASH_NOT_EXCEED_SYSTEM_SALES | DISCOUNT_APPROVAL_LIMIT | NO_NEGATIVE_BALANCE | REQUIRED_FIELD
+//   CollectionSession.status:       OPEN | IN_PROGRESS | COMPLETED | FINALIZED
+//   CollectionStageRecord.status:   PENDING | IN_PROGRESS | COMPLETED | APPROVED | REJECTED
+//   WorkflowApproval.status:        PENDING | APPROVED | REJECTED
 
 model User {
   id                String    @id @default(cuid())
@@ -75,6 +81,13 @@ model User {
   pushSubscriptions   PushSubscription[]
   permissions         UserPermission[]
   excessRefunds       ExcessRefund[]
+
+  collectionSessionsCreated   CollectionSession[]     @relation("CollectionSessionCreatedBy")
+  collectionSessionsCompleted CollectionSession[]     @relation("CollectionSessionCompletedBy")
+  stageRecordsCompleted       CollectionStageRecord[] @relation("StageRecordCompletedBy")
+  stageRecordsApproved        CollectionStageRecord[] @relation("StageRecordApprovedBy")
+  approvalsRequested          WorkflowApproval[]      @relation("ApprovalRequestedBy")
+  approvalsToApprove          WorkflowApproval[]      @relation("ApprovalApprover")
 }
 
 /// Per-user, per-resource grant of Add/Edit/Delete(/Settle/Unsettle for
@@ -114,11 +127,35 @@ model PushSubscription {
   @@index([userId])
 }
 
+// Minimal tenant concept above Outlet — structural prep for eventual resale to
+// other businesses. Does NOT enforce tenant isolation on its own (auth/session
+// stay outlet-scoped as before); it only lets Collection Templates be scoped
+// per business instead of being global. See prisma/schema.prisma Company
+// section notes alongside CollectionTemplate below.
+model Company {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  legalName String?
+  tin       String?
+  vrn       String?
+  createdAt DateTime @default(now())
+
+  outlets             Outlet[]
+  collectionTemplates CollectionTemplate[]
+}
+
 model Outlet {
   id           String   @id @default(cuid())
   name         String   @unique
   location     String?
   isActive     Boolean  @default(true)
+  companyId    String?
+  company      Company? @relation(fields: [companyId], references: [id])
+  // The template used when no session-specific template is chosen for a new
+  // Daily Collection at this outlet. Nullable/optional even after backfill —
+  // absence means "fall back to the fixed DailyCollection form unchanged".
+  defaultTemplateId String?
+  defaultTemplate   CollectionTemplate? @relation("OutletDefaultTemplate", fields: [defaultTemplateId], references: [id])
   // Events-only outlets (e.g. "Tips Events") are NOT included in the automatic
   // weekly roster — staff are only assigned temporarily when an event is created.
   isEventsOnly Boolean  @default(false)
@@ -152,6 +189,7 @@ model Outlet {
   events              Event[]
   excessRefunds       ExcessRefund[]
   salesTargets        SalesTarget[]
+  collectionSessions  CollectionSession[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -274,6 +312,173 @@ model DailyCollectionChannel {
 
   @@unique([collectionId, channelCode])
   @@index([collectionId])
+}
+
+// ─── Collection Workflow Engine ──────────────────────────────────────────────
+// Configurable Collection Templates: businesses define how a "collection" is
+// entered (stages → sections → fields) without a code change. The
+// DailyCollection/DailyCollectionChannel/Cancellation/CollectionExcess models
+// above are NOT replaced — the seeded "Standard Staff Collection" template
+// describes that exact fixed-column workflow as metadata only, and its data
+// keeps living in those typed columns. Only templates built via the future
+// Template Designer store their values in CollectionFieldValue below.
+
+model CollectionTemplate {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  code        String   @unique
+  name        String
+  description String?
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  stages          CollectionStage[]
+  validationRules CollectionValidationRule[]
+  sessions        CollectionSession[]
+  defaultForOutlets Outlet[] @relation("OutletDefaultTemplate")
+
+  @@index([companyId])
+}
+
+model CollectionStage {
+  id         String             @id @default(cuid())
+  templateId String
+  template   CollectionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  key        String
+  label      String
+  order      Int                @default(0)
+  isOptional Boolean            @default(false)
+  entryMode  String             @default("SINGLE_STAFF")
+  isActive   Boolean            @default(true)
+
+  sections CollectionSection[]
+  records  CollectionStageRecord[]
+
+  @@unique([templateId, key])
+  @@index([templateId])
+}
+
+// key identifies the reusable section TYPE (SALES, PAYMENT_CHANNELS, BILLS,
+// DISCOUNTS, CANCELLATIONS, EXCESS, CASH_RECON, REMARKS, ATTACHMENTS, ...).
+model CollectionSection {
+  id          String          @id @default(cuid())
+  stageId     String
+  stage       CollectionStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  key         String
+  label       String
+  order       Int             @default(0)
+  isMandatory Boolean         @default(false)
+  isActive    Boolean         @default(true)
+
+  fields CollectionField[]
+
+  @@unique([stageId, key])
+  @@index([stageId])
+}
+
+model CollectionField {
+  id         String            @id @default(cuid())
+  sectionId  String
+  section    CollectionSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  key        String
+  label      String
+  fieldType  String
+  order      Int               @default(0)
+  isRequired Boolean           @default(false)
+  config     String? // JSON: select options, min/max, etc.
+
+  values CollectionFieldValue[]
+
+  @@unique([sectionId, key])
+  @@index([sectionId])
+}
+
+model CollectionValidationRule {
+  id         String             @id @default(cuid())
+  templateId String
+  template   CollectionTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  ruleType   String
+  config     String? // JSON parameters for the rule (e.g. {"limit": 50000})
+  isActive   Boolean            @default(true)
+
+  @@index([templateId])
+}
+
+model CollectionSession {
+  id            String             @id @default(cuid())
+  date          DateTime           @default(now())
+  outletId      String
+  outlet        Outlet             @relation(fields: [outletId], references: [id])
+  templateId    String
+  template      CollectionTemplate @relation(fields: [templateId], references: [id])
+  status        String             @default("OPEN")
+  createdById   String
+  createdBy     User               @relation("CollectionSessionCreatedBy", fields: [createdById], references: [id])
+  completedById String?
+  completedBy   User?              @relation("CollectionSessionCompletedBy", fields: [completedById], references: [id])
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  stageRecords CollectionStageRecord[]
+
+  @@unique([outletId, date, templateId])
+  @@index([outletId, date])
+}
+
+model CollectionStageRecord {
+  id            String            @id @default(cuid())
+  sessionId     String
+  session       CollectionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  stageId       String
+  stage         CollectionStage   @relation(fields: [stageId], references: [id])
+  status        String            @default("PENDING")
+  staffId       String?
+  staffName     String?
+  completedAt   DateTime?
+  completedById String?
+  completedBy   User?             @relation("StageRecordCompletedBy", fields: [completedById], references: [id])
+  approvedById  String?
+  approvedBy    User?             @relation("StageRecordApprovedBy", fields: [approvedById], references: [id])
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  fieldValues CollectionFieldValue[]
+  approvals   WorkflowApproval[]
+
+  @@index([sessionId])
+  @@index([stageId])
+}
+
+model CollectionFieldValue {
+  id            String                @id @default(cuid())
+  stageRecordId String
+  stageRecord   CollectionStageRecord @relation(fields: [stageRecordId], references: [id], onDelete: Cascade)
+  fieldId       String
+  field         CollectionField       @relation(fields: [fieldId], references: [id])
+  value         String?
+
+  @@unique([stageRecordId, fieldId])
+  @@index([stageRecordId])
+}
+
+model WorkflowApproval {
+  id            String                @id @default(cuid())
+  stageRecordId String
+  stageRecord   CollectionStageRecord @relation(fields: [stageRecordId], references: [id], onDelete: Cascade)
+  requestedById String
+  requestedBy   User                  @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
+  approverRole  String?
+  approverId    String?
+  approver      User?                 @relation("ApprovalApprover", fields: [approverId], references: [id])
+  status        String                @default("PENDING")
+  comment       String?
+  createdAt     DateTime              @default(now())
+  resolvedAt    DateTime?
+
+  @@index([stageRecordId])
 }
 
 model Person {
