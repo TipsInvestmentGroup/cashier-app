@@ -5,6 +5,7 @@
 // and calls generateWeekSchedule().
 
 import { DEFAULT_SCHEDULE_CONFIG, type ShiftDef } from '@/lib/schedule-config-shared'
+import { DEFAULT_EVENT_CONFIG } from '@/lib/event-config-shared'
 
 export type ShiftType = 'MORNING' | 'EVENING'
 
@@ -30,14 +31,12 @@ export const EVENT_STATUSES = ['PLANNED', 'CONFIRMED', 'COMPLETED', 'CANCELLED']
 export type EventStatus = typeof EVENT_STATUSES[number]
 // Staff roles available at an event (same vocabulary as the roster).
 export const EVENT_ROLES = SCHEDULE_ROLES
-export const EVENT_TYPES = ['Wedding', 'Corporate', 'Concert', 'Private Party', 'Product Launch', 'Other'] as const
-// Original short list kept alongside the fuller Phase 1 category set so
-// expense lines recorded before this phase still validate.
-export const EVENT_EXPENSE_CATEGORIES = [
-  'Transport', 'Equipment Hire', 'Food & Drinks', 'Decor', 'Staff Allowance', 'Other',
-  'Casual Labour', 'Staff Allowances', 'Security', 'Fuel', 'Decorations', 'Entertainment',
-  'Marketing & Advertising', 'Equipment Rental', 'Cleaning', 'Licenses & Permits', 'Utilities', 'Miscellaneous Expenses',
-] as const
+// Defaults only — the live picker options are company-config-driven (see
+// lib/event-config-db.ts / /api/event-config); these are the fallback if
+// unset. Original short category list kept alongside the fuller Phase 1 set
+// so expense lines recorded before this phase still validate.
+export const EVENT_TYPES = DEFAULT_EVENT_CONFIG.eventTypes
+export const EVENT_EXPENSE_CATEGORIES = DEFAULT_EVENT_CONFIG.expenseCategories
 export const EXPENSE_PAYMENT_STATUSES = ['UNPAID', 'PARTIAL', 'PAID'] as const
 export const SPONSORSHIP_TYPES = ['CASH', 'IN_KIND', 'MEDIA', 'OTHER'] as const
 export const SPONSOR_AGREEMENT_STATUSES = ['PENDING', 'SIGNED', 'FULFILLED'] as const

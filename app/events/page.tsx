@@ -8,14 +8,17 @@ import { Card } from '@/components/ui/Card'
 import { NumberField, InlineNumberField } from '@/components/ui/NumberField'
 import { ExportBar } from '@/components/ExportBar'
 import { formatCurrency, STATUS_COLORS } from '@/lib/utils'
-import { EVENT_TYPES, EVENT_EXPENSE_CATEGORIES, EXPENSE_PAYMENT_STATUSES, SPONSORSHIP_TYPES, SPONSOR_AGREEMENT_STATUSES, EVENT_TARGET_TYPES } from '@/lib/scheduling'
+import {
+  EVENT_TYPES, EVENT_EXPENSE_CATEGORIES, EXPENSE_PAYMENT_STATUSES, SPONSORSHIP_TYPES, SPONSOR_AGREEMENT_STATUSES, EVENT_TARGET_TYPES,
+  EVENT_ROLES, EVENT_STATUSES, SCHEDULE_MANAGE_ROLES,
+} from '@/lib/scheduling'
 import { format, parseISO } from 'date-fns'
 import toast from 'react-hot-toast'
-import { PartyPopper, Plus, X, Trash2, Users, Wallet, TrendingUp, Gift, Package, Target, Ticket, Armchair, Copy, Pencil } from 'lucide-react'
+import { PartyPopper, Plus, X, Trash2, Users, Wallet, TrendingUp, Gift, Package, Target, Ticket, Armchair, Copy, Pencil, Settings2 } from 'lucide-react'
 
-const MANAGE_ROLES = ['MANAGER', 'DIRECTOR', 'ADMIN']
-const STATUSES = ['PLANNED', 'CONFIRMED', 'COMPLETED', 'CANCELLED']
-const ROLES = ['SUPERVISOR', 'WAITER', 'BARTENDER', 'CASHIER', 'HOSTESS']
+const MANAGE_ROLES = SCHEDULE_MANAGE_ROLES
+const STATUSES = EVENT_STATUSES
+const ROLES = EVENT_ROLES
 const BOOKING_STATUSES = ['PENDING', 'CONFIRMED', 'CANCELLED']
 const TABLE_STATUSES = ['AVAILABLE', 'RESERVED', 'OCCUPIED']
 const BOOKING_STATUS_CHIP: Record<string, string> = {
@@ -72,6 +75,15 @@ export default function EventsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [detail, setDetail] = useState<EventDetail | null>(null)
+  const [eventTypes, setEventTypes] = useState<string[]>([...EVENT_TYPES])
+  const [expenseCategories, setExpenseCategories] = useState<string[]>([...EVENT_EXPENSE_CATEGORIES])
+  const [categoriesOpen, setCategoriesOpen] = useState(false)
+
+  const loadEventConfig = useCallback(() => {
+    request('/api/event-config')
+      .then((cfg) => { if (cfg?.eventTypes?.length) setEventTypes(cfg.eventTypes); if (cfg?.expenseCategories?.length) setExpenseCategories(cfg.expenseCategories) })
+      .catch(() => {})
+  }, [request])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -80,6 +92,7 @@ export default function EventsPage() {
     finally { setLoading(false) }
   }, [request, statusFilter])
   useEffect(() => { load() }, [load])
+  useEffect(() => { loadEventConfig() }, [loadEventConfig])
 
   const openDetail = async (id: string) => {
     try { setDetail(await request(`/api/events/${id}`)) }
@@ -106,6 +119,11 @@ export default function EventsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Events</h1>
             <p className="text-sm text-gray-500">External events & special functions — staffed temporarily, off the regular roster.</p>
           </div>
+          {canManage && (
+            <button onClick={() => setCategoriesOpen(true)} title="Manage event types & expense categories" className="flex items-center gap-1.5 px-3 py-2 bg-white border-2 border-gray-200 text-gray-600 rounded-xl text-sm font-medium hover:border-gray-300 transition">
+              <Settings2 className="w-4 h-4" />
+            </button>
+          )}
           {canManage && (
             <button onClick={() => setCreateOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition">
               <Plus className="w-4 h-4" />New event
@@ -157,7 +175,7 @@ export default function EventsPage() {
             <Field label="Event type">
               <select value={form.eventType} onChange={(e) => setForm({ ...form, eventType: e.target.value })} className={inputCls}>
                 <option value="">Select type…</option>
-                {EVENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                {eventTypes.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </Field>
             <Field label="Client"><input value={form.clientName} onChange={(e) => setForm({ ...form, clientName: e.target.value })} className={inputCls} /></Field>
@@ -175,9 +193,99 @@ export default function EventsPage() {
 
       {/* Detail modal */}
       {detail && (
-        <EventDetailView detail={detail} canManage={canManage} onClose={() => setDetail(null)} request={request} refresh={refreshDetail} reload={load} />
+        <EventDetailView detail={detail} canManage={canManage} onClose={() => setDetail(null)} request={request} refresh={refreshDetail} reload={load}
+          eventTypes={eventTypes} expenseCategories={expenseCategories} />
+      )}
+
+      {categoriesOpen && (
+        <ManageCategoriesModal
+          request={request}
+          eventTypes={eventTypes} expenseCategories={expenseCategories}
+          onClose={() => setCategoriesOpen(false)}
+          onSaved={loadEventConfig}
+        />
       )}
     </AppShell>
+  )
+}
+
+/** Admin editor for the two Events taxonomy lists (event types, expense categories) — a simple ordered list with add/remove, same idiom as Floor Positions on Company Preferences. */
+function ManageCategoriesModal({ request, eventTypes, expenseCategories, onClose, onSaved }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  request: (url: string, opts?: any) => Promise<any>
+  eventTypes: string[]
+  expenseCategories: string[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [types, setTypes] = useState(eventTypes)
+  const [categories, setCategories] = useState(expenseCategories)
+  const [newType, setNewType] = useState('')
+  const [newCategory, setNewCategory] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const save = async (next: { eventTypes?: string[]; expenseCategories?: string[] }) => {
+    setSaving(true)
+    try {
+      const cfg = await request('/api/event-config', { method: 'PUT', body: JSON.stringify(next) })
+      setTypes(cfg.eventTypes); setCategories(cfg.expenseCategories)
+      onSaved()
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not save') }
+    finally { setSaving(false) }
+  }
+
+  const addType = () => {
+    const v = newType.trim()
+    if (!v || types.includes(v)) return
+    save({ eventTypes: [...types, v] }); setNewType('')
+  }
+  const removeType = (t: string) => save({ eventTypes: types.filter((x) => x !== t) })
+  const addCategory = () => {
+    const v = newCategory.trim()
+    if (!v || categories.includes(v)) return
+    save({ expenseCategories: [...categories, v] }); setNewCategory('')
+  }
+  const removeCategory = (c: string) => save({ expenseCategories: categories.filter((x) => x !== c) })
+
+  return (
+    <Modal title="Manage Event Types & Expense Categories" onClose={onClose} wide>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div>
+          <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Event Types</h4>
+          <div className="space-y-1.5 max-h-56 overflow-y-auto mb-2">
+            {types.map((t) => (
+              <div key={t} className="flex items-center gap-2 bg-gray-50 rounded-lg px-2.5 py-1.5">
+                <span className="flex-1 text-sm text-gray-800">{t}</span>
+                <button onClick={() => removeType(t)} disabled={saving} className="text-red-500 hover:text-red-700 disabled:opacity-40"><X className="w-3.5 h-3.5" /></button>
+              </div>
+            ))}
+            {types.length === 0 && <p className="text-xs text-gray-400 py-2">No event types yet</p>}
+          </div>
+          <div className="flex gap-2">
+            <input value={newType} onChange={(e) => setNewType(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addType() } }}
+              placeholder="New event type…" className={inputCls} />
+            <button onClick={addType} disabled={saving} className="px-3 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">Add</button>
+          </div>
+        </div>
+        <div>
+          <h4 className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Expense Categories</h4>
+          <div className="space-y-1.5 max-h-56 overflow-y-auto mb-2">
+            {categories.map((c) => (
+              <div key={c} className="flex items-center gap-2 bg-gray-50 rounded-lg px-2.5 py-1.5">
+                <span className="flex-1 text-sm text-gray-800">{c}</span>
+                <button onClick={() => removeCategory(c)} disabled={saving} className="text-red-500 hover:text-red-700 disabled:opacity-40"><X className="w-3.5 h-3.5" /></button>
+              </div>
+            ))}
+            {categories.length === 0 && <p className="text-xs text-gray-400 py-2">No categories yet</p>}
+          </div>
+          <div className="flex gap-2">
+            <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCategory() } }}
+              placeholder="New expense category…" className={inputCls} />
+            <button onClick={addCategory} disabled={saving} className="px-3 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap">Add</button>
+          </div>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -202,12 +310,13 @@ function Modal({ title, onClose, children, wide }: { title: string; onClose: () 
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-function EventDetailView({ detail, canManage, onClose, request, refresh, reload }: {
+function EventDetailView({ detail, canManage, onClose, request, refresh, reload, eventTypes, expenseCategories }: {
   detail: EventDetail; canManage: boolean; onClose: () => void; request: any; refresh: () => Promise<void>; reload: () => Promise<void>
+  eventTypes: string[]; expenseCategories: string[]
 }) {
   const [addStaffId, setAddStaffId] = useState('')
   const [addRole, setAddRole] = useState('WAITER')
-  const [exp, setExp] = useState({ category: EVENT_EXPENSE_CATEGORIES[0] as string, description: '', estimatedCost: '', amount: '', supplier: '', paymentStatus: 'UNPAID' as string })
+  const [exp, setExp] = useState({ category: expenseCategories[0] || '', description: '', estimatedCost: '', amount: '', supplier: '', paymentStatus: 'UNPAID' as string })
   const [sponsor, setSponsor] = useState({ sponsorName: '', contactPerson: '', phone: '', email: '', sponsorshipType: 'CASH' as string, sponsorshipValue: '', itemsProvided: '', agreementStatus: 'PENDING' as string })
   const [addProductId, setAddProductId] = useState('')
   const [productForm, setProductForm] = useState({ eventPrice: '', expectedQuantity: '', procurementQuantity: '' })
@@ -243,7 +352,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
     if (!(Number(exp.amount) > 0) && !(Number(exp.estimatedCost) > 0)) return toast.error('Enter an estimated or actual amount')
     api(async () => {
       await request(`/api/events/${detail.id}/expenses`, { method: 'POST', body: JSON.stringify({ ...exp, estimatedCost: Number(exp.estimatedCost) || 0, amount: Number(exp.amount) || 0 }) })
-      setExp({ category: EVENT_EXPENSE_CATEGORIES[0], description: '', estimatedCost: '', amount: '', supplier: '', paymentStatus: 'UNPAID' })
+      setExp({ category: expenseCategories[0] || '', description: '', estimatedCost: '', amount: '', supplier: '', paymentStatus: 'UNPAID' })
     }, async () => { await refresh(); await reload() })
   }
   const updateExpense = (expenseId: string, patch: Record<string, unknown>) => api(() => request(`/api/events/${detail.id}/expenses`, { method: 'PATCH', body: JSON.stringify({ expenseId, ...patch }) }), async () => { await refresh(); await reload() })
@@ -371,7 +480,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
               <Field label="Event type">
                 <select value={editForm.eventType} onChange={(e) => setEditForm({ ...editForm, eventType: e.target.value })} className={inputCls}>
                   <option value="">Select type…</option>
-                  {EVENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  {eventTypes.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </Field>
               <Field label="Client"><input value={editForm.clientName} onChange={(e) => setEditForm({ ...editForm, clientName: e.target.value })} className={inputCls} /></Field>
@@ -533,7 +642,7 @@ function EventDetailView({ detail, canManage, onClose, request, refresh, reload 
           {canManage && (
             <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-gray-100 bg-gray-50/50">
               <select value={exp.category} onChange={(e) => setExp({ ...exp, category: e.target.value })} className="px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none">
-                {EVENT_EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {expenseCategories.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
               <input value={exp.description} onChange={(e) => setExp({ ...exp, description: e.target.value })} placeholder="Description" className="flex-1 min-w-[100px] px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
               <NumberField value={exp.estimatedCost} onChange={(v) => setExp({ ...exp, estimatedCost: v })} placeholder="Estimated" className="w-24 px-3 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />

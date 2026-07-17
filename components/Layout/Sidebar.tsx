@@ -7,11 +7,12 @@ import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
 import { useApi } from '@/hooks/useApi'
 import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
+import { VALID_ROLES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, type LucideIcon } from 'lucide-react'
 import { UploadSalesModal } from '@/components/UploadSalesModal'
 
-const ALL = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER']
+const ALL = VALID_ROLES
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
