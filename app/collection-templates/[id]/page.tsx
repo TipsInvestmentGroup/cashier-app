@@ -1,0 +1,242 @@
+'use client'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { AppShell } from '@/components/Layout/AppShell'
+import { SetupTabs } from '@/components/Layout/SetupTabs'
+import { useApi } from '@/hooks/useApi'
+import { useAuth } from '@/contexts/AuthContext'
+import toast from 'react-hot-toast'
+
+const FIELD_TYPES = ['NUMBER', 'TEXT', 'SELECT', 'STAFF_PICKER', 'PERSON_PICKER', 'DATE', 'BOOLEAN'] as const
+const ENTRY_MODES: { value: string; label: string; enabled: boolean }[] = [
+  { value: 'SINGLE_STAFF', label: 'Single Staff (one form, save, next staff)', enabled: true },
+  { value: 'MULTI_STAFF_GRID', label: 'Multi-Staff Grid — coming in a later phase', enabled: false },
+  { value: 'BATCH', label: 'Batch Entry — coming in a later phase', enabled: false },
+  { value: 'EXCEL_IMPORT', label: 'Excel Import — coming in a later phase', enabled: false },
+  { value: 'POS_SYNC', label: 'POS Auto Sync — coming in a later phase', enabled: false },
+]
+const SECTION_PRESETS = ['SALES', 'PAYMENT_CHANNELS', 'BILLS', 'DISCOUNTS', 'CANCELLATIONS', 'RETURNS', 'REFUNDS', 'EXCESS', 'CASH_RECON', 'BANK_DEPOSITS', 'CUSTOMER_DETAILS', 'REFERENCE_NUMBERS', 'REMARKS', 'ATTACHMENTS']
+
+let tempSeq = 0
+const tempKey = () => `tmp_${++tempSeq}`
+const toKey = (s: string) => String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+
+interface FieldState { _k: string; id?: string; key: string; label: string; fieldType: string; isRequired: boolean }
+interface SectionState { _k: string; id?: string; key: string; label: string; isMandatory: boolean; fields: FieldState[] }
+interface StageState { _k: string; id?: string; key: string; label: string; isOptional: boolean; entryMode: string; sections: SectionState[] }
+
+function move<T>(arr: T[], index: number, dir: -1 | 1): T[] {
+  const target = index + dir
+  if (target < 0 || target >= arr.length) return arr
+  const copy = [...arr]
+  ;[copy[index], copy[target]] = [copy[target], copy[index]]
+  return copy
+}
+
+export default function CollectionTemplateEditorPage() {
+  const { id } = useParams<{ id: string }>()
+  const router = useRouter()
+  const { request } = useApi()
+  const { user } = useAuth()
+  const canManage = user?.role === 'ADMIN'
+
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [isActive, setIsActive] = useState(true)
+  const [isDefault, setIsDefault] = useState(false)
+  const [stages, setStages] = useState<StageState[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const t = await request(`/api/collection-templates/${id}`)
+      setName(t.name); setDescription(t.description || ''); setIsActive(t.isActive); setIsDefault(t.isDefault)
+      setStages((t.stages || []).map((s: { id: string; key: string; label: string; isOptional: boolean; entryMode: string; sections: { id: string; key: string; label: string; isMandatory: boolean; fields: { id: string; key: string; label: string; fieldType: string; isRequired: boolean }[] }[] }) => ({
+        _k: tempKey(), id: s.id, key: s.key, label: s.label, isOptional: s.isOptional, entryMode: s.entryMode,
+        sections: s.sections.map((sec) => ({
+          _k: tempKey(), id: sec.id, key: sec.key, label: sec.label, isMandatory: sec.isMandatory,
+          fields: sec.fields.map((f) => ({ _k: tempKey(), id: f.id, key: f.key, label: f.label, fieldType: f.fieldType, isRequired: f.isRequired })),
+        })),
+      })))
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not load template')
+    } finally { setLoading(false) }
+  }, [request, id])
+
+  useEffect(() => { load() }, [load])
+
+  const addStage = () => setStages((prev) => [...prev, { _k: tempKey(), key: `STAGE_${prev.length + 1}`, label: 'New Stage', isOptional: false, entryMode: 'SINGLE_STAFF', sections: [] }])
+  const removeStage = (i: number) => setStages((prev) => prev.filter((_, idx) => idx !== i))
+  const updateStage = (i: number, patch: Partial<StageState>) => setStages((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)))
+  const moveStage = (i: number, dir: -1 | 1) => setStages((prev) => move(prev, i, dir))
+
+  const addSection = (stageIdx: number) => updateStage(stageIdx, { sections: [...stages[stageIdx].sections, { _k: tempKey(), key: 'CUSTOM_SECTION', label: 'New Section', isMandatory: false, fields: [] }] })
+  const removeSection = (stageIdx: number, secIdx: number) => updateStage(stageIdx, { sections: stages[stageIdx].sections.filter((_, i) => i !== secIdx) })
+  const updateSection = (stageIdx: number, secIdx: number, patch: Partial<SectionState>) =>
+    updateStage(stageIdx, { sections: stages[stageIdx].sections.map((s, i) => (i === secIdx ? { ...s, ...patch } : s)) })
+  const moveSection = (stageIdx: number, secIdx: number, dir: -1 | 1) => updateStage(stageIdx, { sections: move(stages[stageIdx].sections, secIdx, dir) })
+
+  const addField = (stageIdx: number, secIdx: number) => {
+    const section = stages[stageIdx].sections[secIdx]
+    updateSection(stageIdx, secIdx, { fields: [...section.fields, { _k: tempKey(), key: `FIELD_${section.fields.length + 1}`, label: 'New Field', fieldType: 'NUMBER', isRequired: false }] })
+  }
+  const removeField = (stageIdx: number, secIdx: number, fieldIdx: number) => {
+    const section = stages[stageIdx].sections[secIdx]
+    updateSection(stageIdx, secIdx, { fields: section.fields.filter((_, i) => i !== fieldIdx) })
+  }
+  const updateField = (stageIdx: number, secIdx: number, fieldIdx: number, patch: Partial<FieldState>) => {
+    const section = stages[stageIdx].sections[secIdx]
+    updateSection(stageIdx, secIdx, { fields: section.fields.map((f, i) => (i === fieldIdx ? { ...f, ...patch } : f)) })
+  }
+
+  const canSave = useMemo(() => name.trim().length > 0, [name])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const payload = {
+        name, description, isActive,
+        stages: stages.map((s) => ({
+          id: s.id, key: s.key, label: s.label, isOptional: s.isOptional, entryMode: s.entryMode,
+          sections: s.sections.map((sec) => ({
+            id: sec.id, key: sec.key, label: sec.label, isMandatory: sec.isMandatory,
+            fields: sec.fields.map((f) => ({ id: f.id, key: f.key, label: f.label, fieldType: f.fieldType, isRequired: f.isRequired })),
+          })),
+        })),
+      }
+      await request(`/api/collection-templates/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
+      toast.success('Template saved')
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not save template')
+    } finally { setSaving(false) }
+  }
+
+  if (loading) return <AppShell><SetupTabs /><div className="py-10 text-center text-gray-400">Loading…</div></AppShell>
+
+  return (
+    <AppShell>
+      <SetupTabs />
+      <div className="space-y-6 max-w-4xl pb-16">
+        <div className="flex items-center justify-between">
+          <div>
+            <button onClick={() => router.push('/collection-templates')} className="text-xs text-gray-400 hover:text-gray-600 mb-1">← Back to templates</button>
+            <h1 className="text-2xl font-bold text-gray-900">Edit Template</h1>
+          </div>
+          {canManage && (
+            <button disabled={!canSave || saving} onClick={save} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save Template'}
+            </button>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-gray-500">Name</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} disabled={!canManage}
+              className="w-full mt-1 px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm disabled:bg-gray-50" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-500">Description</label>
+            <input value={description} onChange={(e) => setDescription(e.target.value)} disabled={!canManage}
+              className="w-full mt-1 px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm disabled:bg-gray-50" />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={isActive} disabled={!canManage} onChange={(e) => setIsActive(e.target.checked)} /> Active
+            {isDefault && <span className="ml-2 px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[11px] font-semibold rounded-full">Default template</span>}
+          </label>
+        </div>
+
+        <div className="space-y-4">
+          {stages.map((stage, stageIdx) => (
+            <div key={stage._k} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="px-2 py-1 bg-gray-100 text-gray-500 text-xs font-bold rounded-lg">Stage {stageIdx + 1}</span>
+                <input value={stage.label} disabled={!canManage}
+                  onChange={(e) => updateStage(stageIdx, { label: e.target.value, key: stage.key === `STAGE_${stageIdx + 1}` || !stage.id ? toKey(e.target.value) : stage.key })}
+                  className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-xl text-sm font-semibold focus:border-indigo-500 focus:outline-none disabled:bg-gray-50" />
+                {canManage && (
+                  <div className="flex gap-1">
+                    <button onClick={() => moveStage(stageIdx, -1)} className="px-2 py-1 bg-gray-50 rounded-lg text-gray-500 hover:bg-gray-100" title="Move up">↑</button>
+                    <button onClick={() => moveStage(stageIdx, 1)} className="px-2 py-1 bg-gray-50 rounded-lg text-gray-500 hover:bg-gray-100" title="Move down">↓</button>
+                    <button onClick={() => removeStage(stageIdx)} className="px-2 py-1 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-xs font-semibold">Remove</button>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-4 mb-4 text-xs text-gray-500">
+                <label className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={stage.isOptional} disabled={!canManage} onChange={(e) => updateStage(stageIdx, { isOptional: e.target.checked })} /> Optional stage
+                </label>
+                <label className="flex items-center gap-1.5">
+                  Entry mode:
+                  <select value={stage.entryMode} disabled={!canManage} onChange={(e) => updateStage(stageIdx, { entryMode: e.target.value })}
+                    className="px-2 py-1 border border-gray-200 rounded-lg text-xs">
+                    {ENTRY_MODES.map((m) => <option key={m.value} value={m.value} disabled={!m.enabled}>{m.label}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              <div className="space-y-3 pl-3 border-l-2 border-gray-100">
+                {stage.sections.map((section, secIdx) => (
+                  <div key={section._k} className="bg-gray-50 rounded-xl p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <input value={section.label} disabled={!canManage}
+                        onChange={(e) => updateSection(stageIdx, secIdx, { label: e.target.value, key: !section.id ? toKey(e.target.value) : section.key })}
+                        list="section-presets"
+                        className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none disabled:bg-gray-100" />
+                      <label className="flex items-center gap-1 text-xs text-gray-500">
+                        <input type="checkbox" checked={section.isMandatory} disabled={!canManage} onChange={(e) => updateSection(stageIdx, secIdx, { isMandatory: e.target.checked })} /> Mandatory
+                      </label>
+                      {canManage && (
+                        <div className="flex gap-1">
+                          <button onClick={() => moveSection(stageIdx, secIdx, -1)} className="px-1.5 py-1 bg-white rounded-lg text-gray-400 hover:text-gray-600 border border-gray-200 text-xs">↑</button>
+                          <button onClick={() => moveSection(stageIdx, secIdx, 1)} className="px-1.5 py-1 bg-white rounded-lg text-gray-400 hover:text-gray-600 border border-gray-200 text-xs">↓</button>
+                          <button onClick={() => removeSection(stageIdx, secIdx)} className="px-2 py-1 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-xs font-semibold">✕</button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      {section.fields.map((field, fieldIdx) => (
+                        <div key={field._k} className="flex items-center gap-2">
+                          <input value={field.label} disabled={!canManage}
+                            onChange={(e) => updateField(stageIdx, secIdx, fieldIdx, { label: e.target.value, key: !field.id ? toKey(e.target.value) : field.key })}
+                            className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm bg-white focus:border-indigo-500 focus:outline-none disabled:bg-gray-100" />
+                          <select value={field.fieldType} disabled={!canManage} onChange={(e) => updateField(stageIdx, secIdx, fieldIdx, { fieldType: e.target.value })}
+                            className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white">
+                            {FIELD_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                          <label className="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap">
+                            <input type="checkbox" checked={field.isRequired} disabled={!canManage} onChange={(e) => updateField(stageIdx, secIdx, fieldIdx, { isRequired: e.target.checked })} /> Required
+                          </label>
+                          {canManage && (
+                            <button onClick={() => removeField(stageIdx, secIdx, fieldIdx)} className="px-2 py-1 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-xs font-semibold">✕</button>
+                          )}
+                        </div>
+                      ))}
+                      {canManage && (
+                        <button onClick={() => addField(stageIdx, secIdx)} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800 mt-1">+ Add field</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {canManage && (
+                  <button onClick={() => addSection(stageIdx)} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800">+ Add section</button>
+                )}
+              </div>
+            </div>
+          ))}
+          {canManage && (
+            <button onClick={addStage} className="w-full py-3 border-2 border-dashed border-gray-200 rounded-2xl text-sm font-semibold text-gray-400 hover:text-indigo-600 hover:border-indigo-300">
+              + Add Stage
+            </button>
+          )}
+        </div>
+      </div>
+      <datalist id="section-presets">
+        {SECTION_PRESETS.map((p) => <option key={p} value={p} />)}
+      </datalist>
+    </AppShell>
+  )
+}
