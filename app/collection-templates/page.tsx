@@ -5,7 +5,10 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import { BookOpen } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+const GUIDE_URL = 'https://claude.ai/code/artifact/6f64a71f-ad53-45e1-a65e-d6c54820d242'
 
 interface Template { id: string; code: string; name: string; description: string | null; isDefault: boolean; isActive: boolean }
 
@@ -49,9 +52,15 @@ export default function CollectionTemplatesPage() {
     <AppShell>
       <SetupTabs />
       <div className="space-y-6 max-w-3xl">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Collection Templates</h1>
-          <p className="text-gray-500 text-sm">Define how a Daily Collection is structured — stages, sections, and fields — without a code change.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Collection Templates</h1>
+            <p className="text-gray-500 text-sm">Define how a Daily Collection is structured — stages, sections, and fields — without a code change.</p>
+          </div>
+          <a href={GUIDE_URL} target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-lg hover:bg-indigo-100 whitespace-nowrap">
+            <BookOpen className="w-3.5 h-3.5" /> Setup Guide
+          </a>
         </div>
 
         {!canManage && (
