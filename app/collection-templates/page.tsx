@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
@@ -15,10 +16,12 @@ interface Template { id: string; code: string; name: string; description: string
 export default function CollectionTemplatesPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const router = useRouter()
   const [canManage, setCanManage] = useState(false)
   const [items, setItems] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
+  const [duplicating, setDuplicating] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -46,6 +49,17 @@ export default function CollectionTemplatesPage() {
     if (!confirm(`Delete template "${t.name}"?`)) return
     try { await request(`/api/collection-templates/${t.id}`, { method: 'DELETE' }); toast.success('Deleted'); load() }
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not delete') }
+  }
+
+  const duplicate = async (t: Template) => {
+    setDuplicating(t.id)
+    try {
+      const copy = await request(`/api/collection-templates/${t.id}/duplicate`, { method: 'POST' })
+      toast.success(`Duplicated as "${copy.name}" — it's saved inactive until you review it`)
+      router.push(`/collection-templates/${copy.id}`)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not duplicate template')
+    } finally { setDuplicating(null) }
   }
 
   return (
@@ -96,6 +110,12 @@ export default function CollectionTemplatesPage() {
                   <Link href={`/collection-templates/${t.id}`} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-lg hover:bg-indigo-100">
                     {canManage ? 'Edit' : 'View'}
                   </Link>
+                  {canManage && (
+                    <button onClick={() => duplicate(t)} disabled={duplicating === t.id}
+                      className="px-3 py-1.5 bg-gray-50 text-gray-700 text-xs font-semibold rounded-lg hover:bg-gray-100 disabled:opacity-50">
+                      {duplicating === t.id ? 'Duplicating…' : 'Duplicate'}
+                    </button>
+                  )}
                   {canManage && !t.isDefault && (
                     <button onClick={() => remove(t)} className="px-3 py-1.5 bg-red-50 text-red-700 text-xs font-semibold rounded-lg hover:bg-red-100">Delete</button>
                   )}
