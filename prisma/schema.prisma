@@ -37,7 +37,7 @@ datasource db {
 //   CollectionField.fieldType:      NUMBER | TEXT | SELECT | STAFF_PICKER | PERSON_PICKER | DATE | BOOLEAN
 //   CollectionValidationRule.ruleType: STAGE_SEQUENCE | CASH_NOT_EXCEED_SYSTEM_SALES | DISCOUNT_APPROVAL_LIMIT | NO_NEGATIVE_BALANCE | REQUIRED_FIELD
 //   CollectionSession.status:       OPEN | IN_PROGRESS | COMPLETED | FINALIZED
-//   CollectionStageRecord.status:   PENDING | IN_PROGRESS | COMPLETED | APPROVED | REJECTED
+//   CollectionStageRecord.status:   PENDING | IN_PROGRESS | PENDING_APPROVAL | COMPLETED | APPROVED | REJECTED
 //   WorkflowApproval.status:        PENDING | APPROVED | REJECTED
 
 model User {

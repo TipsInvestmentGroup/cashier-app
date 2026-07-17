@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { hasPermission, RESOURCES } from '@/lib/rbac'
 
 const toCode = (s: string) => String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 
@@ -20,7 +21,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Only an administrator can create collection templates' }, { status: 403 })
+  if (user.role !== 'ADMIN' && !(await hasPermission(user.email, user.userId, RESOURCES.COLLECTION_TEMPLATES, 'add'))) {
+    return NextResponse.json({ error: 'You are not authorized to create collection templates' }, { status: 403 })
+  }
 
   const { name, description } = await req.json().catch(() => ({}))
   if (!name || !String(name).trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 })

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { hasPermission, RESOURCES } from '@/lib/rbac'
 
 const FIELD_TYPES = ['NUMBER', 'TEXT', 'SELECT', 'STAFF_PICKER', 'PERSON_PICKER', 'DATE', 'BOOLEAN']
 const ENTRY_MODES = ['SINGLE_STAFF', 'MULTI_STAFF_GRID', 'BATCH', 'EXCEL_IMPORT', 'POS_SYNC']
@@ -9,6 +10,9 @@ const ENTRY_MODES = ['SINGLE_STAFF', 'MULTI_STAFF_GRID', 'BATCH', 'EXCEL_IMPORT'
 interface FieldInput { id?: string; key: string; label: string; fieldType: string; order?: number; isRequired?: boolean; config?: string | null }
 interface SectionInput { id?: string; key: string; label: string; order?: number; isMandatory?: boolean; fields?: FieldInput[] }
 interface StageInput { id?: string; key: string; label: string; order?: number; isOptional?: boolean; entryMode?: string; sections?: SectionInput[] }
+interface RuleInput { id?: string; ruleType: string; config?: string | null; isActive?: boolean }
+
+const RULE_TYPES = ['STAGE_SEQUENCE', 'CASH_NOT_EXCEED_SYSTEM_SALES', 'DISCOUNT_APPROVAL_LIMIT', 'NO_NEGATIVE_BALANCE', 'REQUIRED_FIELD']
 
 /** Full template tree — any authed user (the stage renderer needs it to draw a session's form). */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -42,16 +46,25 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Only an administrator can edit collection templates' }, { status: 403 })
+  if (user.role !== 'ADMIN' && !(await hasPermission(user.email, user.userId, RESOURCES.COLLECTION_TEMPLATES, 'edit'))) {
+    return NextResponse.json({ error: 'You are not authorized to edit collection templates' }, { status: 403 })
+  }
 
   const { id } = await params
   const existing = await prisma.collectionTemplate.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Template not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
-  const { name, description, isActive, stages } = body as { name?: string; description?: string | null; isActive?: boolean; stages?: StageInput[] }
+  const { name, description, isActive, stages, validationRules } = body as { name?: string; description?: string | null; isActive?: boolean; stages?: StageInput[]; validationRules?: RuleInput[] }
 
   if (!Array.isArray(stages)) return NextResponse.json({ error: 'stages must be an array' }, { status: 400 })
+  const rules = Array.isArray(validationRules) ? validationRules : []
+  for (const r of rules) {
+    if (!RULE_TYPES.includes(r.ruleType)) return NextResponse.json({ error: `Invalid rule type: ${r.ruleType}` }, { status: 400 })
+    if (r.config) {
+      try { JSON.parse(r.config) } catch { return NextResponse.json({ error: 'Rule config must be valid JSON' }, { status: 400 }) }
+    }
+  }
   for (const s of stages) {
     if (!s.key || !s.label) return NextResponse.json({ error: 'Every stage needs a key and a label' }, { status: 400 })
     if (s.entryMode && !ENTRY_MODES.includes(s.entryMode)) return NextResponse.json({ error: `Invalid entry mode: ${s.entryMode}` }, { status: 400 })
@@ -118,7 +131,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         }
       }
 
-      await tx.auditLog.create({ data: { userId: user.userId, action: 'UPDATE', entity: 'CollectionTemplate', entityId: id, details: `Saved template tree (${stages.length} stage(s))` } })
+      const existingRules = await tx.collectionValidationRule.findMany({ where: { templateId: id }, select: { id: true } })
+      const incomingRuleIds = new Set(rules.filter((r) => r.id).map((r) => r.id as string))
+      const rulesToDelete = existingRules.filter((r) => !incomingRuleIds.has(r.id))
+      if (rulesToDelete.length) await tx.collectionValidationRule.deleteMany({ where: { id: { in: rulesToDelete.map((r) => r.id) } } })
+      for (const r of rules) {
+        const data = { ruleType: r.ruleType, config: r.config ?? null, isActive: r.isActive === undefined ? true : !!r.isActive }
+        if (r.id) await tx.collectionValidationRule.update({ where: { id: r.id }, data })
+        else await tx.collectionValidationRule.create({ data: { templateId: id, ...data } })
+      }
+
+      await tx.auditLog.create({ data: { userId: user.userId, action: 'UPDATE', entity: 'CollectionTemplate', entityId: id, details: `Saved template tree (${stages.length} stage(s), ${rules.length} rule(s))` } })
     })
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
@@ -132,7 +155,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const saved = await prisma.collectionTemplate.findUnique({
     where: { id },
-    include: { stages: { orderBy: { order: 'asc' }, include: { sections: { orderBy: { order: 'asc' }, include: { fields: { orderBy: { order: 'asc' } } } } } } },
+    include: {
+      validationRules: true,
+      stages: { orderBy: { order: 'asc' }, include: { sections: { orderBy: { order: 'asc' }, include: { fields: { orderBy: { order: 'asc' } } } } } },
+    },
   })
   return NextResponse.json(saved)
 }
@@ -141,7 +167,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Only an administrator can delete collection templates' }, { status: 403 })
+  if (user.role !== 'ADMIN' && !(await hasPermission(user.email, user.userId, RESOURCES.COLLECTION_TEMPLATES, 'delete'))) {
+    return NextResponse.json({ error: 'You are not authorized to delete collection templates' }, { status: 403 })
+  }
 
   const { id } = await params
   const existing = await prisma.collectionTemplate.findUnique({ where: { id } })

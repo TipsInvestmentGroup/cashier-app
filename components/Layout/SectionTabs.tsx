@@ -40,6 +40,7 @@ export const DAILY_TABS: Tab[] = [
   { href: '/excess-loss', label: 'Excess & Loss', icon: TrendingUp, roles: CASHIER_ROLES },
   { href: '/excess-recon', label: 'Excess Recon', icon: ListChecks, roles: CASHIER_ROLES },
   { href: '/collection-sessions', label: 'Collection Sessions', icon: Workflow, roles: CASHIER_ROLES },
+  { href: '/collection-approvals', label: 'Collection Approvals', icon: ClipboardCheck, roles: CASHIER_ROLES },
 ]
 
 export const BILLS_TABS: Tab[] = [

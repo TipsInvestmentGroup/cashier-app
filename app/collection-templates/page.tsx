@@ -12,15 +12,19 @@ interface Template { id: string; code: string; name: string; description: string
 export default function CollectionTemplatesPage() {
   const { request } = useApi()
   const { user } = useAuth()
-  const canManage = user?.role === 'ADMIN'
+  const [canManage, setCanManage] = useState(false)
   const [items, setItems] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setItems((await request('/api/collection-templates')) || []) } finally { setLoading(false) }
-  }, [request])
+    try {
+      const [tpl, perms] = await Promise.all([request('/api/collection-templates'), request('/api/permissions/me')])
+      setItems(tpl || [])
+      setCanManage(user?.role === 'ADMIN' || !!perms?.COLLECTION_TEMPLATES?.canAdd)
+    } finally { setLoading(false) }
+  }, [request, user])
 
   useEffect(() => { load() }, [load])
 

@@ -10,12 +10,19 @@ import toast from 'react-hot-toast'
 const FIELD_TYPES = ['NUMBER', 'TEXT', 'SELECT', 'STAFF_PICKER', 'PERSON_PICKER', 'DATE', 'BOOLEAN'] as const
 const ENTRY_MODES: { value: string; label: string; enabled: boolean }[] = [
   { value: 'SINGLE_STAFF', label: 'Single Staff (one form, save, next staff)', enabled: true },
-  { value: 'MULTI_STAFF_GRID', label: 'Multi-Staff Grid — coming in a later phase', enabled: false },
+  { value: 'MULTI_STAFF_GRID', label: 'Multi-Staff Grid (all staff, one screen, one save)', enabled: true },
   { value: 'BATCH', label: 'Batch Entry — coming in a later phase', enabled: false },
   { value: 'EXCEL_IMPORT', label: 'Excel Import — coming in a later phase', enabled: false },
   { value: 'POS_SYNC', label: 'POS Auto Sync — coming in a later phase', enabled: false },
 ]
 const SECTION_PRESETS = ['SALES', 'PAYMENT_CHANNELS', 'BILLS', 'DISCOUNTS', 'CANCELLATIONS', 'RETURNS', 'REFUNDS', 'EXCESS', 'CASH_RECON', 'BANK_DEPOSITS', 'CUSTOMER_DETAILS', 'REFERENCE_NUMBERS', 'REMARKS', 'ATTACHMENTS']
+const RULE_TYPES: { value: string; label: string; help: string }[] = [
+  { value: 'STAGE_SEQUENCE', label: 'Stage Sequence', help: 'A required stage must be completed before later stages can be submitted. No config needed.' },
+  { value: 'CASH_NOT_EXCEED_SYSTEM_SALES', label: 'Cash Cannot Exceed System Sales', help: '{"cashFieldKey":"CASH","systemSalesFieldKey":"SYSTEM_SALES","reasonFieldKey":"EXCESS_REASON"}' },
+  { value: 'DISCOUNT_APPROVAL_LIMIT', label: 'Discount Approval Limit', help: '{"fieldKey":"DISCOUNT","limit":50000,"approverRole":"MANAGER"}' },
+  { value: 'NO_NEGATIVE_BALANCE', label: 'No Negative Balance', help: '{"fieldKey":"CASH"} — omit fieldKey to apply to every number field' },
+  { value: 'REQUIRED_FIELD', label: 'Required Field', help: 'No-op — required fields are already enforced per-field in the editor above.' },
+]
 
 let tempSeq = 0
 const tempKey = () => `tmp_${++tempSeq}`
@@ -24,6 +31,7 @@ const toKey = (s: string) => String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/
 interface FieldState { _k: string; id?: string; key: string; label: string; fieldType: string; isRequired: boolean }
 interface SectionState { _k: string; id?: string; key: string; label: string; isMandatory: boolean; fields: FieldState[] }
 interface StageState { _k: string; id?: string; key: string; label: string; isOptional: boolean; entryMode: string; sections: SectionState[] }
+interface RuleState { _k: string; id?: string; ruleType: string; config: string; isActive: boolean }
 
 function move<T>(arr: T[], index: number, dir: -1 | 1): T[] {
   const target = index + dir
@@ -38,20 +46,22 @@ export default function CollectionTemplateEditorPage() {
   const router = useRouter()
   const { request } = useApi()
   const { user } = useAuth()
-  const canManage = user?.role === 'ADMIN'
+  const [canManage, setCanManage] = useState(false)
 
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [isActive, setIsActive] = useState(true)
   const [isDefault, setIsDefault] = useState(false)
   const [stages, setStages] = useState<StageState[]>([])
+  const [rules, setRules] = useState<RuleState[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const t = await request(`/api/collection-templates/${id}`)
+      const [t, perms] = await Promise.all([request(`/api/collection-templates/${id}`), request('/api/permissions/me')])
+      setCanManage(user?.role === 'ADMIN' || !!perms?.COLLECTION_TEMPLATES?.canEdit)
       setName(t.name); setDescription(t.description || ''); setIsActive(t.isActive); setIsDefault(t.isDefault)
       setStages((t.stages || []).map((s: { id: string; key: string; label: string; isOptional: boolean; entryMode: string; sections: { id: string; key: string; label: string; isMandatory: boolean; fields: { id: string; key: string; label: string; fieldType: string; isRequired: boolean }[] }[] }) => ({
         _k: tempKey(), id: s.id, key: s.key, label: s.label, isOptional: s.isOptional, entryMode: s.entryMode,
@@ -60,10 +70,13 @@ export default function CollectionTemplateEditorPage() {
           fields: sec.fields.map((f) => ({ _k: tempKey(), id: f.id, key: f.key, label: f.label, fieldType: f.fieldType, isRequired: f.isRequired })),
         })),
       })))
+      setRules((t.validationRules || []).map((r: { id: string; ruleType: string; config: string | null; isActive: boolean }) => ({
+        _k: tempKey(), id: r.id, ruleType: r.ruleType, config: r.config || '', isActive: r.isActive,
+      })))
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not load template')
     } finally { setLoading(false) }
-  }, [request, id])
+  }, [request, id, user])
 
   useEffect(() => { load() }, [load])
 
@@ -91,7 +104,15 @@ export default function CollectionTemplateEditorPage() {
     updateSection(stageIdx, secIdx, { fields: section.fields.map((f, i) => (i === fieldIdx ? { ...f, ...patch } : f)) })
   }
 
-  const canSave = useMemo(() => name.trim().length > 0, [name])
+  const addRule = () => setRules((prev) => [...prev, { _k: tempKey(), ruleType: 'DISCOUNT_APPROVAL_LIMIT', config: '', isActive: true }])
+  const removeRule = (i: number) => setRules((prev) => prev.filter((_, idx) => idx !== i))
+  const updateRule = (i: number, patch: Partial<RuleState>) => setRules((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+
+  const canSave = useMemo(() => {
+    if (!name.trim()) return false
+    for (const r of rules) { if (r.config) { try { JSON.parse(r.config) } catch { return false } } }
+    return true
+  }, [name, rules])
 
   const save = async () => {
     setSaving(true)
@@ -105,6 +126,7 @@ export default function CollectionTemplateEditorPage() {
             fields: sec.fields.map((f) => ({ id: f.id, key: f.key, label: f.label, fieldType: f.fieldType, isRequired: f.isRequired })),
           })),
         })),
+        validationRules: rules.map((r) => ({ id: r.id, ruleType: r.ruleType, config: r.config || null, isActive: r.isActive })),
       }
       await request(`/api/collection-templates/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
       toast.success('Template saved')
@@ -232,6 +254,36 @@ export default function CollectionTemplateEditorPage() {
               + Add Stage
             </button>
           )}
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <h2 className="text-sm font-bold text-gray-700 mb-1">Validation Rules</h2>
+          <p className="text-xs text-gray-400 mb-3">Fixed rule types, configured per template — not a free-form rule builder.</p>
+          <div className="space-y-3">
+            {rules.map((rule, i) => {
+              const def = RULE_TYPES.find((t) => t.value === rule.ruleType)
+              return (
+                <div key={rule._k} className="bg-gray-50 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <select value={rule.ruleType} disabled={!canManage} onChange={(e) => updateRule(i, { ruleType: e.target.value })}
+                      className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm bg-white">
+                      {RULE_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                    <label className="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap">
+                      <input type="checkbox" checked={rule.isActive} disabled={!canManage} onChange={(e) => updateRule(i, { isActive: e.target.checked })} /> Active
+                    </label>
+                    {canManage && <button onClick={() => removeRule(i)} className="px-2 py-1 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-xs font-semibold">✕</button>}
+                  </div>
+                  <input value={rule.config} disabled={!canManage || rule.ruleType === 'STAGE_SEQUENCE' || rule.ruleType === 'REQUIRED_FIELD'}
+                    onChange={(e) => updateRule(i, { config: e.target.value })} placeholder={def?.help}
+                    className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-mono bg-white focus:border-indigo-500 focus:outline-none disabled:bg-gray-100" />
+                  <p className="text-[11px] text-gray-400">{def?.help}</p>
+                </div>
+              )
+            })}
+            {canManage && <button onClick={addRule} className="text-xs text-indigo-600 font-semibold hover:text-indigo-800">+ Add rule</button>}
+            {rules.length === 0 && !canManage && <p className="text-xs text-gray-400">No validation rules configured.</p>}
+          </div>
         </div>
       </div>
       <datalist id="section-presets">

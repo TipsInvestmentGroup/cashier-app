@@ -3,12 +3,21 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
+import Link from 'next/link'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
 interface Template { id: string; name: string; code: string; isDefault: boolean; isActive: boolean }
+interface TodaySession {
+  id: string; status: string
+  outlet: { name: string }
+  template: { name: string }
+  stageRecords: { status: string }[]
+}
+
+const DONE_STATUSES = new Set(['COMPLETED', 'APPROVED', 'PENDING_APPROVAL'])
 
 /**
  * Launcher for custom-template Collection Sessions. The Standard Staff
@@ -25,14 +34,20 @@ export default function CollectionSessionsLauncherPage() {
   const [templateId, setTemplateId] = useState('')
   const [loading, setLoading] = useState(true)
   const [opening, setOpening] = useState(false)
+  const [todaySessions, setTodaySessions] = useState<TodaySession[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [o, t] = await Promise.all([request('/api/outlets'), request('/api/collection-templates')])
+      const today = new Date().toISOString().slice(0, 10)
+      const [o, t, sessions] = await Promise.all([
+        request('/api/outlets'), request('/api/collection-templates'),
+        request(`/api/collection-sessions?date=${today}`).catch(() => []),
+      ])
       setOutlets(o || [])
       const custom = (t || []).filter((tpl: Template) => !tpl.isDefault && tpl.isActive)
       setTemplates(custom)
+      setTodaySessions(sessions || [])
       if (user?.outletId) setOutletId(user.outletId)
       else if (o?.[0]) setOutletId(o[0].id)
       if (custom[0]) setTemplateId(custom[0].id)
@@ -85,6 +100,30 @@ export default function CollectionSessionsLauncherPage() {
             </>
           )}
         </div>
+
+        {todaySessions.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+            <h2 className="text-sm font-bold text-gray-700 mb-3">Today's Sessions</h2>
+            <div className="divide-y divide-gray-50">
+              {todaySessions.map((s) => {
+                const done = s.stageRecords.filter((r) => DONE_STATUSES.has(r.status)).length
+                const total = s.stageRecords.length || 1
+                const pct = Math.round((done / total) * 100)
+                return (
+                  <Link key={s.id} href={`/collection-sessions/${s.id}`} className="flex items-center justify-between py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">{s.template.name}</p>
+                      <p className="text-xs text-gray-400">{s.outlet.name} · {s.status}</p>
+                    </div>
+                    <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   )
