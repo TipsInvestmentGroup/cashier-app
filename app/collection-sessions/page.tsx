@@ -48,7 +48,7 @@ export default function CollectionSessionsLauncherPage() {
       const custom = (t || []).filter((tpl: Template) => !tpl.isDefault && tpl.isActive)
       setTemplates(custom)
       setTodaySessions(sessions || [])
-      if (user?.outletId) setOutletId(user.outletId)
+      if (user?.outlet?.id) setOutletId(user.outlet.id)
       else if (o?.[0]) setOutletId(o[0].id)
       if (custom[0]) setTemplateId(custom[0].id)
     } finally { setLoading(false) }
@@ -82,7 +82,7 @@ export default function CollectionSessionsLauncherPage() {
             <>
               <div>
                 <label className="text-xs font-semibold text-gray-500">Outlet</label>
-                <select value={outletId} onChange={(e) => setOutletId(e.target.value)} disabled={!!user?.outletId}
+                <select value={outletId} onChange={(e) => setOutletId(e.target.value)} disabled={!!user?.outlet?.id}
                   className="w-full mt-1 px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none disabled:bg-gray-50">
                   {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </select>
