@@ -18,8 +18,18 @@ export async function GET(req: NextRequest) {
   if ((await prisma.cancellationReason.count()) === 0) {
     for (const d of DEFAULTS) await prisma.cancellationReason.upsert({ where: { code: d.code }, update: {}, create: d })
   }
-  const items = await prisma.cancellationReason.findMany({ orderBy: { createdAt: 'asc' } })
-  return NextResponse.json(items)
+  const items = await prisma.cancellationReason.findMany({
+    orderBy: { createdAt: 'asc' },
+    include: { categories: { select: { categoryId: true } }, products: { select: { productId: true } } },
+  })
+  const shaped = items.map((r) => ({
+    ...r,
+    categoryIds: r.categories.map((c) => c.categoryId),
+    productIds: r.products.map((p) => p.productId),
+    categories: undefined,
+    products: undefined,
+  }))
+  return NextResponse.json(shaped)
 }
 
 /** Add a reason — owner / fixed manager / owner-chosen manager only. */

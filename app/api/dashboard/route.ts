@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { approvalGate, TOP_DEBTOR_BILL_TYPES } from '@/lib/bill-types'
+import { getCollectionSessionTotals } from '@/lib/collection-session-totals'
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -83,6 +84,13 @@ export async function GET(req: NextRequest) {
     }),
   ])
 
+  const [templateToday, templateWeek, templateMonth] = await Promise.all([
+    getCollectionSessionTotals({ outletId, dateRange: { gte: todayStart, lte: todayEnd } }),
+    getCollectionSessionTotals({ outletId, dateRange: { gte: weekStart, lte: weekEnd } }),
+    getCollectionSessionTotals({ outletId, dateRange: { gte: monthStart, lte: monthEnd } }),
+  ])
+  const sumTotals = (rows: { total: number }[]) => rows.reduce((s, r) => s + r.total, 0)
+
   // Per-outlet metrics for the dashboard outlet-performance widget
   const [todayByOutlet, unpaidByOutlet] = await Promise.all([
     prisma.dailyCollection.groupBy({
@@ -125,14 +133,15 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     today: {
-      total: todayCollections._sum.total || 0,
+      total: (todayCollections._sum.total || 0) + sumTotals(templateToday),
       cash: todayCollections._sum.cash || 0,
       crdb: todayCollections._sum.crdb || 0,
       stanbic: todayCollections._sum.stanbic || 0,
       mpesa: todayCollections._sum.mpesa || 0,
+      templateCollections: sumTotals(templateToday),
     },
-    week: { total: weekCollections._sum.total || 0 },
-    month: { total: monthCollections._sum.total || 0 },
+    week: { total: (weekCollections._sum.total || 0) + sumTotals(templateWeek) },
+    month: { total: (monthCollections._sum.total || 0) + sumTotals(templateMonth) },
     byBillType,
     unpaidBills: {
       total: unpaidBills._sum.amount || 0,

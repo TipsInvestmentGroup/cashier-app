@@ -20,6 +20,7 @@ interface ReportData {
   products: { id: string; code: string; name: string; buyingPrice: number; sellingPrice: number; unitMeasure: string; isActive: boolean }[]
   byBillType: Record<string, number>
   byPaymentMethod: Record<string, number>
+  templateCollections: { id: string; date: string; status: string; templateName: string; total: number }[]
 }
 interface Outlet { id: string; name: string }
 
@@ -286,6 +287,34 @@ export default function ReportsPage() {
                         </tbody>
                       </table>
                     </div>
+
+                    {data.templateCollections.length > 0 && (
+                      <div className="mt-6">
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Collection Template Sessions</p>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                              <tr className="text-left text-gray-600">
+                                <th className="px-4 py-3 font-semibold">Date</th>
+                                <th className="px-4 py-3 font-semibold">Template</th>
+                                <th className="px-4 py-3 font-semibold">Status</th>
+                                <th className="px-4 py-3 font-semibold">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {data.templateCollections.map((s) => (
+                                <tr key={s.id} className="hover:bg-gray-50">
+                                  <td className="px-4 py-3">{formatDate(s.date)}</td>
+                                  <td className="px-4 py-3">{s.templateName}</td>
+                                  <td className="px-4 py-3 text-gray-500">{s.status}</td>
+                                  <td className="px-4 py-3 font-bold">{formatCurrency(s.total)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

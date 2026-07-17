@@ -145,6 +145,18 @@ export default function CompanyPreferencesPage() {
                 <Field label="VAT rate (%)" hint="Used on purchase orders — e.g. 18">
                   <input value={vatPct} onChange={(e) => setVatPct(e.target.value)} disabled={!isAdmin} inputMode="decimal" className={inputCls} />
                 </Field>
+                <Field label="Business day starts at" hint="Entries before this hour count as the previous business day (e.g. a 1am entry counts as yesterday if set to 05:00)">
+                  <select
+                    value={form.businessDayCutoverHour}
+                    onChange={(e) => setForm((f) => ({ ...f, businessDayCutoverHour: Number(e.target.value) }))}
+                    disabled={!isAdmin}
+                    className={inputCls}
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
+                    ))}
+                  </select>
+                </Field>
               </div>
             </div>
 

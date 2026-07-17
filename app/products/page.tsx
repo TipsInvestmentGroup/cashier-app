@@ -16,17 +16,20 @@ import toast from 'react-hot-toast'
 
 interface Product {
   id: string; code: string; name: string; buyingPrice: number; sellingPrice: number
-  unitMeasure: string; isActive: boolean
+  unitMeasure: string; isActive: boolean; categoryId?: string | null; category?: string | null
+  productCategory?: { id: string; label: string } | null
 }
+interface Category { id: string; label: string; isActive: boolean }
 
 const UNITS = ['unit', 'kg', 'crate 24 bottle', 'crate 25 bottle', 'crate 6 bottle']
-const INIT = { name: '', buyingPrice: '', sellingPrice: '', unitMeasure: 'unit', code: '' }
+const INIT = { name: '', buyingPrice: '', sellingPrice: '', unitMeasure: 'unit', code: '', categoryId: '' }
 
 export default function ProductsPage() {
   const { request } = useApi()
   const { user } = useAuth()
   const confirm = useConfirm()
   const [items, setItems] = useState<Product[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -46,8 +49,9 @@ export default function ProductsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [its, me] = await Promise.all([request('/api/products'), request('/api/permissions/me')])
+      const [its, me, cats] = await Promise.all([request('/api/products'), request('/api/permissions/me'), request('/api/product-categories').catch(() => [])])
       setItems(its || [])
+      setCategories((cats || []).filter((c: Category) => c.isActive))
       setPerms({ canAdd: !!me?.PRODUCTS?.canAdd, canEdit: !!me?.PRODUCTS?.canEdit, canDelete: !!me?.PRODUCTS?.canDelete })
     } finally { setLoading(false) }
   }, [request])
@@ -57,7 +61,7 @@ export default function ProductsPage() {
   const openNew = () => { setEditingId(null); setForm({ ...INIT }); setShowForm(true) }
   const openEdit = (p: Product) => {
     setEditingId(p.id)
-    setForm({ name: p.name, buyingPrice: String(p.buyingPrice), sellingPrice: String(p.sellingPrice), unitMeasure: p.unitMeasure, code: p.code })
+    setForm({ name: p.name, buyingPrice: String(p.buyingPrice), sellingPrice: String(p.sellingPrice), unitMeasure: p.unitMeasure, code: p.code, categoryId: p.categoryId || '' })
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -69,7 +73,7 @@ export default function ProductsPage() {
     try {
       const payload = JSON.stringify({
         name: form.name, buyingPrice: Number(form.buyingPrice) || 0, sellingPrice: Number(form.sellingPrice) || 0,
-        unitMeasure: form.unitMeasure, ...(editingId ? { code: form.code } : {}),
+        unitMeasure: form.unitMeasure, categoryId: form.categoryId || null, ...(editingId ? { code: form.code } : {}),
       })
       if (editingId) await request(`/api/products/${editingId}`, { method: 'PUT', body: payload })
       else await request('/api/products', { method: 'POST', body: payload })
@@ -141,6 +145,15 @@ export default function ProductsPage() {
                 </select>
               </div>
               <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">Category</label>
+                <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                  <option value="">No category</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Managed under Setup → Product Categories — also drives which Cancellation Reasons apply.</p>
+              </div>
+              <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">Buying Price (TZS)</label>
                 <MoneyInput value={form.buyingPrice} onChange={(v) => setForm({ ...form, buyingPrice: v })}
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="0" />
@@ -174,6 +187,7 @@ export default function ProductsPage() {
                   <tr className="text-left text-gray-600">
                     <th className="px-4 py-3 font-semibold">Code</th>
                     <th className="px-4 py-3 font-semibold">Product</th>
+                    <th className="px-4 py-3 font-semibold">Category</th>
                     <th className="px-4 py-3 font-semibold">Unit</th>
                     <th className="px-4 py-3 font-semibold">Buying</th>
                     <th className="px-4 py-3 font-semibold">Selling</th>
@@ -186,6 +200,7 @@ export default function ProductsPage() {
                     <tr key={p.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 font-mono text-indigo-700 font-semibold">{p.code}</td>
                       <td className={`px-4 py-3 font-medium ${p.isActive ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{p.name}</td>
+                      <td className="px-4 py-3 text-gray-500">{p.productCategory?.label || p.category || '—'}</td>
                       <td className="px-4 py-3 text-gray-500">{p.unitMeasure}</td>
                       <td className="px-4 py-3 text-gray-600">{formatCurrency(p.buyingPrice)}</td>
                       <td className="px-4 py-3 font-semibold text-gray-900">{formatCurrency(p.sellingPrice)}</td>
@@ -202,7 +217,7 @@ export default function ProductsPage() {
                     </tr>
                   ))}
                   {filtered.length === 0 && (
-                    <tr><td colSpan={canManage ? 7 : 6}><EmptyState icon="📦" title="No products yet" hint="Add your first product to the catalogue." /></td></tr>
+                    <tr><td colSpan={canManage ? 8 : 7}><EmptyState icon="📦" title="No products yet" hint="Add your first product to the catalogue." /></td></tr>
                   )}
                 </tbody>
               </table>

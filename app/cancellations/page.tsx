@@ -19,9 +19,9 @@ interface Cancellation {
   quantity: number; amount: number; status: string; approvedBy: string; staffName: string; outletName: string
 }
 interface Staff { id: string; name: string; type: string }
-interface Product { id: string; name: string; sellingPrice: number; isActive: boolean }
-const REASONS = ['Double Punch', 'Out of Stock', 'Wrong Punch']
-const INIT = { staffName: '', productId: '', productName: '', sellingPrice: 0, reason: 'Double Punch', quantity: '' }
+interface Product { id: string; name: string; sellingPrice: number; isActive: boolean; categoryId?: string | null }
+interface CancelReason { code: string; label: string; isActive: boolean; appliesToAll: boolean; categoryIds: string[]; productIds: string[] }
+const INIT = { staffName: '', productId: '', productName: '', sellingPrice: 0, reason: '', quantity: '' }
 
 const STATUS_STYLE: Record<string, string> = {
   APPROVED: 'bg-green-100 text-green-700',
@@ -43,6 +43,14 @@ function CancellationsPage() {
   const [groupBy, setGroupBy] = useState<'none' | 'staff' | 'product'>('none')
   const [staff, setStaff] = useState<Staff[]>([])
   const [products, setProducts] = useState<Product[]>([])
+  const [cancelReasons, setCancelReasons] = useState<CancelReason[]>([])
+  const reasonsForProduct = (productId: string) => {
+    const product = products.find((p) => p.id === productId)
+    return cancelReasons
+      .filter((r) => r.isActive)
+      .filter((r) => r.appliesToAll || !productId || (product && (r.categoryIds.includes(product.categoryId || '') || r.productIds.includes(productId))))
+      .map((r) => r.label)
+  }
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({ ...INIT })
@@ -52,12 +60,14 @@ function CancellationsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [rows, persons, prods, access] = await Promise.all([
+      const [rows, persons, prods, access, reasons] = await Promise.all([
         request('/api/cancellations'), request('/api/persons'), request('/api/products'), request('/api/cancellation-access'),
+        request('/api/cancellation-reasons').catch(() => []),
       ])
       setItems(rows || [])
       setStaff((persons || []).filter((p: Staff) => p.type === 'STAFF_LOSS').sort((a: Staff, b: Staff) => a.name.localeCompare(b.name)))
       setProducts((prods || []).filter((p: Product) => p.isActive))
+      setCancelReasons(reasons || [])
       setCanApprove(!!access?.canApprove)
       setCanCreate(!!access?.canCreate)
     } finally { setLoading(false) }
@@ -164,7 +174,12 @@ function CancellationsPage() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Product</label>
-                <select value={form.productId} onChange={(e) => { const p = products.find((x) => x.id === e.target.value); setForm({ ...form, productId: e.target.value, productName: p?.name || '', sellingPrice: p?.sellingPrice || 0 }) }}
+                <select value={form.productId} onChange={(e) => {
+                  const p = products.find((x) => x.id === e.target.value)
+                  const nextReasons = reasonsForProduct(e.target.value)
+                  const nextReason = nextReasons.includes(form.reason) ? form.reason : (nextReasons[0] || '')
+                  setForm({ ...form, productId: e.target.value, productName: p?.name || '', sellingPrice: p?.sellingPrice || 0, reason: nextReason })
+                }}
                   className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white text-sm">
                   <option value="">Select product…</option>
                   {products.map((p) => <option key={p.id} value={p.id}>{p.name} · {formatCurrency(p.sellingPrice)}</option>)}
@@ -174,7 +189,7 @@ function CancellationsPage() {
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Reason</label>
                 <select value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })}
                   className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white text-sm">
-                  {REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                  {reasonsForProduct(form.productId).map((r) => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
               <div>

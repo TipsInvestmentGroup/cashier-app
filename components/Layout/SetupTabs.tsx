@@ -7,6 +7,7 @@ import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, 
 // The Setup groups, in the order they appear. Role-gated per group.
 export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles: string[] }[] = [
   { href: '/products', label: 'Products', icon: Package, roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
+  { href: '/product-categories', label: 'Product Categories', icon: FolderTree, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/departments', label: 'Departments', icon: FolderTree, roles: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN', 'WAITER'] },
   { href: '/person-categories', label: 'Categories', icon: Tag, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/payment-channels', label: 'Payment Channels', icon: CreditCard, roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },

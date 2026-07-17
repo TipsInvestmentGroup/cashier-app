@@ -19,6 +19,7 @@ export interface CompanyConfig {
   receiptDisclaimerText: string // small-print line on printed 80mm bills (may be empty)
   receiptFooterText: string // bold sign-off line on printed 80mm bills (may be empty)
   vatRate: number // 0.18 = 18%
+  businessDayCutoverHour: number // 0-23; entries before this hour count as the previous business day
 }
 
 export const DEFAULT_COMPANY_CONFIG: CompanyConfig = {
@@ -34,6 +35,7 @@ export const DEFAULT_COMPANY_CONFIG: CompanyConfig = {
   receiptDisclaimerText: 'Hii sio risiti halali ya malipo, huu ni mchanganuo',
   receiptFooterText: 'Karibu tena!',
   vatRate: 0.18,
+  businessDayCutoverHour: 5,
 }
 
 /** Merge a stored/partial object over the defaults, dropping bad values. */
@@ -56,6 +58,9 @@ export function normalizeCompanyConfig(raw: unknown): CompanyConfig {
     receiptDisclaimerText: typeof r.receiptDisclaimerText === 'string' ? r.receiptDisclaimerText : DEFAULT_COMPANY_CONFIG.receiptDisclaimerText,
     receiptFooterText: typeof r.receiptFooterText === 'string' ? r.receiptFooterText : DEFAULT_COMPANY_CONFIG.receiptFooterText,
     vatRate: Number.isFinite(vat) && vat >= 0 && vat < 1 ? vat : DEFAULT_COMPANY_CONFIG.vatRate,
+    businessDayCutoverHour: Number.isInteger(Number(r.businessDayCutoverHour)) && Number(r.businessDayCutoverHour) >= 0 && Number(r.businessDayCutoverHour) <= 23
+      ? Number(r.businessDayCutoverHour)
+      : DEFAULT_COMPANY_CONFIG.businessDayCutoverHour,
   }
 }
 

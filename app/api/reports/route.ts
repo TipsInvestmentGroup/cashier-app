@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { approvalGate } from '@/lib/bill-types'
+import { getCollectionSessionTotals } from '@/lib/collection-session-totals'
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
   const dateFilter = { gte: start, lte: end }
   const outletFilter = outletId ? { outletId } : {}
 
-  const [collections, signedBills, paidBills, cancellations, products] = await Promise.all([
+  const [collections, signedBills, paidBills, cancellations, products, templateCollections] = await Promise.all([
     prisma.dailyCollection.findMany({
       where: { ...outletFilter, date: dateFilter },
       include: { outlet: true, cashier: { select: { name: true } } },
@@ -55,9 +56,11 @@ export async function GET(req: NextRequest) {
       orderBy: { date: 'desc' },
     }),
     prisma.product.findMany({ orderBy: { name: 'asc' } }),
+    getCollectionSessionTotals({ outletId: outletId || undefined, dateRange: dateFilter }),
   ])
 
-  const totalCollected = collections.reduce((s, c) => s + c.total, 0)
+  const templateCollectionsTotal = templateCollections.reduce((s, c) => s + c.total, 0)
+  const totalCollected = collections.reduce((s, c) => s + c.total, 0) + templateCollectionsTotal
   const totalSigned = signedBills.reduce((s, b) => s + b.amount, 0)
   const totalPaid = paidBills.reduce((s, p) => s + p.amountPaid, 0)
 
@@ -83,5 +86,6 @@ export async function GET(req: NextRequest) {
     products,
     byBillType,
     byPaymentMethod,
+    templateCollections,
   })
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
+import { resolveBusinessDate } from '@/lib/business-date'
+import { getCompanyConfig } from '@/lib/company-config'
 import { startOfDay, endOfDay } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -21,9 +23,16 @@ export async function GET(req: NextRequest) {
       ...(dateParam ? { date: { gte: startOfDay(new Date(dateParam)), lte: endOfDay(new Date(dateParam)) } } : {}),
     },
     include: {
-      template: { select: { id: true, name: true, code: true } },
+      template: {
+        select: {
+          id: true, name: true, code: true, description: true,
+          stages: { select: { id: true, key: true, label: true, order: true }, orderBy: { order: 'asc' } },
+        },
+      },
       outlet: { select: { id: true, name: true } },
-      stageRecords: { select: { id: true, status: true, stageId: true } },
+      createdBy: { select: { id: true, name: true } },
+      completedBy: { select: { id: true, name: true } },
+      stageRecords: { select: { id: true, status: true, stageId: true, updatedAt: true } },
     },
     orderBy: { date: 'desc' },
   })
@@ -44,9 +53,10 @@ export async function POST(req: NextRequest) {
 
   const template = await prisma.collectionTemplate.findUnique({ where: { id: body.templateId } })
   if (!template || !template.isActive) return NextResponse.json({ error: 'Template not found or inactive' }, { status: 404 })
+  if (template.isDefault) return NextResponse.json({ error: 'The Standard template uses the Daily Collections screen directly — no session needed.' }, { status: 400 })
 
-  const date = body.date ? new Date(body.date) : new Date()
-  const day = startOfDay(date)
+  const { businessDayCutoverHour } = await getCompanyConfig()
+  const day = body.date ? startOfDay(new Date(body.date)) : resolveBusinessDate(new Date(), businessDayCutoverHour)
 
   const existing = await prisma.collectionSession.findUnique({
     where: { outletId_date_templateId: { outletId, date: day, templateId: template.id } },

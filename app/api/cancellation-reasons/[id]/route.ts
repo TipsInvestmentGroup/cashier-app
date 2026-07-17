@@ -15,9 +15,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const data: any = {}
   if (body.label !== undefined) data.label = String(body.label).trim()
   if (body.isActive !== undefined) data.isActive = !!body.isActive
+  if (body.appliesToAll !== undefined) data.appliesToAll = !!body.appliesToAll
 
   try {
-    const item = await prisma.cancellationReason.update({ where: { id }, data })
+    const item = await prisma.$transaction(async (tx) => {
+      const updated = await tx.cancellationReason.update({ where: { id }, data })
+      // Diff-and-replace the mapping, same shape as the Collection Template PUT.
+      if (Array.isArray(body.categoryIds)) {
+        await tx.cancellationReasonCategory.deleteMany({ where: { reasonId: id } })
+        for (const categoryId of body.categoryIds as string[]) {
+          await tx.cancellationReasonCategory.create({ data: { reasonId: id, categoryId } })
+        }
+      }
+      if (Array.isArray(body.productIds)) {
+        await tx.cancellationReasonProduct.deleteMany({ where: { reasonId: id } })
+        for (const productId of body.productIds as string[]) {
+          await tx.cancellationReasonProduct.create({ data: { reasonId: id, productId } })
+        }
+      }
+      return updated
+    })
     await prisma.auditLog.create({ data: { userId: user.userId, action: 'UPDATE', entity: 'CancellationReason', entityId: id, details: `Edited ${item.label}` } })
     return NextResponse.json(item)
   } catch {

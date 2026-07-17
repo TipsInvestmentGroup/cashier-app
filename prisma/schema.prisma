@@ -723,7 +723,12 @@ model Product {
   id              String   @id @default(cuid())
   code            String   @unique // auto-generated, human-readable e.g. COC-001
   name            String
+  // Legacy free-text category — kept (not dropped) so any reader that hasn't
+  // migrated to categoryId still sees a value; scripts/backfill-product-categories.ts
+  // is the one-time migration from this string to a real ProductCategory row.
   category        String? // e.g. "Beers", "Spirits", "Soft Drinks"
+  categoryId      String?
+  productCategory ProductCategory? @relation(fields: [categoryId], references: [id])
   buyingPrice     Float    @default(0)
   sellingPrice    Float    @default(0)
   unitMeasure     String // unit | kg | crate 24 bottle | crate 25 bottle | crate 6 bottle
@@ -745,8 +750,24 @@ model Product {
   stockTransferItems StockTransferItem[]
   purchaseOrderItems PurchaseOrderItem[]
   eventProducts      EventProduct[]
+  cancellationReasons CancellationReasonProduct[]
 
   @@index([name])
+  @@index([categoryId])
+}
+
+/// Admin-managed product category (managed under Setup → Product Categories).
+/// Replaces Product.category's free-text string as the source of truth —
+/// see the backfill note on Product.category above.
+model ProductCategory {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  label     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  products                    Product[]
+  cancellationReasonCategories CancellationReasonCategory[]
 }
 
 /// A central stock location that is not a POS counter — e.g. "Main Store".
@@ -1224,7 +1245,38 @@ model CancellationReason {
   code      String   @unique
   label     String
   isActive  Boolean  @default(true)
+  // true (the default) = this reason is offered for every product, exactly
+  // today's behavior. When false, it's only offered for the specifically
+  // mapped categories/products below — an admin opt-in, not a regression.
+  appliesToAll Boolean @default(true)
   createdAt DateTime @default(now())
+
+  categories CancellationReasonCategory[]
+  products   CancellationReasonProduct[]
+}
+
+/// Restricts a CancellationReason (with appliesToAll = false) to one product category.
+model CancellationReasonCategory {
+  id         String              @id @default(cuid())
+  reasonId   String
+  reason     CancellationReason  @relation(fields: [reasonId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   ProductCategory     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([reasonId, categoryId])
+  @@index([categoryId])
+}
+
+/// Restricts a CancellationReason (with appliesToAll = false) to one specific product.
+model CancellationReasonProduct {
+  id        String             @id @default(cuid())
+  reasonId  String
+  reason    CancellationReason @relation(fields: [reasonId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([reasonId, productId])
+  @@index([productId])
 }
 
 /// Reasons for an "excess amount" (Cash Recon / Collections excess pickers).

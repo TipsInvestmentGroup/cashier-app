@@ -25,6 +25,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (body.sellingPrice !== undefined) data.sellingPrice = roundMoney(body.sellingPrice)
   if (body.unitMeasure !== undefined) data.unitMeasure = UNITS.includes(body.unitMeasure) ? body.unitMeasure : (body.unitMeasure || 'unit')
   if (body.isActive !== undefined) data.isActive = !!body.isActive
+  if (body.categoryId !== undefined) data.categoryId = body.categoryId || null
 
   try {
     const item = await prisma.product.update({ where: { id }, data })

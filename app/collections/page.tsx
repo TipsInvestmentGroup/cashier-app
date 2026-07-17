@@ -9,6 +9,8 @@ import { CashReconForm } from '@/components/recon/CashReconForm'
 import { DigitalReconForm } from '@/components/recon/DigitalReconForm'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
+import { resolveBusinessDate } from '@/lib/business-date'
 import { formatCurrency, formatDateTime, roundMoney } from '@/lib/utils'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
@@ -40,7 +42,7 @@ interface Collection {
   channels?: { channelCode: string; amount: number }[]; excessItems?: CollectionExcessRow[]
 }
 interface ExcessItem { key: string; id?: string; amount: string; reason: string; staffId: string; personId: string; paidAmount: number }
-interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean }
+interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean; categoryId?: string | null }
 interface SignedBill { id: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
 // signed-bill type → paid-bill category label
 const BILLTYPE_TO_CATEGORY: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', STAFF_LOSS: 'Staff Loss', TIPS: 'Sponsors & Partners' }
@@ -56,11 +58,17 @@ interface Outlet { id: string; name: string }
 interface Person { id: string; name: string; type: string }
 
 interface NamedCode { code: string; label: string; isActive: boolean }
+interface CancelReason extends NamedCode { appliesToAll: boolean; categoryIds: string[]; productIds: string[] }
 
 export default function CollectionsPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const { config: companyConfig } = useCompanyConfig()
   const confirm = useConfirm()
+  // The business day a fresh entry defaults to — before the cutover hour, that's
+  // still yesterday's shift, not the raw calendar date.
+  const businessToday = format(resolveBusinessDate(new Date(), companyConfig.businessDayCutoverHour), 'yyyy-MM-dd')
+  const isBeforeCutover = businessToday !== format(new Date(), 'yyyy-MM-dd')
   const [collections, setCollections] = useState<Collection[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [staff, setStaff] = useState<Person[]>([])
@@ -78,8 +86,17 @@ export default function CollectionsPage() {
   const [allPersons, setAllPersons] = useState<Person[]>([])
   const [categories, setCategories] = useState<NamedCode[]>([])
   const [channels, setChannels] = useState<NamedCode[]>([])
-  const [cancelReasons, setCancelReasons] = useState<NamedCode[]>([])
+  const [cancelReasons, setCancelReasons] = useState<CancelReason[]>([])
   const CANCEL_REASONS = cancelReasons.filter((r) => r.isActive).map((r) => r.label)
+  // Reasons available for a given cancellation row's picked product — reasons that
+  // apply to all products, plus any scoped to that product's category or itself.
+  const reasonsForProduct = (productId: string) => {
+    const product = products.find((p) => p.id === productId)
+    return cancelReasons
+      .filter((r) => r.isActive)
+      .filter((r) => r.appliesToAll || !productId || (product && (r.categoryIds.includes(product.categoryId || '') || r.productIds.includes(productId))))
+      .map((r) => r.label)
+  }
   const PAID_CATEGORIES = categories.filter((c) => c.isActive).map((c) => c.label)
   const SIGNED_TYPE_OPTS = categories.filter((c) => c.isActive)
   const METHOD_OPTS = channels.filter((c) => c.isActive)
@@ -100,13 +117,13 @@ export default function CollectionsPage() {
   const [closingDay, setClosingDay] = useState(false)
   const [closeWizard, setCloseWizard] = useState(false) // guided close-day flow
   const [wizardStep, setWizardStep] = useState(0)
-  const [dayStatus, setDayStatus] = useState({ cashDone: false, digitalDone: false })
+  const [dayStatus, setDayStatus] = useState({ cashDone: false, digitalDone: false, templateDone: false })
   const [statusLoading, setStatusLoading] = useState(false)
 
   const [form, setForm] = useState({
     cash: '', channelAmounts: {} as Record<string, string>, notes: '', staffName: '', systemSales: '',
     discount: '', discountReason: '',
-    outletId: user?.outlet?.id || '', date: format(new Date(), 'yyyy-MM-dd'),
+    outletId: user?.outlet?.id || '', date: businessToday,
   })
   const channelAmountsNum = Object.fromEntries(Object.entries(form.channelAmounts).map(([k, v]) => [k, Number(v) || 0]))
   const getAmountBox = (code: string) => code === 'CASH' ? form.cash : (form.channelAmounts[code] || '')
@@ -259,7 +276,7 @@ export default function CollectionsPage() {
       } else {
         toast.success(editingId ? 'Collection updated!' : 'Collection saved — balanced, no loss.')
       }
-      setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+      setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: businessToday })
       setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
       setExcessItems([])
       setEditingId(null)
@@ -306,7 +323,7 @@ export default function CollectionsPage() {
 
   const newCollection = () => {
     setEditingId(null)
-    setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: format(new Date(), 'yyyy-MM-dd') })
+    setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: businessToday })
     setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
     setExcessItems([])
     setShowForm((s) => !s)
@@ -391,7 +408,9 @@ export default function CollectionsPage() {
   const dayKey = (d: string | Date) => typeof d === 'string' ? d.slice(0, 10) : format(d, 'yyyy-MM-dd')
   const isDayClosed = (d: string | Date) => closedDays.includes(dayKey(d))
   // The day the button acts on: the chosen single day (custom) or today.
-  const targetCloseDate = range === 'custom' && customFrom === customTo ? parseISO(customFrom) : new Date()
+  const targetCloseDate = range === 'custom' && customFrom === customTo
+    ? parseISO(customFrom)
+    : resolveBusinessDate(new Date(), companyConfig.businessDayCutoverHour)
   const targetClosed = isDayClosed(targetCloseDate)
   const canReopen = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
 
@@ -412,15 +431,16 @@ export default function CollectionsPage() {
 
   // Live readiness — is Cash Recon + Digital Recon done for the target day?
   const loadDayStatus = async () => {
-    if (targetOutletIds.length === 0) { setDayStatus({ cashDone: false, digitalDone: false }); return }
+    if (targetOutletIds.length === 0) { setDayStatus({ cashDone: false, digitalDone: false, templateDone: false }); return }
     setStatusLoading(true)
     try {
       const results = await Promise.all(targetOutletIds.map((oid) =>
         request(`/api/collections/day-status?date=${targetDayStr}&outletId=${oid}`).catch(() => null)))
-      const ok = results.filter(Boolean) as { cashReconDone: boolean; digitalReconDone: boolean }[]
+      const ok = results.filter(Boolean) as { cashReconDone: boolean; digitalReconDone: boolean; templateSessionsOpen: boolean }[]
       setDayStatus({
         cashDone: ok.length > 0 && ok.every((r) => r.cashReconDone),
         digitalDone: ok.length > 0 && ok.every((r) => r.digitalReconDone),
+        templateDone: ok.length > 0 && ok.every((r) => !r.templateSessionsOpen),
       })
     } finally { setStatusLoading(false) }
   }
@@ -437,7 +457,7 @@ export default function CollectionsPage() {
   const closeDay = async () => {
     const label = format(targetCloseDate, 'dd MMM yyyy')
     if (targetOutletIds.length === 0) { toast.error('No collections found for this day to close.'); return }
-    if (!dayStatus.cashDone || !dayStatus.digitalDone) { toast.error('Complete Cash and Digital reconciliation first.'); return }
+    if (!dayStatus.cashDone || !dayStatus.digitalDone || !dayStatus.templateDone) { toast.error('Complete Cash and Digital reconciliation, and any open Collection Template sessions, first.'); return }
     setClosingDay(true)
     try {
       for (const outletId of targetOutletIds) {
@@ -556,9 +576,14 @@ export default function CollectionsPage() {
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Business Date</label>
                   <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
+                  {!editingId && isBeforeCutover && form.date === businessToday && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      Auto-set to {format(parseISO(businessToday), 'dd MMM')} — entered before the {String(companyConfig.businessDayCutoverHour).padStart(2, '0')}:00 business-day cutover. Change it above if this belongs to a different day.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet</label>
@@ -644,15 +669,18 @@ export default function CollectionsPage() {
                 )}
                 {cancelRows.map((r, i) => {
                   const amt = r.sellingPrice * (Number(r.quantity) || 0)
+                  const reasonOptions = reasonsForProduct(r.productId)
                   return (
                     <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
                       <select value={r.reason} onChange={(e) => { const n = [...cancelRows]; n[i] = { ...r, reason: e.target.value }; setCancelRows(n) }}
                         className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
-                        {CANCEL_REASONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                        {reasonOptions.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
                       <select value={r.productId} onChange={(e) => {
                         const p = products.find((x) => x.id === e.target.value)
-                        const n = [...cancelRows]; n[i] = { ...r, productId: e.target.value, productName: p?.name || '', sellingPrice: p?.sellingPrice || 0 }; setCancelRows(n)
+                        const nextReasons = reasonsForProduct(e.target.value)
+                        const nextReason = nextReasons.includes(r.reason) ? r.reason : (nextReasons[0] || '')
+                        const n = [...cancelRows]; n[i] = { ...r, productId: e.target.value, productName: p?.name || '', sellingPrice: p?.sellingPrice || 0, reason: nextReason }; setCancelRows(n)
                       }}
                         className="col-span-4 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm bg-white">
                         <option value="">Select product…</option>
@@ -1165,16 +1193,19 @@ export default function CollectionsPage() {
                     <div className={`flex items-center gap-2 text-sm ${dayStatus.digitalDone ? 'text-green-700' : 'text-rose-600'}`}>
                       <span>{dayStatus.digitalDone ? '✓' : '✕'}</span> Digital Reconciliation
                     </div>
+                    <div className={`flex items-center gap-2 text-sm ${dayStatus.templateDone ? 'text-green-700' : 'text-rose-600'}`}>
+                      <span>{dayStatus.templateDone ? '✓' : '✕'}</span> Collection Template Sessions
+                    </div>
                   </div>
                   <button onClick={loadDayStatus} className="w-full py-2 mb-3 rounded-xl border-2 border-gray-200 text-gray-600 text-xs font-medium">↻ Refresh status</button>
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-800 text-sm mb-4">
                     Are you sure all <strong>paid bills, signed bills, discounts, cancellations, cash requests</strong> and other transactions have been properly recorded and reconciled? Once closed, this day can&apos;t be edited (a supervisor can reopen it).
                   </div>
-                  {!(dayStatus.cashDone && dayStatus.digitalDone) && (
-                    <p className="text-xs text-rose-600 mb-2">Complete Cash and Digital reconciliation before you can close the day.</p>
+                  {!(dayStatus.cashDone && dayStatus.digitalDone && dayStatus.templateDone) && (
+                    <p className="text-xs text-rose-600 mb-2">Complete Cash and Digital reconciliation, and any open Collection Template sessions, before you can close the day.</p>
                   )}
                   <div className="flex flex-col gap-2">
-                    <button onClick={closeDay} disabled={closingDay || !dayStatus.cashDone || !dayStatus.digitalDone}
+                    <button onClick={closeDay} disabled={closingDay || !dayStatus.cashDone || !dayStatus.digitalDone || !dayStatus.templateDone}
                       className="w-full py-3 rounded-xl bg-green-600 text-white font-bold text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed">
                       {closingDay ? 'Closing…' : '✅ Yes — Close the Day'}
                     </button>

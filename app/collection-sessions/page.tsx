@@ -6,18 +6,24 @@ import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import Link from 'next/link'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
+import { resolveBusinessDate } from '@/lib/business-date'
+import { DONE_STATUSES, statusColor } from '@/lib/collection-status'
+import { format } from 'date-fns'
+import { User, Clock, History, ArrowRight } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
 interface Template { id: string; name: string; code: string; isDefault: boolean; isActive: boolean }
+interface Stage { id: string; key: string; label: string; order: number }
 interface TodaySession {
-  id: string; status: string
+  id: string; status: string; date: string; createdAt: string; updatedAt: string
   outlet: { name: string }
-  template: { name: string }
-  stageRecords: { status: string }[]
+  template: { name: string; description: string | null; stages: Stage[] }
+  createdBy: { name: string } | null
+  completedBy: { name: string } | null
+  stageRecords: { status: string; stageId: string; updatedAt: string }[]
 }
-
-const DONE_STATUSES = new Set(['COMPLETED', 'APPROVED', 'PENDING_APPROVAL'])
 
 /**
  * Launcher for custom-template Collection Sessions. The Standard Staff
@@ -27,6 +33,7 @@ const DONE_STATUSES = new Set(['COMPLETED', 'APPROVED', 'PENDING_APPROVAL'])
 export default function CollectionSessionsLauncherPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const { config: companyConfig } = useCompanyConfig()
   const router = useRouter()
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
@@ -36,13 +43,17 @@ export default function CollectionSessionsLauncherPage() {
   const [opening, setOpening] = useState(false)
   const [todaySessions, setTodaySessions] = useState<TodaySession[]>([])
 
+  const businessToday = format(resolveBusinessDate(new Date(), companyConfig.businessDayCutoverHour), 'yyyy-MM-dd')
+  const isBeforeCutover = businessToday !== format(new Date(), 'yyyy-MM-dd')
+  const [sessionDate, setSessionDate] = useState(businessToday)
+  useEffect(() => { setSessionDate(businessToday) }, [businessToday]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const today = new Date().toISOString().slice(0, 10)
       const [o, t, sessions] = await Promise.all([
         request('/api/outlets'), request('/api/collection-templates'),
-        request(`/api/collection-sessions?date=${today}`).catch(() => []),
+        request(`/api/collection-sessions?date=${sessionDate}`).catch(() => []),
       ])
       setOutlets(o || [])
       const custom = (t || []).filter((tpl: Template) => !tpl.isDefault && tpl.isActive)
@@ -52,7 +63,7 @@ export default function CollectionSessionsLauncherPage() {
       else if (o?.[0]) setOutletId(o[0].id)
       if (custom[0]) setTemplateId(custom[0].id)
     } finally { setLoading(false) }
-  }, [request, user])
+  }, [request, user, sessionDate])
 
   useEffect(() => { load() }, [load])
 
@@ -60,7 +71,7 @@ export default function CollectionSessionsLauncherPage() {
     if (!outletId || !templateId) return
     setOpening(true)
     try {
-      const session = await request('/api/collection-sessions', { method: 'POST', body: JSON.stringify({ outletId, templateId }) })
+      const session = await request('/api/collection-sessions', { method: 'POST', body: JSON.stringify({ outletId, templateId, date: sessionDate }) })
       router.push(`/collection-sessions/${session.id}`)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not open session')
@@ -81,6 +92,16 @@ export default function CollectionSessionsLauncherPage() {
           ) : (
             <>
               <div>
+                <label className="text-xs font-semibold text-gray-500">Business Date</label>
+                <input type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
+                {isBeforeCutover && sessionDate === businessToday && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Auto-set to {format(new Date(businessToday), 'dd MMM')} — before the {String(companyConfig.businessDayCutoverHour).padStart(2, '0')}:00 business-day cutover.
+                  </p>
+                )}
+              </div>
+              <div>
                 <label className="text-xs font-semibold text-gray-500">Outlet</label>
                 <select value={outletId} onChange={(e) => setOutletId(e.target.value)} disabled={!!user?.outlet?.id}
                   className="w-full mt-1 px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none disabled:bg-gray-50">
@@ -95,7 +116,7 @@ export default function CollectionSessionsLauncherPage() {
                 </select>
               </div>
               <button onClick={openSession} disabled={opening} className="w-full py-3 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
-                {opening ? 'Opening…' : "Open Today's Session"}
+                {opening ? 'Opening…' : "Open Session"}
               </button>
             </>
           )}
@@ -104,21 +125,48 @@ export default function CollectionSessionsLauncherPage() {
         {todaySessions.length > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
             <h2 className="text-sm font-bold text-gray-700 mb-3">Today's Sessions</h2>
-            <div className="divide-y divide-gray-50">
+            <div className="space-y-3">
               {todaySessions.map((s) => {
-                const done = s.stageRecords.filter((r) => DONE_STATUSES.has(r.status)).length
-                const total = s.stageRecords.length || 1
-                const pct = Math.round((done / total) * 100)
+                const stages = s.template.stages
+                const isStageDone = (stageId: string) => s.stageRecords.some((r) => r.stageId === stageId && DONE_STATUSES.has(r.status))
+                const stagesDone = stages.filter((st) => isStageDone(st.id)).length
+                const stagesTotal = stages.length || 1
+                const pct = Math.round((stagesDone / stagesTotal) * 100)
+                const currentStage = stages.find((st) => !isStageDone(st.id))
+                const lastUpdated = s.stageRecords.reduce((latest, r) => r.status && new Date(r.updatedAt || 0) > latest ? new Date(r.updatedAt) : latest, new Date(s.updatedAt))
                 return (
-                  <Link key={s.id} href={`/collection-sessions/${s.id}`} className="flex items-center justify-between py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">{s.template.name}</p>
-                      <p className="text-xs text-gray-400">{s.outlet.name} · {s.status}</p>
+                  <div key={s.id} className="border border-gray-100 rounded-xl p-3.5 hover:border-indigo-200 transition">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-gray-800">{s.template.name}</p>
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">{format(new Date(s.date), 'dd MMM yyyy')}</span>
+                          <span className={`text-[10px] font-semibold ${statusColor(s.status)}`}>{s.status}</span>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-0.5">{s.outlet.name}</p>
+                        {s.template.description && <p className="text-xs text-gray-400 mt-0.5 italic">{s.template.description}</p>}
+                      </div>
+                      <Link href={`/collection-sessions/${s.id}`} className="shrink-0 flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700 whitespace-nowrap">
+                        View Details <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
                     </div>
-                    <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${pct}%` }} />
+
+                    <p className="text-xs text-gray-600 mt-2">
+                      {currentStage ? <>Current Stage: <span className="font-semibold">{currentStage.label}</span></> : <span className="font-semibold text-emerald-600">All stages complete</span>}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-[11px] text-gray-400 whitespace-nowrap">{stagesDone}/{stagesTotal} stages</span>
                     </div>
-                  </Link>
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[11px] text-gray-400">
+                      <span className="flex items-center gap-1"><User className="w-3 h-3" /> Opened by {s.createdBy?.name || '—'}</span>
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {format(new Date(s.createdAt), 'dd MMM, HH:mm')}</span>
+                      <span className="flex items-center gap-1"><History className="w-3 h-3" /> Updated {format(lastUpdated, 'dd MMM, HH:mm')}</span>
+                    </div>
+                  </div>
                 )
               })}
             </div>

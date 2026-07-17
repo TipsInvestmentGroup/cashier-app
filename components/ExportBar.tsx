@@ -42,7 +42,8 @@ export function ExportBar({ rows, filename, title, subject }: { rows: Row[]; fil
     const doc = new jsPDF({ orientation: keys.length > 6 ? 'landscape' : 'portrait' })
     doc.setFontSize(14); doc.text(title, 14, 16)
     doc.setFontSize(9); doc.text(new Date().toLocaleString(), 14, 22)
-    autoTable(doc, { startY: 26, head: [keys], body: rows.map((r) => keys.map((k) => String(r[k] ?? ''))), styles: { fontSize: 7 }, headStyles: { fillColor: [79, 70, 229] } })
+    const fmtCell = (v: unknown) => typeof v === 'number' ? v.toLocaleString('en-US') : String(v ?? '')
+    autoTable(doc, { startY: 26, head: [keys], body: rows.map((r) => keys.map((k) => fmtCell(r[k]))), styles: { fontSize: 7 }, headStyles: { fillColor: [79, 70, 229] } })
     doc.save(`${filename}.pdf`)
     toast.success('PDF exported!')
   }

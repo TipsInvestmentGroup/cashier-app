@@ -164,7 +164,13 @@ export function StageExcelImportRenderer({ stage, onSubmit }: Props) {
                       </select>
                     )}
                   </td>
-                  {fields.map((f) => <td key={f.id} className="px-3 py-1.5 text-gray-600">{r.values[f.id] ?? ''}</td>)}
+                  {fields.map((f) => {
+                    const raw = r.values[f.id]
+                    const display = f.fieldType === 'NUMBER' && raw !== undefined && raw !== '' && !Number.isNaN(Number(raw))
+                      ? Number(raw).toLocaleString('en-US')
+                      : (raw ?? '')
+                    return <td key={f.id} className="px-3 py-1.5 text-gray-600">{display}</td>
+                  })}
                 </tr>
               ))}
             </tbody>

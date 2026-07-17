@@ -8,6 +8,8 @@ import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
 import { findBestPersonMatch } from '@/lib/nameMatch'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
+import { resolveBusinessDate } from '@/lib/business-date'
+import { getCompanyConfig } from '@/lib/company-config'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 // Resolve a free-text signed-bill name to a Person: use an explicit personId from
@@ -86,7 +88,8 @@ export async function POST(req: NextRequest) {
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
 
   // Prevent duplicates: one collection per staff, per outlet, per day.
-  const collDate = date ? new Date(date) : new Date()
+  const { businessDayCutoverHour } = await getCompanyConfig()
+  const collDate = date ? new Date(date) : resolveBusinessDate(new Date(), businessDayCutoverHour)
 
   // A closed day is locked for cashiers — no new collections.
   if (user.role === 'CASHIER') {
@@ -120,7 +123,7 @@ export async function POST(req: NextRequest) {
         cash: roundMoney(cash), ...legacyFixedFields(channelAmounts),
         total, staffName: staffName || null, systemSales: roundMoney(systemSales),
         discount, discountReason: discountReason || null,
-        notes, outletId: usedOutletId, cashierId: user.userId, date: date ? new Date(date) : new Date(),
+        notes, outletId: usedOutletId, cashierId: user.userId, date: collDate,
       },
       include: { outlet: true },
     })

@@ -6,6 +6,7 @@ import { useApi } from '@/hooks/useApi'
 import { StageRenderer } from '@/components/collections/StageRenderer'
 import { StageGridRenderer } from '@/components/collections/StageGridRenderer'
 import { StageExcelImportRenderer } from '@/components/collections/StageExcelImportRenderer'
+import { DONE_STATUSES, statusColor } from '@/lib/collection-status'
 import toast from 'react-hot-toast'
 
 interface FieldDef { id: string; key: string; label: string; fieldType: string; isRequired: boolean }
@@ -19,7 +20,6 @@ interface SessionDetail {
   stageRecords: StageRecord[]
 }
 
-const DONE_STATUSES = new Set(['COMPLETED', 'APPROVED', 'PENDING_APPROVAL'])
 const STAGE_ACTION_LABEL: Record<string, string> = {
   MULTI_STAFF_GRID: 'Open Grid',
   BATCH: 'Open Batch',
@@ -157,7 +157,7 @@ export default function CollectionSessionDetailPage() {
                       {records.map((r) => (
                         <div key={r.id} className="flex items-center justify-between py-1.5 text-sm">
                           <span className="text-gray-700">{r.staffName || '—'}</span>
-                          <span className={`text-xs font-semibold ${r.status === 'PENDING_APPROVAL' ? 'text-amber-600' : r.status === 'REJECTED' ? 'text-red-600' : 'text-emerald-600'}`}>{r.status}</span>
+                          <span className={`text-xs font-semibold ${statusColor(r.status)}`}>{r.status}</span>
                         </div>
                       ))}
                     </div>

@@ -17,7 +17,7 @@ import {
 import { format } from 'date-fns'
 
 interface DashboardData {
-  today: { total: number; cash: number; crdb: number; stanbic: number; mpesa: number }
+  today: { total: number; cash: number; crdb: number; stanbic: number; mpesa: number; templateCollections: number }
   week: { total: number }
   month: { total: number }
   byBillType: Record<string, number>
@@ -228,6 +228,7 @@ export default function DashboardPage() {
             { label: 'CRDB Bank', value: data.today.crdb, Icon: Landmark, chip: 'bg-blue-50 text-blue-600' },
             { label: 'Stanbic', value: data.today.stanbic, Icon: Building2, chip: 'bg-purple-50 text-purple-600' },
             { label: 'M-PESA', value: data.today.mpesa, Icon: Smartphone, chip: 'bg-amber-50 text-amber-600' },
+            ...(data.today.templateCollections > 0 ? [{ label: 'Template Sessions', value: data.today.templateCollections, Icon: CalendarDays, chip: 'bg-indigo-50 text-indigo-600' }] : []),
           ].map((item) => (
             <div key={item.label} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
               <div className="flex items-center gap-2 mb-2">

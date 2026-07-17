@@ -24,7 +24,7 @@ async function generateCode(name: string): Promise<string> {
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const items = await prisma.product.findMany({ orderBy: { name: 'asc' } })
+  const items = await prisma.product.findMany({ orderBy: { name: 'asc' }, include: { productCategory: { select: { id: true, label: true } } } })
   return NextResponse.json(items)
 }
 
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}))
-  const { name, buyingPrice, sellingPrice, unitMeasure, code } = body
+  const { name, buyingPrice, sellingPrice, unitMeasure, code, categoryId } = body
   if (!name || !String(name).trim()) return NextResponse.json({ error: 'Product name is required' }, { status: 400 })
   const unit = UNITS.includes(unitMeasure) ? unitMeasure : (unitMeasure || 'unit')
 
@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
         buyingPrice: roundMoney(buyingPrice),
         sellingPrice: roundMoney(sellingPrice),
         unitMeasure: unit,
+        categoryId: categoryId || null,
       },
     })
     await prisma.auditLog.create({ data: { userId: user.userId, action: 'CREATE', entity: 'Product', entityId: item.id, details: `Added product ${item.name} (${item.code})` } })
