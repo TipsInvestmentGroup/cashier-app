@@ -39,6 +39,9 @@ datasource db {
 //   CollectionSession.status:       OPEN | IN_PROGRESS | COMPLETED | FINALIZED
 //   CollectionStageRecord.status:   PENDING | IN_PROGRESS | PENDING_APPROVAL | COMPLETED | APPROVED | REJECTED
 //   WorkflowApproval.status:        PENDING | APPROVED | REJECTED
+//   TransactionSession.status:      OPEN | VALIDATED | CLOSED
+//   StaffTransaction.category:      PAYMENT | SIGNED_BILL | DISCOUNT | CANCELLATION | CREDIT_SALE
+//   StaffTransaction.status:        DECLARED | PENDING_APPROVAL | APPROVED | REJECTED
 
 model User {
   id                String    @id @default(cuid())
@@ -88,6 +91,11 @@ model User {
   stageRecordsApproved        CollectionStageRecord[] @relation("StageRecordApprovedBy")
   approvalsRequested          WorkflowApproval[]      @relation("ApprovalRequestedBy")
   approvalsToApprove          WorkflowApproval[]      @relation("ApprovalApprover")
+
+  transactionSessionsCreated  TransactionSession[] @relation("TxSessionCreatedBy")
+  transactionSessionsValidated TransactionSession[] @relation("TxSessionValidatedBy")
+  systemSalesRecords          SystemSalesRecord[]  @relation("SystemSalesStaff")
+  staffTransactions           StaffTransaction[]    @relation("StaffTransactionStaff")
 }
 
 /// Per-user, per-resource grant of Add/Edit/Delete(/Settle/Unsettle for
@@ -190,6 +198,7 @@ model Outlet {
   excessRefunds       ExcessRefund[]
   salesTargets        SalesTarget[]
   collectionSessions  CollectionSession[]
+  transactionSessions TransactionSession[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -464,21 +473,107 @@ model CollectionFieldValue {
   @@index([stageRecordId])
 }
 
+// stageRecordId and transactionId are mutually exclusive — a WorkflowApproval
+// resolves either a Collection Workflow Engine stage record OR a Transaction
+// Management StaffTransaction, never both. Kept as one table (rather than a
+// second parallel approvals model) so /api/collection-approvals and its
+// notifyApprovers push pipeline serve both without duplication.
 model WorkflowApproval {
-  id            String                @id @default(cuid())
-  stageRecordId String
-  stageRecord   CollectionStageRecord @relation(fields: [stageRecordId], references: [id], onDelete: Cascade)
+  id            String                 @id @default(cuid())
+  stageRecordId String?
+  stageRecord   CollectionStageRecord? @relation(fields: [stageRecordId], references: [id], onDelete: Cascade)
+  transactionId String?
+  transaction   StaffTransaction?      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   requestedById String
-  requestedBy   User                  @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
+  requestedBy   User                   @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
   approverRole  String?
   approverId    String?
-  approver      User?                 @relation("ApprovalApprover", fields: [approverId], references: [id])
-  status        String                @default("PENDING")
+  approver      User?                  @relation("ApprovalApprover", fields: [approverId], references: [id])
+  status        String                 @default("PENDING")
   comment       String?
-  createdAt     DateTime              @default(now())
+  createdAt     DateTime               @default(now())
   resolvedAt    DateTime?
 
   @@index([stageRecordId])
+  @@index([transactionId])
+}
+
+// ─── Transaction Management (staff self-declared transactions) ─────────────
+// Simplified layer in front of DailyCollection: the cashier only imports the
+// daily System Sales report (defines the expected staff roster); each service
+// staff self-declares the payments they personally received; transactions
+// needing sign-off (signed bills, discounts, cancellations, credit sales) go
+// through the same WorkflowApproval pipeline the Collection Workflow Engine
+// already uses. Once the cashier validates a staff's summarized totals, that
+// data is written into a DailyCollection row and continues through the
+// existing, unchanged collection workflow (Close Day, Reporting, Finance
+// Posting, Audit Trail, Bank Reconciliation).
+//   TransactionSession.status:     OPEN | VALIDATED | CLOSED
+//   StaffTransaction.category:     PAYMENT | SIGNED_BILL | DISCOUNT | CANCELLATION | CREDIT_SALE
+//   StaffTransaction.paymentMethod: CASH | CRDB | STANBIC | MPESA | ... (matches PaymentChannel.code)
+//   StaffTransaction.status:       DECLARED | PENDING_APPROVAL | APPROVED | REJECTED
+
+model TransactionSession {
+  id            String    @id @default(cuid())
+  date          DateTime  @default(now())
+  outletId      String
+  outlet        Outlet    @relation(fields: [outletId], references: [id])
+  status        String    @default("OPEN")
+  createdById   String
+  createdBy     User      @relation("TxSessionCreatedBy", fields: [createdById], references: [id])
+  validatedById String?
+  validatedBy   User?     @relation("TxSessionValidatedBy", fields: [validatedById], references: [id])
+  validatedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  systemSales  SystemSalesRecord[]
+  transactions StaffTransaction[]
+
+  @@unique([outletId, date])
+  @@index([outletId, date])
+}
+
+/// One row per staff from the cashier's uploaded daily System Sales report —
+/// this both sets each staff's "expected sales" figure and creates the
+/// official roster of staff expected to declare transactions this session.
+model SystemSalesRecord {
+  id        String             @id @default(cuid())
+  sessionId String
+  session   TransactionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  staffId   String?
+  staff     User?              @relation("SystemSalesStaff", fields: [staffId], references: [id])
+  staffName String
+  amount    Float              @default(0)
+  createdAt DateTime           @default(now())
+
+  @@unique([sessionId, staffName])
+  @@index([sessionId])
+}
+
+/// A single payment a service staff personally received, self-declared. The
+/// cashier's dashboard groups and totals these by paymentMethod +
+/// receivingAccount per staff — never manually calculated.
+model StaffTransaction {
+  id               String             @id @default(cuid())
+  sessionId        String
+  session          TransactionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  staffId          String
+  staff            User               @relation("StaffTransactionStaff", fields: [staffId], references: [id])
+  category         String             @default("PAYMENT")
+  paymentMethod    String?
+  amount           Float
+  receivingAccount String?
+  reference        String?
+  status           String             @default("DECLARED")
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  approvals WorkflowApproval[]
+
+  @@index([sessionId])
+  @@index([staffId])
+  @@index([status])
 }
 
 model Person {

@@ -24,6 +24,12 @@ export async function GET(req: NextRequest) {
           session: { include: { outlet: { select: { name: true } }, template: { select: { name: true } } } },
         },
       },
+      transaction: {
+        include: {
+          staff: { select: { name: true } },
+          session: { include: { outlet: { select: { name: true } } } },
+        },
+      },
     },
     orderBy: { createdAt: 'asc' },
   })

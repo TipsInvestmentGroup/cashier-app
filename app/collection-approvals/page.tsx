@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
+import { formatCurrency } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 interface Approval {
@@ -16,7 +17,14 @@ interface Approval {
     staffName: string | null
     stage: { label: string }
     session: { id: string; outlet: { name: string }; template: { name: string } }
-  }
+  } | null
+  transaction: {
+    id: string
+    category: string
+    amount: number
+    staff: { name: string }
+    session: { outlet: { name: string } }
+  } | null
 }
 
 export default function CollectionApprovalsPage() {
@@ -61,8 +69,17 @@ export default function CollectionApprovalsPage() {
                 <div key={a.id} className="py-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-semibold text-gray-800">{a.stageRecord.session.template.name} · {a.stageRecord.stage.label}</p>
-                      <p className="text-xs text-gray-400">{a.stageRecord.session.outlet.name} · {a.stageRecord.staffName || '—'} · requested by {a.requestedBy.name}</p>
+                      {a.transaction ? (
+                        <>
+                          <p className="text-sm font-semibold text-gray-800">{a.transaction.category.replace('_', ' ')} · {formatCurrency(a.transaction.amount)}</p>
+                          <p className="text-xs text-gray-400">{a.transaction.session.outlet.name} · {a.transaction.staff.name} · requested by {a.requestedBy.name}</p>
+                        </>
+                      ) : a.stageRecord ? (
+                        <>
+                          <p className="text-sm font-semibold text-gray-800">{a.stageRecord.session.template.name} · {a.stageRecord.stage.label}</p>
+                          <p className="text-xs text-gray-400">{a.stageRecord.session.outlet.name} · {a.stageRecord.staffName || '—'} · requested by {a.requestedBy.name}</p>
+                        </>
+                      ) : null}
                     </div>
                     <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[11px] font-semibold rounded-full">{a.approverRole}</span>
                   </div>

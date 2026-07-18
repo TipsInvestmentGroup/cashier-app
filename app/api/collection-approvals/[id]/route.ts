@@ -19,16 +19,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { decision, comment } = await req.json().catch(() => ({}))
   if (decision !== 'APPROVED' && decision !== 'REJECTED') return NextResponse.json({ error: 'decision must be APPROVED or REJECTED' }, { status: 400 })
 
-  await prisma.$transaction([
-    prisma.workflowApproval.update({ where: { id }, data: { status: decision, resolvedAt: new Date(), comment: comment ? String(comment) : approval.comment } }),
-    prisma.collectionStageRecord.update({
-      where: { id: approval.stageRecordId },
-      data: { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED', approvedById: user.userId },
-    }),
-  ])
+  await prisma.$transaction(async (tx) => {
+    await tx.workflowApproval.update({ where: { id }, data: { status: decision, resolvedAt: new Date(), comment: comment ? String(comment) : approval.comment } })
+    if (approval.stageRecordId) {
+      await tx.collectionStageRecord.update({
+        where: { id: approval.stageRecordId },
+        data: { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED', approvedById: user.userId },
+      })
+    }
+    if (approval.transactionId) {
+      await tx.staffTransaction.update({
+        where: { id: approval.transactionId },
+        data: { status: decision === 'APPROVED' ? 'APPROVED' : 'REJECTED' },
+      })
+    }
+  })
 
   await prisma.auditLog.create({
-    data: { userId: user.userId, action: 'UPDATE', entity: 'WorkflowApproval', entityId: id, details: `${decision === 'APPROVED' ? 'Approved' : 'Rejected'} approval for stage record ${approval.stageRecordId}` },
+    data: { userId: user.userId, action: 'UPDATE', entity: 'WorkflowApproval', entityId: id, details: `${decision === 'APPROVED' ? 'Approved' : 'Rejected'} approval for ${approval.stageRecordId ? `stage record ${approval.stageRecordId}` : `transaction ${approval.transactionId}`}` },
   })
 
   return NextResponse.json({ ok: true })
