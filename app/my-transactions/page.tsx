@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { format } from 'date-fns'
+import { format, parse as parseDate } from 'date-fns'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
@@ -52,6 +53,17 @@ interface Dashboard {
 const STATUS_COLOR: Record<string, string> = { BELOW_TARGET: 'bg-red-500', ON_TARGET: 'bg-amber-500', ABOVE_TARGET: 'bg-emerald-500' }
 const STATUS_TEXT: Record<string, string> = { BELOW_TARGET: 'Below Target', ON_TARGET: 'On Target', ABOVE_TARGET: 'Above Target' }
 
+interface HourBucket { hour: number; label: string; amount: number; count: number; avgValue: number }
+interface DayFigures { date: string; total: number; validated: boolean; signedBills: number; discounts: number; cancellations: number; dailyLoss: number | null; transactionCount: number; avgTransactionValue: number }
+interface DayOverDay {
+  today: DayFigures; yesterday: DayFigures
+  salesChangePct: number | null; avgTransactionChangePct: number | null
+  transactionsServed: number; transactionsServedYesterday: number
+  signedBillsChangePct: number | null; discountsChangePct: number | null; cancellationsChangePct: number | null; dailyLossChangePct: number | null
+}
+interface Trends { series: { date: string; total: number }[]; last7: { average: number; best: { date: string; total: number } | null; lowest: { date: string; total: number } | null }; last30: { average: number; best: { date: string; total: number } | null; lowest: { date: string; total: number } | null } }
+interface Analytics { hourly: { buckets: HourBucket[]; peakHour: HourBucket | null; slowHour: HourBucket | null }; dayOverDay: DayOverDay; trends: Trends }
+
 export default function MyTransactionsPage() {
   const { user } = useAuth()
   const { request } = useApi()
@@ -84,6 +96,14 @@ export default function MyTransactionsPage() {
   }, [request])
 
   useEffect(() => { load() }, [load])
+
+  // Loaded separately and lazily — the heavier historical queries (30-day
+  // window, yesterday lookup) shouldn't hold up the dashboard's first paint.
+  const [analytics, setAnalytics] = useState<Analytics | null>(null)
+  useEffect(() => {
+    if (!data || data.mode === 'NO_SESSION') return
+    request('/api/my-dashboard/analytics').then(setAnalytics).catch(() => {})
+  }, [data, request])
 
   // /api/my-dashboard resolves the session server-side but doesn't expose its
   // id (the dashboard payload is deliberately read-model-only) — fetch it
@@ -376,6 +396,8 @@ export default function MyTransactionsPage() {
             {data.target && data.target.length > 0 && <TargetSection target={data.target} />}
           </>
         )}
+
+        {analytics && data.mode !== 'NO_SESSION' && <AnalyticsSection analytics={analytics} />}
       </div>
     </AppShell>
   )
@@ -463,6 +485,120 @@ function TargetSection({ target }: { target: TargetRow[] }) {
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+function ChangeIndicator({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="text-gray-400 text-xs font-semibold">➖ n/a</span>
+  if (pct > 0) return <span className="text-emerald-600 text-xs font-semibold">▲ {pct}%</span>
+  if (pct < 0) return <span className="text-red-600 text-xs font-semibold">▼ {Math.abs(pct)}%</span>
+  return <span className="text-gray-400 text-xs font-semibold">➖ 0%</span>
+}
+
+function AnalyticsSection({ analytics }: { analytics: Analytics }) {
+  const [trendWindow, setTrendWindow] = useState<7 | 30>(7)
+  const { hourly, dayOverDay, trends } = analytics
+  const chartData = trendWindow === 7 ? trends.series.slice(-7) : trends.series
+  const summary = trendWindow === 7 ? trends.last7 : trends.last30
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-bold text-gray-900 pt-2">Insights &amp; Analytics</h2>
+
+      {/* Time vs Time */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+        <h3 className="font-semibold text-gray-800 mb-1">Time vs Time (Today)</h3>
+        <p className="text-xs text-gray-400 mb-3">Sales and Collections are the same figure until MyPOS provides a separate per-period system-sales feed.</p>
+        {hourly.buckets.length === 0 ? (
+          <p className="py-6 text-center text-gray-400 text-sm">No transactions declared yet today</p>
+        ) : (
+          <div className="space-y-2">
+            {hourly.buckets.map((b) => {
+              const isPeak = hourly.peakHour?.hour === b.hour
+              const isSlow = hourly.slowHour?.hour === b.hour && hourly.buckets.length > 1
+              const maxAmount = hourly.peakHour?.amount || 1
+              return (
+                <div key={b.hour} className={`rounded-xl p-2.5 ${isPeak ? 'bg-emerald-50 border border-emerald-200' : isSlow ? 'bg-amber-50 border border-amber-200' : 'bg-gray-50'}`}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-semibold text-gray-700">{b.label}{isPeak && ' · Peak'}{isSlow && ' · Slowest'}</span>
+                    <span className="text-gray-500">{b.count} txn{b.count !== 1 ? 's' : ''} · avg {formatCurrency(b.avgValue)}</span>
+                  </div>
+                  <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${isPeak ? 'bg-emerald-500' : isSlow ? 'bg-amber-500' : 'bg-indigo-400'}`} style={{ width: `${Math.max(4, (b.amount / maxAmount) * 100)}%` }} />
+                  </div>
+                  <p className="text-right text-xs font-semibold text-gray-800 mt-1">{formatCurrency(b.amount)}</p>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Day-over-Day */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+        <h3 className="font-semibold text-gray-800 mb-3">Day-over-Day (vs Yesterday)</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+          <DoDTile label="Sales" pct={dayOverDay.salesChangePct} value={formatCurrency(dayOverDay.today.total)} />
+          <DoDTile label="Avg Transaction" pct={dayOverDay.avgTransactionChangePct} value={formatCurrency(dayOverDay.today.avgTransactionValue)} />
+          <DoDTile label="Transactions Served" pct={null} value={`${dayOverDay.transactionsServed} (was ${dayOverDay.transactionsServedYesterday})`} />
+          <DoDTile label="Signed Bills" pct={dayOverDay.signedBillsChangePct} value={formatCurrency(dayOverDay.today.signedBills)} />
+          <DoDTile label="Discounts" pct={dayOverDay.discountsChangePct} value={formatCurrency(dayOverDay.today.discounts)} />
+          <DoDTile label="Cancellations" pct={dayOverDay.cancellationsChangePct} value={formatCurrency(dayOverDay.today.cancellations)} />
+          {dayOverDay.today.dailyLoss !== null && (
+            <DoDTile label="Daily Loss" pct={dayOverDay.dailyLossChangePct} value={formatCurrency(dayOverDay.today.dailyLoss)} />
+          )}
+        </div>
+      </div>
+
+      {/* Performance Trends */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-gray-800">Performance Trends</h3>
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            {([7, 30] as const).map((w) => (
+              <button key={w} onClick={() => setTrendWindow(w)}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md ${trendWindow === w ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}>
+                {w} Days
+              </button>
+            ))}
+          </div>
+        </div>
+        {chartData.length === 0 ? (
+          <div className="flex items-center justify-center h-32 text-gray-400 text-sm">No validated days yet</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={chartData}>
+              <defs>
+                <linearGradient id="colorStaffTrend" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(d) => format(parseDate(d, 'yyyy-MM-dd', new Date()), 'dd MMM')} interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip formatter={(v) => formatCurrency(Number(v))} labelFormatter={(d) => format(parseDate(d, 'yyyy-MM-dd', new Date()), 'dd MMM yyyy')} />
+              <Area type="monotone" dataKey="total" stroke="#6366f1" fill="url(#colorStaffTrend)" strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+        <div className="grid grid-cols-3 gap-2 text-xs mt-3">
+          <Tile label={`Avg (${trendWindow}d)`} value={summary.average} />
+          <Tile label="Best Day" value={summary.best?.total || 0} />
+          <Tile label="Lowest Day" value={summary.lowest?.total || 0} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DoDTile({ label, pct, value }: { label: string; pct: number | null; value: string }) {
+  return (
+    <div className="bg-gray-50 rounded-lg px-2.5 py-1.5">
+      <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-0.5">{label}</p>
+      <p className="font-semibold text-gray-800">{value}</p>
+      <ChangeIndicator pct={pct} />
     </div>
   )
 }
