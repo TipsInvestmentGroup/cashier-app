@@ -7,6 +7,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency } from '@/lib/utils'
+import { summarizeStaffTransactions } from '@/lib/staff-transaction-summary'
 import toast from 'react-hot-toast'
 
 interface Approval { id: string; status: string; approverRole: string; comment: string | null }
@@ -33,40 +34,29 @@ interface StaffSummary {
 }
 
 function buildSummaries(session: SessionDetail): StaffSummary[] {
-  const byStaff = new Map<string, StaffSummary>()
+  const byStaffTxns = new Map<string, { staffName: string; transactions: Txn[] }>()
+  const staffSystemSales = new Map<string, number>()
   const validatedNames = new Set(session.validatedCollections.map((c) => c.staffName))
-
-  const ensure = (staffId: string, staffName: string) => {
-    let s = byStaff.get(staffId)
-    if (!s) {
-      s = { staffId, staffName, systemSales: 0, cash: 0, channelTotals: {}, signedBills: 0, discounts: 0, cancellations: 0, creditSales: 0, grandTotal: 0, pendingApprovals: 0, validated: validatedNames.has(staffName), transactions: [] }
-      byStaff.set(staffId, s)
-    }
-    return s
-  }
 
   for (const row of session.systemSales) {
     if (!row.staffId) continue
-    const s = ensure(row.staffId, row.staffName)
-    s.systemSales += row.amount
+    staffSystemSales.set(row.staffId, (staffSystemSales.get(row.staffId) || 0) + row.amount)
+    if (!byStaffTxns.has(row.staffId)) byStaffTxns.set(row.staffId, { staffName: row.staffName, transactions: [] })
   }
-
   for (const t of session.transactions) {
-    const s = ensure(t.staff.id, t.staff.name)
-    s.transactions.push(t)
-    if (t.status === 'REJECTED') continue
-    if (t.status === 'PENDING_APPROVAL') { s.pendingApprovals += 1; continue }
-    if (t.category === 'PAYMENT') {
-      if ((t.paymentMethod || 'CASH') === 'CASH') s.cash += t.amount
-      else s.channelTotals[t.paymentMethod!] = (s.channelTotals[t.paymentMethod!] || 0) + t.amount
-      s.grandTotal += t.amount
-    } else if (t.category === 'SIGNED_BILL') { s.signedBills += t.amount; s.grandTotal += t.amount }
-    else if (t.category === 'DISCOUNT') { s.discounts += t.amount }
-    else if (t.category === 'CANCELLATION') { s.cancellations += t.amount }
-    else if (t.category === 'CREDIT_SALE') { s.creditSales += t.amount; s.grandTotal += t.amount }
+    if (!byStaffTxns.has(t.staff.id)) byStaffTxns.set(t.staff.id, { staffName: t.staff.name, transactions: [] })
+    byStaffTxns.get(t.staff.id)!.transactions.push(t)
   }
 
-  return [...byStaff.values()].sort((a, b) => a.staffName.localeCompare(b.staffName))
+  const result: StaffSummary[] = []
+  for (const [staffId, { staffName, transactions }] of byStaffTxns) {
+    const agg = summarizeStaffTransactions(transactions)
+    result.push({
+      staffId, staffName, systemSales: staffSystemSales.get(staffId) || 0,
+      validated: validatedNames.has(staffName), transactions, ...agg,
+    })
+  }
+  return result.sort((a, b) => a.staffName.localeCompare(b.staffName))
 }
 
 export default function TransactionSessionDetailPage() {

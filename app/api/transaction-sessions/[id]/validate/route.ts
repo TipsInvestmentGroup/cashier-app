@@ -181,6 +181,48 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       data: { creditSales: roundMoney(creditSales), paymentsReceived: roundMoney(paymentsReceived) },
     })
 
+    // Same reconciliation the fixed Daily Collections form runs (see
+    // app/api/collections/route.ts) — without this, Excess & Loss / Excess
+    // Recon would silently see nothing for collections validated through
+    // Transaction Verification mode. A shortfall becomes an auto STAFF_LOSS
+    // SignedBill; a surplus becomes a CollectionExcess row. There's no
+    // interactive excess-reason picker in this flow (unlike the fixed form),
+    // so surplus is filed under the existing UNASSIGNED reason for the
+    // cashier to reclassify later via Excess Recon.
+    const lossAmount = roundMoney((systemSalesRow?.amount || 0) - total - creditSales - paymentsReceived - discount)
+    if (lossAmount > 0) {
+      const person = await tx.person.findFirst({ where: { name: staff.name, type: 'STAFF_LOSS' } })
+      const recordId = crypto.randomUUID()
+      const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', 'STAFF_LOSS')
+      const ref = await generateBillReference(tx, {
+        recordId, sourceModel: 'SignedBill', billTypeCode, date: session.date, personId: person?.id ?? null, outletId: session.outletId,
+      })
+      await tx.signedBill.create({
+        data: {
+          id: recordId,
+          autoKey: `SL-${created.id}`, voucherNumber: ref.displayReference, billType: 'STAFF_LOSS',
+          personId: person?.id ?? null, personName: staff.name, amount: lossAmount, serviceStaff: staff.name,
+          description: `Auto staff loss: System ${systemSalesRow?.amount || 0} − collected ${total} − credit sales ${creditSales} − payments received ${paymentsReceived} − discount ${discount} (Transaction Session ${id})`,
+          status: 'UNPAID', date: session.date, outletId: session.outletId, cashierId: user.userId,
+          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+          autoSourceCollectionId: created.id,
+        },
+      })
+    } else if (lossAmount < 0) {
+      const excessAmount = roundMoney(Math.abs(lossAmount))
+      const recordId = crypto.randomUUID()
+      const ref = await generateBillReference(tx, {
+        recordId, sourceModel: 'CollectionExcess', billTypeCode: 'EXS', date: session.date, personId: null, outletId: session.outletId,
+      })
+      await tx.collectionExcess.create({
+        data: {
+          id: recordId,
+          collectionId: created.id, amount: excessAmount, reason: 'UNASSIGNED', staffName: staff.name,
+          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+        },
+      })
+    }
+
     await tx.staffTransaction.updateMany({ where: { id: { in: usable.map((t) => t.id) } }, data: { status: 'APPROVED' } })
 
     return updated
