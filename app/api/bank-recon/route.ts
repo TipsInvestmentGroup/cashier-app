@@ -43,6 +43,7 @@ async function reportedFor(channel: string, dayStart: Date, dayEnd: Date, outlet
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!ALLOWED.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   // Cashiers are strictly locked to their own outlet.

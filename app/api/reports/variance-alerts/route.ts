@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, readOutletScope } from '@/lib/auth'
+import { getAuthUser, readOutletScope, CASHIER_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
@@ -11,6 +11,7 @@ import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!CASHIER_ROLES.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const outletId = readOutletScope(user, searchParams.get('outletId'))

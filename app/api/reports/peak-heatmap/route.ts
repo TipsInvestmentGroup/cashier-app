@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, readOutletScope } from '@/lib/auth'
+import { getAuthUser, readOutletScope, MGMT_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid, differenceInCalendarDays } from 'date-fns'
 
@@ -16,6 +16,7 @@ const EAT_OFFSET_MS = 3 * 60 * 60 * 1000
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!MGMT_ROLES.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
   const outletId = readOutletScope(user, searchParams.get('outletId'))

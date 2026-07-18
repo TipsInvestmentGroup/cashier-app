@@ -22,6 +22,14 @@ export interface JWTPayload {
   position?: string
 }
 
+// Shared read-access role whitelists, mirroring the two groupings
+// components/Layout/SectionTabs.tsx uses to gate the pages that call these
+// endpoints (CASHIER_ROLES / MGMT there) — kept here, not imported from that
+// 'use client' file, so API routes don't pull client-only code into their
+// server bundle. Use these instead of re-declaring the same array per route.
+export const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+export const MGMT_ROLES = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+
 export function signToken(payload: JWTPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' })
 }
