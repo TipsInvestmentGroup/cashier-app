@@ -565,6 +565,11 @@ model StaffTransaction {
   amount           Float
   receivingAccount String?
   reference        String?
+  // The customer/payer name — required for SIGNED_BILL (a payment collected
+  // today against a bill signed earlier, allocated via lib/payment-alloc.ts)
+  // and CREDIT_SALE (a brand-new signed bill issued today). Validating turns
+  // these into real SignedBill/PaidBill rows instead of a plain sum.
+  personName       String?
   status           String             @default("DECLARED")
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt

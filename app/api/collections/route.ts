@@ -6,33 +6,11 @@ import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
 import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
-import { findBestPersonMatch } from '@/lib/nameMatch'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { resolveBusinessDate } from '@/lib/business-date'
 import { getCompanyConfig } from '@/lib/company-config'
+import { resolvePerson } from '@/lib/resolve-person'
 import { startOfDay, endOfDay, format } from 'date-fns'
-
-// Resolve a free-text signed-bill name to a Person: use an explicit personId from
-// the client when given (the cashier already confirmed it in the UI), otherwise
-// fuzzy-match against existing persons of the same type, and auto-create a new
-// Person when nothing matches so the entry is never missing from Accounts Receivable.
-async function resolvePerson(
-  tx: any, // eslint-disable-line @typescript-eslint/no-explicit-any
-  name: string, type: string, personId?: string | null, confirmedNew?: boolean
-) {
-  if (personId) {
-    const existing = await tx.person.findUnique({ where: { id: personId } })
-    if (existing) return existing
-  }
-  if (!confirmedNew) {
-    const candidates = await tx.person.findMany({ where: { type }, select: { id: true, name: true } })
-    const result = findBestPersonMatch(name, candidates)
-    if (result.kind === 'exact' || result.kind === 'similar') {
-      return tx.person.findUnique({ where: { id: result.match.id } })
-    }
-  }
-  return tx.person.create({ data: { name, type, isActive: true } })
-}
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)

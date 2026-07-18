@@ -1,7 +1,11 @@
+import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { resolvePerson } from '@/lib/resolve-person'
+import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
+import { allocatePayment } from '@/lib/payment-alloc'
 
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
 
@@ -12,11 +16,17 @@ const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
  * On VALIDATE: the staff's DECLARED/APPROVED transactions become the
  * official Daily Collection for that staff/outlet/date — no re-entry. Cash
  * and non-cash PAYMENT transactions become the DailyCollection cash/channel
- * amounts; CREDIT_SALE sums into creditSales; DISCOUNT sums into discount;
- * SIGNED_BILL sums into paymentsReceived (payments collected against
- * already-signed bills); CANCELLATION rows each become a Cancellation record.
- * From here the existing collection workflow (Close Day, Reporting, Finance
- * Posting, Audit Trail, Bank Reconciliation) continues completely unchanged.
+ * amounts; DISCOUNT sums into discount (no dedicated model exists for
+ * discounts in this app, same as the fixed Daily Collections form);
+ * CANCELLATION rows each become a real Cancellation record. CREDIT_SALE and
+ * SIGNED_BILL create real, bill-referenced records exactly like the fixed
+ * Daily Collections form does: CREDIT_SALE creates a new SignedBill (a
+ * credit sale issued today, billType CUSTOMER) and sums into creditSales;
+ * SIGNED_BILL allocates the payment against the payer's outstanding signed
+ * bills via lib/payment-alloc.ts (creating real PaidBill rows) and sums into
+ * paymentsReceived. From here the existing collection workflow (Close Day,
+ * Reporting, Finance Posting, Audit Trail, Bank Reconciliation) continues
+ * completely unchanged.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
@@ -58,23 +68,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   const usable = transactions.filter((t) => t.status === 'DECLARED' || t.status === 'APPROVED')
   if (!usable.length) return NextResponse.json({ error: 'No declared transactions to validate' }, { status: 400 })
+  if (usable.some((t) => (t.category === 'SIGNED_BILL' || t.category === 'CREDIT_SALE') && !t.personName)) {
+    return NextResponse.json({ error: 'Every Signed Bill / Credit Sale transaction needs a payer name before it can be validated' }, { status: 400 })
+  }
 
   const systemSalesRow = await prisma.systemSalesRecord.findFirst({ where: { sessionId: id, staffName: staff.name } })
 
   let cash = 0
-  let creditSales = 0
   let discount = 0
-  let paymentsReceived = 0
   const channelTotals: Record<string, number> = {}
   const cancellations: typeof usable = []
+  const creditSaleTxns: typeof usable = []
+  const signedBillPaymentTxns: typeof usable = []
 
   for (const t of usable) {
     if (t.category === 'PAYMENT') {
       if ((t.paymentMethod || 'CASH') === 'CASH') cash += t.amount
       else channelTotals[t.paymentMethod!] = roundMoney((channelTotals[t.paymentMethod!] || 0) + t.amount)
-    } else if (t.category === 'CREDIT_SALE') creditSales += t.amount
+    } else if (t.category === 'CREDIT_SALE') creditSaleTxns.push(t)
     else if (t.category === 'DISCOUNT') discount += t.amount
-    else if (t.category === 'SIGNED_BILL') paymentsReceived += t.amount
+    else if (t.category === 'SIGNED_BILL') signedBillPaymentTxns.push(t)
     else if (t.category === 'CANCELLATION') cancellations.push(t)
   }
 
@@ -95,10 +108,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         stanbic: channelTotals.STANBIC || 0,
         mpesa: channelTotals.MPESA || 0,
         total,
-        creditSales: roundMoney(creditSales),
         discount: roundMoney(discount),
         discountReason: discount > 0 ? 'Staff-declared discount(s), see Transaction Sessions drill-down' : null,
-        paymentsReceived: roundMoney(paymentsReceived),
         notes: `Validated from Transaction Session ${id}`,
       },
     })
@@ -125,10 +136,55 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       })
     }
 
+    // CREDIT_SALE — a brand-new signed bill issued today by the staff member,
+    // same real SignedBill record the fixed Daily Collections form creates.
+    let creditSales = 0
+    for (const t of creditSaleTxns) {
+      const amt = roundMoney(t.amount)
+      const person = await resolvePerson(tx, t.personName!, 'CUSTOMER')
+      const recordId = crypto.randomUUID()
+      const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', 'CUSTOMER')
+      const ref = await generateBillReference(tx, {
+        recordId, sourceModel: 'SignedBill', billTypeCode, date: session.date, personId: person?.id ?? null, outletId: session.outletId,
+      })
+      await tx.signedBill.create({
+        data: {
+          id: recordId,
+          autoKey: `TXN-${t.id}`, voucherNumber: ref.displayReference, billType: 'CUSTOMER',
+          personId: person?.id ?? null, personName: t.personName!, amount: amt, serviceStaff: staff.name,
+          description: `Credit sale declared by ${staff.name} via Transaction Session ${id}`,
+          status: 'UNPAID', date: session.date, outletId: session.outletId, cashierId: user.userId,
+          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+        },
+      })
+      creditSales += amt
+    }
+
+    // SIGNED_BILL — payment collected today against a bill signed earlier;
+    // allocates across the payer's outstanding bills (creating real PaidBill
+    // rows), same lib/payment-alloc.ts flow the fixed form uses.
+    let paymentsReceived = 0
+    for (const t of signedBillPaymentTxns) {
+      const amt = roundMoney(t.amount)
+      const person = await resolvePerson(tx, t.personName!, 'CUSTOMER')
+      await allocatePayment(tx, {
+        payerName: t.personName!, category: 'Customer', totalAmount: amt,
+        paymentMethod: t.paymentMethod || 'CASH', outletId: session.outletId, cashierId: user.userId,
+        date: session.date, billRef: `TXN-${t.id}`, personId: person?.id ?? null,
+        notes: `Signed bill payment declared by ${staff.name} via Transaction Session ${id}`,
+      })
+      paymentsReceived += amt
+    }
+
+    const updated = await tx.dailyCollection.update({
+      where: { id: created.id },
+      data: { creditSales: roundMoney(creditSales), paymentsReceived: roundMoney(paymentsReceived) },
+    })
+
     await tx.staffTransaction.updateMany({ where: { id: { in: usable.map((t) => t.id) } }, data: { status: 'APPROVED' } })
 
-    return created
-  })
+    return updated
+  }, { timeout: 20000 })
 
   const allTransactions = await prisma.staffTransaction.findMany({ where: { sessionId: id } })
   const allStaffIds = new Set(allTransactions.map((t) => t.staffId))

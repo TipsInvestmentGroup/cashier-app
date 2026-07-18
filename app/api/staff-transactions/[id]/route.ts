@@ -20,6 +20,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (body.paymentMethod !== undefined) data.paymentMethod = body.paymentMethod ? String(body.paymentMethod) : null
   if (body.receivingAccount !== undefined) data.receivingAccount = body.receivingAccount ? String(body.receivingAccount) : null
   if (body.reference !== undefined) data.reference = body.reference ? String(body.reference) : null
+  if (body.personName !== undefined) data.personName = body.personName ? String(body.personName).trim() : null
 
   const updated = await prisma.staffTransaction.update({ where: { id }, data })
   return NextResponse.json(updated)

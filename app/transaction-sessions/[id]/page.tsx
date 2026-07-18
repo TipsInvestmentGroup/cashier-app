@@ -12,7 +12,7 @@ import toast from 'react-hot-toast'
 interface Approval { id: string; status: string; approverRole: string; comment: string | null }
 interface Txn {
   id: string; category: string; paymentMethod: string | null; amount: number
-  receivingAccount: string | null; reference: string | null; status: string; createdAt: string
+  receivingAccount: string | null; reference: string | null; personName: string | null; status: string; createdAt: string
   staff: { id: string; name: string }; approvals: Approval[]
 }
 interface SystemSalesRow { id: string; staffId: string | null; staffName: string; amount: number }
@@ -155,7 +155,7 @@ export default function TransactionSessionDetailPage() {
                           <div key={t.id} className="py-2 flex items-center justify-between gap-2 text-sm">
                             <div>
                               <span className="font-medium text-gray-700">{format(new Date(t.createdAt), 'HH:mm')} · {t.category.replace('_', ' ')}{t.paymentMethod ? ` · ${t.paymentMethod}` : ''}</span>
-                              <p className="text-xs text-gray-400">{t.receivingAccount || t.reference || '—'}</p>
+                              <p className="text-xs text-gray-400">{t.personName || t.receivingAccount || t.reference || '—'}</p>
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-gray-900">{formatCurrency(t.amount)}</span>

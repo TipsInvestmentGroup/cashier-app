@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(rows)
 }
 
-/** POST — declare one transaction. Body: { sessionId, category, paymentMethod?, amount, receivingAccount?, reference? } */
+/** POST — declare one transaction. Body: { sessionId, category, paymentMethod?, amount, receivingAccount?, reference?, personName? } */
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -34,17 +34,21 @@ export async function POST(req: NextRequest) {
   const paymentMethod = body.paymentMethod ? String(body.paymentMethod) : null
   const receivingAccount = body.receivingAccount ? String(body.receivingAccount) : null
   const reference = body.reference ? String(body.reference) : null
+  const personName = body.personName ? String(body.personName).trim() : null
 
   if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
   if (amount <= 0) return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })
   if (category === 'PAYMENT' && !paymentMethod) return NextResponse.json({ error: 'Payment method required' }, { status: 400 })
+  if ((category === 'SIGNED_BILL' || category === 'CREDIT_SALE') && !personName) {
+    return NextResponse.json({ error: 'Payer/customer name required' }, { status: 400 })
+  }
 
   const session = await prisma.transactionSession.findUnique({ where: { id: sessionId } })
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
   if (session.status !== 'OPEN') return NextResponse.json({ error: 'This session is no longer open for new transactions' }, { status: 409 })
 
   const transaction = await prisma.$transaction((tx) =>
-    createStaffTransaction({ tx, sessionId, staffId: user.userId, category, paymentMethod, amount, receivingAccount, reference }),
+    createStaffTransaction({ tx, sessionId, staffId: user.userId, category, paymentMethod, amount, receivingAccount, reference, personName }),
   )
 
   if (categoryNeedsApproval(category)) {

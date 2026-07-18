@@ -22,6 +22,7 @@ interface CreateArgs {
   amount: number
   receivingAccount: string | null
   reference: string | null
+  personName: string | null
 }
 
 /**
@@ -30,7 +31,7 @@ interface CreateArgs {
  * via the existing /api/collection-approvals decide endpoint) — otherwise it
  * is immediately DECLARED and counts toward the cashier's summary.
  */
-export async function createStaffTransaction({ tx, sessionId, staffId, category, paymentMethod, amount, receivingAccount, reference }: CreateArgs) {
+export async function createStaffTransaction({ tx, sessionId, staffId, category, paymentMethod, amount, receivingAccount, reference, personName }: CreateArgs) {
   const needsApproval = categoryNeedsApproval(category)
   const transaction = await tx.staffTransaction.create({
     data: {
@@ -41,6 +42,7 @@ export async function createStaffTransaction({ tx, sessionId, staffId, category,
       amount,
       receivingAccount,
       reference,
+      personName,
       status: needsApproval ? 'PENDING_APPROVAL' : 'DECLARED',
     },
   })

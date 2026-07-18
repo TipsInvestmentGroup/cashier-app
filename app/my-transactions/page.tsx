@@ -13,8 +13,10 @@ interface TxSession { id: string; status: string; date: string }
 interface Approval { status: string; comment: string | null }
 interface Txn {
   id: string; category: string; paymentMethod: string | null; amount: number
-  receivingAccount: string | null; reference: string | null; status: string; approvals: Approval[]
+  receivingAccount: string | null; reference: string | null; personName: string | null; status: string; approvals: Approval[]
 }
+
+const NEEDS_PAYER = new Set(['SIGNED_BILL', 'CREDIT_SALE'])
 
 const CATEGORIES = [
   { value: 'PAYMENT', label: 'Payment' },
@@ -45,14 +47,16 @@ export default function MyTransactionsPage() {
   const [amount, setAmount] = useState('')
   const [receivingAccount, setReceivingAccount] = useState('')
   const [reference, setReference] = useState('')
+  const [personName, setPersonName] = useState('')
 
   const today = format(new Date(), 'yyyy-MM-dd')
 
   const load = useCallback(async () => {
+    if (!user?.outlet?.id) { setLoading(false); return }
     setLoading(true)
     try {
       const [sessions, chans] = await Promise.all([
-        request(`/api/transaction-sessions?from=${today}&to=${today}`),
+        request(`/api/transaction-sessions?outletId=${user.outlet.id}&from=${today}&to=${today}`),
         request('/api/payment-channels'),
       ])
       setChannels((chans || []).filter((c: { isActive: boolean }) => c.isActive))
@@ -63,7 +67,7 @@ export default function MyTransactionsPage() {
     } catch {
       // best-effort — errors surface via the empty-state below
     } finally { setLoading(false) }
-  }, [request, today])
+  }, [request, today, user?.outlet?.id])
 
   useEffect(() => { load() }, [load])
 
@@ -72,6 +76,7 @@ export default function MyTransactionsPage() {
     const amt = Number(amount)
     if (!amt || amt <= 0) return toast.error('Enter a valid amount')
     if (category === 'PAYMENT' && !paymentMethod) return toast.error('Select a payment method')
+    if (NEEDS_PAYER.has(category) && !personName.trim()) return toast.error('Enter the payer/customer name')
     setSaving(true)
     try {
       await request('/api/staff-transactions', {
@@ -83,10 +88,11 @@ export default function MyTransactionsPage() {
           amount: amt,
           receivingAccount: receivingAccount || null,
           reference: reference || null,
+          personName: NEEDS_PAYER.has(category) ? personName.trim() : null,
         }),
       })
       toast.success('Transaction declared')
-      setAmount(''); setReceivingAccount(''); setReference('')
+      setAmount(''); setReceivingAccount(''); setReference(''); setPersonName('')
       load()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not save')
@@ -141,6 +147,14 @@ export default function MyTransactionsPage() {
                 </div>
               )}
 
+              {NEEDS_PAYER.has(category) && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Payer / Customer Name</label>
+                  <input value={personName} onChange={(e) => setPersonName(e.target.value)}
+                    placeholder="e.g. John Customer" className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Amount</label>
                 <input type="number" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)}
@@ -183,7 +197,7 @@ export default function MyTransactionsPage() {
                           {CATEGORIES.find((c) => c.value === t.category)?.label}
                           {t.paymentMethod ? ` · ${t.paymentMethod}` : ''}
                         </p>
-                        <p className="text-xs text-gray-400">{t.receivingAccount || t.reference || '—'}</p>
+                        <p className="text-xs text-gray-400">{t.personName || t.receivingAccount || t.reference || '—'}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-gray-900">{formatCurrency(t.amount)}</span>
