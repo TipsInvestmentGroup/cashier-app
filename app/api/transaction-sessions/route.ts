@@ -44,12 +44,14 @@ export async function POST(req: NextRequest) {
   const date = body.date ? startOfDay(new Date(body.date)) : startOfDay(new Date())
   if (isNaN(date.getTime())) return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
 
-  // This outlet may be configured for Default (fixed-form) Collection instead
+  // This outlet may be configured for Default (fixed-form) Collection only
   // — the Collection Mode Engine decides, not this route. Block opening a
   // Transaction Session there rather than silently letting two workflows run
-  // in parallel for the same outlet/day.
+  // in parallel for the same outlet/day. HYBRID explicitly allows both
+  // workflows at once (e.g. some staff self-declare while the cashier still
+  // enters others directly), so it passes this gate too.
   const mode = await resolveCollectionMode({ outletId })
-  if (mode !== 'TRANSACTION_VERIFICATION') {
+  if (mode !== 'TRANSACTION_VERIFICATION' && mode !== 'HYBRID') {
     return NextResponse.json({ error: 'This outlet is configured for Default Collection Mode — use Daily Collections instead. Ask an Admin to change it under Setup → Collection Mode if this is wrong.' }, { status: 409 })
   }
 

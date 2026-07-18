@@ -6,7 +6,15 @@ import { summarizeStaffTransactions, staffDifference, splitChannelTotals } from 
 import { loadActiveTargets } from '@/lib/sales-targets'
 import { targetLevels, targetDeptKey } from '@/lib/targets'
 import { computeActuals } from '@/lib/target-actuals'
-import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
+import { compare, targetAchievement, lossAttribution, peakHourInsight } from '@/lib/bi/insights'
+import { getHourlyBreakdown } from '@/lib/staff-analytics'
+import { startOfDay, endOfDay, subDays, parse, isValid } from 'date-fns'
+
+// Prisma client types for BusinessSession are generated on deploy; assert to
+// avoid local type drift (same pattern as lib/sales-targets.ts).
+const biDb = prisma as unknown as { businessSession: { findUnique: (args: unknown) => Promise<{
+  officialCollection: number; cancellations: number; discounts: number; signedBillsTotal: number; dailyLoss: number
+} | null> } }
 
 /**
  * GET — the Service Staff Dashboard for the caller's own outlet/day: whichever
@@ -115,6 +123,7 @@ export async function GET(req: NextRequest) {
   const outstandingLossBalance = roundMoney(staffLossBills.reduce((s, b) => s + b.amount, 0) - (staffLossPaidAllTime._sum.amountPaid || 0))
 
   const targetPayload = await computeStaffTarget(outletId, user.name, date)
+  const insights = await computeAfterModeInsights({ outletId, staffName: user.name, date, session, staffId: user.userId, collectionTotal: collection.total, targetPayload })
 
   return NextResponse.json({
     ...base,
@@ -141,7 +150,42 @@ export async function GET(req: NextRequest) {
       lossPaidToday: roundMoney(staffLossPaidToday._sum.amountPaid || 0), outstandingLossBalance,
     },
     target: targetPayload,
+    insights,
   })
+}
+
+interface TargetRow { department: string; actual: number; weeklyTarget: number }
+
+/**
+ * BI-layer insights for the AFTER (validated) view — additive to the existing
+ * response, computed from the standardized BusinessSession row rather than
+ * re-deriving DoD/loss-cause figures inline. Returns null fields (not thrown
+ * errors) when a prior day's BusinessSession doesn't exist yet, e.g. the
+ * staff's first day, or before the backfill script has run.
+ */
+async function computeAfterModeInsights({ outletId, staffName, date, session, staffId, collectionTotal, targetPayload }: {
+  outletId: string; staffName: string; date: Date
+  session: { id: string } | null; staffId: string; collectionTotal: number
+  targetPayload: TargetRow[]
+}) {
+  const [bsToday, bsYesterday] = await Promise.all([
+    biDb.businessSession.findUnique({ where: { outletId_date_staffName: { outletId, date, staffName } } }),
+    biDb.businessSession.findUnique({ where: { outletId_date_staffName: { outletId, date: startOfDay(subDays(date, 1)), staffName } } }),
+  ])
+
+  const collectionInsight = bsYesterday ? compare(collectionTotal, bsYesterday.officialCollection, 'yesterday') : null
+  const lossInsight = bsToday ? lossAttribution(bsToday) : null
+
+  const collectionTargetRow = targetPayload.find((t) => t.department === 'Total Collection')
+  const targetInsight = collectionTargetRow ? targetAchievement(collectionTargetRow.actual, collectionTargetRow.weeklyTarget) : null
+
+  let peakHour = null
+  if (session) {
+    const hourly = await getHourlyBreakdown(session.id, staffId)
+    peakHour = peakHourInsight(hourly.buckets)
+  }
+
+  return { collection: collectionInsight, loss: lossInsight, target: targetInsight, peakHour }
 }
 
 async function computeStaffTarget(outletId: string, staffName: string, date: Date) {

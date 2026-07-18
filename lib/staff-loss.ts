@@ -2,11 +2,44 @@ import crypto from 'crypto'
 import { roundMoney } from './utils'
 import { syncCollectionExcessTotal } from './collection-excess'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from './bill-reference'
+import { syncBusinessSession } from './business-session'
 
 // Loose type — works with both the prisma singleton and a transaction client,
 // and avoids depending on generated Prisma types (regenerated on deploy).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = any
+
+export interface LossComponents {
+  approvedCancel: number
+  shortfall: number
+}
+
+/**
+ * The authoritative Staff Loss formula, as pure data — no DB access, no side
+ * effects. Extracted so callers that only need the figures (e.g. the BI
+ * layer's syncBusinessSession) don't re-derive this formula independently.
+ *
+ *   Staff Loss = System Sales − Collection − Signed Bills − Paid (Staff Loss)
+ *                − Discount − Approved cancellations (by that staff)
+ */
+export function computeLossComponents(c: {
+  systemSales?: number | null
+  total: number
+  creditSales?: number | null
+  paymentsReceived?: number | null
+  discount?: number | null
+  cancellations?: { status: string; amount: number }[]
+}): LossComponents {
+  const approvedCancel = roundMoney(
+    (c.cancellations || [])
+      .filter((x) => x.status === 'APPROVED')
+      .reduce((s, x) => s + (x.amount || 0), 0)
+  )
+  const shortfall = roundMoney(
+    (c.systemSales || 0) - c.total - (c.creditSales || 0) - (c.paymentsReceived || 0) - (c.discount || 0) - approvedCancel
+  )
+  return { approvedCancel, shortfall }
+}
 
 /**
  * Recompute and sync a collection's auto staff-loss (voucher SL-<collectionId>).
@@ -22,14 +55,7 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
   const c = await db.dailyCollection.findUnique({ where: { id: collectionId }, include: { cancellations: true } })
   if (!c) return 0
 
-  const approvedCancel = roundMoney(
-    (c.cancellations || [])
-      .filter((x: { status: string; amount: number }) => x.status === 'APPROVED')
-      .reduce((s: number, x: { amount: number }) => s + (x.amount || 0), 0)
-  )
-  const shortfall = roundMoney(
-    (c.systemSales || 0) - c.total - (c.creditSales || 0) - (c.paymentsReceived || 0) - (c.discount || 0) - approvedCancel
-  )
+  const { shortfall } = computeLossComponents(c)
 
   const voucher = `SL-${collectionId}`
   const sl = await db.signedBill.findUnique({ where: { autoKey: voucher } })
@@ -66,6 +92,7 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
         },
       })
     }
+    await syncBusinessSession(db, collectionId)
     return shortfall
   }
 
@@ -74,5 +101,6 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
     await db.paidBill.deleteMany({ where: { signedBillId: sl.id } })
     await db.signedBill.delete({ where: { id: sl.id } })
   }
+  await syncBusinessSession(db, collectionId)
   return 0
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, MGMT_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { getSessionTotalsByOutlet } from '@/lib/bi/business-sessions'
 import { startOfDay, endOfDay, parse, isValid, differenceInCalendarDays, subDays } from 'date-fns'
 
 /**
@@ -27,20 +28,27 @@ export async function GET(req: NextRequest) {
   const cur = { gte: startOfDay(from), lte: endOfDay(to) }
   const prev = { gte: startOfDay(prevFrom), lte: endOfDay(prevTo) }
 
-  const [outlets, cols, prevCols, signed, cancels] = await Promise.all([
+  const [outlets, bsCurrent, bsPrev, signed, standaloneCancellations] = await Promise.all([
     prisma.outlet.findMany({ where: { isActive: true }, select: { id: true, name: true } }),
-    prisma.dailyCollection.findMany({ where: { date: cur, ...oWhere }, select: { outletId: true, systemSales: true, total: true } }),
-    prisma.dailyCollection.findMany({ where: { date: prev, ...oWhere }, select: { outletId: true, total: true } }),
+    getSessionTotalsByOutlet({ outletId, dateRange: cur }),
+    getSessionTotalsByOutlet({ outletId, dateRange: prev }),
+    // Broader than BusinessSession's signedBillsTotal (which is only signed
+    // bills entered through the collection-entry workflow) — this counts every
+    // signed-bill type (Tips/DJ/Admin/Director/Customer), so it stays on its
+    // own source rather than being folded into the BI layer.
     prisma.signedBill.findMany({ where: { date: cur, ...oWhere, approvalStatus: { not: 'REJECTED' } }, select: { outletId: true, amount: true } }),
-    prisma.cancellation.findMany({ where: { date: cur, ...(outletId ? { outletId } : {}), status: 'APPROVED' }, select: { outletId: true, amount: true } }),
+    // Standalone cancellation requests (filed via app/api/cancellations, not
+    // tied to a Daily Collection) aren't part of any BusinessSession — merge
+    // them in on top of BusinessSession's collection-linked cancellations.
+    prisma.cancellation.findMany({ where: { date: cur, ...(outletId ? { outletId } : {}), status: 'APPROVED', collectionId: null }, select: { outletId: true, amount: true } }),
   ])
 
   const agg: Record<string, { systemSales: number; collected: number; prevCollected: number; signed: number; cancellations: number }> = {}
   const b = (id: string | null) => { if (!id) return null; return (agg[id] ||= { systemSales: 0, collected: 0, prevCollected: 0, signed: 0, cancellations: 0 }) }
-  cols.forEach((c) => { const x = b(c.outletId); if (x) { x.systemSales += c.systemSales || 0; x.collected += c.total || 0 } })
-  prevCols.forEach((c) => { const x = b(c.outletId); if (x) x.prevCollected += c.total || 0 })
+  bsCurrent.forEach((c) => { const x = b(c.outletId); if (x) { x.systemSales += c.systemSales; x.collected += c.officialCollection; x.cancellations += c.cancellations } })
+  bsPrev.forEach((c) => { const x = b(c.outletId); if (x) x.prevCollected += c.officialCollection })
   signed.forEach((s) => { const x = b(s.outletId); if (x) x.signed += s.amount || 0 })
-  cancels.forEach((c) => { const x = b(c.outletId); if (x) x.cancellations += c.amount || 0 })
+  standaloneCancellations.forEach((c) => { const x = b(c.outletId); if (x) x.cancellations += c.amount || 0 })
 
   const rows = outlets
     .filter((o) => agg[o.id] && (agg[o.id].systemSales > 0 || agg[o.id].collected > 0 || agg[o.id].prevCollected > 0))

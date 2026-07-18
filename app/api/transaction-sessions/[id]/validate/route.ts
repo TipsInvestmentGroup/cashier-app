@@ -6,6 +6,7 @@ import { roundMoney } from '@/lib/utils'
 import { resolvePerson } from '@/lib/resolve-person'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { allocatePayment } from '@/lib/payment-alloc'
+import { syncBusinessSession } from '@/lib/business-session'
 
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
 
@@ -224,6 +225,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
 
     await tx.staffTransaction.updateMany({ where: { id: { in: usable.map((t) => t.id) } }, data: { status: 'APPROVED' } })
+
+    await syncBusinessSession(tx, created.id)
 
     return updated
   }, { timeout: 20000 })

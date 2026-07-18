@@ -88,7 +88,7 @@ export function SectionTabs({ tabs }: { tabs: Tab[] }) {
   const pathname = usePathname()
   const { user } = useAuth()
   const { request } = useApi()
-  const [mode, setMode] = useState<'DEFAULT' | 'TRANSACTION_VERIFICATION' | null>(null)
+  const [mode, setMode] = useState<'DEFAULT' | 'TRANSACTION_VERIFICATION' | 'HYBRID' | null>(null)
 
   const needsMode = tabs.some((t) => t.modeGate?.forRoles.includes(user?.role || ''))
   useEffect(() => {
@@ -100,7 +100,9 @@ export function SectionTabs({ tabs }: { tabs: Tab[] }) {
   const visible = tabs.filter((t) => {
     if (!t.roles.includes(user?.role || '')) return false
     if (t.excludePositions?.includes(user?.position || '')) return false
-    if (t.modeGate?.forRoles.includes(user?.role || '') && mode !== null && mode !== t.modeGate.mode) return false
+    // HYBRID means both workflows are active for this outlet — it satisfies
+    // every modeGate rather than failing them all.
+    if (t.modeGate?.forRoles.includes(user?.role || '') && mode !== null && mode !== 'HYBRID' && mode !== t.modeGate.mode) return false
     return true
   })
   // Longest matching href wins so nested routes don't also light up their parent.

@@ -6,12 +6,12 @@ import { useApi } from '@/hooks/useApi'
 import { VALID_ROLES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 
-type Mode = 'DEFAULT' | 'TRANSACTION_VERIFICATION'
+type Mode = 'DEFAULT' | 'TRANSACTION_VERIFICATION' | 'HYBRID'
 interface ConfigRow { id: string; scope: 'GLOBAL' | 'COMPANY' | 'OUTLET' | 'ROLE'; scopeId: string | null; mode: Mode }
 interface Outlet { id: string; name: string }
 interface Company { id: string; name: string }
 
-const MODE_LABEL: Record<Mode, string> = { DEFAULT: 'Default Collection', TRANSACTION_VERIFICATION: 'Transaction Verification' }
+const MODE_LABEL: Record<Mode, string> = { DEFAULT: 'Default Collection', TRANSACTION_VERIFICATION: 'Transaction Verification', HYBRID: 'Hybrid (mixed per-role)' }
 
 export default function CollectionModeSettingsPage() {
   const { request } = useApi()
@@ -69,14 +69,14 @@ export default function CollectionModeSettingsPage() {
       <div className="max-w-3xl space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Collection Mode</h1>
-          <p className="text-gray-500 text-sm">Choose which collection workflow applies where — Default Collection (the traditional cashier form) or Transaction Verification (staff self-declare, cashier validates). Every collection ends up the same regardless of mode; only the data-entry screens differ.</p>
+          <p className="text-gray-500 text-sm">Choose which collection workflow applies where — Default Collection (the traditional cashier form), Transaction Verification (staff self-declare, cashier validates), or Hybrid (both at once — e.g. some staff self-declare while the cashier still enters others directly). Every collection ends up the same regardless of mode; only the data-entry screens differ.</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <h2 className="font-semibold text-gray-800 mb-1">Global Default</h2>
           <p className="text-xs text-gray-400 mb-3">Applies everywhere unless overridden below by Company, Outlet, or Role.</p>
           <div className="flex gap-2">
-            {(['DEFAULT', 'TRANSACTION_VERIFICATION'] as Mode[]).map((m) => (
+            {(['DEFAULT', 'TRANSACTION_VERIFICATION', 'HYBRID'] as Mode[]).map((m) => (
               <button key={m} disabled={saving} onClick={() => set('GLOBAL', null, m)}
                 className={`flex-1 px-3 py-2.5 rounded-xl text-sm font-semibold transition ${(global?.mode || 'DEFAULT') === m ? 'bg-indigo-600 text-white shadow' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                 {MODE_LABEL[m]}
@@ -156,6 +156,7 @@ function OverrideSection({
             className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
             <option value="DEFAULT">Default Collection</option>
             <option value="TRANSACTION_VERIFICATION">Transaction Verification</option>
+            <option value="HYBRID">Hybrid (mixed per-role)</option>
           </select>
           <button onClick={onAdd} disabled={!newId} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">Add Override</button>
         </div>

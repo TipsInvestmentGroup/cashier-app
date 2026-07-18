@@ -10,6 +10,7 @@ import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill
 import { resolveBusinessDate } from '@/lib/business-date'
 import { getCompanyConfig } from '@/lib/company-config'
 import { resolvePerson } from '@/lib/resolve-person'
+import { syncBusinessSession } from '@/lib/business-session'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -247,6 +248,8 @@ export async function POST(req: NextRequest) {
       }
       excess = { amount: excessAmount, items: items.length }
     }
+
+    await syncBusinessSession(tx, collection.id)
 
     return { collection, signedTotal, paidTotal, paidStaffLoss, signedCreated, paidCreated, staffLoss, excess }
   }, { timeout: 20000 })

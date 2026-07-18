@@ -9,8 +9,10 @@ import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, subDays } from 'date-fns'
 
 // Tanzania has no DST — EAT is a fixed UTC+3 (see peak-heatmap route).
-const EAT_OFFSET_MS = 3 * 60 * 60 * 1000
-const localHour = (d: Date) => new Date(d.getTime() + EAT_OFFSET_MS).getUTCHours()
+// Exported so lib/bi/insights.ts's peak-hour insight reuses the same
+// bucketing instead of a third copy of this hour-shift math.
+export const EAT_OFFSET_MS = 3 * 60 * 60 * 1000
+export const localHour = (d: Date) => new Date(d.getTime() + EAT_OFFSET_MS).getUTCHours()
 
 export interface HourBucket { hour: number; label: string; amount: number; count: number; avgValue: number }
 

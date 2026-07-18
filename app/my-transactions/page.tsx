@@ -7,6 +7,8 @@ import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency } from '@/lib/utils'
+import { WidgetGrid } from '@/components/widgets/WidgetGrid'
+import { MY_TRANSACTIONS_DRILL_WIDGETS } from './widgets'
 import toast from 'react-hot-toast'
 
 const NEEDS_PAYER = new Set(['SIGNED_BILL', 'CREDIT_SALE'])
@@ -25,7 +27,7 @@ const STATUS_STYLE: Record<string, string> = {
 }
 
 interface Channel { code: string; label: string }
-interface Txn {
+export interface Txn {
   id: string; category: string; paymentMethod: string | null; amount: number
   receivingAccount: string | null; reference: string | null; personName: string | null; status: string; createdAt: string
 }
@@ -33,7 +35,7 @@ interface TargetRow {
   department: string; unit: string; unitLabel: string | null
   dailyTarget: number; actual: number; achievementPct: number; remaining: number; status: string
 }
-interface Dashboard {
+export interface Dashboard {
   date: string; outletName: string; mode: 'NO_SESSION' | 'BEFORE' | 'AFTER'
   // BEFORE
   sessionStatus?: string; systemSales?: number; declaredTotal?: number; difference?: number
@@ -48,6 +50,12 @@ interface Dashboard {
   paidBills?: { billsCollectedCount: number; billsPaidAmount: number; outstandingAmount: number; staffLossRecoveryAmount: number; records: { id: string; payerName: string; amountPaid: number; paymentMethod: string; date: string }[] }
   dailyLoss?: { expectedSales: number; official: number; variance: number; lossPaidToday: number; outstandingLossBalance: number }
   target?: TargetRow[]
+  insights?: {
+    collection: { text: string; status: 'good' | 'bad' | 'neutral' } | null
+    loss: { text: string; recommendation?: string } | null
+    target: { text: string } | null
+    peakHour: { text: string } | null
+  }
 }
 
 const STATUS_COLOR: Record<string, string> = { BELOW_TARGET: 'bg-red-500', ON_TARGET: 'bg-amber-500', ABOVE_TARGET: 'bg-emerald-500' }
@@ -71,7 +79,6 @@ export default function MyTransactionsPage() {
   const [channels, setChannels] = useState<Channel[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [expanded, setExpanded] = useState<string | null>(null)
 
   const [category, setCategory] = useState('PAYMENT')
   const [paymentMethod, setPaymentMethod] = useState('CASH')
@@ -312,73 +319,10 @@ export default function MyTransactionsPage() {
                 <Tile label="Bank" value={data.collection.bank} />
                 <Tile label="Mobile Money" value={data.collection.mobileMoney} />
               </div>
+              {data.insights && <InsightStrip insights={data.insights} />}
             </div>
 
-            {data.signedBillsAfter && (
-              <DrillCard
-                title="Signed Bills" expandKey="signed" expanded={expanded} setExpanded={setExpanded}
-                tiles={[
-                  { label: 'Issued', value: data.signedBillsAfter.issuedCount, isCount: true },
-                  { label: 'Approved', value: data.signedBillsAfter.approvedCount, isCount: true },
-                  { label: 'Pending', value: data.signedBillsAfter.pendingCount, isCount: true },
-                  { label: 'Rejected', value: data.signedBillsAfter.rejectedCount, isCount: true },
-                  { label: 'Paid', value: data.signedBillsAfter.paidAmount },
-                  { label: 'Outstanding', value: data.signedBillsAfter.outstandingAmount },
-                ]}
-              >
-                {data.signedBillsAfter.records.length === 0 ? <EmptyRow /> : data.signedBillsAfter.records.map((r) => (
-                  <RecordRow key={r.id} label={r.personName} sub={r.displayReference || undefined} amount={r.amount} status={r.status} />
-                ))}
-              </DrillCard>
-            )}
-
-            {data.discountsAfter && (
-              <DrillCard
-                title="Discounts" expandKey="discounts" expanded={expanded} setExpanded={setExpanded}
-                tiles={[
-                  { label: 'Issued', value: data.discountsAfter.count, isCount: true },
-                  { label: 'Approved', value: data.discountsAfter.approved, isCount: true },
-                  { label: 'Pending', value: data.discountsAfter.pending, isCount: true },
-                  { label: 'Rejected', value: data.discountsAfter.rejected, isCount: true },
-                ]}
-              >
-                {data.discountsAfter.records.length === 0 ? <EmptyRow /> : data.discountsAfter.records.map((r) => (
-                  <RecordRow key={r.id} label={format(new Date(r.createdAt), 'HH:mm')} sub={r.reference || undefined} amount={r.amount} status={r.status} />
-                ))}
-              </DrillCard>
-            )}
-
-            {data.cancellationsAfter && (
-              <DrillCard
-                title="Cancellations" expandKey="cancellations" expanded={expanded} setExpanded={setExpanded}
-                tiles={[
-                  { label: 'Requested', value: data.cancellationsAfter.count, isCount: true },
-                  { label: 'Approved', value: data.cancellationsAfter.approved, isCount: true },
-                  { label: 'Pending', value: data.cancellationsAfter.pending, isCount: true },
-                  { label: 'Rejected', value: data.cancellationsAfter.rejected, isCount: true },
-                ]}
-              >
-                {data.cancellationsAfter.records.length === 0 ? <EmptyRow /> : data.cancellationsAfter.records.map((r) => (
-                  <RecordRow key={r.id} label={format(new Date(r.createdAt), 'HH:mm')} sub={r.reference || undefined} amount={r.amount} status={r.status} />
-                ))}
-              </DrillCard>
-            )}
-
-            {data.paidBills && (
-              <DrillCard
-                title="Paid Bills" expandKey="paidbills" expanded={expanded} setExpanded={setExpanded}
-                tiles={[
-                  { label: 'Bills Collected', value: data.paidBills.billsCollectedCount, isCount: true },
-                  { label: 'Bills Paid', value: data.paidBills.billsPaidAmount },
-                  { label: 'Outstanding', value: data.paidBills.outstandingAmount },
-                  { label: 'Staff Loss Recovery', value: data.paidBills.staffLossRecoveryAmount },
-                ]}
-              >
-                {data.paidBills.records.length === 0 ? <EmptyRow /> : data.paidBills.records.map((r) => (
-                  <RecordRow key={r.id} label={r.payerName} sub={r.paymentMethod} amount={r.amountPaid} />
-                ))}
-              </DrillCard>
-            )}
+            <WidgetGrid defs={MY_TRANSACTIONS_DRILL_WIDGETS} data={data} role={user?.role || ''} className="space-y-5" />
 
             {data.dailyLoss && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
@@ -421,47 +365,19 @@ function Tile({ label, value, accent }: { label: string; value: number; accent?:
   )
 }
 
-function EmptyRow() {
-  return <p className="py-4 text-center text-gray-400 text-xs">Nothing here</p>
-}
-
-function RecordRow({ label, sub, amount, status }: { label: string; sub?: string; amount: number; status?: string }) {
+/** BI-layer insight lines under the Daily Collection card — additive, no layout change if absent. */
+function InsightStrip({ insights }: { insights: NonNullable<Dashboard['insights']> }) {
+  const lines = [
+    insights.collection && { text: insights.collection.text, tone: insights.collection.status },
+    insights.target && { text: insights.target.text, tone: 'neutral' as const },
+    insights.peakHour && { text: insights.peakHour.text, tone: 'neutral' as const },
+    insights.loss && { text: insights.loss.recommendation ? `${insights.loss.text} — ${insights.loss.recommendation}` : insights.loss.text, tone: insights.loss.recommendation ? 'bad' as const : 'neutral' as const },
+  ].filter(Boolean) as { text: string; tone: 'good' | 'bad' | 'neutral' }[]
+  if (!lines.length) return null
+  const toneClass = { good: 'text-emerald-700', bad: 'text-red-600', neutral: 'text-gray-500' }
   return (
-    <div className="py-2 flex items-center justify-between gap-2 text-sm">
-      <div>
-        <span className="font-medium text-gray-700">{label}</span>
-        {sub && <p className="text-xs text-gray-400">{sub}</p>}
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="font-semibold text-gray-900">{formatCurrency(amount)}</span>
-        {status && <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_STYLE[status] || 'bg-gray-100 text-gray-600'}`}>{status.replace('_', ' ')}</span>}
-      </div>
-    </div>
-  )
-}
-
-function DrillCard({
-  title, tiles, children, expandKey, expanded, setExpanded,
-}: {
-  title: string; tiles: { label: string; value: number; isCount?: boolean }[]; children: React.ReactNode
-  expandKey: string; expanded: string | null; setExpanded: (k: string | null) => void
-}) {
-  const isOpen = expanded === expandKey
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-      <button onClick={() => setExpanded(isOpen ? null : expandKey)} className="w-full flex items-center justify-between p-5 pb-3 text-left">
-        <h2 className="font-semibold text-gray-800">{title}</h2>
-        <span className="text-xs text-indigo-600 font-semibold">{isOpen ? 'Hide details' : 'View details'}</span>
-      </button>
-      <div className="px-5 pb-4 grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-        {tiles.map((t) => (
-          <div key={t.label} className="bg-gray-50 rounded-lg px-2.5 py-1.5">
-            <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">{t.label}</p>
-            <p className="font-semibold text-gray-800">{t.isCount ? t.value : formatCurrency(t.value)}</p>
-          </div>
-        ))}
-      </div>
-      {isOpen && <div className="border-t border-gray-100 px-5 py-2 bg-gray-50/60 divide-y divide-gray-100">{children}</div>}
+    <div className="mt-3 pt-3 border-t border-gray-100 space-y-1">
+      {lines.map((l, i) => <p key={i} className={`text-xs font-medium ${toneClass[l.tone]}`}>{l.text}</p>)}
     </div>
   )
 }

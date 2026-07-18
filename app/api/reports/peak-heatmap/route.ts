@@ -3,10 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, MGMT_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, parse, isValid, differenceInCalendarDays } from 'date-fns'
-
-// Tanzania has no DST — EAT is a fixed UTC+3. createdAt is stored UTC, so we
-// shift by +3h before reading the weekday/hour to bucket into local time.
-const EAT_OFFSET_MS = 3 * 60 * 60 * 1000
+import { EAT_OFFSET_MS } from '@/lib/staff-analytics'
 
 /**
  * Peak-period heatmap: order volume and revenue bucketed by weekday (Mon–Sun)

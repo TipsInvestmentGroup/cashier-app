@@ -6,17 +6,21 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
-import { StatCard } from '@/components/ui/StatCard'
+import { WidgetGrid } from '@/components/widgets/WidgetGrid'
+import { DASHBOARD_STAT_WIDGETS, DASHBOARD_ROLE_WIDGETS } from './widgets'
 import { Skeleton, StatCardsSkeleton } from '@/components/ui/Skeleton'
-import { Wallet, CalendarDays, Calendar, AlertTriangle, Banknote, Landmark, Building2, Smartphone } from 'lucide-react'
+import { Banknote, Landmark, Building2, Smartphone, CalendarDays } from 'lucide-react'
 import { generateWarningLetters, type FlaggedItem } from '@/lib/warning-letter-pdf'
+import type { StaffTotals } from '@/lib/bi/business-sessions'
+import type { PendingApprovalCounts } from '@/lib/bi/pending-approvals'
+import type { UnreconciledBankCounts } from '@/lib/bi/bank-recon-status'
 import {
   ComposedChart, Area, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import { format } from 'date-fns'
 
-interface DashboardData {
+export interface DashboardData {
   today: { total: number; cash: number; crdb: number; stanbic: number; mpesa: number; templateCollections: number }
   week: { total: number }
   month: { total: number }
@@ -27,6 +31,16 @@ interface DashboardData {
   paymentMethodBreakdown: { paymentMethod: string; _sum: { amountPaid: number } }[]
   recentBills: { id: string; personName: string; amount: number; billType: string; status: string; date: string }[]
   dailyTrend: { date: string; total: number }[]
+  insights?: {
+    today: { text: string; status: 'good' | 'bad' | 'neutral' } | null
+    week: { text: string; status: 'good' | 'bad' | 'neutral' } | null
+    trend: 'improving' | 'stable' | 'declining'
+  }
+  // Role-specific decision-support widgets (Manager/HR/Finance/Executive) — see app/dashboard/widgets.ts
+  staffPerformance?: StaffTotals[]
+  pendingApprovals?: PendingApprovalCounts
+  unreconciledBank?: UnreconciledBankCounts
+  outletGrowth?: { outletId: string; outletName: string; thisWeek: number; prevWeek: number; growthPct: number; direction: 'up' | 'down' | 'flat' }[]
 }
 
 const BILL_TYPE_COLORS: Record<string, string> = {
@@ -214,12 +228,10 @@ export default function DashboardPage() {
         )}
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-          <StatCard icon={Wallet} tone="indigo" label="Today's Collections" value={formatCurrency(data.today.total)} sub="Cash + Bank + M-PESA" href="/collections" />
-          <StatCard icon={CalendarDays} tone="purple" label="This Week" value={formatCurrency(data.week.total)} sub="Weekly total" href="/reports" />
-          <StatCard icon={Calendar} tone="blue" label="This Month" value={formatCurrency(data.month.total)} sub="Monthly total" href="/reports" />
-          <StatCard icon={AlertTriangle} tone="amber" label="Outstanding Receivables" value={formatCurrency(data.unpaidBills.total)} sub={`${data.unpaidBills.count} unpaid bills`} href="/receivables" />
-        </div>
+        <WidgetGrid defs={DASHBOARD_STAT_WIDGETS} data={data} role={role} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" />
+
+        {/* Manager/HR/Finance/Executive decision-support widgets — role-gated, additive */}
+        <WidgetGrid defs={DASHBOARD_ROLE_WIDGETS} data={data} role={role} className="grid grid-cols-1 sm:grid-cols-2 gap-4" />
 
         {/* Today breakdown */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

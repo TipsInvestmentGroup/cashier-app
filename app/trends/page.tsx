@@ -22,6 +22,13 @@ interface Data {
   compare: { label: string; collected: number; systemSales: number }
   delta: { collectedPct: number; systemSalesPct: number; collectedAbs: number }
   series: SeriesRow[]
+  trend?: 'improving' | 'stable' | 'declining'
+}
+
+const TREND_BADGE: Record<'improving' | 'stable' | 'declining', { label: string; className: string }> = {
+  improving: { label: 'Improving', className: 'bg-green-50 text-green-700' },
+  stable: { label: 'Stable', className: 'bg-gray-100 text-gray-600' },
+  declining: { label: 'Declining', className: 'bg-red-50 text-red-600' },
 }
 
 // "vs previous Qn" / "vs same period last year" wording per grain + mode.
@@ -108,7 +115,14 @@ export default function TrendsPage() {
             </div>
 
             <Card>
-              <CardHeader title="Collections vs system sales by period" subtitle={`Trailing ${data.series.length} ${grain === 'month' ? 'months' : grain === 'quarter' ? 'quarters' : 'years'}`} />
+              <div className="flex items-center justify-between gap-2">
+                <CardHeader title="Collections vs system sales by period" subtitle={`Trailing ${data.series.length} ${grain === 'month' ? 'months' : grain === 'quarter' ? 'quarters' : 'years'}`} />
+                {data.trend && (
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${TREND_BADGE[data.trend].className}`}>
+                    {TREND_BADGE[data.trend].label}
+                  </span>
+                )}
+              </div>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={data.series} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />

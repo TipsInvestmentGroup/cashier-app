@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import type { LucideIcon } from 'lucide-react'
 
-type Tone = 'indigo' | 'green' | 'amber' | 'red' | 'purple' | 'blue' | 'pink' | 'gray'
+export type Tone = 'indigo' | 'green' | 'amber' | 'red' | 'purple' | 'blue' | 'pink' | 'gray'
 
 const TONES: Record<Tone, { chip: string; accent: string }> = {
   indigo: { chip: 'bg-indigo-50 text-indigo-600', accent: 'text-indigo-600' },
@@ -15,12 +15,18 @@ const TONES: Record<Tone, { chip: string; accent: string }> = {
   gray: { chip: 'bg-gray-100 text-gray-600', accent: 'text-gray-600' },
 }
 
+const INSIGHT_STATUS_CLASS: Record<'good' | 'bad' | 'neutral', string> = {
+  good: 'text-green-600', bad: 'text-red-600', neutral: 'text-gray-400',
+}
+
 /**
  * KPI card — clean white surface with a tinted icon chip. When `href` is set the
  * whole card links to the filtered detail (subtle lift + "View" on hover).
+ * `insight` is an optional BI-layer line (from lib/bi/insights.ts) rendered
+ * additively below `sub` — cards render exactly as before when it's absent.
  */
 export function StatCard({
-  icon: Icon, label, value, sub, tone = 'indigo', href,
+  icon: Icon, label, value, sub, tone = 'indigo', href, insight,
 }: {
   icon?: LucideIcon
   label: string
@@ -28,6 +34,7 @@ export function StatCard({
   sub?: string
   tone?: Tone
   href?: string
+  insight?: { text: string; status: 'good' | 'bad' | 'neutral' } | null
 }) {
   const t = TONES[tone]
   const inner = (
@@ -44,6 +51,7 @@ export function StatCard({
         {sub ? <p className="text-xs text-gray-400">{sub}</p> : <span />}
         {href && <span className={cn('text-xs font-semibold opacity-0 group-hover:opacity-100 transition', t.accent)}>View →</span>}
       </div>
+      {insight && <p className={cn('text-xs font-medium mt-1', INSIGHT_STATUS_CLASS[insight.status])}>{insight.text}</p>}
     </div>
   )
   return href ? <Link href={href} className="block h-full">{inner}</Link> : inner

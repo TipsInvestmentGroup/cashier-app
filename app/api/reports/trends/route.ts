@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, MGMT_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { resolvePeriod, pctChange, type Grain, type CompareMode } from '@/lib/periods'
+import { getSessionsForRange } from '@/lib/bi/business-sessions'
+import { trendLabel } from '@/lib/bi/insights'
 
 /**
  * Period-over-period trends (MoM / QoQ / YoY) for collections and system sales.
@@ -24,14 +25,13 @@ export async function GET(req: NextRequest) {
   const minStart = [p.series[0].start, p.compare.start].reduce((a, b) => (a < b ? a : b))
   const maxEnd = [p.current.end, p.compare.end].reduce((a, b) => (a > b ? a : b))
 
-  const where: Record<string, unknown> = { date: { gte: minStart, lte: maxEnd } }
-  if (outletId) where.outletId = outletId
-  const cols = await prisma.dailyCollection.findMany({ where, select: { date: true, total: true, systemSales: true } })
+  const sessions = (await getSessionsForRange({ outletId, dateRange: { gte: minStart, lte: maxEnd } })) as
+    Array<{ date: Date; officialCollection: number; systemSales: number }>
 
   const sumWindow = (start: Date, end: Date) => {
     let collected = 0, systemSales = 0
-    for (const c of cols) {
-      if (c.date >= start && c.date <= end) { collected += c.total || 0; systemSales += c.systemSales || 0 }
+    for (const s of sessions) {
+      if (s.date >= start && s.date <= end) { collected += s.officialCollection || 0; systemSales += s.systemSales || 0 }
     }
     return { collected: roundMoney(collected), systemSales: roundMoney(systemSales) }
   }
@@ -50,5 +50,6 @@ export async function GET(req: NextRequest) {
       collectedAbs: roundMoney(current.collected - compare.collected),
     },
     series,
+    trend: trendLabel(series.map((w) => w.collected)),
   })
 }

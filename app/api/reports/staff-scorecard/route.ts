@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, MGMT_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { getSessionsByStaff, type StaffTotals } from '@/lib/bi/business-sessions'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 interface Agg {
   staff: string; days: number; systemSales: number; collected: number
-  creditIssued: number; paidStaffLoss: number; discount: number; cancellations: number
+  creditIssued: number; paidStaffLoss: number; discount: number; cancellations: number; net: number
   eventsWorked: number; eventsAttended: number; eventSales: number
 }
 
@@ -14,10 +15,13 @@ interface Agg {
 const db = prisma as any
 
 /**
- * Per-staff performance scorecard over a period. Aggregates daily collections
- * and approved cancellations (collection-linked ones resolve to the collection's
- * staff). Net = System − Collected − Credit − Paid(StaffLoss) − Discount −
- * Approved cancellations; positive = loss, negative = excess.
+ * Per-staff performance scorecard over a period. Figures come from the BI
+ * layer (BusinessSession, one row per completed staff/outlet/day session
+ * regardless of Collection Mode) — see lib/bi/business-sessions.ts — plus
+ * Event work, which isn't part of BusinessSession and stays queried directly.
+ * Net = System − Collected − Credit − Paid(StaffLoss) − Discount − Approved
+ * cancellations (BusinessSession.dailyLoss, the same canonical formula as
+ * lib/staff-loss.ts); positive = loss, negative = excess.
  */
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -31,12 +35,15 @@ export async function GET(req: NextRequest) {
   const end = parseD(searchParams.get('to')) || start
   const range = { gte: startOfDay(start), lte: endOfDay(end) }
 
-  const baseWhere: Record<string, unknown> = { date: range }
-  if (outletId) baseWhere.outletId = outletId
-
-  const [cols, cancels, eventStaff] = await Promise.all([
-    prisma.dailyCollection.findMany({ where: baseWhere, select: { staffName: true, systemSales: true, total: true, creditSales: true, paymentsReceived: true, discount: true } }),
-    prisma.cancellation.findMany({ where: { date: range, ...(outletId ? { outletId } : {}), status: 'APPROVED' }, select: { staffName: true, amount: true, collection: { select: { staffName: true } } } }),
+  const [staffTotals, standaloneCancellations, eventStaff] = await Promise.all([
+    getSessionsByStaff({ outletId, dateRange: range }),
+    // Standalone cancellation requests (filed via app/api/cancellations, not
+    // tied to a Daily Collection) aren't part of any BusinessSession — they'd
+    // silently vanish from this scorecard if left out of the BI-layer figures.
+    prisma.cancellation.findMany({
+      where: { date: range, ...(outletId ? { outletId } : {}), status: 'APPROVED', collectionId: null },
+      select: { staffName: true, amount: true },
+    }),
     // Event work is its own (Tips Events) outlet, so it's matched by staff name
     // across the period — independent of the operating-outlet filter.
     db.eventStaff.findMany({ where: { event: { date: range } }, select: { staffName: true, attended: true, salesAttributed: true } }),
@@ -45,21 +52,24 @@ export async function GET(req: NextRequest) {
   const map = new Map<string, Agg>()
   const get = (k: string) => {
     let a = map.get(k)
-    if (!a) { a = { staff: k, days: 0, systemSales: 0, collected: 0, creditIssued: 0, paidStaffLoss: 0, discount: 0, cancellations: 0, eventsWorked: 0, eventsAttended: 0, eventSales: 0 }; map.set(k, a) }
+    if (!a) { a = { staff: k, days: 0, systemSales: 0, collected: 0, creditIssued: 0, paidStaffLoss: 0, discount: 0, cancellations: 0, net: 0, eventsWorked: 0, eventsAttended: 0, eventSales: 0 }; map.set(k, a) }
     return a
   }
-  for (const c of cols) {
-    const a = get(c.staffName || 'Unassigned')
-    a.days += 1
-    a.systemSales += c.systemSales || 0
-    a.collected += c.total || 0
-    a.creditIssued += c.creditSales || 0
-    a.paidStaffLoss += c.paymentsReceived || 0
-    a.discount += c.discount || 0
+  for (const s of staffTotals as StaffTotals[]) {
+    const a = get(s.staffName)
+    a.days = s.days
+    a.systemSales = s.systemSales
+    a.collected = s.officialCollection
+    a.creditIssued = s.signedBillsTotal
+    a.paidStaffLoss = s.paidBillsTotal
+    a.discount = s.discounts
+    a.cancellations = s.cancellations
+    a.net = s.dailyLoss
   }
-  for (const cn of cancels) {
-    const k = cn.staffName || cn.collection?.staffName || 'Unassigned'
-    get(k).cancellations += cn.amount || 0
+  for (const cn of standaloneCancellations as { staffName: string | null; amount: number }[]) {
+    const a = get(cn.staffName || 'Unassigned')
+    a.cancellations = roundMoney(a.cancellations + (cn.amount || 0))
+    a.net = roundMoney(a.net + (cn.amount || 0))
   }
 
   // Attach event performance, matching staff by name (case-insensitive). When an
@@ -77,17 +87,14 @@ export async function GET(req: NextRequest) {
     a.eventSales += e.salesAttributed || 0
   }
 
-  const rows = [...map.values()].map((a) => {
-    const net = roundMoney(a.systemSales - a.collected - a.creditIssued - a.paidStaffLoss - a.discount - a.cancellations)
-    return {
-      staff: a.staff, days: a.days,
-      systemSales: roundMoney(a.systemSales), collected: roundMoney(a.collected),
-      creditIssued: roundMoney(a.creditIssued), discount: roundMoney(a.discount), cancellations: roundMoney(a.cancellations),
-      collectionRate: a.systemSales > 0 ? Math.round((a.collected / a.systemSales) * 100) : 0,
-      loss: net > 0 ? net : 0, excess: net < 0 ? -net : 0, net,
-      eventsWorked: a.eventsWorked, eventsAttended: a.eventsAttended, eventSales: roundMoney(a.eventSales),
-    }
-  }).sort((x, y) => y.systemSales - x.systemSales)
+  const rows = [...map.values()].map((a) => ({
+    staff: a.staff, days: a.days,
+    systemSales: roundMoney(a.systemSales), collected: roundMoney(a.collected),
+    creditIssued: roundMoney(a.creditIssued), discount: roundMoney(a.discount), cancellations: roundMoney(a.cancellations),
+    collectionRate: a.systemSales > 0 ? Math.round((a.collected / a.systemSales) * 100) : 0,
+    loss: a.net > 0 ? a.net : 0, excess: a.net < 0 ? -a.net : 0, net: a.net,
+    eventsWorked: a.eventsWorked, eventsAttended: a.eventsAttended, eventSales: roundMoney(a.eventSales),
+  })).sort((x, y) => y.systemSales - x.systemSales)
 
   const totals = rows.reduce((t, r) => ({
     systemSales: t.systemSales + r.systemSales, collected: t.collected + r.collected,

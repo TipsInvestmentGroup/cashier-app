@@ -1,11 +1,12 @@
 // The Collection Mode Engine's resolver — decides which collection workflow
-// (Default fixed-form, or Transaction Verification) applies for a given
-// user/outlet, without any workflow being hardcoded. See the
-// CollectionModeConfig model comment in prisma/schema.prisma for the
-// scope/priority design.
+// (Default fixed-form, Transaction Verification, or HYBRID — both workflows
+// active at once, split per role, e.g. WAITER self-declares while CASHIER
+// still enters other staff directly) applies for a given user/outlet,
+// without any workflow being hardcoded. See the CollectionModeConfig model
+// comment in prisma/schema.prisma for the scope/priority design.
 import { prisma } from '@/lib/prisma'
 
-export const COLLECTION_MODES = ['DEFAULT', 'TRANSACTION_VERIFICATION'] as const
+export const COLLECTION_MODES = ['DEFAULT', 'TRANSACTION_VERIFICATION', 'HYBRID'] as const
 export type CollectionMode = (typeof COLLECTION_MODES)[number]
 
 export const SCOPES = ['GLOBAL', 'COMPANY', 'OUTLET', 'ROLE'] as const

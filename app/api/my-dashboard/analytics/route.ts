@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { getHourlyBreakdown, getDayOverDay, getPerformanceTrends } from '@/lib/staff-analytics'
+import { trendLabel } from '@/lib/bi/insights'
 import { startOfDay, parse, isValid } from 'date-fns'
 
 /**
@@ -28,5 +29,10 @@ export async function GET(req: NextRequest) {
     getPerformanceTrends(outletId, user.name, date),
   ])
 
-  return NextResponse.json({ hourly, dayOverDay, trends })
+  const trendInsight = {
+    last7: trendLabel(trends.last7 ? trends.series.slice(-7).map((r) => r.total) : []),
+    last30: trendLabel(trends.series.map((r) => r.total)),
+  }
+
+  return NextResponse.json({ hourly, dayOverDay, trends, insights: { trend: trendInsight } })
 }

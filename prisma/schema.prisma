@@ -199,6 +199,7 @@ model Outlet {
   salesTargets        SalesTarget[]
   collectionSessions  CollectionSession[]
   transactionSessions TransactionSession[]
+  businessSessions    BusinessSession[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -499,20 +500,23 @@ model WorkflowApproval {
 }
 
 // ─── Collection Mode Engine ─────────────────────────────────────────────────
-// Which collection workflow (Default fixed-form cashier collection, or
-// Transaction Verification self-declare-and-validate) applies for a given
-// user session — resolved at read time, not hardcoded. A single generic
-// scope+scopeId table (rather than a `collectionMode` column bolted onto
-// User/Outlet/Company) so new scopes (Department, Business Unit, ...) can be
-// added later purely by configuration, with no schema change and no code
-// change to the resolver's shape — only lib/collection-mode.ts's priority
-// list needs to grow. Resolution order (most specific wins), see
-// lib/collection-mode.ts resolveCollectionMode(): ROLE > OUTLET > COMPANY >
-// GLOBAL, falling all the way back to DEFAULT if no config row exists at
-// any level — so a business that never opens this settings page gets
-// exactly today's fixed-form behavior, unchanged, with zero setup.
+// Which collection workflow (Default fixed-form cashier collection,
+// Transaction Verification self-declare-and-validate, or HYBRID — both
+// active at once for the same outlet, split per role via a ROLE-scope
+// override, e.g. WAITER self-declares while CASHIER still enters other staff
+// directly) applies for a given user session — resolved at read time, not
+// hardcoded. A single generic scope+scopeId table (rather than a
+// `collectionMode` column bolted onto User/Outlet/Company) so new scopes
+// (Department, Business Unit, ...) can be added later purely by
+// configuration, with no schema change and no code change to the resolver's
+// shape — only lib/collection-mode.ts's priority list needs to grow.
+// Resolution order (most specific wins), see lib/collection-mode.ts
+// resolveCollectionMode(): ROLE > OUTLET > COMPANY > GLOBAL, falling all the
+// way back to DEFAULT if no config row exists at any level — so a business
+// that never opens this settings page gets exactly today's fixed-form
+// behavior, unchanged, with zero setup.
 //   CollectionModeConfig.scope: GLOBAL | COMPANY | OUTLET | ROLE
-//   CollectionModeConfig.mode:  DEFAULT | TRANSACTION_VERIFICATION
+//   CollectionModeConfig.mode:  DEFAULT | TRANSACTION_VERIFICATION | HYBRID
 model CollectionModeConfig {
   id        String   @id @default(cuid())
   scope     String
@@ -608,6 +612,56 @@ model StaffTransaction {
   @@index([sessionId])
   @@index([staffId])
   @@index([status])
+}
+
+// ─── Business Intelligence Layer ────────────────────────────────────────────
+// One standardized row per completed staff/outlet/day business session,
+// regardless of which Collection Mode produced it (DEFAULT or
+// TRANSACTION_VERIFICATION — see lib/collection-mode.ts). Written by
+// lib/business-session.ts's syncBusinessSession() from a finalized
+// DailyCollection row only — it never special-cases collection mode, since a
+// validated TransactionSession is itself flattened into DailyCollection first
+// (see TransactionSession comment above). This is the single source dashboards
+// and reports should read from instead of re-aggregating DailyCollection
+// directly. staffName (not staffId) is the natural key both source paths
+// converge on, so the upsert is idempotent regardless of mode.
+model BusinessSession {
+  id                   String    @id @default(cuid())
+  date                 DateTime
+  companyId            String?
+  outletId             String
+  outlet               Outlet    @relation(fields: [outletId], references: [id])
+  staffId              String?
+  staffName            String
+  collectionMode       String // DEFAULT | TRANSACTION_VERIFICATION — informational only
+  sourceCollectionId   String?
+  sourceSessionId      String?
+
+  systemSales          Float     @default(0)
+  officialCollection   Float     @default(0)
+  cash                 Float     @default(0)
+  bank                 Float     @default(0)
+  mobileMoney          Float     @default(0)
+  signedBillsTotal     Float     @default(0)
+  paidBillsTotal       Float     @default(0)
+  discounts            Float     @default(0)
+  cancellations        Float     @default(0)
+  collectionDifference Float     @default(0)
+  dailyLoss            Float     @default(0)
+  customerCount        Int?
+  transactionCount     Int       @default(0)
+  avgTransactionValue  Float     @default(0)
+  salesTarget          Float?
+  validationTime       DateTime?
+  approvalTime         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([outletId, date, staffName])
+  @@index([companyId, date])
+  @@index([outletId, date])
+  @@index([staffId])
 }
 
 model Person {
