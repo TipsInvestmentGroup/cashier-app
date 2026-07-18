@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
+import { resolveCollectionMode } from '@/lib/collection-mode'
 import { startOfDay, endOfDay } from 'date-fns'
 
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
@@ -42,6 +43,15 @@ export async function POST(req: NextRequest) {
   if (!outletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
   const date = body.date ? startOfDay(new Date(body.date)) : startOfDay(new Date())
   if (isNaN(date.getTime())) return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
+
+  // This outlet may be configured for Default (fixed-form) Collection instead
+  // — the Collection Mode Engine decides, not this route. Block opening a
+  // Transaction Session there rather than silently letting two workflows run
+  // in parallel for the same outlet/day.
+  const mode = await resolveCollectionMode({ outletId })
+  if (mode !== 'TRANSACTION_VERIFICATION') {
+    return NextResponse.json({ error: 'This outlet is configured for Default Collection Mode — use Daily Collections instead. Ask an Admin to change it under Setup → Collection Mode if this is wrong.' }, { status: 409 })
+  }
 
   const session = await prisma.transactionSession.upsert({
     where: { outletId_date: { outletId, date } },

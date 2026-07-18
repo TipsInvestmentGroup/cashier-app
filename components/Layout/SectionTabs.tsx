@@ -1,14 +1,23 @@
 'use client'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
+import { useApi } from '@/hooks/useApi'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
   Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, type LucideIcon,
 } from 'lucide-react'
 
-export type Tab = { href: string; label: string; icon: LucideIcon; roles: string[]; excludePositions?: string[] }
+// A tab with modeGate is hidden for the roles listed in `forRoles` unless the
+// caller's resolved Collection Mode (see lib/collection-mode.ts) equals
+// `mode` — e.g. a CASHIER only sees "Daily Collections" OR "Transaction
+// Sessions", never both, depending on how their outlet is configured.
+// Oversight roles (MANAGER/ACCOUNTANT/DIRECTOR/ADMIN) aren't listed in
+// forRoles for these tabs — they aren't locked to one outlet and may
+// legitimately need to see either workflow across a mixed-mode business.
+export type Tab = { href: string; label: string; icon: LucideIcon; roles: string[]; excludePositions?: string[]; modeGate?: { mode: 'DEFAULT' | 'TRANSACTION_VERIFICATION'; forRoles: string[] } }
 
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -22,7 +31,7 @@ export const MYPOS_TABS: Tab[] = [
   { href: '/pos/counter', label: 'Counter View', icon: Printer, roles: POS_ROLES, excludePositions: ['OUTSIDE STAFF'] },
   { href: '/pos/manager', label: 'All Orders', icon: ClipboardList, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/manager/items', label: 'Item Blocker', icon: Ban, roles: ['MANAGER', 'ADMIN'] },
-  { href: '/my-transactions', label: 'My Transactions', icon: HandCoins, roles: POS_ROLES },
+  { href: '/my-transactions', label: 'My Transactions', icon: HandCoins, roles: POS_ROLES, modeGate: { mode: 'TRANSACTION_VERIFICATION', forRoles: ['WAITER'] } },
   { href: '/schedule', label: 'Scheduling', icon: CalendarClock, roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/events', label: 'Events', icon: PartyPopper, roles: ['MANAGER', 'ADMIN', 'DIRECTOR'] },
   { href: '/pos/shift-report', label: 'Shift Report', icon: BarChart3, roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'] },
@@ -36,12 +45,12 @@ export const MYPOS_TABS: Tab[] = [
 
 export const DAILY_TABS: Tab[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: CASHIER_ROLES },
-  { href: '/collections', label: 'Daily Collections', icon: Wallet, roles: CASHIER_ROLES },
+  { href: '/collections', label: 'Daily Collections', icon: Wallet, roles: CASHIER_ROLES, modeGate: { mode: 'DEFAULT', forRoles: ['CASHIER'] } },
   { href: '/daily-report', label: 'Daily Report', icon: FileText, roles: CASHIER_ROLES },
   { href: '/excess-loss', label: 'Excess & Loss', icon: TrendingUp, roles: CASHIER_ROLES },
   { href: '/excess-recon', label: 'Excess Recon', icon: ListChecks, roles: CASHIER_ROLES },
   { href: '/collection-sessions', label: 'Collection Sessions', icon: Workflow, roles: CASHIER_ROLES },
-  { href: '/transaction-sessions', label: 'Transaction Sessions', icon: HandCoins, roles: CASHIER_ROLES },
+  { href: '/transaction-sessions', label: 'Transaction Sessions', icon: HandCoins, roles: CASHIER_ROLES, modeGate: { mode: 'TRANSACTION_VERIFICATION', forRoles: ['CASHIER'] } },
   { href: '/collection-approvals', label: 'Collection Approvals', icon: ClipboardCheck, roles: CASHIER_ROLES },
 ]
 
@@ -78,7 +87,22 @@ export const FINANCE_TABS: Tab[] = [
 export function SectionTabs({ tabs }: { tabs: Tab[] }) {
   const pathname = usePathname()
   const { user } = useAuth()
-  const visible = tabs.filter((t) => t.roles.includes(user?.role || '') && !t.excludePositions?.includes(user?.position || ''))
+  const { request } = useApi()
+  const [mode, setMode] = useState<'DEFAULT' | 'TRANSACTION_VERIFICATION' | null>(null)
+
+  const needsMode = tabs.some((t) => t.modeGate?.forRoles.includes(user?.role || ''))
+  useEffect(() => {
+    if (!user || !needsMode) return
+    request('/api/collection-mode').then((r) => setMode(r?.mode || null)).catch(() => setMode(null))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, needsMode])
+
+  const visible = tabs.filter((t) => {
+    if (!t.roles.includes(user?.role || '')) return false
+    if (t.excludePositions?.includes(user?.position || '')) return false
+    if (t.modeGate?.forRoles.includes(user?.role || '') && mode !== null && mode !== t.modeGate.mode) return false
+    return true
+  })
   // Longest matching href wins so nested routes don't also light up their parent.
   const matches = (h: string) => pathname === h || pathname.startsWith(h + '/')
   const best = visible.filter((t) => matches(t.href)).sort((a, b) => b.href.length - a.href.length)[0]?.href

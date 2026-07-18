@@ -498,6 +498,35 @@ model WorkflowApproval {
   @@index([transactionId])
 }
 
+// ─── Collection Mode Engine ─────────────────────────────────────────────────
+// Which collection workflow (Default fixed-form cashier collection, or
+// Transaction Verification self-declare-and-validate) applies for a given
+// user session — resolved at read time, not hardcoded. A single generic
+// scope+scopeId table (rather than a `collectionMode` column bolted onto
+// User/Outlet/Company) so new scopes (Department, Business Unit, ...) can be
+// added later purely by configuration, with no schema change and no code
+// change to the resolver's shape — only lib/collection-mode.ts's priority
+// list needs to grow. Resolution order (most specific wins), see
+// lib/collection-mode.ts resolveCollectionMode(): ROLE > OUTLET > COMPANY >
+// GLOBAL, falling all the way back to DEFAULT if no config row exists at
+// any level — so a business that never opens this settings page gets
+// exactly today's fixed-form behavior, unchanged, with zero setup.
+//   CollectionModeConfig.scope: GLOBAL | COMPANY | OUTLET | ROLE
+//   CollectionModeConfig.mode:  DEFAULT | TRANSACTION_VERIFICATION
+model CollectionModeConfig {
+  id        String   @id @default(cuid())
+  scope     String
+  // Null only for GLOBAL. Otherwise: a Company.id, Outlet.id, or a role
+  // string (CASHIER|WAITER|...) depending on `scope` — not a single FK
+  // since it names a different table per scope.
+  scopeId   String?
+  mode      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, scopeId])
+}
+
 // ─── Transaction Management (staff self-declared transactions) ─────────────
 // Simplified layer in front of DailyCollection: the cashier only imports the
 // daily System Sales report (defines the expected staff roster); each service
