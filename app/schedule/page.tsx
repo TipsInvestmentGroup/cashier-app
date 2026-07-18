@@ -67,10 +67,14 @@ export default function SchedulePage() {
   useEffect(() => {
     request('/api/outlets').then((os: Outlet[]) => {
       setOutlets(os)
-      const first = os.find((o) => !o.isEventsOnly)
+      // A WAITER only ever works one outlet — the backend now enforces this
+      // regardless (see readOutletScope), so default (and lock, below) the
+      // picker to their own outlet rather than an arbitrary first result.
+      const own = user?.outlet?.id ? os.find((o) => o.id === user.outlet!.id) : null
+      const first = own || os.find((o) => !o.isEventsOnly)
       if (first) setOutletId((cur) => cur || first.id)
     }).catch(() => {})
-  }, [request])
+  }, [request, user?.outlet?.id])
 
   const load = useCallback(async () => {
     if (!outletId) return
@@ -193,9 +197,18 @@ export default function SchedulePage() {
         {/* Controls */}
         <Card>
           <div className="flex flex-wrap items-center gap-3">
-            <select value={outletId} onChange={(e) => setOutletId(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm font-medium focus:border-indigo-500 focus:outline-none">
-              {scheduleOutlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
+            {canManage ? (
+              <select value={outletId} onChange={(e) => setOutletId(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm font-medium focus:border-indigo-500 focus:outline-none">
+                {scheduleOutlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            ) : (
+              // Non-manage roles (WAITER) are locked to their own outlet
+              // server-side — showing a picker that has no effect would be
+              // misleading, so just label the outlet instead.
+              <span className="px-3 py-2 bg-gray-50 text-gray-700 rounded-xl text-sm font-medium">
+                {outlets.find((o) => o.id === outletId)?.name || '—'}
+              </span>
+            )}
 
             <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
               <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="p-1.5 rounded-lg hover:bg-white"><ChevronLeft className="w-4 h-4" /></button>

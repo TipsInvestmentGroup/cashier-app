@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, readOutletScope, requireRole } from '@/lib/auth'
+import { getAuthUser, readOutletScope, requireRole, isSingleOutletRole } from '@/lib/auth'
 import { computeActuals } from '@/lib/target-actuals'
 import {
   generateWeekSchedule, SERVICE_ROLES, SCHEDULE_MANAGE_ROLES, SHIFT_TYPES, SCHEDULE_ROLES,
@@ -36,9 +36,21 @@ export async function GET(req: NextRequest) {
   const where: Record<string, unknown> = { date: { gte: from, lte: to } }
   if (outletId) where.outletId = outletId
 
+  // A single-outlet role (WAITER — locked above via readOutletScope) must
+  // never see other outlets' staff/unavailability either, even though these
+  // two queries are otherwise intentionally company-wide for MANAGE_ROLES
+  // ("cross-outlet cover" — see comments below).
+  const restrictToOwnOutlet = isSingleOutletRole(user.role)
+  const unavailabilityWhere: Record<string, unknown> = { date: { gte: from, lte: to } }
+  if (restrictToOwnOutlet) unavailabilityWhere.staff = { outletId }
+  const allStaffWhere: Record<string, unknown> = { isActive: true }
+  if (restrictToOwnOutlet) allStaffWhere.outletId = outletId
+  const casualStaffWhere: Record<string, unknown> = { isActive: true, isCasual: true }
+  if (restrictToOwnOutlet) casualStaffWhere.outletId = outletId
+
   const [assignments, unavailability, config, serviceStaff, allStaff, casualStaff] = await Promise.all([
     db.scheduleAssignment.findMany({ where, orderBy: [{ date: 'asc' }, { shiftType: 'asc' }] }),
-    db.staffUnavailability.findMany({ where: { date: { gte: from, lte: to } }, orderBy: { date: 'asc' } }),
+    db.staffUnavailability.findMany({ where: unavailabilityWhere, orderBy: { date: 'asc' } }),
     outletId ? db.outletScheduleConfig.findUnique({ where: { outletId } }) : null,
     // Auto-schedulable service staff (role WAITER) at the selected outlet —
     // casuals are excluded, they're only ever added to the roster manually.
@@ -46,10 +58,11 @@ export async function GET(req: NextRequest) {
       ? prisma.user.findMany({ where: { outletId, isActive: true, role: { in: SERVICE_ROLES }, isCasual: false }, select: { id: true, name: true, role: true }, orderBy: { name: 'asc' } })
       : Promise.resolve([]),
     // Everyone active — for manual assignment of any role / cross-outlet cover.
-    prisma.user.findMany({ where: { isActive: true }, select: { id: true, name: true, role: true, outletId: true }, orderBy: { name: 'asc' } }),
+    // Restricted to the caller's own outlet for single-outlet roles (above).
+    prisma.user.findMany({ where: allStaffWhere, select: { id: true, name: true, role: true, outletId: true }, orderBy: { name: 'asc' } }),
     // Casual/temporary workers — offered separately so a manager can add one
     // to this week's roster on demand, without them auto-generating shifts.
-    prisma.user.findMany({ where: { isActive: true, isCasual: true }, select: { id: true, name: true, role: true, outletId: true }, orderBy: { name: 'asc' } }),
+    prisma.user.findMany({ where: casualStaffWhere, select: { id: true, name: true, role: true, outletId: true }, orderBy: { name: 'asc' } }),
   ])
 
   return NextResponse.json({

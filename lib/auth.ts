@@ -72,14 +72,33 @@ export function requireRole(user: JWTPayload | null, roles: string[]): boolean {
 // outlet to an empty result set instead of silently exposing all outlets.
 export const NO_OUTLET = '__none__'
 
+// Roles that only ever operate at one physical outlet — CASHIER and WAITER
+// both work a single floor/counter day to day, unlike MANAGER/ACCOUNTANT/
+// DIRECTOR/ADMIN who legitimately need cross-outlet oversight views. Locked
+// here, centrally, so every endpoint that calls readOutletScope gets this for
+// free instead of each one needing its own guard (a WAITER-reachable
+// endpoint that forgets to pass/lock outletId used to silently return every
+// outlet's data — see /api/schedule and /api/search, fixed 2026-07-18).
+const SINGLE_OUTLET_ROLES = ['CASHIER', 'WAITER']
+
 /**
- * Effective outlet filter for READS. Cashiers are strictly locked to their own
- * outlet (any requested outletId is ignored); a cashier without an outlet sees
- * nothing. Everyone else may filter by the requested outletId (or none = all).
+ * Effective outlet filter for READS. Single-outlet roles (see
+ * SINGLE_OUTLET_ROLES) are strictly locked to their own outlet — any
+ * requested outletId is ignored; one with no outlet sees nothing. Everyone
+ * else may filter by the requested outletId (or none = all, an intentional
+ * cross-outlet oversight view for MANAGER/ACCOUNTANT/DIRECTOR/ADMIN).
  */
 export function readOutletScope(user: JWTPayload, requestedOutletId: string | null): string | null {
-  if (user.role === 'CASHIER') return user.outletId || NO_OUTLET
+  if (SINGLE_OUTLET_ROLES.includes(user.role)) return user.outletId || NO_OUTLET
   return requestedOutletId
+}
+
+/** True for roles readOutletScope always locks to one outlet — use this to also
+ *  scope any OTHER query an endpoint runs alongside the readOutletScope'd one
+ *  (e.g. a company-wide "all staff" list that only management should see
+ *  unscoped) instead of re-deriving the same role check ad hoc. */
+export function isSingleOutletRole(role: string): boolean {
+  return SINGLE_OUTLET_ROLES.includes(role)
 }
 
 /**
