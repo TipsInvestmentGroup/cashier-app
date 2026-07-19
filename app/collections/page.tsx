@@ -9,8 +9,7 @@ import { CashReconForm } from '@/components/recon/CashReconForm'
 import { DigitalReconForm } from '@/components/recon/DigitalReconForm'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
-import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
-import { resolveBusinessDate } from '@/lib/business-date'
+import { resolveBusinessDateLocal, DEFAULT_BUSINESS_CALENDAR } from '@/lib/business-calendar-shared'
 import { formatCurrency, formatDateTime, roundMoney } from '@/lib/utils'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
@@ -63,11 +62,14 @@ interface CancelReason extends NamedCode { appliesToAll: boolean; categoryIds: s
 export default function CollectionsPage() {
   const { request } = useApi()
   const { user } = useAuth()
-  const { config: companyConfig } = useCompanyConfig()
   const confirm = useConfirm()
-  // The business day a fresh entry defaults to — before the cutover hour, that's
+  // The Business Calendar Engine's start time for the relevant outlet — starts
+  // at today's exact legacy default and is corrected once the snapshot for the
+  // selected outlet loads (see the effect below).
+  const [calendarStartTime, setCalendarStartTime] = useState(DEFAULT_BUSINESS_CALENDAR.businessDayStartTime)
+  // The business day a fresh entry defaults to — before the cutover time, that's
   // still yesterday's shift, not the raw calendar date.
-  const businessToday = format(resolveBusinessDate(new Date(), companyConfig.businessDayCutoverHour), 'yyyy-MM-dd')
+  const businessToday = format(resolveBusinessDateLocal(new Date(), calendarStartTime), 'yyyy-MM-dd')
   const isBeforeCutover = businessToday !== format(new Date(), 'yyyy-MM-dd')
   const [collections, setCollections] = useState<Collection[]>([])
   const [outlets, setOutlets] = useState<Outlet[]>([])
@@ -125,6 +127,23 @@ export default function CollectionsPage() {
     discount: '', discountReason: '',
     outletId: user?.outlet?.id || '', date: businessToday,
   })
+  // True once the cashier has manually touched the date field — after that,
+  // the auto-correction effect below leaves it alone.
+  const dateTouchedRef = useRef(false)
+  // The Business Calendar Engine may set a different cutover per outlet — refetch
+  // whenever the selected outlet changes, and correct the date field to match
+  // (unless the cashier already picked a date themselves).
+  useEffect(() => {
+    const outletId = form.outletId || user?.outlet?.id
+    request(`/api/business-calendar/snapshot${outletId ? `?outletId=${outletId}` : ''}`)
+      .then((s) => { if (s?.config?.businessDayStartTime) setCalendarStartTime(s.config.businessDayStartTime) })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.outletId, user?.outlet?.id])
+  useEffect(() => {
+    if (!editingId && !dateTouchedRef.current) setForm((f) => ({ ...f, date: businessToday }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessToday, editingId])
   const channelAmountsNum = Object.fromEntries(Object.entries(form.channelAmounts).map(([k, v]) => [k, Number(v) || 0]))
   const getAmountBox = (code: string) => code === 'CASH' ? form.cash : (form.channelAmounts[code] || '')
   const setAmountBox = (code: string, v: string) => {
@@ -283,6 +302,7 @@ export default function CollectionsPage() {
       } else {
         toast.success(editingId ? 'Collection updated!' : 'Collection saved — balanced, no loss.')
       }
+      dateTouchedRef.current = false
       setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: businessToday })
       setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
       setExcessItems([])
@@ -330,6 +350,7 @@ export default function CollectionsPage() {
 
   const newCollection = () => {
     setEditingId(null)
+    dateTouchedRef.current = false
     setForm({ cash: '', channelAmounts: {}, notes: '', staffName: '', systemSales: '', discount: '', discountReason: '', outletId: form.outletId, date: businessToday })
     setSignedRows([]); setPaidRows([]); setCancelRows([]); setConfirmedZero(false)
     setExcessItems([])
@@ -417,7 +438,7 @@ export default function CollectionsPage() {
   // The day the button acts on: the chosen single day (custom) or today.
   const targetCloseDate = range === 'custom' && customFrom === customTo
     ? parseISO(customFrom)
-    : resolveBusinessDate(new Date(), companyConfig.businessDayCutoverHour)
+    : resolveBusinessDateLocal(new Date(), calendarStartTime)
   const targetClosed = isDayClosed(targetCloseDate)
   const canReopen = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
 
@@ -584,11 +605,11 @@ export default function CollectionsPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Business Date</label>
-                  <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
+                  <input type="date" value={form.date} onChange={(e) => { dateTouchedRef.current = true; setForm({ ...form, date: e.target.value }) }}
                     className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
                   {!editingId && isBeforeCutover && form.date === businessToday && (
                     <p className="text-xs text-amber-600 mt-1">
-                      Auto-set to {format(parseISO(businessToday), 'dd MMM')} — entered before the {String(companyConfig.businessDayCutoverHour).padStart(2, '0')}:00 business-day cutover. Change it above if this belongs to a different day.
+                      Auto-set to {format(parseISO(businessToday), 'dd MMM')} — entered before the {calendarStartTime} business-day cutover. Change it above if this belongs to a different day.
                     </p>
                   )}
                 </div>

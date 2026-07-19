@@ -57,6 +57,22 @@ export function hhmmToMinutes(v: string): number {
   return h * 60 + m
 }
 
+/**
+ * Client-side business date resolver — for components that only have the
+ * browser's own clock (no server-side Intl time-zone conversion). Used by
+ * pages that need an immediate default before their calendar snapshot fetch
+ * resolves, e.g. defaulting a new Daily Collection's date. Assumes the
+ * browser's local clock already matches the outlet's time zone, which holds
+ * for on-site staff — the same assumption the pre-engine cutover logic made.
+ */
+export function resolveBusinessDateLocal(now: Date, startTime: string): Date {
+  const startMinutes = hhmmToMinutes(startTime)
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  if (nowMinutes < startMinutes) d.setDate(d.getDate() - 1)
+  return d
+}
+
 /** Merge a stored/partial object over the defaults, dropping bad values. */
 export function normalizeBusinessCalendarFields(raw: unknown): BusinessCalendarFields {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>

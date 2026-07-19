@@ -6,8 +6,7 @@ import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import Link from 'next/link'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
-import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
-import { resolveBusinessDate } from '@/lib/business-date'
+import { resolveBusinessDateLocal, DEFAULT_BUSINESS_CALENDAR } from '@/lib/business-calendar-shared'
 import { DONE_STATUSES, statusColor } from '@/lib/collection-status'
 import { format } from 'date-fns'
 import { User, Clock, History, ArrowRight } from 'lucide-react'
@@ -33,7 +32,6 @@ interface TodaySession {
 export default function CollectionSessionsLauncherPage() {
   const { request } = useApi()
   const { user } = useAuth()
-  const { config: companyConfig } = useCompanyConfig()
   const router = useRouter()
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
@@ -43,7 +41,19 @@ export default function CollectionSessionsLauncherPage() {
   const [opening, setOpening] = useState(false)
   const [todaySessions, setTodaySessions] = useState<TodaySession[]>([])
 
-  const businessToday = format(resolveBusinessDate(new Date(), companyConfig.businessDayCutoverHour), 'yyyy-MM-dd')
+  // The Business Calendar Engine's start time for the selected outlet —
+  // starts at today's exact legacy default and is corrected once the
+  // snapshot for the selected outlet loads.
+  const [calendarStartTime, setCalendarStartTime] = useState(DEFAULT_BUSINESS_CALENDAR.businessDayStartTime)
+  useEffect(() => {
+    const id = outletId || user?.outlet?.id
+    request(`/api/business-calendar/snapshot${id ? `?outletId=${id}` : ''}`)
+      .then((s) => { if (s?.config?.businessDayStartTime) setCalendarStartTime(s.config.businessDayStartTime) })
+      .catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outletId, user?.outlet?.id])
+
+  const businessToday = format(resolveBusinessDateLocal(new Date(), calendarStartTime), 'yyyy-MM-dd')
   const isBeforeCutover = businessToday !== format(new Date(), 'yyyy-MM-dd')
   const [sessionDate, setSessionDate] = useState(businessToday)
   useEffect(() => { setSessionDate(businessToday) }, [businessToday]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -97,7 +107,7 @@ export default function CollectionSessionsLauncherPage() {
                   className="w-full mt-1 px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
                 {isBeforeCutover && sessionDate === businessToday && (
                   <p className="text-xs text-amber-600 mt-1">
-                    Auto-set to {format(new Date(businessToday), 'dd MMM')} — before the {String(companyConfig.businessDayCutoverHour).padStart(2, '0')}:00 business-day cutover.
+                    Auto-set to {format(new Date(businessToday), 'dd MMM')} — before the {calendarStartTime} business-day cutover.
                   </p>
                 )}
               </div>
