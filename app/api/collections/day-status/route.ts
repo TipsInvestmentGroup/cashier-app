@@ -3,8 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, CASHIER_ROLES } from '@/lib/auth'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 import { getCollectionSessionTotals } from '@/lib/collection-session-totals'
-import { resolveBusinessDate } from '@/lib/business-date'
-import { getCompanyConfig } from '@/lib/company-config'
+import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = prisma as any
@@ -23,7 +22,7 @@ export async function GET(req: NextRequest) {
   if (!outletId) return NextResponse.json({ cashReconDone: false, digitalReconDone: false, closed: false })
 
   const p = parse(searchParams.get('date') || '', 'yyyy-MM-dd', new Date())
-  const day = isValid(p) ? p : resolveBusinessDate(new Date(), (await getCompanyConfig()).businessDayCutoverHour)
+  const day = isValid(p) ? p : resolveBusinessDate(new Date(), await resolveEffectiveConfig({ outletId }))
   const range = { gte: startOfDay(day), lte: endOfDay(day) }
 
   const [cashRecon, digitalCount, closure, templateSessions] = await Promise.all([

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, writeOutletId, CASHIER_ROLES } from '@/lib/auth'
-import { resolveBusinessDate } from '@/lib/business-date'
-import { getCompanyConfig } from '@/lib/company-config'
+import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
 import { startOfDay, endOfDay } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -56,8 +55,7 @@ export async function POST(req: NextRequest) {
   if (!template || !template.isActive) return NextResponse.json({ error: 'Template not found or inactive' }, { status: 404 })
   if (template.isDefault) return NextResponse.json({ error: 'The Standard template uses the Daily Collections screen directly — no session needed.' }, { status: 400 })
 
-  const { businessDayCutoverHour } = await getCompanyConfig()
-  const day = body.date ? startOfDay(new Date(body.date)) : resolveBusinessDate(new Date(), businessDayCutoverHour)
+  const day = body.date ? startOfDay(new Date(body.date)) : resolveBusinessDate(new Date(), await resolveEffectiveConfig({ outletId }))
 
   const existing = await prisma.collectionSession.findUnique({
     where: { outletId_date_templateId: { outletId, date: day, templateId: template.id } },

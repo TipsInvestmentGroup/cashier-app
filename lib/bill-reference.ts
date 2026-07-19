@@ -10,6 +10,7 @@
 // upsertStockLevel in lib/stock.ts is atomic with its StockLedgerEntry write.
 import { format } from 'date-fns'
 import { DEFAULT_BILL_TYPES, DEFAULT_REFERENCE_COMPONENTS } from './bill-reference-defaults'
+import { resolveEffectiveConfig, resolveBusinessDate as resolveEngineBusinessDate } from '@/lib/business-calendar'
 
 // Loose type — works with both the prisma singleton and a $transaction
 // client, same convention as lib/stock.ts's `Tx` / lib/collection-excess.ts's `DB`.
@@ -61,8 +62,15 @@ function slugifyOutletName(name: string): string {
   return name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 6)
 }
 
-function resolveBusinessDate(date?: Date | null): Date {
-  return date ?? new Date()
+// Named the same as lib/business-date.ts's cutover resolver, but this one now
+// actually calls the Business Calendar Engine instead of the raw clock — a
+// 2am signed bill's reference date used to be "today", drifting from what
+// Collections calls that sale's business date. `ctx.date`, when the caller
+// supplies it explicitly, is trusted as-is (some callers pre-resolve it).
+async function resolveBusinessDate(ctx: { date?: Date | null; outletId?: string | null }): Promise<Date> {
+  if (ctx.date) return ctx.date
+  const effective = await resolveEffectiveConfig({ outletId: ctx.outletId })
+  return resolveEngineBusinessDate(new Date(), effective)
 }
 
 /** Seeds the 15 default bill types once, the first time any of them is needed
@@ -227,7 +235,7 @@ export async function generateBillReference(tx: Tx, ctx: BillReferenceContext): 
   if (!billTypeConfig.isActive) throw new Error(`Bill type "${billTypeConfig.name}" is deactivated — reactivate it in Bill Types settings before creating new bills of this type`)
 
   const config = await loadReferenceConfig(tx)
-  const date = resolveBusinessDate(ctx.date)
+  const date = await resolveBusinessDate(ctx)
   const personCode = await resolvePersonCode(tx, ctx)
   const outletCode = await resolveOutletCodeForCtx(tx, ctx)
 
@@ -291,7 +299,7 @@ export async function previewDisplayReference(tx: Tx, sample: Partial<BillRefere
   if (!billTypeConfig) throw new Error(`Unknown bill type "${sample.billTypeCode}"`)
 
   const config = await loadReferenceConfig(tx)
-  const date = resolveBusinessDate(sample.date)
+  const date = await resolveBusinessDate(sample)
   const personCode = sample.personCode ?? (await resolvePersonCode(tx, sample)) ?? '14'
   let outletCode = await resolveOutletCodeForCtx(tx, sample)
   if (!outletCode) outletCode = 'DSM'

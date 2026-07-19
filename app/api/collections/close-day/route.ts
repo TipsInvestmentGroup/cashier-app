@@ -3,8 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { startOfDay, endOfDay } from 'date-fns'
 import { getCollectionSessionTotals } from '@/lib/collection-session-totals'
-import { resolveBusinessDate } from '@/lib/business-date'
-import { getCompanyConfig } from '@/lib/company-config'
+import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
 
 // Prisma client types for DayClosure are generated on deploy (vercel-build runs
 // `prisma db push` + `prisma generate`); assert to avoid local type drift.
@@ -49,7 +48,7 @@ export async function POST(req: NextRequest) {
 
   const day = body.date
     ? startOfDay(new Date(body.date))
-    : resolveBusinessDate(new Date(), (await getCompanyConfig()).businessDayCutoverHour)
+    : resolveBusinessDate(new Date(), await resolveEffectiveConfig({ outletId }))
 
   // Validation: a day cannot be closed until both reconciliations are done.
   const range = { gte: startOfDay(day), lte: endOfDay(day) }
@@ -91,7 +90,7 @@ export async function DELETE(req: NextRequest) {
   if (!outletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
   const day = searchParams.get('date')
     ? startOfDay(new Date(searchParams.get('date') as string))
-    : resolveBusinessDate(new Date(), (await getCompanyConfig()).businessDayCutoverHour)
+    : resolveBusinessDate(new Date(), await resolveEffectiveConfig({ outletId }))
 
   await db.dayClosure.deleteMany({ where: { outletId, date: day } })
   await prisma.auditLog.create({

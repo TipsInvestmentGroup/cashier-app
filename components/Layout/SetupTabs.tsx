@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, Workflow, GitBranch, type LucideIcon } from 'lucide-react'
+import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, Workflow, GitBranch, CalendarClock, type LucideIcon } from 'lucide-react'
 
 // The Setup groups, in the order they appear. Role-gated per group.
 export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles: string[] }[] = [
@@ -20,6 +20,7 @@ export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles:
   { href: '/pos-tables', label: 'Tables', icon: LayoutGrid, roles: ['ADMIN'] },
   { href: '/users', label: 'Users', icon: UserCog, roles: ['ADMIN'] },
   { href: '/company-preferences', label: 'Company', icon: Settings2, roles: ['ADMIN'] },
+  { href: '/business-calendar', label: 'Business Calendar', icon: CalendarClock, roles: ['ADMIN'] },
   { href: '/collection-templates', label: 'Collection Templates', icon: Workflow, roles: ['ADMIN'] },
   { href: '/collection-mode-settings', label: 'Collection Mode', icon: GitBranch, roles: ['ADMIN'] },
 ]

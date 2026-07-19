@@ -3,6 +3,7 @@ import { sendMail } from '@/lib/email'
 import { roundMoney } from '@/lib/utils'
 import { getCompanyConfig } from '@/lib/company-config'
 import { DEFAULT_COMPANY_CONFIG, formatAmountLabel } from '@/lib/company-config-shared'
+import { resolveEffectiveConfig, resolveBusinessDate } from '@/lib/business-calendar'
 import { startOfDay, endOfDay, parse, isValid, format } from 'date-fns'
 
 // Currency label comes from Company Preferences — set from config at the top
@@ -19,8 +20,13 @@ function fmt(n: number) {
  */
 export async function sendDailySummary(opts: { date?: string | null; outletId?: string | null; recipients?: string[] }) {
   cfg = await getCompanyConfig()
-  const parsed = opts.date ? parse(opts.date, 'yyyy-MM-dd', new Date()) : new Date()
-  const day = isValid(parsed) ? parsed : new Date()
+  // When no explicit date is requested (the scheduled nightly job), use the
+  // Business Calendar Engine's current business date rather than the raw
+  // clock date — a run at 2am for an outlet whose business day starts at
+  // 09:00 must summarize yesterday's business day, not the still-open one.
+  const fallbackDay = resolveBusinessDate(new Date(), await resolveEffectiveConfig({ outletId: opts.outletId }))
+  const parsed = opts.date ? parse(opts.date, 'yyyy-MM-dd', new Date()) : fallbackDay
+  const day = isValid(parsed) ? parsed : fallbackDay
   const range = { gte: startOfDay(day), lte: endOfDay(day) }
   const where: Record<string, unknown> = { date: range }
   if (opts.outletId) where.outletId = opts.outletId

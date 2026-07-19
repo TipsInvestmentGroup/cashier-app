@@ -531,6 +531,99 @@ model CollectionModeConfig {
   @@unique([scope, scopeId])
 }
 
+// ─── Business Calendar Engine ──────────────────────────────────────────────
+// Single source of truth for "business date" (vs. calendar date), business
+// week, and financial year across every module — replacing the flat, global
+// companyConfig.businessDayCutoverHour (lib/company-config-shared.ts) with a
+// scoped resolver identical in shape to CollectionModeConfig above: GLOBAL ->
+// COMPANY -> OUTLET, narrowest wins, falling back to a hardcoded default
+// (05:00 cutover, Africa/Dar_es_Salaam, week starts Monday, FY = calendar
+// year) if no row exists at any level — so an unconfigured deployment behaves
+// exactly as the app always has. See docs/business-calendar-engine.md.
+//   BusinessCalendarConfig.scope: GLOBAL | COMPANY | OUTLET
+model BusinessCalendarConfig {
+  id   String  @id @default(cuid())
+  scope   String
+  // Null only for GLOBAL; otherwise a Company.id or Outlet.id depending on scope.
+  scopeId String?
+
+  // Preset the admin picked (still fully editable after) — RETAIL | RESTAURANT
+  // | BAR | HOTEL_24H | MANUFACTURING | OFFICE | CUSTOM.
+  templateName String @default("CUSTOM")
+
+  // "HH:mm" — the business day rolls over at businessDayStartTime; a calendar
+  // timestamp before it on a given calendar date belongs to the PREVIOUS
+  // business date. businessDayEndTime is informational (end of the trading
+  // window, spans midnight when earlier than start) — shift templates use it
+  // for validation, the date cutover only needs the start time.
+  businessDayStartTime String @default("05:00")
+  businessDayEndTime   String @default("05:00")
+
+  timeZone     String @default("Africa/Dar_es_Salaam")
+  weekStartDay Int    @default(1) // 0=Sunday .. 6=Saturday
+  fyStartMonth Int    @default(1) // 1-12
+  fyStartDay   Int    @default(1) // 1-31
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, scopeId])
+}
+
+// A time-boxed override of one or more BusinessCalendarConfig fields for a
+// specific date range (e.g. New Year's Eve hours) — expires automatically
+// once `endDate` is in the past; never mutates the underlying config row.
+model BusinessCalendarOverride {
+  id      String  @id @default(cuid())
+  scope   String
+  scopeId String?
+
+  startDate DateTime
+  endDate   DateTime
+
+  businessDayStartTime String?
+  businessDayEndTime   String?
+
+  reason    String?
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  @@index([scope, scopeId, startDate, endDate])
+}
+
+// Named sub-windows inside a business day (e.g. Morning 09:00-16:00, Evening
+// 16:00-05:00) — independent of the day cutover above; unlimited per scope.
+model ShiftTemplate {
+  id      String  @id @default(cuid())
+  scope   String
+  scopeId String?
+
+  name      String
+  startTime String // "HH:mm"
+  endTime   String // "HH:mm"
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scope, scopeId])
+}
+
+model BusinessCalendarAuditLog {
+  id            String   @id @default(cuid())
+  scope         String
+  scopeId       String?
+  field         String
+  previousValue String?
+  newValue      String?
+  reason        String?
+  userId        String?
+  userName      String?
+  createdAt     DateTime @default(now())
+
+  @@index([scope, scopeId, createdAt])
+}
+
 // ─── Transaction Management (staff self-declared transactions) ─────────────
 // Simplified layer in front of DailyCollection: the cashier only imports the
 // daily System Sales report (defines the expected staff roster); each service

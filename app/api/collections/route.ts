@@ -7,8 +7,7 @@ import { roundMoney } from '@/lib/utils'
 import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels, primaryChannelFromAmounts } from '@/lib/collection-channels'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
-import { resolveBusinessDate } from '@/lib/business-date'
-import { getCompanyConfig } from '@/lib/company-config'
+import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
 import { resolvePerson } from '@/lib/resolve-person'
 import { syncBusinessSession } from '@/lib/business-session'
 import { startOfDay, endOfDay, format } from 'date-fns'
@@ -67,8 +66,8 @@ export async function POST(req: NextRequest) {
   if (!usedOutletId) return NextResponse.json({ error: 'Outlet required' }, { status: 400 })
 
   // Prevent duplicates: one collection per staff, per outlet, per day.
-  const { businessDayCutoverHour } = await getCompanyConfig()
-  const collDate = date ? new Date(date) : resolveBusinessDate(new Date(), businessDayCutoverHour)
+  const effectiveCalendar = await resolveEffectiveConfig({ outletId: usedOutletId })
+  const collDate = date ? new Date(date) : resolveBusinessDate(new Date(), effectiveCalendar)
 
   // A closed day is locked for cashiers — no new collections.
   if (user.role === 'CASHIER') {
