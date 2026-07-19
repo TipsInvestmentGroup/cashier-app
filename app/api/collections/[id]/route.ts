@@ -5,7 +5,8 @@ import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { recomputeStaffLoss } from '@/lib/staff-loss'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
-import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
+import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
+import { primaryChannelFromAmounts } from '@/lib/collection-channels'
 import { generateBillReference } from '@/lib/bill-reference'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
@@ -111,17 +112,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // Sync submitted excess line items (upsert-by-id, preserving paidAmount and
   // blocking removal of settled rows — same rule as Cash Recon's excessItems).
   if (Array.isArray(body.excessItems)) {
-    const rawItems: { id?: string; amount: number; reason: string; staffId?: string; personId?: string }[] = body.excessItems
+    const rawItems: { id?: string; amount: number; reason: string; staffId?: string; personId?: string; notes?: string }[] = body.excessItems
     const items = rawItems
-      .map((it) => ({ id: it.id || null, amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
+      .map((it) => ({ id: it.id || null, amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null, notes: it.notes?.trim() || null }))
       .filter((it) => it.amount > 0)
+    const categories = new Map<string, string>()
     for (const it of items) {
       if (!(await isValidExcessReasonCode(it.reason))) {
         return NextResponse.json({ error: 'Select a reason for each excess amount collected' }, { status: 400 })
       }
+      const category = await excessReasonCategoryDb(it.reason)
+      if (!category) return NextResponse.json({ error: 'Select a valid reason for each excess amount collected' }, { status: 400 })
+      categories.set(it.reason, category)
       if (it.reason === 'STAFF_TIP' && !it.staffId) return NextResponse.json({ error: 'Select the staff name for the excess amount collected' }, { status: 400 })
       if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) return NextResponse.json({ error: 'Select the customer name for the excess amount collected' }, { status: 400 })
     }
+    const primaryChannelCode = primaryChannelFromAmounts(Number(cash) || 0, channelAmounts)
     const [staffRows, personRows] = await Promise.all([
       prisma.user.findMany({ where: { id: { in: items.filter((i) => i.staffId).map((i) => i.staffId as string) } }, select: { id: true, name: true } }),
       prisma.person.findMany({ where: { id: { in: items.filter((i) => i.personId).map((i) => i.personId as string) } }, select: { id: true, name: true } }),
@@ -138,7 +144,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     for (const it of items) {
       const fields = {
-        amount: it.amount, reason: it.reason,
+        amount: it.amount, reason: it.reason, category: categories.get(it.reason)!, notes: it.notes, channelCode: primaryChannelCode,
         staffId: it.staffId, staffName: it.staffId ? staffRows.find((s) => s.id === it.staffId)?.name || null : null,
         personId: it.personId, personName: it.personId ? personRows.find((p) => p.id === it.personId)?.name || null : null,
       }

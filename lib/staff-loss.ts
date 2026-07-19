@@ -55,7 +55,18 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
   const c = await db.dailyCollection.findUnique({ where: { id: collectionId }, include: { cancellations: true } })
   if (!c) return 0
 
-  const { shortfall } = computeLossComponents(c)
+  const { shortfall: rawShortfall } = computeLossComponents(c)
+
+  // A shortfall already explained by a NON_PAYABLE Difference Reason (Signed
+  // Bill/Cancellation/Discount/Complimentary/etc, entered via the Collection
+  // form's Difference Reason picker) isn't the staff's liability — only the
+  // unexplained remainder becomes an auto Staff Loss debt. This keeps the
+  // edit path's reconciliation consistent with the create path's category
+  // dispatch in app/api/collections/route.ts.
+  const nonPayableExplained = rawShortfall > 0
+    ? roundMoney((await db.collectionExcess.aggregate({ where: { collectionId, category: 'NON_PAYABLE' }, _sum: { amount: true } }))._sum.amount || 0)
+    : 0
+  const shortfall = roundMoney(rawShortfall - nonPayableExplained)
 
   const voucher = `SL-${collectionId}`
   const sl = await db.signedBill.findUnique({ where: { autoKey: voucher } })

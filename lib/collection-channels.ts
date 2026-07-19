@@ -30,3 +30,21 @@ export async function syncCollectionChannels(tx: Tx, collectionId: string, chann
     await tx.dailyCollectionChannel.create({ data: { collectionId, channelCode, amount: roundMoney(Number(amount)) } })
   }
 }
+
+/** "The" payment channel a collection's money came in through — the largest
+ *  single amount among cash + digital channels — for auto-inheriting onto a
+ *  payable excess record so nobody re-enters it (Excess Collection §4). */
+export function primaryChannelFromAmounts(cash: number, channelAmounts: Record<string, number>): string {
+  const entries: [string, number][] = [['CASH', Number(cash) || 0], ...Object.entries(channelAmounts).map(([k, v]) => [k, Number(v) || 0] as [string, number])]
+  return entries.reduce((best, cur) => (cur[1] > best[1] ? cur : best), entries[0])[0]
+}
+
+/** Same as primaryChannelFromAmounts, resolved from an already-saved DailyCollection. */
+export async function primaryChannelForCollection(tx: Tx, collectionId: string): Promise<string | null> {
+  const collection = await tx.dailyCollection.findUnique({ where: { id: collectionId }, select: { cash: true } })
+  if (!collection) return null
+  const channels = await tx.dailyCollectionChannel.findMany({ where: { collectionId }, select: { channelCode: true, amount: true } })
+  const channelAmounts: Record<string, number> = {}
+  for (const c of channels) channelAmounts[c.channelCode] = c.amount
+  return primaryChannelFromAmounts(collection.cash, channelAmounts)
+}

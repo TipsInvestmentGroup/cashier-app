@@ -4,8 +4,9 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
-import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
+import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
 import { generateBillReference } from '@/lib/bill-reference'
+import { primaryChannelForCollection } from '@/lib/collection-channels'
 
 /** Attach a brand-new excess record to an existing Cash Recon day or Collection,
  *  without reopening the full Cash Recon / Collections form. Owner or an
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
   if (!(await isValidExcessReasonCode(reason))) {
     return NextResponse.json({ error: 'Select a valid reason' }, { status: 400 })
   }
+  const category = await excessReasonCategoryDb(reason)
   if (reason === 'STAFF_TIP' && !body.staffId) return NextResponse.json({ error: 'Select the staff name' }, { status: 400 })
   if (reason === 'CUSTOMER_EXCESS' && !body.personId) return NextResponse.json({ error: 'Select the customer name' }, { status: 400 })
 
@@ -44,8 +46,13 @@ export async function POST(req: NextRequest) {
         body.personId ? tx.person.findUnique({ where: { id: body.personId }, select: { name: true } }) : null,
       ])
 
+      // Auto-inherit the payment channel from the parent Collection — never
+      // re-asked (Excess Collection §4). Cash Recon has no per-channel
+      // breakdown to inherit from, so channelCode stays null there.
+      const channelCode = source === 'COLLECTION' ? await primaryChannelForCollection(tx, parentId) : null
+
       const data = {
-        amount, reason,
+        amount, reason, category: category || 'NON_PAYABLE', channelCode,
         staffId: body.staffId || null, staffName: staff?.name || null,
         personId: body.personId || null, personName: person?.name || null,
       }

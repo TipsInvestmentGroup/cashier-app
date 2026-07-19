@@ -24,8 +24,12 @@ type StatusFilter = 'ALL' | 'PENDING' | 'SETTLED'
 interface Row {
   id: string; source: 'CASH_RECON' | 'COLLECTION'; date: string; outlet: string; person: string
   staffId: string | null; personId: string | null
-  excess: number; reason: string; reasonLabel: string; paid: number; balance: number; status: 'PENDING' | 'SETTLED'
+  excess: number; reason: string; reasonLabel: string; category: string; channelCode: string | null; notes: string | null
+  paid: number; paidAt: string | null; balance: number; status: 'PENDING' | 'SETTLED'
 }
+interface SignedBillRow { id: string; date: string; customer: string; billNumber: string; amount: number; serviceStaff: string; approvedBy: string; status: string; clearedDate: string | null }
+interface CancellationRow { id: string; date: string; cashier: string; amount: number; reason: string; serviceStaff: string; approvedBy: string; status: string }
+interface DiscountRow { id: string; date: string; discountType: string; amount: number; serviceStaff: string }
 interface Outlet { id: string; name: string }
 
 const SOURCE_LABEL: Record<Row['source'], string> = { CASH_RECON: 'Cash Recon', COLLECTION: 'Collections' }
@@ -56,6 +60,9 @@ export default function ExcessReconPage() {
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('PENDING')
   const [rows, setRows] = useState<Row[]>([])
+  const [signedBills, setSignedBills] = useState<SignedBillRow[]>([])
+  const [cancellations, setCancellations] = useState<CancellationRow[]>([])
+  const [discounts, setDiscounts] = useState<DiscountRow[]>([])
   const [loading, setLoading] = useState(false)
   const [payRow, setPayRow] = useState<Row | null>(null)
   const [payAmount, setPayAmount] = useState('')
@@ -86,7 +93,17 @@ export default function ExcessReconPage() {
         qs.set('endDate', format(interval.end, 'yyyy-MM-dd'))
       }
       if (!isCashier && outletId) qs.set('outletId', outletId)
-      setRows(await request(`/api/excess-recon?${qs.toString()}`))
+      const q = qs.toString()
+      const [payable, sbs, cancels, discs] = await Promise.all([
+        request(`/api/excess-recon?${q}`),
+        request(`/api/excess-recon/signed-bills?${q}`).catch(() => []),
+        request(`/api/excess-recon/cancellations?${q}`).catch(() => []),
+        request(`/api/excess-recon/discounts?${q}`).catch(() => []),
+      ])
+      setRows(payable)
+      setSignedBills(sbs || [])
+      setCancellations(cancels || [])
+      setDiscounts(discs || [])
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not load Excess Recon')
     } finally { setLoading(false) }
@@ -98,6 +115,11 @@ export default function ExcessReconPage() {
   const canSettleUI = roleCanSettle || perms.canSettle
   const rowKey = (r: Row) => `${r.source}-${r.id}`
   const visible = rows.filter((r) => statusFilter === 'ALL' || r.status === statusFilter)
+  const byReason = (reason: string) => visible.filter((r) => r.reason === reason)
+  const kitchenRows = byReason('KITCHEN_SALES')
+  const customerExcessRows = byReason('CUSTOMER_EXCESS')
+  const staffTipRows = byReason('STAFF_TIP')
+  const otherPayableRows = visible.filter((r) => !['KITCHEN_SALES', 'CUSTOMER_EXCESS', 'STAFF_TIP'].includes(r.reason))
   const totalExcess = visible.reduce((s, r) => s + r.excess, 0)
   const totalPaid = visible.reduce((s, r) => s + r.paid, 0)
   const totalBalance = visible.reduce((s, r) => s + r.balance, 0)
@@ -231,14 +253,88 @@ export default function ExcessReconPage() {
     }
   }
 
+  // ─── Payable section (Kitchen Sales / Customer Excess / Staff Tips / Other) ──
+  // Shared table renderer — Excess Reconciliation §7-9's columns, grouped by
+  // reason instead of one mixed table. Actions (Pay/Unsettle/Edit/Delete)
+  // only ever appear here — the tracking-only sections below have none.
+  const PayableTable = ({ title, icon, sectionRows, showCustomer }: { title: string; icon: string; sectionRows: Row[]; showCustomer?: boolean }) => (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <h2 className="font-bold text-gray-900">{icon} {title}</h2>
+        <span className="text-xs text-gray-400">{sectionRows.length} record(s) · Balance {formatCurrency(sectionRows.reduce((s, r) => s + r.balance, 0))}</span>
+      </div>
+      {sectionRows.length === 0 ? (
+        <p className="px-4 py-8 text-center text-gray-400 text-sm">No {title.toLowerCase()} records in this period</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr className="text-left text-gray-600">
+                <th className="px-4 py-2.5 font-semibold w-8"></th>
+                <th className="px-4 py-2.5 font-semibold">Date</th>
+                {!isCashier && <th className="px-4 py-2.5 font-semibold">Outlet</th>}
+                {showCustomer && <th className="px-4 py-2.5 font-semibold">Customer</th>}
+                <th className="px-4 py-2.5 font-semibold">Service Staff</th>
+                <th className="px-4 py-2.5 font-semibold">Excess Source</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Excess Amount</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Paid Amount</th>
+                <th className="px-4 py-2.5 font-semibold">Paid Date</th>
+                <th className="px-4 py-2.5 font-semibold">Payment Channel</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Remaining Balance</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {sectionRows.map((r) => (
+                <tr key={rowKey(r)} className="hover:bg-gray-50">
+                  <td className="px-4 py-2.5">
+                    {r.status === 'PENDING' && (
+                      <input type="checkbox" checked={selected.has(rowKey(r))} onChange={() => toggleSelect(r)} className="w-4 h-4" />
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
+                  {!isCashier && <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{r.outlet}</td>}
+                  {showCustomer && <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{r.person}</td>}
+                  <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{showCustomer ? '—' : r.person}</td>
+                  <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{SOURCE_LABEL[r.source]}</td>
+                  <td className="px-4 py-2.5 text-right font-semibold text-gray-800">{formatCurrency(r.excess)}</td>
+                  <td className="px-4 py-2.5 text-right text-green-700">{formatCurrency(r.paid)}</td>
+                  <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{r.paidAt ? formatDate(r.paidAt) : '—'}</td>
+                  <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{r.channelCode || '—'}</td>
+                  <td className="px-4 py-2.5 text-right font-bold text-red-700">{formatCurrency(r.balance)}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    <div className="flex items-center justify-end gap-2 flex-wrap">
+                      {r.status === 'PENDING' && canSettleUI && (
+                        <button onClick={() => openPay(r)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700">Pay</button>
+                      )}
+                      {r.paid > 0 && perms.canUnsettle && (
+                        <button onClick={() => unsettleRow(r)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100">Unsettle</button>
+                      )}
+                      {perms.canEdit && (
+                        <button onClick={() => openEdit(r)} title="Edit" className="text-gray-400 hover:text-indigo-600"><Pencil className="w-4 h-4" /></button>
+                      )}
+                      {perms.canDelete && r.paid <= 0 && (
+                        <button onClick={() => deleteRow(r)} title="Delete" className="text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <AppShell>
       <SectionTabs tabs={DAILY_TABS} />
       <div className="space-y-5">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Excess Recon</h1>
-            <p className="text-gray-500 text-sm">Excess recorded in Cash Reconciliation and Collections, consolidated with Paid/Balance settlement</p>
+            <h1 className="text-2xl font-bold text-gray-900">Excess Reconciliation</h1>
+            <p className="text-gray-500 text-sm">Grouped by business purpose — Kitchen Sales, Customer Excess and Staff Tips are payable; Signed Bills, Cancellation and Discount are tracking-only</p>
           </div>
           <div className="flex items-center gap-2">
             {perms.canAdd && (
@@ -292,7 +388,7 @@ export default function ExcessReconPage() {
           )}
         </div>
 
-        {/* Summary cards */}
+        {/* Summary cards — payable ledger only (Kitchen Sales/Customer Excess/Staff Tips/Other) */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="rounded-2xl p-4 shadow bg-gradient-to-br from-amber-500 to-amber-600 text-white">
             <p className="text-white/80 text-xs font-medium">Total Excess</p>
@@ -321,78 +417,129 @@ export default function ExcessReconPage() {
         )}
 
         {!loading && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-            {visible.length === 0 ? (
-              <p className="px-4 py-10 text-center text-gray-400 text-sm">No {statusFilter === 'ALL' ? '' : statusFilter.toLowerCase() + ' '}excess records in this period</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr className="text-left text-gray-600">
-                      <th className="px-4 py-3 font-semibold w-8"></th>
-                      <th className="px-4 py-3 font-semibold">Date</th>
-                      <th className="px-4 py-3 font-semibold">Source</th>
-                      {!isCashier && <th className="px-4 py-3 font-semibold">Outlet</th>}
-                      <th className="px-4 py-3 font-semibold">Person</th>
-                      <th className="px-4 py-3 font-semibold">Reason</th>
-                      <th className="px-4 py-3 font-semibold text-right">Excess</th>
-                      <th className="px-4 py-3 font-semibold text-right">Paid</th>
-                      <th className="px-4 py-3 font-semibold text-right">Balance</th>
-                      <th className="px-4 py-3 font-semibold">Status</th>
-                      <th className="px-4 py-3 font-semibold text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {visible.map((r) => (
-                      <tr key={rowKey(r)} className="hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          {r.status === 'PENDING' && (
-                            <input type="checkbox" checked={selected.has(rowKey(r))} onChange={() => toggleSelect(r)} className="w-4 h-4" />
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
-                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{SOURCE_LABEL[r.source]}</td>
-                        {!isCashier && <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{r.outlet}</td>}
-                        <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{r.person}</td>
-                        <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{r.reasonLabel}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-gray-800">{formatCurrency(r.excess)}</td>
-                        <td className="px-4 py-3 text-right text-green-700">{formatCurrency(r.paid)}</td>
-                        <td className="px-4 py-3 text-right font-bold text-red-700">{formatCurrency(r.balance)}</td>
-                        <td className="px-4 py-3">
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${r.status === 'SETTLED' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {r.status === 'SETTLED' ? 'Settled' : 'Pending'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-2 flex-wrap">
-                            {r.status === 'PENDING' && canSettleUI && (
-                              <button onClick={() => openPay(r)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700">
-                                Record Payment
-                              </button>
-                            )}
-                            {r.paid > 0 && perms.canUnsettle && (
-                              <button onClick={() => unsettleRow(r)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 hover:bg-amber-100">
-                                Unsettle
-                              </button>
-                            )}
-                            {perms.canEdit && (
-                              <button onClick={() => openEdit(r)} title="Edit" className="text-gray-400 hover:text-indigo-600">
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                            )}
-                            {perms.canDelete && r.paid <= 0 && (
-                              <button onClick={() => deleteRow(r)} title="Delete" className="text-gray-400 hover:text-red-600">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <div className="space-y-5">
+            <PayableTable title="Kitchen Sales" icon="🍽️" sectionRows={kitchenRows} />
+            <PayableTable title="Customer Excess" icon="🧾" sectionRows={customerExcessRows} showCustomer />
+            <PayableTable title="Staff Tips" icon="💰" sectionRows={staffTipRows} />
+            {otherPayableRows.length > 0 && <PayableTable title="Other / Needs Reason" icon="❓" sectionRows={otherPayableRows} />}
+
+            {/* Signed Bills — tracking only, no Pay action (settled by the customer directly) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <h2 className="font-bold text-gray-900">📝 Signed Bills</h2>
+                <span className="text-xs text-gray-400">Tracking only · {signedBills.length} record(s)</span>
               </div>
-            )}
+              {signedBills.length === 0 ? (
+                <p className="px-4 py-8 text-center text-gray-400 text-sm">No signed bills in this period</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr className="text-left text-gray-600">
+                        <th className="px-4 py-2.5 font-semibold">Date</th>
+                        <th className="px-4 py-2.5 font-semibold">Customer</th>
+                        <th className="px-4 py-2.5 font-semibold">Signed Bill Number</th>
+                        <th className="px-4 py-2.5 font-semibold text-right">Amount</th>
+                        <th className="px-4 py-2.5 font-semibold">Service Staff</th>
+                        <th className="px-4 py-2.5 font-semibold">Approved By</th>
+                        <th className="px-4 py-2.5 font-semibold">Status</th>
+                        <th className="px-4 py-2.5 font-semibold">Cleared Date</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {signedBills.map((b) => (
+                        <tr key={b.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{formatDate(b.date)}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{b.customer}</td>
+                          <td className="px-4 py-2.5 text-gray-500 font-mono text-xs whitespace-nowrap">{b.billNumber}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-gray-800">{formatCurrency(b.amount)}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{b.serviceStaff}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{b.approvedBy}</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${b.status === 'PAID' ? 'bg-green-100 text-green-700' : b.status === 'PARTIAL' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>{b.status}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">{b.clearedDate ? formatDate(b.clearedDate) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Cancellation — tracking only, no payment workflow */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <h2 className="font-bold text-gray-900">🚫 Cancellation</h2>
+                <span className="text-xs text-gray-400">Tracking only · {cancellations.length} record(s)</span>
+              </div>
+              {cancellations.length === 0 ? (
+                <p className="px-4 py-8 text-center text-gray-400 text-sm">No cancellations in this period</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr className="text-left text-gray-600">
+                        <th className="px-4 py-2.5 font-semibold">Date</th>
+                        <th className="px-4 py-2.5 font-semibold">Cashier</th>
+                        <th className="px-4 py-2.5 font-semibold text-right">Amount</th>
+                        <th className="px-4 py-2.5 font-semibold">Cancellation Reason</th>
+                        <th className="px-4 py-2.5 font-semibold">Service Staff</th>
+                        <th className="px-4 py-2.5 font-semibold">Approved By</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {cancellations.map((c) => (
+                        <tr key={c.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{formatDate(c.date)}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{c.cashier}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-gray-800">{formatCurrency(c.amount)}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{c.reason}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{c.serviceStaff}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{c.approvedBy}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Discount — tracking only, no payment workflow. No dedicated Discount
+                model exists in this app (see lib/excess-reasons.ts's DISCOUNT
+                reason) — reads DailyCollection.discount/discountReason directly. */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <h2 className="font-bold text-gray-900">🏷️ Discount</h2>
+                <span className="text-xs text-gray-400">Tracking only · {discounts.length} record(s)</span>
+              </div>
+              {discounts.length === 0 ? (
+                <p className="px-4 py-8 text-center text-gray-400 text-sm">No discounts in this period</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr className="text-left text-gray-600">
+                        <th className="px-4 py-2.5 font-semibold">Date</th>
+                        <th className="px-4 py-2.5 font-semibold">Discount Type</th>
+                        <th className="px-4 py-2.5 font-semibold text-right">Discount Amount</th>
+                        <th className="px-4 py-2.5 font-semibold">Service Staff</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {discounts.map((d) => (
+                        <tr key={d.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{formatDate(d.date)}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{d.discountType}</td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-gray-800">{formatCurrency(d.amount)}</td>
+                          <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{d.serviceStaff}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -417,6 +564,7 @@ export default function ExcessReconPage() {
               <button type="button" onClick={() => setPayAmount(String(payRow.balance))} className="text-xs text-indigo-600 font-semibold mt-1 hover:underline">
                 Pay full balance ({formatCurrency(payRow.balance)})
               </button>
+              <p className="text-xs text-gray-400 mt-2">Partial payments are supported — pay some now and the rest later; each payment updates the remaining balance.</p>
             </div>
             <div className="flex gap-2">
               <button onClick={closePay} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-gray-600 font-semibold hover:bg-gray-50">Cancel</button>

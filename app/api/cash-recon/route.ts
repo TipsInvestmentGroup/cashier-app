@@ -164,6 +164,9 @@ export async function POST(req: NextRequest) {
       const fields = {
         amount: it.amount,
         reason: it.reason,
+        // Cash Recon excess is always an over-collection to pay out — the
+        // Collection form's NON_PAYABLE/STAFF_LOSS categories don't apply here.
+        category: 'PAYABLE_EXCESS',
         staffId: it.staffId,
         staffName: staffName(it.staffId),
         personId: it.personId,

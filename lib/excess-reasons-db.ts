@@ -1,18 +1,20 @@
-// Server-only DB-backed layer for excess reasons — kept out of
+// Server-only DB-backed layer for Difference Reasons — kept out of
 // lib/excess-reasons.ts (imported by client components) since it needs
-// prisma. Cached in-process like lib/company-config.ts: normal writes never
+// prisma. Cached in-process like lib/company-config.ts: normal reads never
 // re-query the table; the cache is refreshed after the TTL or invalidated
 // immediately after an admin edit.
 import { prisma } from '@/lib/prisma'
-import { EXCESS_REASONS, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { DIFFERENCE_REASONS, UNASSIGNED_EXCESS_REASON, type DifferenceReasonCategory } from '@/lib/excess-reasons'
 
 const TTL_MS = 30_000
-let cache: { codes: Set<string>; labels: Map<string, string>; at: number } | null = null
+let cache: { codes: Set<string>; labels: Map<string, string>; categories: Map<string, DifferenceReasonCategory>; at: number } | null = null
 
 export async function seedExcessReasonsIfEmpty(): Promise<void> {
-  if ((await prisma.excessReason.count()) > 0) return
-  for (const d of EXCESS_REASONS) {
-    await prisma.excessReason.upsert({ where: { code: d.value }, update: {}, create: { code: d.value, label: d.label } })
+  // Upsert every default reason: creates any missing ones (first run, or a
+  // reason added by a later app version) without ever overwriting a label/
+  // category an admin has already customized.
+  for (const d of DIFFERENCE_REASONS) {
+    await prisma.excessReason.upsert({ where: { code: d.value }, update: {}, create: { code: d.value, label: d.label, category: d.category } })
   }
 }
 
@@ -24,6 +26,7 @@ async function loadCache() {
   cache = {
     codes: new Set(rows.filter((r) => r.isActive).map((r) => r.code)),
     labels: new Map(rows.map((r) => [r.code, r.label])),
+    categories: new Map(rows.map((r) => [r.code, (r.category as DifferenceReasonCategory) || 'NON_PAYABLE'])),
     at: Date.now(),
   }
   return cache
@@ -41,6 +44,12 @@ export async function excessReasonLabelDb(code: string): Promise<string> {
   if (code === UNASSIGNED_EXCESS_REASON) return 'Needs reason'
   const c = (cache && Date.now() - cache.at < TTL_MS) ? cache : await loadCache()
   return c.labels.get(code) || code
+}
+
+/** DB-aware category lookup — the ExcessReason row's current classification (PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS). */
+export async function excessReasonCategoryDb(code: string): Promise<DifferenceReasonCategory | null> {
+  const c = (cache && Date.now() - cache.at < TTL_MS) ? cache : await loadCache()
+  return c.categories.get(code) || null
 }
 
 /** Fetch the code→label map once, for synchronous lookups inside a report's map/flatMap over many rows. */

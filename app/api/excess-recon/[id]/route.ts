@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
-import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
+import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!(await hasPermission(user.email, user.userId, RESOURCES.EXCESS_RECON, 'unsettle'))) {
       return NextResponse.json({ error: 'You are not authorized to unsettle excess payments' }, { status: 403 })
     }
-    const updated = await model.update({ where: { id }, data: { paidAmount: 0 } })
+    const updated = await model.update({ where: { id }, data: { paidAmount: 0, paidAt: null } })
     await prisma.auditLog.create({
       data: {
         userId: user.userId, action: 'UPDATE',
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const newPaid = roundMoney(existing.paidAmount + amount)
-  const updated = await model.update({ where: { id }, data: { paidAmount: newPaid } })
+  const updated = await model.update({ where: { id }, data: { paidAmount: newPaid, paidAt: new Date() } })
 
   await prisma.auditLog.create({
     data: {
@@ -98,7 +98,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Select a valid reason' }, { status: 400 })
     }
     data.reason = body.reason
+    data.category = (await excessReasonCategoryDb(body.reason)) || 'NON_PAYABLE'
   }
+  if (body.notes !== undefined) data.notes = String(body.notes).trim() || null
   const reason = body.reason !== undefined ? body.reason : existing.reason
   if (body.staffId !== undefined || reason === 'STAFF_TIP') {
     if (reason === 'STAFF_TIP' && !body.staffId && !existing.staffId) return NextResponse.json({ error: 'Select the staff name' }, { status: 400 })

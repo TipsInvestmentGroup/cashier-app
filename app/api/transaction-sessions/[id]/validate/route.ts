@@ -218,7 +218,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       await tx.collectionExcess.create({
         data: {
           id: recordId,
-          collectionId: created.id, amount: excessAmount, reason: 'UNASSIGNED', staffName: staff.name,
+          collectionId: created.id, amount: excessAmount, reason: 'UNASSIGNED', category: 'PAYABLE_EXCESS', staffName: staff.name,
           internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
         },
       })

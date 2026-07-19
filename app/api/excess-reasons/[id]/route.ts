@@ -3,12 +3,14 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
 import { invalidateExcessReasonCache } from '@/lib/excess-reasons-db'
+import { RESERVED_REASON_CODES } from '@/lib/excess-reasons'
 
-// STAFF_TIP/CUSTOMER_EXCESS are wired into fixed picker behavior (staff/customer
-// selection) in AddExcessModal.tsx and CashReconForm.tsx by this exact code —
-// deleting the row (not just disabling it) would silently break that UI logic
-// for good, so it's blocked entirely. Renaming the label or disabling is fine.
-const PROTECTED_CODES = ['STAFF_TIP', 'CUSTOMER_EXCESS']
+// STAFF_TIP/CUSTOMER_EXCESS/STAFF_LOSS are wired into fixed engine behavior
+// (staff/customer picker unlock, auto-SignedBill debt path) by this exact
+// code — deleting the row (or changing its category) would silently break
+// that logic for good, so both are blocked entirely. Renaming the label or
+// disabling is fine.
+const PROTECTED_CODES = RESERVED_REASON_CODES
 
 /** Edit a reason (rename / activate) — authorized managers only. Code is immutable. */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -22,6 +24,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const data: any = {}
   if (body.label !== undefined) data.label = String(body.label).trim()
   if (body.isActive !== undefined) data.isActive = !!body.isActive
+  if (body.category !== undefined && ['PAYABLE_EXCESS', 'NON_PAYABLE', 'STAFF_LOSS'].includes(body.category)) {
+    const existing = await prisma.excessReason.findUnique({ where: { id } })
+    if (existing && RESERVED_REASON_CODES.includes(existing.code)) {
+      return NextResponse.json({ error: 'This reason\'s category is wired into fixed engine behavior and cannot be changed.' }, { status: 409 })
+    }
+    data.category = body.category
+  }
 
   try {
     const item = await prisma.excessReason.update({ where: { id }, data })

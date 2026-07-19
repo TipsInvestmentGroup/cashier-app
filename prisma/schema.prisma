@@ -1329,12 +1329,16 @@ model CashReconExcess {
   cashReconId String
   cashRecon   CashRecon @relation(fields: [cashReconId], references: [id], onDelete: Cascade)
   amount      Float
-  reason      String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS
+  reason      String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | SIGNED_BILL | CANCELLATION | DISCOUNT | COMPLIMENTARY | CUSTOMER_WALK_AWAY | TRANSFER_ERROR | UNASSIGNED
+  category    String    @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS — snapshot of ExcessReason.category at creation time
+  notes       String? // optional free-text explanation entered alongside the reason
+  channelCode String? // payment channel auto-inherited from the parent DailyCollection/CashRecon, no re-entry
   staffId     String? // set when reason = STAFF_TIP
   staffName   String?
   personId    String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
   personName  String?
   paidAmount  Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount
+  paidAt      DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
   createdAt   DateTime  @default(now())
 
   // Bill Reference System — plays the "Excess Payment" (EXS) bill type
@@ -1356,12 +1360,16 @@ model CollectionExcess {
   collectionId String
   collection   DailyCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   amount       Float
-  reason       String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | UNASSIGNED
+  reason       String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | SIGNED_BILL | CANCELLATION | DISCOUNT | COMPLIMENTARY | CUSTOMER_WALK_AWAY | TRANSFER_ERROR | UNASSIGNED
+  category     String          @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS — snapshot of ExcessReason.category at creation time
+  notes        String? // optional free-text explanation entered alongside the reason
+  channelCode  String? // payment channel auto-inherited from the parent DailyCollection, no re-entry
   staffId      String? // set when reason = STAFF_TIP
   staffName    String?
   personId     String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
   personName   String?
   paidAmount   Float           @default(0) // settled via Excess Recon; balance = amount - paidAmount
+  paidAt       DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
   createdAt    DateTime        @default(now())
 
   // Bill Reference System — plays the "Excess Payment" (EXS) bill type
@@ -1467,10 +1475,18 @@ model CancellationReasonProduct {
 /// are permanently wired into the picker UI/validation — STAFF_TIP unlocks a
 /// staff picker, CUSTOMER_EXCESS a customer picker — that behavior is fixed
 /// engine logic and doesn't change if a company renames or adds reasons.
+/// Difference Reasons (rebranded from a pure "excess reason" list) — the single
+/// admin-configurable registry Collection form/Excess Recon share (see
+/// lib/excess-reasons.ts). `category` decides the workflow: PAYABLE_EXCESS
+/// creates a CollectionExcess/CashReconExcess record settled via Excess
+/// Payment; NON_PAYABLE is audit-only; STAFF_LOSS (single reserved code,
+/// like STAFF_TIP/CUSTOMER_EXCESS) drives the existing auto-SignedBill debt
+/// path unchanged.
 model ExcessReason {
   id        String   @id @default(cuid())
   code      String   @unique
   label     String
+  category  String   @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 }

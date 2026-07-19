@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     if (balance <= 0) continue
     const pay = roundMoney(Math.min(balance, remaining))
     const newPaid = roundMoney(row.paidAmount + pay)
-    await modelFor(source).update({ where: { id }, data: { paidAmount: newPaid } })
+    await modelFor(source).update({ where: { id }, data: { paidAmount: newPaid, paidAt: new Date() } })
     applied.push({ id, source, amount: pay, newPaid, balance: roundMoney(row.amount - newPaid) })
     remaining = roundMoney(remaining - pay)
   }

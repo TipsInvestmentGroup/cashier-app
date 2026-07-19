@@ -12,7 +12,7 @@ export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles:
   { href: '/person-categories', label: 'Categories', icon: Tag, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/payment-channels', label: 'Payment Channels', icon: CreditCard, roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
   { href: '/cancellation-reasons', label: 'Cancellation Reasons', icon: Ban, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
-  { href: '/excess-reasons', label: 'Excess Reasons', icon: Coins, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
+  { href: '/excess-reasons', label: 'Difference Reasons', icon: Coins, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/bill-types', label: 'Bill Types', icon: Tags, roles: ['ADMIN', 'DIRECTOR'] },
   { href: '/bill-reference-settings', label: 'Bill References', icon: Hash, roles: ['ADMIN', 'DIRECTOR'] },
   { href: '/persons', label: 'Persons', icon: Users, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },

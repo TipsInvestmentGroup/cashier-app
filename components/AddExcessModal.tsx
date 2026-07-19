@@ -9,7 +9,15 @@ import toast from 'react-hot-toast'
 
 type Source = 'CASH_RECON' | 'COLLECTION'
 interface Outlet { id: string; name: string }
-interface CollectionOpt { id: string; staffName?: string; date: string }
+interface CollectionOpt { id: string; staffName?: string; date: string; cash?: number; channels?: { channelCode: string; amount: number }[] }
+
+/** "The" payment channel a collection's money came in through — mirrors
+ *  lib/collection-channels.ts's primaryChannelFromAmounts so the modal can
+ *  display (never re-ask for) the channel an excess record will inherit. */
+function primaryChannel(c: CollectionOpt): string {
+  const entries: [string, number][] = [['CASH', c.cash || 0], ...(c.channels || []).map((ch) => [ch.channelCode, ch.amount] as [string, number])]
+  return entries.reduce((best, cur) => (cur[1] > best[1] ? cur : best), entries[0])[0]
+}
 
 export function AddExcessModal({
   open, onClose, onSaved, outlets, isCashier, defaultOutletId, request,
@@ -47,7 +55,9 @@ export function AddExcessModal({
     Promise.all([request('/api/staff-list'), request('/api/persons?type=CUSTOMER'), request('/api/excess-reasons')])
       .then(([staff, persons, reasonRows]) => {
         setStaffList(staff || []); setCustomerList(persons || [])
-        const active = (reasonRows || []).filter((r: { isActive: boolean }) => r.isActive)
+        // Only payable-excess reasons belong here — this modal always attaches
+        // to Excess Recon/Excess Payment, never the audit-only non-payable ones.
+        const active = (reasonRows || []).filter((r: { isActive: boolean; category?: string }) => r.isActive && (r.category ? r.category === 'PAYABLE_EXCESS' : true))
         if (active.length) setReasons(active.map((r: { code: string; label: string }) => ({ value: r.code, label: r.label })))
       })
       .catch(() => {})
@@ -141,6 +151,14 @@ export function AddExcessModal({
               <option value="">{collections.length === 0 ? 'No collections for this day/outlet' : 'Select a collection…'}</option>
               {collections.map((c) => <option key={c.id} value={c.id}>{c.staffName || '(no staff)'}</option>)}
             </select>
+            {collectionId && (() => {
+              const selected = collections.find((c) => c.id === collectionId)
+              return selected ? (
+                <p className="text-xs text-gray-400 mt-1">
+                  Staff and payment channel ({primaryChannel(selected)}) are auto-filled from this collection — no need to re-enter them.
+                </p>
+              ) : null
+            })()}
           </div>
         )}
 

@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import Link from 'next/link'
 import { formatCurrency } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
 import { WidgetGrid } from '@/components/widgets/WidgetGrid'
@@ -67,6 +68,8 @@ export default function DashboardPage() {
   const [warnings, setWarnings] = useState<{ staffCount: number; flagged: FlaggedItem[] } | null>(null)
   type Growth = { current: number; previous: number; deltaPct: number; spark: number[] }
   const [growth, setGrowth] = useState<{ weekly: Growth; monthly: Growth } | null>(null)
+  interface DiffCard { key: string; label: string; amount?: number; count?: number; href: string }
+  const [diffCards, setDiffCards] = useState<DiffCard[]>([])
 
   useEffect(() => {
     request('/api/dashboard')
@@ -77,6 +80,7 @@ export default function DashboardPage() {
     request('/api/targets/warning-letters').then((r) => setWarnings(r)).catch(() => {})
     request('/api/dashboard/growth').then((r) => setGrowth(r)).catch(() => {})
     request('/api/collections/day-status').then((r) => setDayReady(r)).catch(() => {})
+    request('/api/dashboard/differences').then((r) => setDiffCards(r?.cards || [])).catch(() => {})
   }, [request])
 
   if (loading) return (
@@ -232,6 +236,29 @@ export default function DashboardPage() {
 
         {/* Manager/HR/Finance/Executive decision-support widgets — role-gated, additive */}
         <WidgetGrid defs={DASHBOARD_ROLE_WIDGETS} data={data} role={role} className="grid grid-cols-1 sm:grid-cols-2 gap-4" />
+
+        {/* Collection Difference cards (§15) — each drills into the existing
+            Collections/Excess Recon/Signed Bills/Cancellations page, filtered
+            to today's date range. */}
+        {diffCards.length > 0 && (
+          <div>
+            <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Collection Differences (Today)</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+              {diffCards.map((c) => (
+                <Link key={c.key} href={c.href}
+                  className="bg-white rounded-2xl shadow-sm border border-gray-100 p-3.5 hover:border-indigo-300 hover:shadow-md transition block">
+                  <p className="text-xs text-gray-500 font-medium">{c.label}</p>
+                  <p className="text-lg font-bold text-gray-900 mt-1">
+                    {c.amount !== undefined ? formatCurrency(c.amount) : c.count}
+                  </p>
+                  {c.count !== undefined && c.amount !== undefined && (
+                    <p className="text-[11px] text-gray-400 mt-0.5">{c.count} record(s)</p>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Today breakdown */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

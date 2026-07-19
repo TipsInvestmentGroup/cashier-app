@@ -4,8 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
-import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
-import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
+import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
+import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels, primaryChannelFromAmounts } from '@/lib/collection-channels'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { resolveBusinessDate } from '@/lib/business-date'
 import { getCompanyConfig } from '@/lib/company-config'
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   const signedInput: { billType: string; name: string; amount: number; personId?: string; confirmedNew?: boolean }[] = Array.isArray(body.signedBills) ? body.signedBills : []
   const paidInput: { payerName: string; amount: number; paymentMethod: string; category?: string; categoryBillType?: string; signedBillId?: string; selectedBillIds?: string[] }[] = Array.isArray(body.paidBills) ? body.paidBills : []
   const cancelInput: { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[] = Array.isArray(body.cancellations) ? body.cancellations : []
-  const excessItemsInput: { amount: number; reason: string; staffId?: string; personId?: string }[] = Array.isArray(body.excessItems) ? body.excessItems : []
+  const excessItemsInput: { amount: number; reason: string; staffId?: string; personId?: string; notes?: string }[] = Array.isArray(body.excessItems) ? body.excessItems : []
 
   const total = roundMoney(Number(cash) + sumChannelAmounts(channelAmounts))
   const usedOutletId = writeOutletId(user, outletId)
@@ -90,6 +90,24 @@ export async function POST(req: NextRequest) {
         { status: 409 }
       )
     }
+  }
+
+  // Resolve every referenced Difference Reason's category BEFORE opening the
+  // transaction below. isValidExcessReasonCode/excessReasonCategoryDb read
+  // (and, on a cold cache, write-seed) the ExcessReason table through the
+  // plain `prisma` client — calling them from inside the `tx` transaction
+  // would have that write contend for the same SQLite connection's write
+  // lock that `tx` already holds, deadlocking until the transaction's own
+  // timeout aborts it. Resolving up front avoids that entirely.
+  const referencedReasons = Array.from(new Set(excessItemsInput.map((it) => it.reason).filter(Boolean)))
+  const reasonCategoryMap = new Map<string, string>()
+  for (const reason of referencedReasons) {
+    if (!(await isValidExcessReasonCode(reason))) {
+      return NextResponse.json({ error: 'Select a valid Difference Reason for each line' }, { status: 400 })
+    }
+    const category = await excessReasonCategoryDb(reason)
+    if (!category) return NextResponse.json({ error: 'Select a valid Difference Reason for each line' }, { status: 400 })
+    reasonCategoryMap.set(reason, category)
   }
 
   // All writes for one collection run atomically — a mid-way failure rolls back
@@ -178,60 +196,60 @@ export async function POST(req: NextRequest) {
       data: { creditSales: roundMoney(signedTotal), paymentsReceived: roundMoney(paidStaffLoss) },
     })
 
-    // 3) Staff Loss = System − Collection − SignedBills − PaidBills (Staff Loss only) − Discount
+    // 3) Difference = System Sales − Collection − SignedBills − PaidBills (Staff Loss only) − Discount.
+    // Positive = shortfall (collected less than System Sales), negative = surplus
+    // (collected more). Any non-zero difference needs a Difference Reason before
+    // saving (generalizes "split across multiple reasons/people" — a single
+    // reason is just a one-item split). Each item's reason resolves to a
+    // category that decides the side effect:
+    //   PAYABLE_EXCESS → CollectionExcess row, settled later via Excess Payment.
+    //   STAFF_LOSS     → the pre-existing auto-SignedBill debt path, unchanged.
+    //   NON_PAYABLE    → CollectionExcess row too (uniform audit trail), but
+    //                    excluded from Excess Recon's payable views/actions.
     const lossAmount = roundMoney((Number(systemSales) || 0) - total - signedTotal - paidStaffLoss - discount)
     let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
-    if (staffName && lossAmount > 0) {
-      const person = await tx.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
-      const autoKey = `SL-${collection.id}`
-      const recordId = crypto.randomUUID()
-      const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', 'STAFF_LOSS')
-      const ref = await generateBillReference(tx, {
-        recordId, sourceModel: 'SignedBill', billTypeCode, date: collDate, personId: person?.id ?? null, outletId: usedOutletId,
-      })
-      const bill = await tx.signedBill.create({
-        data: {
-          id: recordId,
-          autoKey, voucherNumber: ref.displayReference, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: staffName,
-          amount: lossAmount, serviceStaff: staffName,
-          description: `Auto staff loss: System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid·staffloss ${paidStaffLoss} − discount ${discount} (collection ${collection.id})`,
-          status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
-          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
-          autoSourceCollectionId: collection.id,
-        },
-      })
-      await tx.auditLog.create({
-        data: { userId: user.userId, action: 'CREATE', entity: 'SignedBill', entityId: bill.id, details: `Auto staff loss ${lossAmount} for ${staffName}` },
-      })
-      staffLoss = { amount: lossAmount, voucher: ref.displayReference, staffName }
-    }
-
-    // 3b) Excess — the staff collected more than the formula required (negative
-    // "loss"). Requires a reason per item (shared with Cash Reconciliation) before
-    // saving, and can be split across multiple reasons/people.
     let excess: { amount: number; items: number } | null = null
-    if (lossAmount < 0) {
-      const excessAmount = roundMoney(Math.abs(lossAmount))
+    // "The" payment channel this collection's money came in through, for
+    // auto-inheriting onto any payable excess record (no re-entry needed).
+    const primaryChannelCode = primaryChannelFromAmounts(Number(cash) || 0, channelAmounts)
+
+    if (lossAmount !== 0) {
+      const differenceAmount = roundMoney(Math.abs(lossAmount))
       const items = excessItemsInput
-        .map((it) => ({ amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
+        .map((it) => ({ amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null, notes: it.notes?.trim() || null }))
         .filter((it) => it.amount > 0)
-      if (items.length === 0) throw new Error('Select a reason for the excess amount collected')
+      if (items.length === 0) {
+        throw new Error(
+          Number(systemSales) > 0 && total === 0
+            ? 'System Sales exist but no collections were recorded. Please select a Difference Reason before saving.'
+            : 'There is a difference between System Sales and Collections. Please select a Difference Reason before saving.'
+        )
+      }
+      const categories = reasonCategoryMap
       for (const it of items) {
-        if (!(await isValidExcessReasonCode(it.reason))) {
-          throw new Error('Select a reason for each excess amount collected')
+        if (!categories.has(it.reason)) {
+          throw new Error('Select a valid Difference Reason for each line')
         }
-        if (it.reason === 'STAFF_TIP' && !it.staffId) throw new Error('Select the staff name for the excess amount collected')
-        if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) throw new Error('Select the customer name for the excess amount collected')
+        if (it.reason === 'STAFF_TIP' && !it.staffId) throw new Error('Select the staff name for the Staff Tip line')
+        if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) throw new Error('Select the customer name for the Customer Excess line')
       }
       const itemsSum = roundMoney(items.reduce((s, it) => s + it.amount, 0))
-      if (itemsSum !== excessAmount) {
-        throw new Error(`Excess reasons must add up to ${excessAmount} (currently ${itemsSum})`)
+      if (itemsSum !== differenceAmount) {
+        throw new Error(`Difference Reasons must add up to ${differenceAmount} (currently ${itemsSum})`)
       }
       const [staffRows, personRows] = await Promise.all([
         tx.user.findMany({ where: { id: { in: items.filter((i) => i.staffId).map((i) => i.staffId as string) } }, select: { id: true, name: true } }),
         tx.person.findMany({ where: { id: { in: items.filter((i) => i.personId).map((i) => i.personId as string) } }, select: { id: true, name: true } }),
       ])
+
+      let payableItemCount = 0
+      let staffLossFromItems = 0
       for (const it of items) {
+        const category = categories.get(it.reason)!
+        if (category === 'STAFF_LOSS') {
+          staffLossFromItems += it.amount
+          continue
+        }
         const recordId = crypto.randomUUID()
         const ref = await generateBillReference(tx, {
           recordId, sourceModel: 'CollectionExcess', billTypeCode: 'EXS', date: collDate, personId: it.personId, outletId: usedOutletId,
@@ -239,14 +257,41 @@ export async function POST(req: NextRequest) {
         await tx.collectionExcess.create({
           data: {
             id: recordId,
-            collectionId: collection.id, amount: it.amount, reason: it.reason,
-            staffId: it.staffId, staffName: it.staffId ? staffRows.find((s: { id: string }) => s.id === it.staffId)?.name || null : null,
+            collectionId: collection.id, amount: it.amount, reason: it.reason, category, channelCode: primaryChannelCode, notes: it.notes,
+            staffId: it.staffId, staffName: it.staffId ? staffRows.find((s: { id: string }) => s.id === it.staffId)?.name || null : (staffName || null),
             personId: it.personId, personName: it.personId ? personRows.find((p: { id: string }) => p.id === it.personId)?.name || null : null,
             internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
           },
         })
+        if (category === 'PAYABLE_EXCESS') payableItemCount++
       }
-      excess = { amount: excessAmount, items: items.length }
+      if (payableItemCount > 0) excess = { amount: roundMoney(items.filter((it) => categories.get(it.reason) === 'PAYABLE_EXCESS').reduce((s, it) => s + it.amount, 0)), items: payableItemCount }
+
+      if (staffLossFromItems > 0 && staffName) {
+        const staffLossAmount = roundMoney(staffLossFromItems)
+        const person = await tx.person.findFirst({ where: { name: staffName, type: 'STAFF_LOSS' } })
+        const autoKey = `SL-${collection.id}`
+        const recordId = crypto.randomUUID()
+        const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', 'STAFF_LOSS')
+        const ref = await generateBillReference(tx, {
+          recordId, sourceModel: 'SignedBill', billTypeCode, date: collDate, personId: person?.id ?? null, outletId: usedOutletId,
+        })
+        const bill = await tx.signedBill.create({
+          data: {
+            id: recordId,
+            autoKey, voucherNumber: ref.displayReference, billType: 'STAFF_LOSS', personId: person?.id ?? null, personName: staffName,
+            amount: staffLossAmount, serviceStaff: staffName,
+            description: `Staff loss (Difference Reason): System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid·staffloss ${paidStaffLoss} − discount ${discount} (collection ${collection.id})`,
+            status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
+            internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+            autoSourceCollectionId: collection.id,
+          },
+        })
+        await tx.auditLog.create({
+          data: { userId: user.userId, action: 'CREATE', entity: 'SignedBill', entityId: bill.id, details: `Auto staff loss ${staffLossAmount} for ${staffName}` },
+        })
+        staffLoss = { amount: staffLossAmount, voucher: ref.displayReference, staffName }
+      }
     }
 
     await syncBusinessSession(tx, collection.id)

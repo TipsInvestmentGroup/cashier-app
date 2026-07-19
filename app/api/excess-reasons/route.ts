@@ -21,12 +21,13 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!(await canManagePersons(user.email))) return NextResponse.json({ error: 'You are not authorized to add excess reasons' }, { status: 403 })
 
-  const { label } = await req.json().catch(() => ({}))
+  const { label, category } = await req.json().catch(() => ({}))
   if (!label || !String(label).trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   const code = toCode(label)
   if (!code) return NextResponse.json({ error: 'Invalid name' }, { status: 400 })
+  const validCategory = ['PAYABLE_EXCESS', 'NON_PAYABLE', 'STAFF_LOSS'].includes(category) ? category : 'NON_PAYABLE'
   try {
-    const item = await prisma.excessReason.create({ data: { code, label: String(label).trim() } })
+    const item = await prisma.excessReason.create({ data: { code, label: String(label).trim(), category: validCategory } })
     invalidateExcessReasonCache()
     await prisma.auditLog.create({ data: { userId: user.userId, action: 'CREATE', entity: 'ExcessReason', entityId: item.id, details: `Added reason ${item.label} (${item.code})` } })
     return NextResponse.json(item, { status: 201 })

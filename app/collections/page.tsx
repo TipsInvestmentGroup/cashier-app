@@ -16,7 +16,7 @@ import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
 import { channelAmountsFor, digitalTotal, sumChannelAmounts } from '@/lib/collection-channels-shared'
 import { findBestPersonMatch } from '@/lib/nameMatch'
-import { EXCESS_REASONS, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { EXCESS_REASONS, SHORTFALL_REASONS, UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 import toast from 'react-hot-toast'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns'
 
@@ -33,7 +33,7 @@ interface Cancellation {
   sellingPrice: number; quantity: number; amount: number; status?: string
 }
 interface CollectionExcessRow {
-  id: string; amount: number; reason: string; staffId?: string | null; staffName?: string | null; personId?: string | null; personName?: string | null; paidAmount: number
+  id: string; amount: number; reason: string; staffId?: string | null; staffName?: string | null; personId?: string | null; personName?: string | null; notes?: string | null; paidAmount: number
 }
 interface Collection {
   id: string; date: string; cash: number; crdb: number; stanbic: number; mpesa: number; total: number
@@ -41,7 +41,7 @@ interface Collection {
   notes: string; outletId?: string; outlet: { id?: string; name: string }; cashier: { name: string }; cancellations?: Cancellation[]
   channels?: { channelCode: string; amount: number }[]; excessItems?: CollectionExcessRow[]
 }
-interface ExcessItem { key: string; id?: string; amount: string; reason: string; staffId: string; personId: string; paidAmount: number }
+interface ExcessItem { key: string; id?: string; amount: string; reason: string; staffId: string; personId: string; notes: string; paidAmount: number }
 interface Product { id: string; code: string; name: string; sellingPrice: number; isActive: boolean; categoryId?: string | null }
 interface SignedBill { id: string; personName: string; amount: number; billType: string; status: string; seq?: number; date?: string }
 // signed-bill type → paid-bill category label
@@ -81,7 +81,7 @@ export default function CollectionsPage() {
   const [cancelRows, setCancelRows] = useState<{ reason: string; productId: string; productName: string; sellingPrice: number; quantity: string }[]>([])
   const [excessItems, setExcessItems] = useState<ExcessItem[]>([])
   const excessKeyRef = useRef(0)
-  const newExcessItem = (amount = ''): ExcessItem => ({ key: `new-${excessKeyRef.current++}`, amount, reason: '', staffId: '', personId: '', paidAmount: 0 })
+  const newExcessItem = (amount = ''): ExcessItem => ({ key: `new-${excessKeyRef.current++}`, amount, reason: '', staffId: '', personId: '', notes: '', paidAmount: 0 })
   const [staffPickList, setStaffPickList] = useState<{ id: string; name: string }[]>([])
   const [allPersons, setAllPersons] = useState<Person[]>([])
   const [categories, setCategories] = useState<NamedCode[]>([])
@@ -241,16 +241,23 @@ export default function CollectionsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.staffName) return toast.error('Please select a staff member before saving the collection.')
-    if (total === 0) return toast.error('Enter at least one amount')
+    // Zero collections are valid — a genuine 0 total is only a problem when it
+    // leaves an unexplained difference against System Sales, handled below.
     if (!reconciled) return toast.error('Record signed bills & payments, or tick "No other bills" to confirm none.')
-    if (lossPreview < 0) {
-      if (activeExcessItems.length === 0) return toast.error('Select a reason for the excess amount collected')
-      for (const it of activeExcessItems) {
-        if (!it.reason) return toast.error('Select a reason for each excess amount')
-        if (it.reason === 'STAFF_TIP' && !it.staffId) return toast.error('Select the staff name for the excess amount')
-        if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) return toast.error('Select the customer name for the excess amount')
+    if (lossPreview !== 0) {
+      if (activeExcessItems.length === 0) {
+        return toast.error(
+          Number(form.systemSales) > 0 && total === 0
+            ? 'System Sales exist but no collections were recorded. Please select a Difference Reason before saving.'
+            : 'There is a difference between System Sales and Collections. Please select a Difference Reason before saving.'
+        )
       }
-      if (!editingId && excessRemaining !== 0) return toast.error(`Excess reasons must add up to ${formatCurrency(Math.abs(lossPreview))} (${excessRemaining > 0 ? formatCurrency(excessRemaining) + ' left to allocate' : 'over by ' + formatCurrency(-excessRemaining)})`)
+      for (const it of activeExcessItems) {
+        if (!it.reason) return toast.error('Select a Difference Reason for each line')
+        if (it.reason === 'STAFF_TIP' && !it.staffId) return toast.error('Select the staff name for the Staff Tip line')
+        if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) return toast.error('Select the customer name for the Customer Excess line')
+      }
+      if (!editingId && excessRemaining !== 0) return toast.error(`Difference Reasons must add up to ${formatCurrency(Math.abs(lossPreview))} (${excessRemaining > 0 ? formatCurrency(excessRemaining) + ' left to allocate' : 'over by ' + formatCurrency(-excessRemaining)})`)
     }
     setSubmitting(true)
     try {
@@ -261,7 +268,7 @@ export default function CollectionsPage() {
         sellingPrice: r.sellingPrice, quantity: Number(r.quantity), amount: r.sellingPrice * (Number(r.quantity) || 0),
       }))
       const excessItemsPayload = activeExcessItems.map((it) => ({
-        id: it.id, amount: Number(it.amount) || 0, reason: it.reason,
+        id: it.id, amount: Number(it.amount) || 0, reason: it.reason, notes: it.notes || undefined,
         ...(it.reason === 'STAFF_TIP' ? { staffId: it.staffId } : {}),
         ...(it.reason === 'CUSTOMER_EXCESS' ? { personId: it.personId } : {}),
       }))
@@ -315,7 +322,7 @@ export default function CollectionsPage() {
     })))
     setExcessItems((c.excessItems || []).map((it) => ({
       key: it.id, id: it.id, amount: String(it.amount), reason: it.reason, staffId: it.staffId || '', personId: it.personId || '',
-      paidAmount: it.paidAmount || 0,
+      notes: it.notes || '', paidAmount: it.paidAmount || 0,
     })))
     setShowForm(true)
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -823,32 +830,37 @@ export default function CollectionsPage() {
                 </div>
               )}
 
-              {/* Live Staff Loss preview (full formula) */}
-              {!editingId && (Number(form.systemSales) > 0 || signedTotalForm > 0 || paidTotalForm > 0) && (
-                <div className={`rounded-xl p-4 ${lossPreview > 0 ? 'bg-red-50' : 'bg-green-50'}`}>
+              {/* Difference = System Sales − Collections (§1). Hidden entirely when
+                  there's no System Sales to compare against; otherwise always
+                  shown for a new collection so "Fully Collected" is visible too. */}
+              {!editingId && Number(form.systemSales) > 0 && (
+                <div className={`rounded-xl p-4 ${lossPreview === 0 ? 'bg-green-50' : lossPreview > 0 ? 'bg-red-50' : 'bg-amber-50'}`}>
                   <div className="flex items-center justify-between">
-                    <span className={`font-semibold ${lossPreview > 0 ? 'text-red-800' : 'text-green-800'}`}>
-                      {lossPreview > 0 ? '🔻 Staff Loss (→ Payroll Deductions)' : lossPreview < 0 ? '🔺 Overage' : '✅ Balanced'}
+                    <span className={`font-semibold ${lossPreview === 0 ? 'text-green-800' : lossPreview > 0 ? 'text-red-800' : 'text-amber-800'}`}>
+                      {lossPreview === 0 ? '✓ Fully Collected' : '⚠ Explanation Required'}
                     </span>
-                    <span className={`text-2xl font-bold ${lossPreview > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(lossPreview))}</span>
+                    <span className={`text-2xl font-bold ${lossPreview === 0 ? 'text-green-700' : lossPreview > 0 ? 'text-red-700' : 'text-amber-700'}`}>{formatCurrency(Math.abs(lossPreview))}</span>
                   </div>
                   <p className="text-xs text-gray-500 mt-1">
-                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid·Staff-Loss {formatCurrency(paidStaffLossForm)} − Discount {formatCurrency(discountForm)} − Approved Cancellations
+                    System {formatCurrency(Number(form.systemSales) || 0)} − Collection {formatCurrency(total)} − Signed {formatCurrency(signedTotalForm)} − Paid·Staff-Loss {formatCurrency(paidStaffLossForm)} − Discount {formatCurrency(discountForm)}
+                    {lossPreview !== 0 && (lossPreview > 0 ? ' (shortfall — collected less than System Sales)' : ' (surplus — collected more than System Sales)')}
                   </p>
                   {cancelTotalForm > 0 && (
                     <p className="text-xs text-amber-600 mt-1">
-                      Cancellations {formatCurrency(cancelTotalForm)} are pending — they will reduce this staff loss once approved.
+                      Cancellations {formatCurrency(cancelTotalForm)} are pending — they will reduce this figure once approved.
                     </p>
                   )}
                 </div>
               )}
 
-              {/* Excess reason(s) — split the overage across one or more reasons/people */}
-              {(lossPreview < 0 || excessItems.length > 0) && (
+              {/* Difference Reason(s) — split across one or more reasons/people.
+                  Options depend on the sign: a shortfall offers the non-payable +
+                  Staff Loss reasons, a surplus offers the payable-excess reasons. */}
+              {(lossPreview !== 0 || excessItems.length > 0) && (
                 <div className="border-2 border-amber-100 bg-amber-50/40 rounded-xl p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="block text-sm font-semibold text-gray-700">Excess Reason(s) {lossPreview < 0 && '*'}</label>
-                    {lossPreview < 0 && (
+                    <label className="block text-sm font-semibold text-gray-700">Difference Reason(s) {lossPreview !== 0 && '*'}</label>
+                    {lossPreview !== 0 && (
                       <span className={`text-xs font-bold ${excessRemaining === 0 ? 'text-green-700' : 'text-amber-800'}`}>
                         {excessRemaining === 0 ? `Allocated: ${formatCurrency(excessItemsTotal)}` : `Remaining to allocate: ${formatCurrency(excessRemaining)}`}
                       </span>
@@ -857,10 +869,11 @@ export default function CollectionsPage() {
                   {excessItems.map((it) => {
                     const locked = it.paidAmount > 0
                     const unassigned = it.reason === UNASSIGNED_EXCESS_REASON
+                    const reasonOptions = lossPreview < 0 ? EXCESS_REASONS : SHORTFALL_REASONS
                     return (
                       <div key={it.key} className="bg-white border-2 border-gray-100 rounded-xl p-2.5 space-y-2">
                         {locked && <p className="text-xs font-semibold text-indigo-600">🔒 {formatCurrency(it.paidAmount)} already settled — edit/removal locked. Manage payments from Excess Recon.</p>}
-                        {unassigned && !locked && <p className="text-xs font-semibold text-amber-700">⚠️ Auto-detected excess — assign a reason below.</p>}
+                        {unassigned && !locked && <p className="text-xs font-semibold text-amber-700">⚠️ Auto-detected difference — assign a reason below.</p>}
                         <div className="flex items-center gap-2">
                           <MoneyInput value={it.amount} onChange={(v) => updateExcessItem(it.key, { amount: v })} disabled={locked}
                             className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none font-bold disabled:bg-gray-50 disabled:text-gray-500" placeholder="0" />
@@ -872,7 +885,7 @@ export default function CollectionsPage() {
                             <select value={unassigned ? '' : it.reason} onChange={(e) => updateExcessItem(it.key, { reason: e.target.value, staffId: '', personId: '' })} disabled={locked}
                               className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500">
                               <option value="">Select a reason…</option>
-                              {EXCESS_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                              {reasonOptions.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                             </select>
                             {it.reason === 'STAFF_TIP' && (
                               <select value={it.staffId} onChange={(e) => updateExcessItem(it.key, { staffId: e.target.value })} disabled={locked}
@@ -888,6 +901,9 @@ export default function CollectionsPage() {
                                 {allPersons.filter((p) => p.type === 'CUSTOMER').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                               </select>
                             )}
+                            <input type="text" value={it.notes} onChange={(e) => updateExcessItem(it.key, { notes: e.target.value })} disabled={locked}
+                              placeholder="Notes (optional)"
+                              className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none disabled:bg-gray-50 disabled:text-gray-500" />
                           </>
                         )}
                       </div>
@@ -895,7 +911,7 @@ export default function CollectionsPage() {
                   })}
                   <button type="button" onClick={addExcessItem}
                     className="w-full py-2 border-2 border-dashed border-amber-300 text-amber-700 rounded-xl text-sm font-semibold hover:bg-amber-50">
-                    + Add Excess Reason
+                    + Add Difference Reason
                   </button>
                 </div>
               )}

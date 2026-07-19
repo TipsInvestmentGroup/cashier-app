@@ -16,7 +16,11 @@ export interface ExcessReconRow {
   excess: number
   reason: string
   reasonLabel: string
+  category: string
+  channelCode: string | null
+  notes: string | null
   paid: number
+  paidAt: string | null
   balance: number
   status: 'PENDING' | 'SETTLED'
 }
@@ -35,8 +39,14 @@ export async function GET(req: NextRequest) {
   const dateFilter = startDate && endDate ? { gte: new Date(startDate), lte: new Date(endDate) } : undefined
 
   const [cashItems, collectionItems] = await Promise.all([
+    // Only PAYABLE_EXCESS rows belong on the Excess Recon/Payment ledger —
+    // NON_PAYABLE (audit-only) and STAFF_LOSS (handled as a SignedBill debt,
+    // not an excess) rows never appear here. See the read-only
+    // /api/excess-recon/{signed-bills,cancellations,discounts} endpoints for
+    // the tracking-only Reconciliation sections.
     prisma.cashReconExcess.findMany({
       where: {
+        category: 'PAYABLE_EXCESS',
         cashRecon: { ...(outletId ? { outletId } : {}), ...(dateFilter ? { date: dateFilter } : {}) },
       },
       include: { cashRecon: true },
@@ -44,6 +54,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.collectionExcess.findMany({
       where: {
+        category: 'PAYABLE_EXCESS',
         collection: { ...(outletId ? { outletId } : {}), ...(dateFilter ? { date: dateFilter } : {}) },
       },
       include: { collection: { include: { outlet: true } } },
@@ -66,7 +77,8 @@ export async function GET(req: NextRequest) {
         person: it.staffName || it.personName || '—',
         staffId: it.staffId, personId: it.personId,
         excess: it.amount, reason: it.reason, reasonLabel: await excessReasonLabelDb(it.reason),
-        paid: it.paidAmount, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
+        category: it.category, channelCode: it.channelCode, notes: it.notes,
+        paid: it.paidAmount, paidAt: it.paidAt ? it.paidAt.toISOString() : null, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
       }
     }),
     ...collectionItems.map(async (it) => {
@@ -78,7 +90,8 @@ export async function GET(req: NextRequest) {
         person: it.staffName || it.personName || it.collection.staffName || '—',
         staffId: it.staffId, personId: it.personId,
         excess: it.amount, reason: it.reason, reasonLabel: await excessReasonLabelDb(it.reason),
-        paid: it.paidAmount, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
+        category: it.category, channelCode: it.channelCode, notes: it.notes,
+        paid: it.paidAmount, paidAt: it.paidAt ? it.paidAt.toISOString() : null, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
       }
     }),
   ])).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())

@@ -5,9 +5,20 @@ import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import toast from 'react-hot-toast'
 
-interface Reason { id: string; code: string; label: string; isActive: boolean }
+interface Reason { id: string; code: string; label: string; category: string; isActive: boolean }
 
-const PROTECTED_CODES = ['STAFF_TIP', 'CUSTOMER_EXCESS']
+const PROTECTED_CODES = ['STAFF_TIP', 'CUSTOMER_EXCESS', 'STAFF_LOSS']
+const CATEGORY_OPTS: { value: string; label: string }[] = [
+  { value: 'PAYABLE_EXCESS', label: 'Payable Excess' },
+  { value: 'NON_PAYABLE', label: 'Non-Payable (audit only)' },
+  { value: 'STAFF_LOSS', label: 'Staff Loss' },
+]
+const CATEGORY_BADGE: Record<string, string> = {
+  PAYABLE_EXCESS: 'bg-amber-100 text-amber-700',
+  NON_PAYABLE: 'bg-gray-100 text-gray-600',
+  STAFF_LOSS: 'bg-red-100 text-red-700',
+}
+const categoryLabel = (v: string) => CATEGORY_OPTS.find((c) => c.value === v)?.label || v
 
 export default function ExcessReasonsPage() {
   const { request } = useApi()
@@ -15,6 +26,7 @@ export default function ExcessReasonsPage() {
   const [loading, setLoading] = useState(true)
   const [canManage, setCanManage] = useState(false)
   const [newName, setNewName] = useState('')
+  const [newCategory, setNewCategory] = useState('NON_PAYABLE')
   const [editing, setEditing] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
 
@@ -32,13 +44,17 @@ export default function ExcessReasonsPage() {
   const add = async () => {
     if (!newName.trim()) return
     try {
-      await request('/api/excess-reasons', { method: 'POST', body: JSON.stringify({ label: newName.trim() }) })
-      toast.success('Reason added'); setNewName(''); load()
+      await request('/api/excess-reasons', { method: 'POST', body: JSON.stringify({ label: newName.trim(), category: newCategory }) })
+      toast.success('Reason added'); setNewName(''); setNewCategory('NON_PAYABLE'); load()
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not add') }
   }
   const saveEdit = async (id: string) => {
     try { await request(`/api/excess-reasons/${id}`, { method: 'PUT', body: JSON.stringify({ label: editValue.trim() }) }); toast.success('Saved'); setEditing(null); load() }
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not save') }
+  }
+  const changeCategory = async (r: Reason, category: string) => {
+    try { await request(`/api/excess-reasons/${r.id}`, { method: 'PUT', body: JSON.stringify({ category }) }); toast.success('Category updated'); load() }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not update category') }
   }
   const toggle = async (r: Reason) => {
     try { await request(`/api/excess-reasons/${r.id}`, { method: 'PUT', body: JSON.stringify({ isActive: !r.isActive }) }); load() }
@@ -55,8 +71,8 @@ export default function ExcessReasonsPage() {
       <SetupTabs />
       <div className="space-y-6 max-w-2xl">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Excess Reasons</h1>
-          <p className="text-gray-500 text-sm">Reasons available when recording an excess amount on Cash Reconciliation or Collections</p>
+          <h1 className="text-2xl font-bold text-gray-900">Difference Reasons</h1>
+          <p className="text-gray-500 text-sm">Reasons offered on the Collection form's Difference Reason picker and Excess Recon. Category decides the workflow: Payable Excess creates a record settled via Excess Payment; Non-Payable is audit-only; Staff Loss drives the payroll-deduction debt path.</p>
         </div>
 
         {!canManage && (
@@ -71,6 +87,10 @@ export default function ExcessReasonsPage() {
               <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }}
                 placeholder="New reason (e.g. Till Float)…"
                 className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm" />
+              <select value={newCategory} onChange={(e) => setNewCategory(e.target.value)}
+                className="px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm bg-white">
+                {CATEGORY_OPTS.filter((c) => c.value !== 'STAFF_LOSS').map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
               <button onClick={add} className="px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700">Add Reason</button>
             </div>
           )}
@@ -89,6 +109,14 @@ export default function ExcessReasonsPage() {
                     <>
                       <span className={`flex-1 text-sm ${r.isActive ? 'text-gray-800 font-medium' : 'text-gray-400 line-through'}`}>{r.label}</span>
                       <span className="font-mono text-[11px] text-gray-400">{r.code}</span>
+                      {canManage && !PROTECTED_CODES.includes(r.code) ? (
+                        <select value={r.category} onChange={(e) => changeCategory(r, e.target.value)}
+                          className={`px-2 py-1 rounded-lg text-xs font-bold border-0 ${CATEGORY_BADGE[r.category] || 'bg-gray-100 text-gray-600'}`}>
+                          {CATEGORY_OPTS.filter((c) => c.value !== 'STAFF_LOSS').map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                        </select>
+                      ) : (
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${CATEGORY_BADGE[r.category] || 'bg-gray-100 text-gray-600'}`}>{categoryLabel(r.category)}</span>
+                      )}
                       {canManage && (
                         <div className="flex gap-1.5 ml-2">
                           <button onClick={() => { setEditing(r.id); setEditValue(r.label) }} className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-lg hover:bg-indigo-100">Edit</button>
@@ -106,7 +134,7 @@ export default function ExcessReasonsPage() {
             </div>
           )}
         </div>
-        <p className="text-xs text-gray-400">Staff Tip and Customer Excess unlock a staff/customer picker in the app and can&apos;t be deleted — disable them instead if unused.</p>
+        <p className="text-xs text-gray-400">Staff Tip and Customer Excess unlock a staff/customer picker, and Staff Loss drives the payroll-deduction debt path — all three are wired into fixed engine behavior, so their category can&apos;t be changed and they can&apos;t be deleted (disable them instead if unused).</p>
       </div>
     </AppShell>
   )

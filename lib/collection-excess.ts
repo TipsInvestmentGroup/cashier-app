@@ -27,7 +27,11 @@ type DB = any
  *    unpaid row(s), never below each row's own paidAmount.
  */
 export async function syncCollectionExcessTotal(db: DB, collectionId: string, newTotalExcessAmount: number): Promise<void> {
-  const rows = await db.collectionExcess.findMany({ where: { collectionId }, orderBy: { createdAt: 'desc' } })
+  // Only PAYABLE_EXCESS rows belong to "the excess total" this trues up —
+  // NON_PAYABLE audit-only Difference Reason rows (Signed Bill/Cancellation/
+  // Discount/etc, see app/api/collections/route.ts) must never be shrunk,
+  // grown, or deleted by this reconciliation.
+  const rows = await db.collectionExcess.findMany({ where: { collectionId, category: 'PAYABLE_EXCESS' }, orderBy: { createdAt: 'desc' } })
   const target = roundMoney(Math.max(0, newTotalExcessAmount))
   const paidSum = roundMoney(rows.reduce((s: number, r: { paidAmount: number }) => s + r.paidAmount, 0))
   const floor = Math.max(target, paidSum)
@@ -65,7 +69,7 @@ export async function syncCollectionExcessTotal(db: DB, collectionId: string, ne
     })
     await db.collectionExcess.create({
       data: {
-        id: recordId, collectionId, amount: delta, reason: UNASSIGNED_EXCESS_REASON,
+        id: recordId, collectionId, amount: delta, reason: UNASSIGNED_EXCESS_REASON, category: 'PAYABLE_EXCESS',
         internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
       },
     })
