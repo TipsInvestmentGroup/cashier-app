@@ -41,6 +41,10 @@ export async function POST(req: NextRequest) {
     return { ...it, row }
   })).catch((err: unknown) => { throw err })
 
+  // Cash-recon excess is already disbursed at reconciliation (D10) — not settle-able here.
+  if (rows.some((r) => r.source === 'CASH_RECON')) {
+    return NextResponse.json({ error: 'One or more selected records were already paid out at cash reconciliation and cannot be settled here.' }, { status: 400 })
+  }
   // Classification gate: refuse the whole batch if any row is still unclassified.
   const unclassified = rows.find((r) => r.row.reason === UNASSIGNED_EXCESS_REASON)
   if (unclassified) {

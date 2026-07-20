@@ -113,7 +113,7 @@ export async function GET(req: NextRequest) {
       where: {
         accountId: cashAccountId,
         ...(outletId ? { outletId } : {}),
-        journalEntry: { sourceType: { in: ['ExcessSettlement', 'ExcessSettlementReversal', 'ExcessRefund'] }, entryDate: range },
+        journalEntry: { sourceType: { in: ['ExcessSettlement', 'ExcessSettlementReversal', 'ExcessRefund', 'CashReconExcessPayout'] }, entryDate: range },
       },
       select: { debit: true, credit: true },
     })

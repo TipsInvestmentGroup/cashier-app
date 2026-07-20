@@ -78,6 +78,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!ALLOWED.includes(user.role) && !(await hasPermission(user.email, user.userId, RESOURCES.EXCESS_RECON, 'settle'))) {
     return NextResponse.json({ error: 'You are not authorized to settle excess payments' }, { status: 403 })
   }
+  // Cash-recon excess is paid out of the till at reconciliation time (it already
+  // reduced the closing balance and posted Dr Sales Revenue / Cr Cash), so it is
+  // not a payable to settle here — settling it would be a second payout (D10).
+  if (source === 'CASH_RECON') {
+    return NextResponse.json({ error: 'This excess was already paid out at cash reconciliation — it cannot be settled again here.' }, { status: 400 })
+  }
   // Classification gate: a difference must be classified before money moves
   // against it — an UNASSIGNED ("Needs reason") row has no accounting meaning
   // yet, so block settling it until an accountant assigns a real reason.
@@ -92,17 +98,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: `Payment ${amount} exceeds the remaining balance of ${balance}` }, { status: 400 })
   }
 
+  // Only COLLECTION-source rows reach here (cash-recon excess is blocked above).
   const newPaid = roundMoney(existing.paidAmount + amount)
   // A COLLECTION-source PAYABLE over-collection accrued to Excess-Payable at
   // collection time; paying it out now relieves that liability against cash:
-  //   Dr Excess-Payable  Cr Cash/channel.
-  // Cash-recon excess and non-PAYABLE rows keep their prior non-GL behavior
-  // (cash-recon excess is a different economic event — see D10, deferred).
-  const postGl = source === 'COLLECTION' && classForReason(existing.reason, existing.category) === 'PAYABLE'
+  //   Dr Excess-Payable  Cr Cash/channel. Non-PAYABLE rows keep prior non-GL behavior.
+  const postGl = classForReason(existing.reason, existing.category) === 'PAYABLE'
   const updated = await prisma.$transaction(async (tx) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const txModel = (source === 'CASH_RECON' ? tx.cashReconExcess : tx.collectionExcess) as any
-    const upd = await txModel.update({ where: { id }, data: { paidAmount: newPaid, paidAt: new Date() } })
+    const upd = await tx.collectionExcess.update({ where: { id }, data: { paidAmount: newPaid, paidAt: new Date() } })
     if (postGl) {
       const coll = await tx.collectionExcess.findUnique({ where: { id }, include: { collection: { include: { outlet: true } } } })
       const outletId = coll?.collection.outletId
@@ -123,7 +126,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await tx.auditLog.create({
       data: {
         userId: user.userId, action: 'UPDATE',
-        entity: source === 'CASH_RECON' ? 'CashReconExcess' : 'CollectionExcess', entityId: id,
+        entity: 'CollectionExcess', entityId: id,
         details: `Excess payment ${amount} recorded (paid ${newPaid} of ${existing.amount})${postGl ? ' — posted Dr Excess-Payable / Cr Cash' : ''}`,
       },
     })

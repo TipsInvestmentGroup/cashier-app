@@ -69,7 +69,7 @@ export async function runReconciliationDiagnostic(prisma: any, opts?: { outletId
   // ── C3/C4: excess rows unclassified or drifted from current policy ──
   const [collRows, cashRows] = await Promise.all([
     prisma.collectionExcess.findMany({ where: collWhere, select: { id: true, reason: true, category: true, accountingClass: true, paidAmount: true } }),
-    prisma.cashReconExcess.findMany({ where: cashWhere, select: { id: true, reason: true, category: true, accountingClass: true, paidAmount: true } }),
+    prisma.cashReconExcess.findMany({ where: cashWhere, select: { id: true, cashReconId: true, reason: true, category: true, accountingClass: true, paidAmount: true } }),
   ])
   const allExcess = [...collRows.map((r: any) => ({ ...r, src: 'COLLECTION' })), ...cashRows.map((r: any) => ({ ...r, src: 'CASH_RECON' }))] // eslint-disable-line @typescript-eslint/no-explicit-any
   const unclassifiedRows = allExcess.filter((r) => !r.accountingClass)
@@ -136,18 +136,30 @@ export async function runReconciliationDiagnostic(prisma: any, opts?: { outletId
     }
   }
 
-  // ── C7: cash-recon excess settlements are not GL-integrated (D10, deferred) ──
-  const settledPayableCash = cashRows.filter((r: any) => r.paidAmount > 0 && classForReason(r.reason, r.category) === 'PAYABLE') // eslint-disable-line @typescript-eslint/no-explicit-any
-  if (settledPayableCash.length) {
-    findings.push({
-      code: 'CASH_RECON_SETTLEMENT_NOT_IN_GL',
-      issue: `${settledPayableCash.length} settled cash-recon excess row(s) do not post to the GL (known deferral, D10).`,
-      rootCause: 'Cash-recon excess is a different economic event (money paid out at recon time); its GL treatment is deferred pending a decision.',
-      affectedModules: ['Cash Reconciliation', 'General Ledger'],
-      recommendedFix: 'Decide cash-recon excess treatment, then wire its settlement/disbursement posting.',
-      severity: 'MEDIUM',
-      count: settledPayableCash.length,
+  // ── C7: cash-recon excess without its recon-time GL payout entry (pre-D10) ──
+  // Cash-recon excess now posts Dr Sales Revenue / Cr Cash at reconciliation
+  // (D10). Reconciliations saved before that existed have excess rows but no
+  // CashReconExcessPayout entry — re-saving the recon posts the catch-up.
+  const reconIdsWithExcess: string[] = Array.from(new Set(cashRows.map((r: any) => r.cashReconId as string))) // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (reconIdsWithExcess.length) {
+    const payoutEntries = await prisma.journalEntry.findMany({
+      where: { sourceType: 'CashReconExcessPayout', sourceId: { in: reconIdsWithExcess } },
+      select: { sourceId: true },
     })
+    const posted = new Set(payoutEntries.map((e: any) => e.sourceId)) // eslint-disable-line @typescript-eslint/no-explicit-any
+    const missingRecons = reconIdsWithExcess.filter((id) => !posted.has(id))
+    if (missingRecons.length) {
+      findings.push({
+        code: 'CASH_RECON_PAYOUT_NOT_IN_GL',
+        issue: `${missingRecons.length} cash reconciliation(s) with excess paid out have no GL payout entry.`,
+        rootCause: 'The reconciliation was saved before cash-recon excess posted to the GL (pre-D10).',
+        affectedModules: ['Cash Reconciliation', 'General Ledger'],
+        recommendedFix: 'Re-save each affected reconciliation to post the catch-up Dr Sales Revenue / Cr Cash entry.',
+        severity: 'MEDIUM',
+        count: missingRecons.length,
+        sample: missingRecons.slice(0, 8),
+      })
+    }
   }
 
   // ── C8: approved refunds with no GL entry (pre-D7) ──

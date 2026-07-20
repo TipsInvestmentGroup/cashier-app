@@ -8,6 +8,8 @@ import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { classForReason } from '@/lib/reconciliation-classification'
 import { generateBillReference } from '@/lib/bill-reference'
 import { syncFromCashRecon } from '@/lib/payment-verification'
+import { postJournalEntry } from '@/lib/ledger'
+import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
@@ -190,6 +192,35 @@ export async function POST(req: NextRequest) {
             id: recordId, cashReconId: saved.id, ...fields,
             internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
           },
+        })
+      }
+    }
+
+    // D10 — cash-recon excess is cash paid OUT of the till at reconciliation
+    // time (it reduces the closing balance, like a deposit). That cash came in
+    // via the day's collection and was booked to Sales Revenue, so paying it
+    // back out reverses that revenue against cash: Dr Sales Revenue / Cr Cash.
+    // Posted idempotently as a DELTA — the recon is re-saved repeatedly as the
+    // day closes, so we true-up the net Sales-Revenue posting to the current
+    // excess total instead of reversing/re-posting each time (delta 0 = no-op).
+    const outlet = usedOutletId ? await tx.outlet.findUnique({ where: { id: usedOutletId }, select: { companyId: true } }) : null
+    const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
+    if (companyId) {
+      const salesRevenueAccountId = await resolveAccountId(tx, { companyId, key: 'SALES_REVENUE' })
+      const priorLines = await tx.journalLine.findMany({
+        where: { accountId: salesRevenueAccountId, journalEntry: { sourceType: 'CashReconExcessPayout', sourceId: saved.id } },
+        select: { debit: true, credit: true },
+      })
+      const postedNet = roundMoney(priorLines.reduce((s, l) => s + (l.debit || 0) - (l.credit || 0), 0))
+      const delta = roundMoney(excess - postedNet)
+      if (delta !== 0) {
+        const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: 'CASH', outletId: usedOutletId })
+        await postJournalEntry(tx, {
+          companyId, entryDate: day, sourceModule: 'COLLECTIONS', sourceType: 'CashReconExcessPayout', sourceId: saved.id,
+          description: `Cash reconciliation excess paid out — ${saved.id}`, createdById: user.userId,
+          lines: delta > 0
+            ? [{ accountId: salesRevenueAccountId, debit: delta, outletId: usedOutletId }, { accountId: cashAccountId, credit: delta, outletId: usedOutletId }]
+            : [{ accountId: cashAccountId, debit: -delta, outletId: usedOutletId }, { accountId: salesRevenueAccountId, credit: -delta, outletId: usedOutletId }],
         })
       }
     }

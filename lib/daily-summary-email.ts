@@ -64,7 +64,7 @@ export async function sendDailySummary(opts: { date?: string | null; outletId?: 
       where: {
         accountId: cashAccountId,
         ...(opts.outletId ? { outletId: opts.outletId } : {}),
-        journalEntry: { sourceType: { in: ['ExcessSettlement', 'ExcessSettlementReversal', 'ExcessRefund'] }, entryDate: range },
+        journalEntry: { sourceType: { in: ['ExcessSettlement', 'ExcessSettlementReversal', 'ExcessRefund', 'CashReconExcessPayout'] }, entryDate: range },
       },
       select: { debit: true, credit: true },
     })
