@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { seedStandardCollectionTemplate } from './collection-template-seed'
 import { RECONCILIATION_STAGE_RESOURCES as RSR, WRITE_OFF_RESOURCES as WOR } from './rbac'
+import { classForReason } from './reconciliation-classification'
 
 // Sensible role defaults for the Reconciliation Workflow Engine + Write-Off
 // resources. Each entry lists the roles GRANTED that resource; every other
@@ -57,6 +58,26 @@ function loadSeedJson<T>(basename: string): T {
   const sample = path.join(process.cwd(), 'prisma', `${basename}.json`)
   const file = fs.existsSync(local) ? local : sample
   return JSON.parse(fs.readFileSync(file, 'utf-8')) as T
+}
+
+/**
+ * Backfills accountingClass on every ExcessReason row from the reason code
+ * (drift-proof — correct even where the legacy `category` drifted). Idempotent:
+ * only writes rows whose class differs. Corrects deployments seeded before the
+ * accounting-classification layer existed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function backfillExcessReasonAccountingClass(prisma: any): Promise<number> {
+  const rows = await prisma.excessReason.findMany()
+  let updated = 0
+  for (const r of rows) {
+    const cls = classForReason(r.code, r.category)
+    if (r.accountingClass !== cls) {
+      await prisma.excessReason.update({ where: { id: r.id }, data: { accountingClass: cls } })
+      updated++
+    }
+  }
+  return updated
 }
 
 /**
@@ -171,6 +192,7 @@ export async function seedCore(prisma: any) {
   }
 
   const reconRoleDefaults = await seedReconciliationRoleDefaults(prisma)
+  const excessClassBackfill = await backfillExcessReasonAccountingClass(prisma)
 
-  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults }
+  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill }
 }

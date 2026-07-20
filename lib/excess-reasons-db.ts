@@ -5,6 +5,7 @@
 // immediately after an admin edit.
 import { prisma } from '@/lib/prisma'
 import { DIFFERENCE_REASONS, UNASSIGNED_EXCESS_REASON, type DifferenceReasonCategory } from '@/lib/excess-reasons'
+import { classForReason } from '@/lib/reconciliation-classification'
 
 const TTL_MS = 30_000
 let cache: { codes: Set<string>; labels: Map<string, string>; categories: Map<string, DifferenceReasonCategory>; at: number } | null = null
@@ -14,11 +15,28 @@ export async function seedExcessReasonsIfEmpty(): Promise<void> {
   // reason added by a later app version) without ever overwriting a label/
   // category an admin has already customized.
   for (const d of DIFFERENCE_REASONS) {
-    await prisma.excessReason.upsert({ where: { code: d.value }, update: {}, create: { code: d.value, label: d.label, category: d.category } })
+    const accountingClass = classForReason(d.value, d.category)
+    await prisma.excessReason.upsert({
+      where: { code: d.value },
+      // Only backfill accountingClass — never touch a label/category the admin
+      // customized. accountingClass derives from the code, so re-stamping it is
+      // safe and corrects any deployment where it's still null.
+      update: { accountingClass },
+      create: { code: d.value, label: d.label, category: d.category, accountingClass },
+    })
   }
 }
 
+
 export function invalidateExcessReasonCache() { cache = null }
+
+/** DB-aware accountingClass lookup for a reason code (RECEIVABLE | PAYABLE | ADJUSTMENT).
+ *  Always resolved from the code via lib/reconciliation-classification so it is
+ *  correct even if the stored class hasn't been backfilled yet. */
+export async function excessReasonAccountingClass(code: string) {
+  const c = (cache && Date.now() - cache.at < TTL_MS) ? cache : await loadCache()
+  return classForReason(code, c.categories.get(code))
+}
 
 async function loadCache() {
   await seedExcessReasonsIfEmpty()

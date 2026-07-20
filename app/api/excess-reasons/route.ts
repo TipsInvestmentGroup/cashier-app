@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
 import { seedExcessReasonsIfEmpty, invalidateExcessReasonCache } from '@/lib/excess-reasons-db'
+import { RESERVED_REASON_CODES } from '@/lib/excess-reasons'
+import { classForReason } from '@/lib/reconciliation-classification'
 
 const toCode = (s: string) => String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 
@@ -25,9 +27,17 @@ export async function POST(req: NextRequest) {
   if (!label || !String(label).trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   const code = toCode(label)
   if (!code) return NextResponse.json({ error: 'Invalid name' }, { status: 400 })
-  const validCategory = ['PAYABLE_EXCESS', 'NON_PAYABLE', 'STAFF_LOSS'].includes(category) ? category : 'NON_PAYABLE'
+  // STAFF_LOSS is the single reserved receivable code that drives the
+  // auto-SignedBill debt path — a custom reason must never carry it, or a
+  // direct API call could mint rogue staff-debt reasons. Custom reasons may
+  // only be PAYABLE_EXCESS or NON_PAYABLE.
+  if (category === 'STAFF_LOSS' && !RESERVED_REASON_CODES.includes(code)) {
+    return NextResponse.json({ error: 'The Staff Loss category is reserved and cannot be assigned to a custom reason.' }, { status: 400 })
+  }
+  const validCategory = ['PAYABLE_EXCESS', 'NON_PAYABLE'].includes(category) ? category : 'NON_PAYABLE'
   try {
-    const item = await prisma.excessReason.create({ data: { code, label: String(label).trim(), category: validCategory } })
+    const accountingClass = classForReason(code, validCategory)
+    const item = await prisma.excessReason.create({ data: { code, label: String(label).trim(), category: validCategory, accountingClass } })
     invalidateExcessReasonCache()
     await prisma.auditLog.create({ data: { userId: user.userId, action: 'CREATE', entity: 'ExcessReason', entityId: item.id, details: `Added reason ${item.label} (${item.code})` } })
     return NextResponse.json(item, { status: 201 })

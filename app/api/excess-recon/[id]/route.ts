@@ -4,6 +4,8 @@ import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
 import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
+import { classForReason } from '@/lib/reconciliation-classification'
+import { UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
@@ -47,6 +49,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!ALLOWED.includes(user.role) && !(await hasPermission(user.email, user.userId, RESOURCES.EXCESS_RECON, 'settle'))) {
     return NextResponse.json({ error: 'You are not authorized to settle excess payments' }, { status: 403 })
+  }
+  // Classification gate: a difference must be classified before money moves
+  // against it — an UNASSIGNED ("Needs reason") row has no accounting meaning
+  // yet, so block settling it until an accountant assigns a real reason.
+  if (existing.reason === UNASSIGNED_EXCESS_REASON) {
+    return NextResponse.json({ error: 'Assign a Difference Reason before settling this record — it is still unclassified.' }, { status: 400 })
   }
   const amount = roundMoney(body.amount)
   if (amount <= 0) return NextResponse.json({ error: 'Payment amount must be greater than zero' }, { status: 400 })
@@ -99,6 +107,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
     data.reason = body.reason
     data.category = (await excessReasonCategoryDb(body.reason)) || 'NON_PAYABLE'
+    data.accountingClass = classForReason(body.reason, data.category)
   }
   if (body.notes !== undefined) data.notes = String(body.notes).trim() || null
   const reason = body.reason !== undefined ? body.reason : existing.reason

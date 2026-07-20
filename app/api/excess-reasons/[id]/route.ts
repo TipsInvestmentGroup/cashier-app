@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
 import { invalidateExcessReasonCache } from '@/lib/excess-reasons-db'
 import { RESERVED_REASON_CODES } from '@/lib/excess-reasons'
+import { classForReason } from '@/lib/reconciliation-classification'
 
 // STAFF_TIP/CUSTOMER_EXCESS/STAFF_LOSS are wired into fixed engine behavior
 // (staff/customer picker unlock, auto-SignedBill debt path) by this exact
@@ -29,7 +30,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (existing && RESERVED_REASON_CODES.includes(existing.code)) {
       return NextResponse.json({ error: 'This reason\'s category is wired into fixed engine behavior and cannot be changed.' }, { status: 409 })
     }
+    // STAFF_LOSS (the receivable auto-debt category) is reserved — a custom
+    // reason can only be PAYABLE_EXCESS or NON_PAYABLE.
+    if (body.category === 'STAFF_LOSS') {
+      return NextResponse.json({ error: 'The Staff Loss category is reserved and cannot be assigned to a custom reason.' }, { status: 400 })
+    }
     data.category = body.category
+    data.accountingClass = classForReason(existing?.code, body.category)
   }
 
   try {

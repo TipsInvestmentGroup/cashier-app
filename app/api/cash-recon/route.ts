@@ -5,6 +5,7 @@ import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
 import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
+import { classForReason } from '@/lib/reconciliation-classification'
 import { generateBillReference } from '@/lib/bill-reference'
 import { syncFromCashRecon } from '@/lib/payment-verification'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
@@ -168,6 +169,10 @@ export async function POST(req: NextRequest) {
         // Cash Recon excess is always an over-collection to pay out — the
         // Collection form's NON_PAYABLE/STAFF_LOSS categories don't apply here.
         category: 'PAYABLE_EXCESS',
+        // Accounting class still derives from the reason code, so a STAFF_TIP
+        // cash-recon line is ADJUSTMENT (pass-through) even though its legacy
+        // category is PAYABLE_EXCESS.
+        accountingClass: classForReason(it.reason, 'PAYABLE_EXCESS'),
         staffId: it.staffId,
         staffName: staffName(it.staffId),
         personId: it.personId,

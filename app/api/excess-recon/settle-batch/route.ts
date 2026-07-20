@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
+import { UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
@@ -36,6 +37,12 @@ export async function POST(req: NextRequest) {
     if (!row) throw new Error(`Excess item ${it.id} not found`)
     return { ...it, row }
   })).catch((err: unknown) => { throw err })
+
+  // Classification gate: refuse the whole batch if any row is still unclassified.
+  const unclassified = rows.find((r) => r.row.reason === UNASSIGNED_EXCESS_REASON)
+  if (unclassified) {
+    return NextResponse.json({ error: `One or more selected records are unclassified ("Needs reason") — assign a Difference Reason before settling.` }, { status: 400 })
+  }
 
   const totalBalance = roundMoney(rows.reduce((s, r) => s + roundMoney(r.row.amount - r.row.paidAmount), 0))
   if (amount > totalBalance) {

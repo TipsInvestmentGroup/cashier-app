@@ -5,6 +5,7 @@ import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
 import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
+import { classForReason } from '@/lib/reconciliation-classification'
 import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels, primaryChannelFromAmounts } from '@/lib/collection-channels'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
@@ -266,7 +267,7 @@ export async function POST(req: NextRequest) {
         await tx.collectionExcess.create({
           data: {
             id: recordId,
-            collectionId: collection.id, amount: it.amount, reason: it.reason, category, channelCode: primaryChannelCode, notes: it.notes,
+            collectionId: collection.id, amount: it.amount, reason: it.reason, category, accountingClass: classForReason(it.reason, category), channelCode: primaryChannelCode, notes: it.notes,
             staffId: it.staffId, staffName: it.staffId ? staffRows.find((s: { id: string }) => s.id === it.staffId)?.name || null : (staffName || null),
             personId: it.personId, personName: it.personId ? personRows.find((p: { id: string }) => p.id === it.personId)?.name || null : null,
             internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
