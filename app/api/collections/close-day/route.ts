@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { startOfDay, endOfDay } from 'date-fns'
-import { getCollectionSessionTotals } from '@/lib/collection-session-totals'
+import { startOfDay } from 'date-fns'
 import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
+import { closeBusinessDay, reopenBusinessDay } from '@/lib/business-day'
 
 // Prisma client types for DayClosure are generated on deploy (vercel-build runs
 // `prisma db push` + `prisma generate`); assert to avoid local type drift.
@@ -50,28 +50,16 @@ export async function POST(req: NextRequest) {
     ? startOfDay(new Date(body.date))
     : resolveBusinessDate(new Date(), await resolveEffectiveConfig({ outletId }))
 
-  // Validation: a day cannot be closed until both reconciliations are done.
-  const range = { gte: startOfDay(day), lte: endOfDay(day) }
-  const [cashRecon, digitalCount] = await Promise.all([
-    prisma.cashRecon.findFirst({ where: { outletId, date: range }, select: { id: true } }),
-    prisma.bankRecon.count({ where: { outletId, date: range, channel: { not: null } } }),
-  ])
-  if (!cashRecon) return NextResponse.json({ error: 'Cash Reconciliation must be completed before closing the day.' }, { status: 400 })
-  if (digitalCount === 0) return NextResponse.json({ error: 'Digital Reconciliation must be completed before closing the day.' }, { status: 400 })
+  const actor = { userId: user.userId, userName: user.name || user.email || 'Unknown' }
+  const result = await closeBusinessDay({ outletId, date: day, actor, allowIncomplete: !!body.allowIncomplete })
 
-  const templateSessions = await getCollectionSessionTotals({ outletId, dateRange: range })
-  if (templateSessions.some((s) => s.hasOpenWork)) {
-    return NextResponse.json({ error: 'Complete all open Collection Template sessions before closing the day.' }, { status: 400 })
+  if (result.blocked) {
+    const summary = result.missingItems.map((m) => m.label).join('; ')
+    return NextResponse.json({ error: `Day cannot be closed — missing: ${summary}`, missingItems: result.missingItems }, { status: 400 })
   }
 
-  const closure = await db.dayClosure.upsert({
-    where: { outletId_date: { outletId, date: day } },
-    update: {}, // already closed — idempotent
-    create: { outletId, date: day, closedBy: user.name || user.email || 'Unknown', closedById: user.userId },
-  })
-
   await prisma.auditLog.create({
-    data: { userId: user.userId, action: 'CLOSE_DAY', entity: 'DayClosure', entityId: closure.id, details: `Closed ${day.toISOString().slice(0, 10)} for outlet ${outletId}` },
+    data: { userId: user.userId, action: 'CLOSE_DAY', entity: 'DayClosure', entityId: result.businessDay.id, details: `Closed ${day.toISOString().slice(0, 10)} for outlet ${outletId}` },
   })
 
   return NextResponse.json({ ok: true, closedDay: day.toISOString() })
@@ -92,7 +80,10 @@ export async function DELETE(req: NextRequest) {
     ? startOfDay(new Date(searchParams.get('date') as string))
     : resolveBusinessDate(new Date(), await resolveEffectiveConfig({ outletId }))
 
-  await db.dayClosure.deleteMany({ where: { outletId, date: day } })
+  const actor = { userId: user.userId, userName: user.name || user.email || 'Unknown' }
+  // Direct DELETE reopen (legacy caller) = indefinite reopen, no auto-lock timer.
+  await reopenBusinessDay({ outletId, date: day, actor, reason: 'Reopened via legacy close-day DELETE', durationMinutes: null })
+
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'REOPEN_DAY', entity: 'DayClosure', entityId: `${outletId}`, details: `Reopened ${day.toISOString().slice(0, 10)} for outlet ${outletId}` },
   })

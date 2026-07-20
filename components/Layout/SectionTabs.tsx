@@ -7,7 +7,7 @@ import { useApi } from '@/hooks/useApi'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
-  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, BookOpen, Landmark, type LucideIcon,
+  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, BookOpen, Landmark, Lock, Unlock, AlertTriangle, type LucideIcon,
 } from 'lucide-react'
 
 // A tab with modeGate is hidden for the roles listed in `forRoles` unless the
@@ -52,6 +52,7 @@ export const DAILY_TABS: Tab[] = [
   { href: '/collection-sessions', label: 'Collection Sessions', icon: Workflow, roles: CASHIER_ROLES },
   { href: '/transaction-sessions', label: 'Transaction Sessions', icon: HandCoins, roles: CASHIER_ROLES, modeGate: { mode: 'TRANSACTION_VERIFICATION', forRoles: ['CASHIER'] } },
   { href: '/collection-approvals', label: 'Collection Approvals', icon: ClipboardCheck, roles: CASHIER_ROLES },
+  { href: '/business-day-unlock-requests', label: 'Unlock Requests', icon: Unlock, roles: CASHIER_ROLES },
 ]
 
 export const BILLS_TABS: Tab[] = [
@@ -81,6 +82,10 @@ export const FINANCE_TABS: Tab[] = [
   { href: '/payroll', label: 'Payroll Deductions', icon: Receipt, roles: MGMT },
   { href: '/reports', label: 'Reports', icon: FileBarChart, roles: MGMT },
   { href: '/audit', label: 'Audit Log', icon: ShieldCheck, roles: MGMT },
+  { href: '/business-days', label: 'Business Days', icon: Lock, roles: MGMT },
+  { href: '/business-day-management', label: 'Day Management', icon: Unlock, roles: MGMT },
+  { href: '/business-day-unlock-requests', label: 'Unlock Requests', icon: ClipboardCheck, roles: CASHIER_ROLES },
+  { href: '/business-day-exceptions-report', label: 'Exceptions Report', icon: AlertTriangle, roles: MGMT },
   { href: '/finance/accounts', label: 'Chart of Accounts', icon: BookOpen, roles: MGMT },
   { href: '/finance/payables', label: 'Accounts Payable', icon: HandCoins, roles: MGMT },
   { href: '/finance/ledger', label: 'General Ledger', icon: Landmark, roles: MGMT },

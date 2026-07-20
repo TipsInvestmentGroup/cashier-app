@@ -27,6 +27,20 @@ export const RESOURCES = {
 export type Resource = (typeof RESOURCES)[keyof typeof RESOURCES]
 export type Action = 'add' | 'edit' | 'delete' | 'settle' | 'unsettle'
 
+// Business Day Exception Management — boolean-only resources (no
+// add/edit/delete/settle/unsettle shape), resolved via resolveResourcePermission
+// below instead of hasPermission/ACTION_FIELD.
+export const BUSINESS_DAY_RESOURCES = {
+  VIEW_BUSINESS_DAYS: 'VIEW_BUSINESS_DAYS',
+  CLOSE_BUSINESS_DAY: 'CLOSE_BUSINESS_DAY',
+  UNLOCK_BUSINESS_DAY: 'UNLOCK_BUSINESS_DAY',
+  APPROVE_UNLOCK: 'APPROVE_UNLOCK',
+  EDIT_CLOSED_RECORDS: 'EDIT_CLOSED_RECORDS',
+  VIEW_BUSINESS_DAY_AUDIT_LOG: 'VIEW_BUSINESS_DAY_AUDIT_LOG',
+} as const
+
+export type BusinessDayResource = (typeof BUSINESS_DAY_RESOURCES)[keyof typeof BUSINESS_DAY_RESOURCES]
+
 const ACTION_FIELD: Record<Action, 'canAdd' | 'canEdit' | 'canDelete' | 'canSettle' | 'canUnsettle'> = {
   add: 'canAdd', edit: 'canEdit', delete: 'canDelete', settle: 'canSettle', unsettle: 'canUnsettle',
 }
@@ -74,4 +88,37 @@ export async function myPermissions(email: string | undefined, userId: string) {
     }
   }
   return result
+}
+
+/**
+ * Boolean-only resolver for BUSINESS_DAY_RESOURCES (and any future
+ * single-flag resource) — separate from hasPermission() so that function's
+ * 5-action shape and existing callers stay untouched.
+ * Resolution: owner always passes > per-user UserPermission override (its
+ * `canAdd` column doubles as the single "allowed" flag for these resources)
+ * > RolePermission default for the caller's role > deny.
+ */
+export async function resolveResourcePermission(
+  user: { email?: string; userId: string; role: string },
+  resource: BusinessDayResource
+): Promise<boolean> {
+  if (isOwner(user.email)) return true
+  const userRow = await prisma.userPermission.findUnique({ where: { userId_resource: { userId: user.userId, resource } } })
+  if (userRow) return !!userRow.canAdd
+  const roleRow = await prisma.rolePermission.findUnique({ where: { role_resource: { role: user.role, resource } } })
+  return !!roleRow?.allowed
+}
+
+/** All role defaults for a resource, owner-only endpoint. */
+export async function listRolePermissions(resource: BusinessDayResource) {
+  return prisma.rolePermission.findMany({ where: { resource }, orderBy: { role: 'asc' } })
+}
+
+/** Owner sets/changes a role's default for a resource. */
+export async function setRolePermission(role: string, resource: BusinessDayResource, allowed: boolean) {
+  return prisma.rolePermission.upsert({
+    where: { role_resource: { role, resource } },
+    update: { allowed },
+    create: { role, resource, allowed },
+  })
 }

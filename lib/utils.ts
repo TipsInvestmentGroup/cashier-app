@@ -105,6 +105,16 @@ export const STATUS_COLORS: Record<string, string> = {
   UNPAID: 'bg-red-100 text-red-700',
   PARTIAL: 'bg-yellow-100 text-yellow-700',
   PAID: 'bg-green-100 text-green-700',
+  // Business Day Exception Management
+  OPEN: 'bg-blue-100 text-blue-700',
+  CLOSED: 'bg-gray-100 text-gray-700',
+  REOPENED: 'bg-amber-100 text-amber-700',
+  ARCHIVED: 'bg-purple-100 text-purple-700',
+  PENDING: 'bg-yellow-100 text-yellow-700',
+  APPROVED: 'bg-green-100 text-green-700',
+  REJECTED: 'bg-red-100 text-red-700',
+  COMPLETED: 'bg-indigo-100 text-indigo-700',
+  EXPIRED: 'bg-orange-100 text-orange-700',
 }
 
 // Friendly Swahili label for a POS shift name. Covers the current

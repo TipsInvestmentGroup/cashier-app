@@ -96,6 +96,10 @@ model User {
   transactionSessionsValidated TransactionSession[] @relation("TxSessionValidatedBy")
   systemSalesRecords           SystemSalesRecord[]  @relation("SystemSalesStaff")
   staffTransactions            StaffTransaction[]   @relation("StaffTransactionStaff")
+
+  businessDayUnlockRequestsMade     BusinessDayUnlockRequest[] @relation("BusinessDayUnlockRequestedBy")
+  businessDayUnlockRequestsApproved BusinessDayUnlockRequest[] @relation("BusinessDayUnlockApprover")
+  notifications                     Notification[]
 }
 
 /// Per-user, per-resource grant of Add/Edit/Delete(/Settle/Unsettle for
@@ -212,6 +216,7 @@ model Outlet {
   collectionSessions     CollectionSession[]
   transactionSessions    TransactionSession[]
   businessSessions       BusinessSession[]
+  businessDays           BusinessDay[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -275,6 +280,9 @@ model SalesMetricLock {
 
 /// Locks a single outlet's day. Once a (outlet, date) is closed, cashiers can no
 /// longer create/edit/delete that day's collections. Reopening is supervisor-only.
+/// Superseded by BusinessDay below as the authoritative status; kept in sync
+/// (upsert on close, delete on reopen) by lib/business-day.ts for any legacy
+/// reader that still queries this table directly.
 model DayClosure {
   id         String   @id @default(cuid())
   outletId   String
@@ -286,6 +294,150 @@ model DayClosure {
 
   @@unique([outletId, date])
   @@index([outletId])
+}
+
+// ─── Business Day Exception Management ─────────────────────────────────────
+// Full status lifecycle for a business day (per Outlet+Date, matching
+// DailyCollection/CashRecon/DayClosure grain — PosShift/PosCounter remain
+// informational breakdown only, never separate lockable units), automatic
+// missing-data detection on close, a request→approve→reopen→submit→auto-lock
+// workflow for non-management roles, an immutable audit trail, and
+// configurable (non-hardcoded) role/user permissions. See
+// lib/business-day.ts for the resolver/mutator functions.
+//   BusinessDay.status:               OPEN | CLOSED | REOPENED | ARCHIVED
+//   BusinessDayUnlockRequest.status:  PENDING | APPROVED | REJECTED | COMPLETED | EXPIRED
+//   BusinessDayUnlockRequest.requestedDuration: 15m | 30m | 1h | CUSTOM
+//   BusinessDayAuditLog.action:       CLOSE | REOPEN | LOCK | UNLOCK_REQUESTED |
+//                                     UNLOCK_APPROVED | UNLOCK_REJECTED | UNLOCK_EXPIRED |
+//                                     AUTO_LOCK | ARCHIVE | ALLOW_INCOMPLETE_CLOSE
+//   Notification.type: MISSING_DATA_DETECTED | UNLOCK_REQUESTED | UNLOCK_APPROVED |
+//                       UNLOCK_REJECTED | UNLOCK_EXPIRED | DAY_REOPENED
+//   BusinessDayPolicyConfig.scope:    GLOBAL | COMPANY | OUTLET (narrowest wins, same
+//                                     shape as CollectionModeConfig/BusinessCalendarConfig)
+model BusinessDay {
+  id             String    @id @default(cuid())
+  outletId       String
+  outlet         Outlet    @relation(fields: [outletId], references: [id])
+  date           DateTime
+  status         String    @default("OPEN")
+  isComplete     Boolean   @default(true)
+  missingItems   String? // JSON array of {type, label, shift?, counter?} — informational only
+  closedById     String?
+  closedByName   String?
+  closedAt       DateTime?
+  reopenedById   String?
+  reopenedByName String?
+  reopenedAt     DateTime?
+  reopenReason   String?
+  lockExpiresAt  DateTime? // set when reopened with a duration; lazily checked, see checkAndAutoLock
+  archivedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  unlockRequests BusinessDayUnlockRequest[]
+  auditLogs      BusinessDayAuditLog[]
+
+  @@unique([outletId, date])
+  @@index([outletId, status])
+  @@index([date])
+}
+
+/// Request → Approval → Reopen → Submit → Auto-Lock workflow for roles that
+/// cannot unlock directly. Kept separate from WorkflowApproval — that model
+/// has no duration/expiry fields and is scoped to the Collection Workflow Engine.
+model BusinessDayUnlockRequest {
+  id                String      @id @default(cuid())
+  businessDayId     String
+  businessDay       BusinessDay @relation(fields: [businessDayId], references: [id])
+  requestedById     String
+  requestedBy       User        @relation("BusinessDayUnlockRequestedBy", fields: [requestedById], references: [id])
+  reason            String
+  scopeShift        String? // optional informational PosShift.name filter
+  scopeCounter      String? // optional informational PosCounter.code filter
+  requestedDuration String? // "15m" | "30m" | "1h" | "CUSTOM"
+  requestedMinutes  Int?
+  status            String      @default("PENDING")
+  approverId        String?
+  approver          User?       @relation("BusinessDayUnlockApprover", fields: [approverId], references: [id])
+  approverComment   String?
+  resolvedAt        DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([businessDayId, status])
+  @@index([requestedById])
+}
+
+/// Immutable field-diff + approval audit trail for BusinessDay actions.
+/// INSERT-ONLY by convention — no update/delete API route is ever added for
+/// this model (SQLite has no trigger to enforce it; this is a code-review
+/// invariant, not a DB constraint).
+model BusinessDayAuditLog {
+  id             String      @id @default(cuid())
+  businessDayId  String
+  businessDay    BusinessDay @relation(fields: [businessDayId], references: [id])
+  action         String
+  field          String?
+  previousValue  String?
+  newValue       String?
+  reason         String?
+  approvedById   String?
+  approvedByName String?
+  userId         String?
+  userName       String?
+  createdAt      DateTime    @default(now())
+
+  @@index([businessDayId, createdAt])
+  @@index([action])
+}
+
+/// Role-level permission default (resource + boolean) — resolved as a
+/// per-user UserPermission override (if present for that resource) > this
+/// role default > deny. See lib/rbac.ts resolveResourcePermission().
+model RolePermission {
+  id        String   @id @default(cuid())
+  role      String
+  resource  String
+  allowed   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([role, resource])
+}
+
+/// Generic in-app notification — bell/list UI, hooked into
+/// lib/pendingBellEvents.ts's notifyNotificationsChanged() for live refresh.
+model Notification {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       String
+  title      String
+  message    String
+  entityType String?
+  entityId   String?
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
+
+/// Configurable "block close on missing data" / "who can approve unlocks"
+/// policy — same GLOBAL→COMPANY→OUTLET scope+scopeId shape as
+/// BusinessCalendarConfig/CollectionModeConfig, narrowest wins.
+model BusinessDayPolicyConfig {
+  id                   String   @id @default(cuid())
+  scope                String
+  scopeId              String?
+  blockCloseOnMissing  Boolean  @default(true)
+  approverRoles        String? // JSON array of role strings; null = fall back to APPROVE_UNLOCK holders
+  defaultUnlockMinutes Int      @default(30)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([scope, scopeId])
 }
 
 model DailyCollection {

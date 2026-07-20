@@ -21,7 +21,7 @@ const SECTIONS = ['MyPos', 'Daily', 'Targets', 'Bills & Requests', 'Petty Cash',
 const navItems: { href: string; icon: LucideIcon; label: string; section: string; roles: string[]; match?: string[] }[] = [
   { href: '/mypos', icon: UtensilsCrossed, label: 'MyPos', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'], match: ['/mypos', '/pos', '/schedule', '/events'] },
 
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Daily', section: 'Daily', roles: CASHIER_ROLES, match: ['/dashboard', '/collections', '/daily-report', '/excess-loss', '/excess-recon'] },
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Daily', section: 'Daily', roles: CASHIER_ROLES, match: ['/dashboard', '/collections', '/daily-report', '/excess-loss', '/excess-recon', '/business-day-unlock-requests'] },
 
   { href: '/targets', icon: Target, label: 'Targets', section: 'Targets', roles: ALL, match: ['/targets'] },
 
@@ -29,7 +29,7 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 
   { href: '/petty-cash', icon: Wallet, label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals', '/petty-payments'] },
 
-  { href: '/analytics', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/analytics', '/receivables', '/admin-director-bills', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/trends', '/payroll', '/reports', '/audit'] },
+  { href: '/analytics', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/analytics', '/receivables', '/admin-director-bills', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/trends', '/payroll', '/reports', '/audit', '/business-days', '/business-day-management', '/business-day-unlock-requests', '/business-day-exceptions-report'] },
 
   { href: '/setup', icon: Settings, label: 'Setup', section: 'Setup', roles: ALL, match: ['/setup', ...SETUP_TABS.map((t) => t.href)] },
 ]

@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { Sidebar } from './Sidebar'
 import { GlobalSearch } from './GlobalSearch'
 import { PendingBell } from './PendingBell'
+import { NotificationBell } from './NotificationBell'
 import { OfflineQueueBadge } from './OfflineQueueBadge'
 import { Menu } from 'lucide-react'
 
@@ -74,6 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
           <GlobalSearch />
           <PendingBell />
+          <NotificationBell />
           <OfflineQueueBadge />
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <span className="hidden lg:inline">
