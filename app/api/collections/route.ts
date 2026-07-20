@@ -10,6 +10,9 @@ import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill
 import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
 import { resolvePerson } from '@/lib/resolve-person'
 import { syncBusinessSession } from '@/lib/business-session'
+import { postJournalEntry } from '@/lib/ledger'
+import { resolveAccountId, resolveDefaultCompanyId, resolveChannelAccountId } from '@/lib/finance-mapping'
+import { postCreditSale } from '@/lib/finance-ar'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -143,7 +146,7 @@ export async function POST(req: NextRequest) {
       const ref = await generateBillReference(tx, {
         recordId, sourceModel: 'SignedBill', billTypeCode, date: collDate, personId: person?.id ?? null, outletId: usedOutletId,
       })
-      await tx.signedBill.create({
+      const createdSignedBill = await tx.signedBill.create({
         data: {
           id: recordId,
           autoKey: `VCH-${collection.id}-${i}`, voucherNumber: ref.displayReference, billType: type, personId: person?.id ?? null, personName: sb.name,
@@ -152,6 +155,10 @@ export async function POST(req: NextRequest) {
           internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
         },
       })
+      // Finance Platform (Stage 2): posts Dr AR / Cr Sales Revenue for
+      // CUSTOMER/ADMIN/DIRECTOR (immediately real); no-ops for TIPS/DJ until
+      // approved and for any other type.
+      await postCreditSale(tx, createdSignedBill, user.userId)
       signedTotal += amt
       signedCreated++
     }
@@ -289,11 +296,40 @@ export async function POST(req: NextRequest) {
         await tx.auditLog.create({
           data: { userId: user.userId, action: 'CREATE', entity: 'SignedBill', entityId: bill.id, details: `Auto staff loss ${staffLossAmount} for ${staffName}` },
         })
+        await postCreditSale(tx, bill, user.userId) // no-op: STAFF_LOSS isn't a CREDIT_BILL_TYPES receivable
         staffLoss = { amount: staffLossAmount, voucher: ref.displayReference, staffName }
       }
     }
 
     await syncBusinessSession(tx, collection.id)
+
+    // Finance Platform (Phase 1): post the cash-in side of this collection —
+    // Dr Cash/Bank/Mobile-Money (per channel) / Cr Sales Revenue. A channel
+    // with its own glAccountId set posts there; otherwise it falls back to
+    // the company's default Cash/Mobile-Money account via
+    // resolveAccountId(), so an unconfigured company still posts correctly.
+    const companyId = collection.outlet.companyId || (await resolveDefaultCompanyId(tx))
+    if (companyId && total > 0) {
+      const amountsByCode: Record<string, number> = { CASH: roundMoney(Number(cash) || 0), ...channelAmounts }
+      const debitLines: { accountId: string; debit: number; outletId: string }[] = []
+      const accountTotals = new Map<string, number>()
+      for (const [code, rawAmount] of Object.entries(amountsByCode)) {
+        const channelAmount = roundMoney(Number(rawAmount) || 0)
+        if (channelAmount <= 0) continue
+        const accountId = await resolveChannelAccountId(tx, { companyId, channelCode: code, outletId: usedOutletId })
+        accountTotals.set(accountId, roundMoney((accountTotals.get(accountId) || 0) + channelAmount))
+      }
+      for (const [accountId, amount] of accountTotals) debitLines.push({ accountId, debit: amount, outletId: usedOutletId })
+
+      if (debitLines.length) {
+        const salesRevenueAccountId = await resolveAccountId(tx, { companyId, key: 'SALES_REVENUE' })
+        await postJournalEntry(tx, {
+          companyId, entryDate: collDate, sourceModule: 'COLLECTIONS', sourceType: 'DailyCollection', sourceId: collection.id,
+          description: `Daily collection ${collection.id}`, createdById: user.userId,
+          lines: [...debitLines, { accountId: salesRevenueAccountId, credit: total, outletId: usedOutletId }],
+        })
+      }
+    }
 
     return { collection, signedTotal, paidTotal, paidStaffLoss, signedCreated, paidCreated, staffLoss, excess }
   }, { timeout: 20000 })

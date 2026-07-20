@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
+import { postCreditSale } from '@/lib/finance-ar'
 
 const APPROVERS = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
@@ -20,6 +21,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const approvalStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
   const item = await prisma.signedBill.update({ where: { id }, data: { approvalStatus, approvedBy: user.name } })
+  if (approvalStatus === 'APPROVED') await postCreditSale(prisma, item, user.userId)
 
   await prisma.auditLog.create({
     data: { userId: user.userId, action: approvalStatus, entity: 'SignedBill', entityId: id, details: `${approvalStatus} customer bill for ${existing.personName} by ${user.name}` },

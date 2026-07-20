@@ -15,6 +15,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const data: any = {}
   if (body.label !== undefined) data.label = String(body.label).trim()
   if (body.isActive !== undefined) data.isActive = !!body.isActive
+  // Finance Platform (Phase 1): the Cash/Bank/Mobile-Money GL account this
+  // channel's money lands in — required before it can be used on a Supplier
+  // Payment (see lib/finance.ts createSupplierPayment).
+  if ('glAccountId' in body) data.glAccountId = body.glAccountId || null
 
   try {
     const item = await prisma.paymentChannel.update({ where: { id }, data })

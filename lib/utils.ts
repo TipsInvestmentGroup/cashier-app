@@ -7,6 +7,17 @@ export function roundMoney(n: number | string | null | undefined): number {
   return Math.round(v * 100) / 100
 }
 
+/** Renders "field: old -> new" for every key present in `after` that
+ *  differs from `before` — for AuditLog `details` strings on edit routes,
+ *  so an audit trail records what actually changed, not just that
+ *  "something" did. */
+export function fieldDiff(before: Record<string, unknown>, after: Record<string, unknown>): string {
+  const changes = Object.keys(after)
+    .filter((k) => after[k] !== undefined && before[k] !== after[k])
+    .map((k) => `${k}: ${JSON.stringify(before[k])} → ${JSON.stringify(after[k])}`)
+  return changes.length ? changes.join(', ') : 'no fields changed'
+}
+
 // Module-level company config for CLIENT code (formatters, PDF letterheads),
 // defaulting to this deployment's live values so every render is correct
 // before any fetch completes. CompanyConfigProvider overwrites it once

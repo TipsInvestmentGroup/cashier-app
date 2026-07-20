@@ -18,6 +18,8 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 import { roundMoney } from './utils'
 import { generateBillReference } from './bill-reference'
 import { getCompanyConfig } from './company-config'
+import { postJournalEntry } from './ledger'
+import { resolveAccountId, resolveDefaultCompanyId } from './finance-mapping'
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>
 
@@ -186,6 +188,15 @@ export async function receiveGrn(opts: {
       },
     })
 
+    // Finance Platform (Phase 1): totalCost accrues Σ(quantityOrdered ×
+    // unitCost-per-purchaseUnit) across lines, falling back to the linked PO
+    // line's own unitPrice when a receiver leaves unitCost blank. If any
+    // line has neither, we can't trust the total — costMissing skips GL
+    // posting for this GRN entirely (see below) rather than post a wrong
+    // number; the physical stock receipt itself is never blocked by this.
+    let totalCost = 0
+    let costMissing = false
+
     for (const item of opts.items) {
       const productName = productMap.get(item.productId)
       if (!productName) throw new Error('Product not found')
@@ -209,6 +220,8 @@ export async function receiveGrn(opts: {
         },
       })
 
+      let lineUnitCost = item.unitCost ?? null
+
       if (item.purchaseOrderItemId) {
         // Re-check against the PO line's own remaining quantity, not the
         // client-supplied one — a stale prefill or an overtyped value could
@@ -224,7 +237,11 @@ export async function receiveGrn(opts: {
           where: { id: item.purchaseOrderItemId },
           data: { quantityReceived: { increment: item.quantityOrdered } },
         })
+        if (lineUnitCost == null) lineUnitCost = poItem.unitPrice
       }
+
+      if (lineUnitCost == null) costMissing = true
+      else totalCost = roundMoney(totalCost + item.quantityOrdered * lineUnitCost)
     }
 
     if (opts.purchaseOrderId) {
@@ -241,6 +258,41 @@ export async function receiveGrn(opts: {
       if (nextStatus && !wouldRegress) {
         await tx.purchaseOrder.update({ where: { id: opts.purchaseOrderId }, data: { status: nextStatus } })
       }
+    }
+
+    // Finance Platform (Phase 1): derive the receiving company from the
+    // linked PO's first outlet, falling back to the default (today's only)
+    // company, then post the provisional accrual — Dr Inventory Asset /
+    // Cr Accounts Payable Accrual — so the GRN shows up on the books
+    // immediately, ahead of the formal Supplier Invoice.
+    let grnCompanyId: string | null = null
+    if (opts.purchaseOrderId) {
+      const po = await tx.purchaseOrder.findUnique({ where: { id: opts.purchaseOrderId }, select: { outletIds: true } })
+      const outletIds: string[] = po?.outletIds ? JSON.parse(po.outletIds) : []
+      if (outletIds[0]) {
+        const outlet = await tx.outlet.findUnique({ where: { id: outletIds[0] }, select: { companyId: true } })
+        grnCompanyId = outlet?.companyId || null
+      }
+    }
+    if (!grnCompanyId) grnCompanyId = await resolveDefaultCompanyId(tx)
+
+    if (grnCompanyId && !costMissing && totalCost > 0) {
+      const [inventoryAccountId, apAccrualAccountId] = await Promise.all([
+        resolveAccountId(tx, { companyId: grnCompanyId, key: 'INVENTORY_ASSET' }),
+        resolveAccountId(tx, { companyId: grnCompanyId, key: 'AP_ACCRUAL' }),
+      ])
+      const { id: journalEntryId } = await postJournalEntry(tx, {
+        companyId: grnCompanyId, entryDate: grn.receivedDate, sourceModule: 'INVENTORY',
+        sourceType: 'Grn', sourceId: grn.id, description: `GRN ${grn.grnNumber} received from ${opts.supplierName}`,
+        createdById: opts.userId,
+        lines: [
+          { accountId: inventoryAccountId, debit: totalCost, description: `GRN ${grn.grnNumber}` },
+          { accountId: apAccrualAccountId, credit: totalCost, description: `GRN ${grn.grnNumber}` },
+        ],
+      })
+      await tx.grn.update({ where: { id: grn.id }, data: { companyId: grnCompanyId, journalEntryId } })
+    } else {
+      await tx.grn.update({ where: { id: grn.id }, data: { companyId: grnCompanyId, needsCosting: true } })
     }
 
     return { grnId: grn.id, grnNumber: grn.grnNumber }

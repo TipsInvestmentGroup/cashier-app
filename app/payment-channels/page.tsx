@@ -5,11 +5,13 @@ import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import toast from 'react-hot-toast'
 
-interface Channel { id: string; code: string; label: string; isActive: boolean }
+interface Channel { id: string; code: string; label: string; isActive: boolean; glAccountId: string | null }
+interface FinanceAccount { id: string; code: string; name: string }
 
 export default function PaymentChannelsPage() {
   const { request } = useApi()
   const [items, setItems] = useState<Channel[]>([])
+  const [accounts, setAccounts] = useState<FinanceAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [canManage, setCanManage] = useState(false)
   const [newName, setNewName] = useState('')
@@ -19,9 +21,10 @@ export default function PaymentChannelsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [ch, access] = await Promise.all([request('/api/payment-channels'), request('/api/persons-access')])
+      const [ch, access, acc] = await Promise.all([request('/api/payment-channels'), request('/api/persons-access'), request('/api/finance/accounts').catch(() => [])])
       setItems(ch || [])
       setCanManage(!!access?.canManage)
+      setAccounts((acc || []).filter((a: { type: string }) => a.type === 'ASSET'))
     } finally { setLoading(false) }
   }, [request])
 
@@ -37,6 +40,10 @@ export default function PaymentChannelsPage() {
   const saveEdit = async (id: string) => {
     try { await request(`/api/payment-channels/${id}`, { method: 'PUT', body: JSON.stringify({ label: editValue.trim() }) }); toast.success('Saved'); setEditing(null); load() }
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not save') }
+  }
+  const setGlAccount = async (c: Channel, glAccountId: string) => {
+    try { await request(`/api/payment-channels/${c.id}`, { method: 'PUT', body: JSON.stringify({ glAccountId: glAccountId || null }) }); load() }
+    catch { toast.error('Could not update GL account') }
   }
   const toggle = async (c: Channel) => {
     try { await request(`/api/payment-channels/${c.id}`, { method: 'PUT', body: JSON.stringify({ isActive: !c.isActive }) }); load() }
@@ -87,6 +94,13 @@ export default function PaymentChannelsPage() {
                     <>
                       <span className={`flex-1 text-sm ${c.isActive ? 'text-gray-800 font-medium' : 'text-gray-400 line-through'}`}>{c.label}</span>
                       <span className="font-mono text-[11px] text-gray-400">{c.code}</span>
+                      {canManage && (
+                        <select value={c.glAccountId || ''} onChange={(e) => setGlAccount(c, e.target.value)}
+                          className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-600 focus:border-indigo-500 focus:outline-none">
+                          <option value="">No GL account</option>
+                          {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
+                        </select>
+                      )}
                       {canManage && (
                         <div className="flex gap-1.5 ml-2">
                           <button onClick={() => { setEditing(c.id); setEditValue(c.label) }} className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-lg hover:bg-indigo-100">Edit</button>

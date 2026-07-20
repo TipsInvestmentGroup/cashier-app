@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { approvalGate } from '@/lib/bill-types'
+import { outstandingReceivablesWhere, outstandingBalance } from '@/lib/finance-receivables'
 import { differenceInDays } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -12,13 +12,11 @@ export async function GET(req: NextRequest) {
   const type = searchParams.get('type')
   const outletId = user.role === 'CASHIER' ? user.outletId : searchParams.get('outletId')
 
-  // Request-type bills (Customer/Tips/DJ) only count once APPROVED; other types aren't gated.
-  const where: Record<string, unknown> = {
-    status: { not: 'PAID' },
-    ...approvalGate(),
-  }
-  if (type) where.billType = type
-  if (outletId) where.outletId = outletId
+  // Request-type bills (Customer/Tips/DJ) only count once APPROVED; other
+  // types aren't gated. Excludes WRITTEN_OFF as well as PAID — see
+  // lib/finance-receivables.ts (shared with the Finance Dashboard so the
+  // two totals can never silently disagree).
+  const where = outstandingReceivablesWhere({ billType: type, outletId })
 
   const bills = await prisma.signedBill.findMany({
     where,
@@ -26,6 +24,7 @@ export async function GET(req: NextRequest) {
       outlet: true,
       person: true,
       payments: { select: { amountPaid: true } },
+      writeOffs: { select: { amount: true } },
     },
     orderBy: { date: 'asc' },
   })
@@ -45,7 +44,7 @@ export async function GET(req: NextRequest) {
 
   const receivables = bills.map((b) => {
     const totalPaid = b.payments.reduce((s, p) => s + p.amountPaid, 0)
-    const balance = b.amount - totalPaid
+    const balance = outstandingBalance(b)
     const daysOutstanding = differenceInDays(now, b.date)
     const isOverdue = b.dueDate ? now > b.dueDate : daysOutstanding > 30
     const aging = daysOutstanding <= 30 ? '0-30' : daysOutstanding <= 60 ? '31-60' : daysOutstanding <= 90 ? '61-90' : '90+'

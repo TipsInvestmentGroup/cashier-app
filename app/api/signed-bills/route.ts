@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole, readOutletScope, writeOutletId } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
+import { checkCreditLimit, postCreditSale } from '@/lib/finance-ar'
 
 const CAN_WRITE = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
@@ -80,23 +81,7 @@ export async function POST(req: NextRequest) {
   const itemsTotal = roundMoney(itemsInput.reduce((s, it) => s + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0), 0))
   const finalAmount = roundMoney(itemsInput.length ? itemsTotal : Number(amount))
 
-  let limitExceeded = false
-  let exceededAmount = 0
-
-  if (personId && ['ADMIN', 'DIRECTOR'].includes(billType)) {
-    const person = await prisma.person.findUnique({ where: { id: personId } })
-    if (person && person.creditLimit > 0) {
-      const outstanding = await prisma.signedBill.aggregate({
-        where: { personId, status: { not: 'PAID' } },
-        _sum: { amount: true },
-      })
-      const totalOwed = (outstanding._sum.amount || 0) + finalAmount
-      if (totalOwed > person.creditLimit) {
-        limitExceeded = true
-        exceededAmount = totalOwed - person.creditLimit
-      }
-    }
-  }
+  const { limitExceeded, exceededAmount } = await checkCreditLimit(prisma, { personId, billType, newAmount: finalAmount })
 
   const billDate = date ? new Date(date) : new Date()
 
@@ -142,6 +127,8 @@ export async function POST(req: NextRequest) {
 
     return created
   })
+
+  await postCreditSale(prisma, bill, user.userId)
 
   return NextResponse.json({ ...bill, limitExceeded, exceededAmount }, { status: 201 })
 }

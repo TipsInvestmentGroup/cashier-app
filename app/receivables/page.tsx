@@ -3,6 +3,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, FINANCE_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
+import { useAuth } from '@/contexts/AuthContext'
+import toast from 'react-hot-toast'
 import { formatCurrency, formatDate, BILL_TYPE_LABELS } from '@/lib/utils'
 import { ExportBar } from '@/components/ExportBar'
 import { PaymentStoryModal } from '@/components/PaymentStoryModal'
@@ -34,8 +36,11 @@ const AGING_COLORS: Record<string, string> = {
   '90+': 'bg-red-100 text-red-700',
 }
 
+const FINANCE_WRITE_OFF_ROLES = ['ACCOUNTANT', 'DIRECTOR', 'ADMIN']
+
 export default function ReceivablesPage() {
   const { request } = useApi()
+  const { user } = useAuth()
   const [receivables, setReceivables] = useState<Receivable[]>([])
   const [summary, setSummary] = useState<Summary | null>(null)
   const [creditAccounts, setCreditAccounts] = useState<CreditAccount[]>([])
@@ -314,7 +319,15 @@ export default function ReceivablesPage() {
         })()}
       </div>
 
-      <PaymentStoryModal billId={storyBillId} request={request} onClose={() => setStoryBillId(null)} />
+      <PaymentStoryModal
+        billId={storyBillId} request={request} onClose={() => setStoryBillId(null)}
+        onWriteOff={FINANCE_WRITE_OFF_ROLES.includes(user?.role || '') ? async (signedBillId, amount, reason) => {
+          try {
+            await request('/api/finance/write-offs', { method: 'POST', body: JSON.stringify({ signedBillId, amount, reason }) })
+            toast.success('Written off'); setStoryBillId(null); load()
+          } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not write off this bill') }
+        } : undefined}
+      />
     </AppShell>
   )
 }

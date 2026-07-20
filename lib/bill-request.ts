@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
+import { postCreditSale } from '@/lib/finance-ar'
 
 interface ItemInput { productId?: string; productName?: string; unitPrice?: number; quantity?: number }
 interface BillRequestArgs {
@@ -18,6 +19,12 @@ interface BillRequestArgs {
 /**
  * Create a signed-bill REQUEST (Customer / Tips / DJ) filed as PENDING approval.
  * Amount = sum of product line items when provided, else the manual amount.
+ * Finance Platform (Stage 2): also calls postCreditSale() — a no-op here
+ * since CUSTOMER/TIPS/DJ are still PENDING approval; it actually posts once
+ * the approve action flips approvalStatus to APPROVED (see
+ * app/api/customer-bills/[id]/route.ts, app/api/tips-dj/[id]/route.ts). Kept
+ * here anyway so every SignedBill creation/status-change site uniformly
+ * calls it, rather than relying on remembering which ones need it.
  */
 export async function createBillRequest(a: BillRequestArgs) {
   const itemsInput = (a.items || []).filter((it) => it.productName && Number(it.quantity) > 0)
@@ -25,7 +32,7 @@ export async function createBillRequest(a: BillRequestArgs) {
   const finalAmount = roundMoney(itemsInput.length ? itemsTotal : Number(a.amount))
   const billDate = a.date ? new Date(a.date) : new Date()
 
-  return prisma.$transaction(async (tx) => {
+  const bill = await prisma.$transaction(async (tx) => {
     const recordId = crypto.randomUUID()
     const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', a.billType)
     const ref = await generateBillReference(tx, {
@@ -61,4 +68,7 @@ export async function createBillRequest(a: BillRequestArgs) {
 
     return bill
   })
+
+  await postCreditSale(prisma, bill, a.cashierId)
+  return bill
 }

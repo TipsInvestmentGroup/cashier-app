@@ -11,17 +11,24 @@ interface Story {
 
 /** Reusable "payment story" modal for a signed bill: the bill, its payment
  *  timeline with running balance, and the outstanding amount. Pass a billId to
- *  open it; pass null to keep it closed. */
-export function PaymentStoryModal({ billId, request, onClose }: {
+ *  open it; pass null to keep it closed. `onWriteOff` is optional — only
+ *  Finance's Receivables page passes it, so app/signed-bills/page.tsx (the
+ *  other caller) renders exactly as before with no write-off UI. */
+export function PaymentStoryModal({ billId, request, onClose, onWriteOff }: {
   billId: string | null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   request: (url: string) => Promise<any>
   onClose: () => void
+  onWriteOff?: (signedBillId: string, amount: number, reason: string) => Promise<void>
 }) {
   const [story, setStory] = useState<Story | null>(null)
   const [loading, setLoading] = useState(false)
+  const [writingOff, setWritingOff] = useState(false)
+  const [writeOffAmount, setWriteOffAmount] = useState('')
+  const [writeOffReason, setWriteOffReason] = useState('')
 
   useEffect(() => {
+    setWritingOff(false); setWriteOffAmount(''); setWriteOffReason('')
     if (!billId) { setStory(null); return }
     let active = true
     setLoading(true); setStory(null)
@@ -90,6 +97,33 @@ export function PaymentStoryModal({ billId, request, onClose }: {
                 </div>
                 <span className={`text-2xl font-bold ${story.balance <= 0 ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(Math.max(0, story.balance))}</span>
               </div>
+
+              {/* Bad debt write-off — Finance only, see onWriteOff prop */}
+              {onWriteOff && story.balance > 0 && story.bill.status !== 'WRITTEN_OFF' && (
+                writingOff ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+                    <p className="text-sm font-semibold text-amber-800">Write off as bad debt</p>
+                    <input type="number" value={writeOffAmount} onChange={(e) => setWriteOffAmount(e.target.value)}
+                      placeholder={`Amount (up to ${formatCurrency(story.balance)})`}
+                      className="w-full px-3 py-2 border-2 border-amber-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" />
+                    <input value={writeOffReason} onChange={(e) => setWriteOffReason(e.target.value)} placeholder="Reason (optional)"
+                      className="w-full px-3 py-2 border-2 border-amber-200 rounded-lg text-sm focus:border-amber-500 focus:outline-none" />
+                    <div className="flex gap-2 justify-end">
+                      <button onClick={() => setWritingOff(false)} className="px-3 py-1.5 text-sm text-gray-500">Cancel</button>
+                      <button
+                        onClick={async () => { await onWriteOff(story.bill.id, Number(writeOffAmount) || 0, writeOffReason); setWritingOff(false) }}
+                        className="px-3 py-1.5 bg-amber-600 text-white text-sm font-semibold rounded-lg hover:bg-amber-700">
+                        Confirm Write-off
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => { setWritingOff(true); setWriteOffAmount(String(story.balance)) }}
+                    className="w-full px-3 py-2 bg-amber-50 text-amber-700 text-sm font-semibold rounded-xl hover:bg-amber-100">
+                    Write off as bad debt
+                  </button>
+                )
+              )}
             </div>
           )}
         </div>

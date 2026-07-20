@@ -92,10 +92,10 @@ model User {
   approvalsRequested          WorkflowApproval[]      @relation("ApprovalRequestedBy")
   approvalsToApprove          WorkflowApproval[]      @relation("ApprovalApprover")
 
-  transactionSessionsCreated  TransactionSession[] @relation("TxSessionCreatedBy")
+  transactionSessionsCreated   TransactionSession[] @relation("TxSessionCreatedBy")
   transactionSessionsValidated TransactionSession[] @relation("TxSessionValidatedBy")
-  systemSalesRecords          SystemSalesRecord[]  @relation("SystemSalesStaff")
-  staffTransactions           StaffTransaction[]    @relation("StaffTransactionStaff")
+  systemSalesRecords           SystemSalesRecord[]  @relation("SystemSalesStaff")
+  staffTransactions            StaffTransaction[]   @relation("StaffTransactionStaff")
 }
 
 /// Per-user, per-resource grant of Add/Edit/Delete(/Settle/Unsettle for
@@ -150,15 +150,25 @@ model Company {
 
   outlets             Outlet[]
   collectionTemplates CollectionTemplate[]
+
+  accounts               Account[]
+  financialPeriods       FinancialPeriod[]
+  journalEntries         JournalEntry[]
+  supplierInvoices       SupplierInvoice[]
+  supplierPayments       SupplierPayment[]
+  grns                   Grn[]
+  companyPaymentAccounts CompanyPaymentAccount[]
+  bankTransactions       BankTransaction[]
+  budgets                Budget[]
 }
 
 model Outlet {
-  id           String   @id @default(cuid())
-  name         String   @unique
-  location     String?
-  isActive     Boolean  @default(true)
-  companyId    String?
-  company      Company? @relation(fields: [companyId], references: [id])
+  id                String              @id @default(cuid())
+  name              String              @unique
+  location          String?
+  isActive          Boolean             @default(true)
+  companyId         String?
+  company           Company?            @relation(fields: [companyId], references: [id])
   // The template used when no session-specific template is chosen for a new
   // Daily Collection at this outlet. Nullable/optional even after backfill —
   // absence means "fall back to the fixed DailyCollection form unchanged".
@@ -166,40 +176,42 @@ model Outlet {
   defaultTemplate   CollectionTemplate? @relation("OutletDefaultTemplate", fields: [defaultTemplateId], references: [id])
   // Events-only outlets (e.g. "Tips Events") are NOT included in the automatic
   // weekly roster — staff are only assigned temporarily when an event is created.
-  isEventsOnly Boolean  @default(false)
+  isEventsOnly      Boolean             @default(false)
   // Printed-bill header details (company legal name + tax IDs). Shown on the
   // customer/in-house bill; the outlet name appears in parentheses beside them.
-  legalName    String?
-  tin          String?
-  vrn          String?
+  legalName         String?
+  tin               String?
+  vrn               String?
   // Optional code backing the BRANCH_CODE/COMPANY_CODE bill-reference
   // components (see lib/bill-reference.ts). Falls back to a slugified
   // Outlet.name when unset.
-  branchCode   String?
-  createdAt    DateTime @default(now())
+  branchCode        String?
+  createdAt         DateTime            @default(now())
 
-  users               User[]
-  dailyCollections    DailyCollection[]
-  signedBills         SignedBill[]
-  paidBills           PaidBill[]
-  posTables           PosTable[]
-  posShifts           PosShift[]
-  posCounters         PosCounter[]
-  posStockRequests    PosStockRequest[]
-  stockLevels         StockLevel[]
-  stockTransfers      StockTransfer[]
-  posOrders           PosOrder[]
-  posBlockedItems     PosBlockedItem[]
-  dayClosures         DayClosure[]
-  salesMetrics        SalesMetric[]
-  scheduleAssignments ScheduleAssignment[]
-  scheduleConfig      OutletScheduleConfig?
-  events              Event[]
-  excessRefunds       ExcessRefund[]
-  salesTargets        SalesTarget[]
-  collectionSessions  CollectionSession[]
-  transactionSessions TransactionSession[]
-  businessSessions    BusinessSession[]
+  users                  User[]
+  dailyCollections       DailyCollection[]
+  signedBills            SignedBill[]
+  paidBills              PaidBill[]
+  companyPaymentAccounts CompanyPaymentAccount[]
+  budgets                Budget[]
+  posTables              PosTable[]
+  posShifts              PosShift[]
+  posCounters            PosCounter[]
+  posStockRequests       PosStockRequest[]
+  stockLevels            StockLevel[]
+  stockTransfers         StockTransfer[]
+  posOrders              PosOrder[]
+  posBlockedItems        PosBlockedItem[]
+  dayClosures            DayClosure[]
+  salesMetrics           SalesMetric[]
+  scheduleAssignments    ScheduleAssignment[]
+  scheduleConfig         OutletScheduleConfig?
+  events                 Event[]
+  excessRefunds          ExcessRefund[]
+  salesTargets           SalesTarget[]
+  collectionSessions     CollectionSession[]
+  transactionSessions    TransactionSession[]
+  businessSessions       BusinessSession[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -345,10 +357,10 @@ model CollectionTemplate {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  stages          CollectionStage[]
-  validationRules CollectionValidationRule[]
-  sessions        CollectionSession[]
-  defaultForOutlets Outlet[] @relation("OutletDefaultTemplate")
+  stages            CollectionStage[]
+  validationRules   CollectionValidationRule[]
+  sessions          CollectionSession[]
+  defaultForOutlets Outlet[]                   @relation("OutletDefaultTemplate")
 
   @@index([companyId])
 }
@@ -542,7 +554,7 @@ model CollectionModeConfig {
 // exactly as the app always has. See docs/business-calendar-engine.md.
 //   BusinessCalendarConfig.scope: GLOBAL | COMPANY | OUTLET
 model BusinessCalendarConfig {
-  id   String  @id @default(cuid())
+  id      String  @id @default(cuid())
   scope   String
   // Null only for GLOBAL; otherwise a Company.id or Outlet.id depending on scope.
   scopeId String?
@@ -601,8 +613,8 @@ model ShiftTemplate {
   name      String
   startTime String // "HH:mm"
   endTime   String // "HH:mm"
-  sortOrder Int     @default(0)
-  isActive  Boolean @default(true)
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -719,16 +731,16 @@ model StaffTransaction {
 // directly. staffName (not staffId) is the natural key both source paths
 // converge on, so the upsert is idempotent regardless of mode.
 model BusinessSession {
-  id                   String    @id @default(cuid())
-  date                 DateTime
-  companyId            String?
-  outletId             String
-  outlet               Outlet    @relation(fields: [outletId], references: [id])
-  staffId              String?
-  staffName            String
-  collectionMode       String // DEFAULT | TRANSACTION_VERIFICATION — informational only
-  sourceCollectionId   String?
-  sourceSessionId      String?
+  id                 String   @id @default(cuid())
+  date               DateTime
+  companyId          String?
+  outletId           String
+  outlet             Outlet   @relation(fields: [outletId], references: [id])
+  staffId            String?
+  staffName          String
+  collectionMode     String // DEFAULT | TRANSACTION_VERIFICATION — informational only
+  sourceCollectionId String?
+  sourceSessionId    String?
 
   systemSales          Float     @default(0)
   officialCollection   Float     @default(0)
@@ -804,7 +816,7 @@ model SignedBill {
   serviceStaff   String?
   description    String?
   dueDate        DateTime?
-  status         String    @default("UNPAID")
+  status         String    @default("UNPAID") // UNPAID | PARTIAL | PAID | WRITTEN_OFF
   approvalStatus String    @default("PENDING") // PENDING | APPROVED | REJECTED (used for Tips/DJ bill requests)
   approvedBy     String?
   outletId       String
@@ -813,6 +825,15 @@ model SignedBill {
   cashier        User      @relation(fields: [cashierId], references: [id])
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  // Finance Platform (Stage 2 — Accounts Receivable): set once the credit
+  // sale is posted to the GL (Dr Accounts Receivable / Cr Sales Revenue) —
+  // see lib/finance-ar.ts postCreditSale(). Doubles as the idempotency guard
+  // against double-posting (e.g. an approve action firing twice). Only ever
+  // set for CREDIT_BILL_TYPES (lib/bill-types.ts) once approvalGate() passes
+  // — never for STAFF_LOSS, and never before a request-type bill is approved.
+  journalEntryId String?
+
+  writeOffs SignedBillWriteOff[]
 
   // Bill Reference System (see lib/bill-reference.ts). internalBillId is the
   // permanent, never-changing system id ("B-YYYYMMDD-NNNNNN");
@@ -859,27 +880,33 @@ model BillItem {
 }
 
 model PaidBill {
-  id            String      @id @default(cuid())
-  date          DateTime    @default(now())
+  id             String      @id @default(cuid())
+  date           DateTime    @default(now())
   // Free-text/correlation field — NOT the Bill Reference System's reference.
   // Also doubles as a correlation key ("COL-<collectionId>",
   // "PAYROLL-<periodLabel>") and a report-grouping key
   // (app/api/reports/daily-cashier/route.ts) — left untouched by design.
-  billRef       String?
-  signedBillId  String?
-  signedBill    SignedBill? @relation(fields: [signedBillId], references: [id])
-  personId      String?
-  person        Person?     @relation(fields: [personId], references: [id])
-  payerCategory String?
-  payerName     String
-  amountPaid    Float
-  paymentMethod String
-  notes         String?
-  outletId      String
-  outlet        Outlet      @relation(fields: [outletId], references: [id])
-  cashierId     String
-  cashier       User        @relation(fields: [cashierId], references: [id])
-  createdAt     DateTime    @default(now())
+  billRef        String?
+  signedBillId   String?
+  signedBill     SignedBill? @relation(fields: [signedBillId], references: [id])
+  personId       String?
+  person         Person?     @relation(fields: [personId], references: [id])
+  payerCategory  String?
+  payerName      String
+  amountPaid     Float
+  paymentMethod  String
+  notes          String?
+  outletId       String
+  outlet         Outlet      @relation(fields: [outletId], references: [id])
+  cashierId      String
+  cashier        User        @relation(fields: [cashierId], references: [id])
+  createdAt      DateTime    @default(now())
+  // Finance Platform (Stage 2): set when this receipt is posted to the GL
+  // (Dr Cash/Bank / Cr Accounts Receivable) — see lib/finance-ar.ts
+  // postReceipt(). Only set when signedBillId resolves to a CREDIT_BILL_TYPES
+  // bill; left null for unlinked/unallocated credits (no receivable to
+  // clear against yet).
+  journalEntryId String?
 
   // Bill Reference System (see lib/bill-reference.ts / SignedBill above).
   internalBillId   String?         @unique
@@ -984,6 +1011,8 @@ model Department {
   name      String   @unique
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+
+  budgets Budget[]
 }
 
 // Functions selectable on the cash-request form (e.g. Purchases of, Allowance, Transport).
@@ -996,8 +1025,8 @@ model PettyFunction {
 
 // Product catalogue (managed in /products).
 model Product {
-  id              String   @id @default(cuid())
-  code            String   @unique // auto-generated, human-readable e.g. COC-001
+  id              String           @id @default(cuid())
+  code            String           @unique // auto-generated, human-readable e.g. COC-001
   name            String
   // Legacy free-text category — kept (not dropped) so any reader that hasn't
   // migrated to categoryId still sees a value; scripts/backfill-product-categories.ts
@@ -1005,27 +1034,27 @@ model Product {
   category        String? // e.g. "Beers", "Spirits", "Soft Drinks"
   categoryId      String?
   productCategory ProductCategory? @relation(fields: [categoryId], references: [id])
-  buyingPrice     Float    @default(0)
-  sellingPrice    Float    @default(0)
+  buyingPrice     Float            @default(0)
+  sellingPrice    Float            @default(0)
   unitMeasure     String // unit | kg | crate 24 bottle | crate 25 bottle | crate 6 bottle
-  isActive        Boolean  @default(true)
+  isActive        Boolean          @default(true)
   // Counter stock tracking (see StockLevel/StockLedgerEntry below). WEIGHT
   // items (e.g. shisha flavours) are counted in grams; gramsPerServing
   // converts a gram reading into sellable servings, same conversion the
   // business already does by hand on paper stock-take sheets.
-  trackingMode    String   @default("UNIT") // UNIT | WEIGHT
+  trackingMode    String           @default("UNIT") // UNIT | WEIGHT
   gramsPerServing Float?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime         @default(now())
 
-  cancellations      Cancellation[]
-  billItems          BillItem[]
-  posOrderItems      PosOrderItem[]
-  posBlockedItems    PosBlockedItem[]
-  stockLevels        StockLevel[]
-  grnItems           GrnItem[]
-  stockTransferItems StockTransferItem[]
-  purchaseOrderItems PurchaseOrderItem[]
-  eventProducts      EventProduct[]
+  cancellations       Cancellation[]
+  billItems           BillItem[]
+  posOrderItems       PosOrderItem[]
+  posBlockedItems     PosBlockedItem[]
+  stockLevels         StockLevel[]
+  grnItems            GrnItem[]
+  stockTransferItems  StockTransferItem[]
+  purchaseOrderItems  PurchaseOrderItem[]
+  eventProducts       EventProduct[]
   cancellationReasons CancellationReasonProduct[]
 
   @@index([name])
@@ -1042,7 +1071,7 @@ model ProductCategory {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  products                    Product[]
+  products                     Product[]
   cancellationReasonCategories CancellationReasonCategory[]
 }
 
@@ -1124,6 +1153,8 @@ model Supplier {
   createdAt     DateTime @default(now())
 
   purchaseOrders PurchaseOrder[]
+  invoices       SupplierInvoice[]
+  payments       SupplierPayment[]
 }
 
 /// A Purchase Order to a supplier. status is the workflow engine: DRAFT ->
@@ -1196,12 +1227,24 @@ model Grn {
   note            String?
   createdById     String
   createdAt       DateTime       @default(now())
+  // Finance Platform (Phase 1): companyId is derived at receipt time in
+  // receiveGrn() (from the linked PO's outlet, else the default company) so
+  // the accrual journal entry can be posted per-company. needsCosting is set
+  // when no unitCost/PO price was available on any line — the physical
+  // receipt is never blocked, but the GRN surfaces in Finance's "Unposted
+  // GRNs" list until someone supplies a cost and it can be posted.
+  companyId       String?
+  company         Company?       @relation(fields: [companyId], references: [id])
+  needsCosting    Boolean        @default(false)
+  journalEntryId  String?
 
-  items GrnItem[]
+  items            GrnItem[]
+  supplierInvoices SupplierInvoice[]
 
   @@index([warehouseId])
   @@index([receivedDate])
   @@index([purchaseOrderId])
+  @@index([companyId])
 }
 
 /// One line of a Grn. Quantity is entered in a purchase unit (e.g.
@@ -1515,25 +1558,36 @@ model PersonCategory {
 // Configurable payment channels (managed under Outlets). Used by Paid Bills,
 // Petty Cash, and Daily Collections amount boxes (see DailyCollectionChannel).
 model PaymentChannel {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  label     String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  code        String   @unique
+  label       String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  // Finance Platform (Stage 1): a simple, single default GL Cash/Bank/
+  // Mobile-Money account for this channel — kept as the fallback for a
+  // business that never sets up Company Payment Accounts (Stage 3). Once a
+  // channel has one or more CompanyPaymentAccount rows, that account's
+  // default row wins over this field (see lib/finance-mapping.ts
+  // resolveChannelAccountId's cascade).
+  glAccountId String?
+  glAccount   Account? @relation(fields: [glAccountId], references: [id])
+
+  supplierPayments SupplierPayment[]
+  companyAccounts  CompanyPaymentAccount[]
 }
 
 // Configurable cancellation reasons (managed under Setup). Cancellation.reason
 // stores the label as free text — this table only drives the picker options.
 model CancellationReason {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  label     String
-  isActive  Boolean  @default(true)
+  id           String   @id @default(cuid())
+  code         String   @unique
+  label        String
+  isActive     Boolean  @default(true)
   // true (the default) = this reason is offered for every product, exactly
   // today's behavior. When false, it's only offered for the specifically
   // mapped categories/products below — an admin opt-in, not a regression.
-  appliesToAll Boolean @default(true)
-  createdAt DateTime @default(now())
+  appliesToAll Boolean  @default(true)
+  createdAt    DateTime @default(now())
 
   categories CancellationReasonCategory[]
   products   CancellationReasonProduct[]
@@ -1541,11 +1595,11 @@ model CancellationReason {
 
 /// Restricts a CancellationReason (with appliesToAll = false) to one product category.
 model CancellationReasonCategory {
-  id         String              @id @default(cuid())
+  id         String             @id @default(cuid())
   reasonId   String
-  reason     CancellationReason  @relation(fields: [reasonId], references: [id], onDelete: Cascade)
+  reason     CancellationReason @relation(fields: [reasonId], references: [id], onDelete: Cascade)
   categoryId String
-  category   ProductCategory     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category   ProductCategory    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@unique([reasonId, categoryId])
   @@index([categoryId])
@@ -2052,6 +2106,7 @@ model Event {
   tables        EventTable[]
   tableBookings TableBooking[]
   posOrders     PosOrder[]
+  budgets       Budget[]
 
   @@index([date])
   @@index([status])
@@ -2237,4 +2292,433 @@ model TableBooking {
 
   @@index([eventId])
   @@index([tableId])
+}
+
+// ─── Finance Platform (Phase 1: Chart of Accounts, General Ledger, AP) ─────
+// Foundation layer only — see docs/finance-platform.md. Journals are
+// system-generated only in this phase (posted from Grn/SupplierInvoice/
+// SupplierPayment/DailyCollection); there is no manual/draft journal UI yet.
+// A posted entry is never edited, only reversed (reverseJournalEntry in
+// lib/ledger.ts posts an equal-and-opposite entry and links reversalOfId) —
+// same "never delete, only reverse" audit principle as StockLedgerEntry.
+//   Account.type:            ASSET | LIABILITY | EQUITY | INCOME | EXPENSE
+//   FinancialPeriod.status:   OPEN | LOCKED
+//   JournalEntry.sourceModule: PROCUREMENT | INVENTORY | SALES | COLLECTIONS | MANUAL
+//   JournalEntry.status:      POSTED | REVERSED
+//   FinanceAccountMapping.scope: GLOBAL | COMPANY | OUTLET (same shape as CollectionModeConfig)
+//   SupplierInvoice.status:   OPEN | PARTIALLY_PAID | PAID | CANCELLED
+
+/// One company's Chart of Accounts. Seeded with a starter set (Cash, Bank,
+/// Mobile Money Clearing, Inventory Asset, AP Accrual, AP Control, VAT
+/// Input/Output, Sales Revenue, COGS, Purchases Expense, Rounding/Variance)
+/// on first access — see lib/finance-accounts-defaults.ts, same
+/// "seed defaults on first GET" convention as PaymentChannel. isSystemAccount
+/// protects the seeded/auto-mapped accounts from deletion.
+model Account {
+  id              String    @id @default(cuid())
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id])
+  code            String
+  name            String
+  type            String // ASSET | LIABILITY | EQUITY | INCOME | EXPENSE
+  parentId        String?
+  parent          Account?  @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children        Account[] @relation("AccountHierarchy")
+  isSystemAccount Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  journalLines          JournalLine[]
+  mappings              FinanceAccountMapping[]
+  paymentChannels       PaymentChannel[]
+  companyPaymentAccount CompanyPaymentAccount?
+  budgets               Budget[]
+
+  @@unique([companyId, code])
+  @@index([companyId, type])
+}
+
+/// A company's accounting calendar. Journal posting (lib/ledger.ts) requires
+/// the entry date fall inside an OPEN period for that company; LOCKED blocks
+/// further posting into it (reopening is a plain status flip + audit log —
+/// no separate approval workflow in this phase).
+model FinancialPeriod {
+  id             String            @id @default(cuid())
+  companyId      String
+  company        Company           @relation(fields: [companyId], references: [id])
+  name           String // e.g. "2026-07"
+  startDate      DateTime
+  endDate        DateTime
+  status         String            @default("OPEN") // OPEN | LOCKED
+  lockedAt       DateTime?
+  lockedById     String?
+  // Finance Platform (Stage 4): periods can now nest — a MONTHLY period
+  // sits inside its QUARTERLY and ANNUAL periods, all covering the same
+  // dates. postJournalEntry()'s period check (lib/ledger.ts
+  // assertPeriodOpen) already checks every covering period, not just one,
+  // so locking at any level blocks posting. parentPeriodId is informational
+  // (drives the Financial Year view's nesting), not required for the lock
+  // check itself. Generated in bulk by lib/finance-periods.ts
+  // generateFinancialYearPeriods() ("Financial Year Management").
+  periodType     String            @default("MONTHLY") // DAILY | WEEKLY | MONTHLY | QUARTERLY | ANNUAL
+  parentPeriodId String?
+  parentPeriod   FinancialPeriod?  @relation("PeriodHierarchy", fields: [parentPeriodId], references: [id])
+  childPeriods   FinancialPeriod[] @relation("PeriodHierarchy")
+  // Reopening a LOCKED period is restricted to DIRECTOR/ADMIN (see
+  // app/api/finance/periods/route.ts) — "Reopen with Authorization" — and
+  // the reason is recorded here for the audit trail alongside the standard
+  // AuditLog entry.
+  reopenReason   String?
+
+  @@unique([companyId, name])
+  @@index([companyId, status])
+}
+
+/// A balanced double-entry posting. The single choke point every module goes
+/// through is postJournalEntry() in lib/ledger.ts — it validates the period
+/// is OPEN, validates debits=credits, and writes header+lines in one
+/// transaction. sourceType/sourceId are a loose ref (same convention as
+/// StockLedgerEntry.refType/refId), not a FK, since the source varies by
+/// module (Grn, SupplierInvoice, SupplierPayment, DailyCollection, ...).
+model JournalEntry {
+  id           String        @id @default(cuid())
+  entryNumber  String        @unique // "JE-000001"
+  companyId    String
+  company      Company       @relation(fields: [companyId], references: [id])
+  entryDate    DateTime
+  sourceModule String // PROCUREMENT | INVENTORY | SALES | COLLECTIONS | MANUAL
+  sourceType   String? // "Grn" | "SupplierInvoice" | "SupplierPayment" | "DailyCollection"
+  sourceId     String?
+  description  String?
+  status       String        @default("POSTED") // POSTED | REVERSED
+  createdById  String
+  reversalOfId String?       @unique
+  reversalOf   JournalEntry? @relation("JournalReversal", fields: [reversalOfId], references: [id])
+  reversedBy   JournalEntry? @relation("JournalReversal")
+  reversedById String?
+  reversedAt   DateTime?
+  createdAt    DateTime      @default(now())
+
+  lines JournalLine[]
+
+  @@index([companyId, entryDate])
+  @@index([sourceType, sourceId])
+}
+
+/// One debit or credit line of a JournalEntry. App-layer invariant (like
+/// StockLevel's "never both" comment): exactly one of debit/credit is > 0 per
+/// line; the entry-level invariant sum(debit)==sum(credit) is enforced by
+/// postJournalEntry(), not by the schema. outletId is an optional reporting
+/// dimension (branch/cost-centre), not a scoping field.
+model JournalLine {
+  id             String       @id @default(cuid())
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        Account      @relation(fields: [accountId], references: [id])
+  outletId       String?
+  debit          Float        @default(0)
+  credit         Float        @default(0)
+  description    String?
+
+  @@index([journalEntryId])
+  @@index([accountId])
+}
+
+/// Configuration-driven mapping of a business event to a GL account —
+/// identical scope/scopeId shape to CollectionModeConfig, resolved narrowest
+/// wins (OUTLET > COMPANY > GLOBAL) in lib/finance-mapping.ts, falling back
+/// to the company's seeded system account for that key if unconfigured — so
+/// an unconfigured company still posts correctly on day one. key examples:
+/// INVENTORY_ASSET | AP_ACCRUAL | AP_CONTROL | SALES_REVENUE | VAT_INPUT |
+/// VAT_OUTPUT | ROUNDING.
+model FinanceAccountMapping {
+  id        String   @id @default(cuid())
+  scope     String // GLOBAL | COMPANY | OUTLET
+  scopeId   String? // null only for GLOBAL; else a Company.id or Outlet.id
+  key       String
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, scopeId, key])
+}
+
+/// A supplier's formal invoice, raised against a received Grn. Creating one
+/// reverses the GRN's provisional accrual (Dr AP Accrual / Cr AP Control,
+/// posting any cost variance to the Rounding/Variance account) — see
+/// lib/finance.ts createSupplierInvoice().
+model SupplierInvoice {
+  id                 String    @id @default(cuid())
+  invoiceNumber      String    @unique // "INV-000001", internal
+  supplierId         String
+  supplier           Supplier  @relation(fields: [supplierId], references: [id])
+  companyId          String
+  company            Company   @relation(fields: [companyId], references: [id])
+  grnId              String?
+  grn                Grn?      @relation(fields: [grnId], references: [id])
+  supplierInvoiceRef String? // the supplier's own invoice number
+  invoiceDate        DateTime
+  dueDate            DateTime?
+  subtotal           Float
+  vatAmount          Float     @default(0)
+  total              Float
+  amountPaid         Float     @default(0)
+  status             String    @default("OPEN") // OPEN | PARTIALLY_PAID | PAID | CANCELLED
+  createdById        String
+  journalEntryId     String?
+  createdAt          DateTime  @default(now())
+
+  allocations SupplierPaymentAllocation[]
+
+  @@index([supplierId, status])
+  @@index([companyId])
+}
+
+/// A payment run to a supplier — may cover one or many open invoices
+/// (SupplierPaymentAllocation), including partial amounts. Posts
+/// Dr AP Control / Cr Cash-Bank (via paymentChannel's mapped GL account).
+model SupplierPayment {
+  id               String         @id @default(cuid())
+  paymentNumber    String         @unique // "PAY-000001"
+  supplierId       String
+  supplier         Supplier       @relation(fields: [supplierId], references: [id])
+  companyId        String
+  company          Company        @relation(fields: [companyId], references: [id])
+  paymentChannelId String
+  paymentChannel   PaymentChannel @relation(fields: [paymentChannelId], references: [id])
+  amount           Float
+  paymentDate      DateTime       @default(now())
+  reference        String?
+  note             String?
+  createdById      String
+  journalEntryId   String?
+  createdAt        DateTime       @default(now())
+
+  allocations SupplierPaymentAllocation[]
+
+  @@index([supplierId])
+  @@index([companyId])
+}
+
+/// Splits one SupplierPayment across one or more SupplierInvoices (and one
+/// invoice can be paid across several payments) — the many-to-many needed for
+/// "partial payments / multiple payments" in the spec.
+model SupplierPaymentAllocation {
+  id                String          @id @default(cuid())
+  paymentId         String
+  payment           SupplierPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  supplierInvoiceId String
+  supplierInvoice   SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id])
+  amount            Float
+
+  @@index([paymentId])
+  @@index([supplierInvoiceId])
+}
+
+// ─── Finance Platform (Stage 2 — Accounts Receivable) ──────────────────────
+// AR deliberately does NOT introduce a new "CustomerInvoice" model — SignedBill
+// already IS the customer/credit invoice (see SignedBill above) and PaidBill
+// already IS the receipt. Stage 2 only adds GL posting (lib/finance-ar.ts)
+// on top of that existing data, plus this one new model for write-offs,
+// which SignedBill/PaidBill have no room to express (a write-off is neither
+// a bill nor a cash receipt).
+
+/// Bad-debt write-off of a SignedBill's remaining (unpaid) balance. Posts
+/// Dr Bad Debt Expense / Cr Accounts Receivable — see lib/finance-ar.ts
+/// writeOffSignedBill(). Multiple partial write-offs against one bill are
+/// allowed (e.g. a partial recovery followed by writing off the rest).
+model SignedBillWriteOff {
+  id             String     @id @default(cuid())
+  signedBillId   String
+  signedBill     SignedBill @relation(fields: [signedBillId], references: [id])
+  amount         Float
+  reason         String?
+  createdById    String
+  journalEntryId String?
+  createdAt      DateTime   @default(now())
+
+  @@index([signedBillId])
+}
+
+// ─── Finance Platform (Stage 3 — Banking & Cash Management) ────────────────
+// A PaymentChannel (Stage 1) is a payment TYPE ("Bank Transfer", "M-Pesa") —
+// a business only needs one glAccountId per channel if it has a single bank
+// account. CompanyPaymentAccount is the actual account INSTANCE under that
+// type: unlimited accounts, multiple accounts in the same bank, multiple
+// currencies, optional branch (outlet) assignment, one designated default
+// per (company, channel[, outlet]) scope. Each account gets its own GL
+// Account (via glAccountId) so its running balance is just that GL account's
+// ledger balance — no separate balance column to keep in sync.
+//   CompanyPaymentAccount.currency: ISO 4217 code, e.g. "TZS" | "USD"
+//   BankTransaction.type: TRANSFER | DEPOSIT | WITHDRAWAL | BANK_CHARGE | INTEREST
+
+/// One real bank/mobile-money/cash account a company holds, under a
+/// PaymentChannel "type". outletId scopes it to one branch (e.g. a
+/// branch-specific till); null means company-wide / any branch can use it.
+/// isDefault marks the account a channel resolves to when nothing more
+/// specific is configured — see lib/finance-mapping.ts
+/// resolveChannelAccountId() and lib/finance-banking.ts
+/// resolveDefaultCompanyAccountId().
+model CompanyPaymentAccount {
+  id               String         @id @default(cuid())
+  companyId        String
+  company          Company        @relation(fields: [companyId], references: [id])
+  paymentChannelId String
+  paymentChannel   PaymentChannel @relation(fields: [paymentChannelId], references: [id])
+  outletId         String?
+  outlet           Outlet?        @relation(fields: [outletId], references: [id])
+  bankName         String?
+  accountName      String
+  accountNumber    String?
+  currency         String         @default("TZS")
+  glAccountId      String         @unique
+  glAccount        Account        @relation(fields: [glAccountId], references: [id])
+  isDefault        Boolean        @default(false)
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  transfersOut    BankTransaction[]       @relation("BankTxnFrom")
+  transfersIn     BankTransaction[]       @relation("BankTxnTo")
+  reconciliations AccountReconciliation[]
+
+  @@index([companyId, paymentChannelId])
+  @@index([outletId])
+}
+
+/// A manual cash-management movement between/against Company Payment
+/// Accounts — see lib/finance-banking.ts postBankTransaction() for the
+/// Dr/Cr rule per type:
+///   TRANSFER      Dr toAccount / Cr fromAccount (both required)
+///   DEPOSIT       Dr toAccount (bank) / Cr fromAccount (e.g. Cash) — moving
+///                 physical cash into the bank
+///   WITHDRAWAL    Dr toAccount (e.g. Cash) / Cr fromAccount (bank)
+///   BANK_CHARGE   Dr Bank Charges Expense / Cr fromAccount
+///   INTEREST      Dr toAccount / Cr Interest Income
+model BankTransaction {
+  id              String                 @id @default(cuid())
+  companyId       String
+  company         Company                @relation(fields: [companyId], references: [id])
+  type            String
+  fromAccountId   String?
+  fromAccount     CompanyPaymentAccount? @relation("BankTxnFrom", fields: [fromAccountId], references: [id])
+  toAccountId     String?
+  toAccount       CompanyPaymentAccount? @relation("BankTxnTo", fields: [toAccountId], references: [id])
+  amount          Float
+  transactionDate DateTime               @default(now())
+  reference       String?
+  note            String?
+  createdById     String
+  journalEntryId  String?
+  createdAt       DateTime               @default(now())
+
+  @@index([companyId, transactionDate])
+}
+
+// ─── Finance Platform (Stage 4 — Budgeting & Forecasting) ──────────────────
+// A budget targets one GL Account over one period, at a scope of company,
+// optionally narrowed to an outlet (branch). department/eventId are stored
+// as organizational tags on the budget itself — useful for grouping/
+// filtering budgets in the UI — but the "Actual" figure (lib/finance-budget.ts
+// computeActual()) is always computed from account + outlet + date range,
+// the only dimensions JournalLine actually carries; it is NOT further split
+// by department/event, since no posting site in this app tags journal lines
+// with either today. Two departments budgeting the same account/outlet/
+// period will therefore see the same Actual number — an honest limitation,
+// not a bug, until journal lines carry those tags too.
+//   Budget.periodType: DAILY | WEEKLY | MONTHLY | QUARTERLY | ANNUAL
+model Budget {
+  id           String      @id @default(cuid())
+  companyId    String
+  company      Company     @relation(fields: [companyId], references: [id])
+  outletId     String?
+  outlet       Outlet?     @relation(fields: [outletId], references: [id])
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  eventId      String?
+  event        Event?      @relation(fields: [eventId], references: [id])
+  accountId    String
+  account      Account     @relation(fields: [accountId], references: [id])
+  periodType   String      @default("MONTHLY")
+  periodStart  DateTime
+  periodEnd    DateTime
+  amount       Float
+  note         String?
+  createdById  String
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([companyId, accountId, periodStart, periodEnd])
+  @@index([outletId])
+}
+
+// ─── Finance Platform (Stage 5 — Reconciliation) ───────────────────────────
+// GL-based reconciliation of a Company Payment Account (Stage 3) against an
+// external bank/mobile-money statement — distinct from the pre-existing,
+// pre-Finance-Platform CashRecon/BankRecon models, which reconcile a daily
+// cash drawer and Daily Collection digital-channel totals respectively and
+// are NOT GL-based. This is the "does our ledger match the bank statement"
+// reconciliation the spec asks for; Supplier/Customer "reconciliation" is
+// already covered by the AP/AR aging + Payment Story views built in Stages
+// 1-2 (every invoice/bill's full payment history is already visible there),
+// so no separate model was added for those.
+//   AccountReconciliation.status: DRAFT | PENDING_APPROVAL | APPROVED
+//   ReconciliationItem.source: SYSTEM | STATEMENT
+//   ReconciliationItem.matchStatus: MATCHED | UNMATCHED | MISSING | DUPLICATE
+
+/// One reconciliation run for one Company Payment Account over one period.
+/// glBalance is a snapshot (the account's GL balance at creation time, via
+/// lib/finance-banking.ts companyAccountBalance) — frozen so a later
+/// transaction back-dated into this period doesn't silently change a
+/// reconciliation that's already been approved. Approval is a separate
+/// step from submission (lib/finance-reconciliation.ts), matching this
+/// app's existing "entry role vs. verifier role" separation of duties
+/// convention (see lib/cash-verify.ts canVerifyCash()).
+model AccountReconciliation {
+  id                      String                @id @default(cuid())
+  companyPaymentAccountId String
+  companyPaymentAccount   CompanyPaymentAccount @relation(fields: [companyPaymentAccountId], references: [id])
+  periodStart             DateTime
+  periodEnd               DateTime
+  statementBalance        Float
+  glBalance               Float
+  status                  String                @default("DRAFT")
+  createdById             String
+  submittedById           String?
+  submittedAt             DateTime?
+  approvedById            String?
+  approvedAt              DateTime?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+
+  items ReconciliationItem[]
+
+  @@index([companyPaymentAccountId, periodStart])
+}
+
+/// One line on one side of a reconciliation — either a SYSTEM line (a real
+/// JournalLine on the account, snapshotted at match time via
+/// sourceJournalLineId) or a STATEMENT line (typed in by the user from the
+/// bank/mobile-money statement). matchGroupId links a matched pair (or
+/// group, for a split) together; null means still unresolved. amount is
+/// signed the same way the statement itself would show it: positive =
+/// money in, negative = money out.
+model ReconciliationItem {
+  id                  String                @id @default(cuid())
+  reconciliationId    String
+  reconciliation      AccountReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Cascade)
+  source              String
+  transactionDate     DateTime
+  description         String?
+  amount              Float
+  matchStatus         String                @default("UNMATCHED")
+  matchGroupId        String?
+  sourceJournalLineId String?
+  createdAt           DateTime              @default(now())
+
+  @@index([reconciliationId, matchStatus])
 }

@@ -7,7 +7,7 @@ import { useApi } from '@/hooks/useApi'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
-  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, type LucideIcon,
+  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, BookOpen, Landmark, type LucideIcon,
 } from 'lucide-react'
 
 // A tab with modeGate is hidden for the roles listed in `forRoles` unless the
@@ -81,6 +81,14 @@ export const FINANCE_TABS: Tab[] = [
   { href: '/payroll', label: 'Payroll Deductions', icon: Receipt, roles: MGMT },
   { href: '/reports', label: 'Reports', icon: FileBarChart, roles: MGMT },
   { href: '/audit', label: 'Audit Log', icon: ShieldCheck, roles: MGMT },
+  { href: '/finance/accounts', label: 'Chart of Accounts', icon: BookOpen, roles: MGMT },
+  { href: '/finance/payables', label: 'Accounts Payable', icon: HandCoins, roles: MGMT },
+  { href: '/finance/ledger', label: 'General Ledger', icon: Landmark, roles: MGMT },
+  { href: '/finance/banking', label: 'Banking', icon: CreditCard, roles: MGMT },
+  { href: '/finance/budgets', label: 'Budgets', icon: ClipboardList, roles: MGMT },
+  { href: '/finance/reconciliation', label: 'Reconciliation', icon: ListChecks, roles: MGMT },
+  { href: '/finance/statements', label: 'Financial Statements', icon: FileBarChart, roles: MGMT },
+  { href: '/finance/dashboard', label: 'Finance Dashboard', icon: LayoutDashboard, roles: MGMT },
 ]
 
 /** Horizontal tab bar shown at the top of a section's pages. */

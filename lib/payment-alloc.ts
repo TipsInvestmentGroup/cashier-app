@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { CATEGORY_TO_BILLTYPE } from '@/lib/categories'
 import { roundMoney } from '@/lib/utils'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
+import { postReceipt } from '@/lib/finance-ar'
 
 // Accepts a PrismaClient or an interactive-transaction client.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,7 +64,7 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
     const ref = await generateBillReference(db, {
       recordId, sourceModel: 'PaidBill', billTypeCode, date: a.date, personId: a.personId || null, outletId: a.outletId,
     })
-    await db.paidBill.create({
+    const createdPaidBill = await db.paidBill.create({
       data: {
         id: recordId,
         signedBillId: b.id, personId: a.personId || null, payerCategory: a.category || null, payerName: a.payerName,
@@ -72,6 +73,10 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
         internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
       },
     })
+    // Finance Platform (Stage 2): Dr Cash/Bank / Cr Accounts Receivable — a
+    // no-op if the linked SignedBill's credit sale was never itself posted
+    // (e.g. STAFF_LOSS, or a request bill still pending approval).
+    await postReceipt(db, createdPaidBill, a.cashierId)
     const tot = (agg._sum.amountPaid || 0) + pay
     await db.signedBill.update({ where: { id: b.id }, data: { status: tot >= b.amount ? 'PAID' : tot > 0 ? 'PARTIAL' : 'UNPAID' } })
     allocations.push({ billId: b.id, amount: pay })
