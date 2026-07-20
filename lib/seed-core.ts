@@ -2,6 +2,49 @@ import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
 import { seedStandardCollectionTemplate } from './collection-template-seed'
+import { RECONCILIATION_STAGE_RESOURCES as RSR, WRITE_OFF_RESOURCES as WOR } from './rbac'
+
+// Sensible role defaults for the Reconciliation Workflow Engine + Write-Off
+// resources. Each entry lists the roles GRANTED that resource; every other
+// role resolves to deny (no row). Seeded create-only-if-absent so it never
+// overrides a choice the owner later makes in Reconciliation Settings.
+// Write-off APPROVE is kept above the requesters (DIRECTOR/ADMIN only) to
+// preserve separation of duties. See docs/reconciliation-workflow-engine-design.md §7/§12.4.
+const RECON_ROLE_DEFAULTS: Record<string, string[]> = {
+  [RSR.VIEW_RECONCILIATION_STAGES]: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'],
+  [RSR.CLOSE_CASHIER_RECON]: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN'],
+  [RSR.CLOSE_FINANCE_RECON]: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'],
+  [RSR.CLOSE_FINANCIAL_CLOSE]: ['DIRECTOR', 'ADMIN'],
+  [RSR.UNLOCK_RECONCILIATION_STAGE]: ['MANAGER', 'DIRECTOR', 'ADMIN'],
+  [RSR.APPROVE_RECONCILIATION_UNLOCK]: ['MANAGER', 'DIRECTOR', 'ADMIN'],
+  [RSR.MANAGE_RECONCILIATION_CONFIG]: ['DIRECTOR', 'ADMIN'],
+  [RSR.VERIFY_PAYMENT]: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN'],
+  [RSR.VIEW_RECONCILIATION_AUDIT_LOG]: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'],
+  [WOR.REQUEST_WRITE_OFF]: ['CASHIER', 'ACCOUNTANT', 'MANAGER'],
+  [WOR.APPROVE_WRITE_OFF]: ['DIRECTOR', 'ADMIN'],
+  [WOR.VIEW_WRITE_OFFS]: ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'],
+}
+
+/**
+ * Seeds default role grants for the reconciliation/write-off resources,
+ * create-only-if-absent so re-running never clobbers the owner's later
+ * customizations in Reconciliation Settings. Only writes `allowed: true`
+ * rows for granted roles; denied roles simply have no row (resolves to deny).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function seedReconciliationRoleDefaults(prisma: any): Promise<number> {
+  let created = 0
+  for (const [resource, roles] of Object.entries(RECON_ROLE_DEFAULTS)) {
+    for (const role of roles) {
+      const existing = await prisma.rolePermission.findUnique({ where: { role_resource: { role, resource } } })
+      if (!existing) {
+        await prisma.rolePermission.create({ data: { role, resource, allowed: true } })
+        created++
+      }
+    }
+  }
+  return created
+}
 
 interface SeedPerson { name: string; phone: string | null; type: string; creditLimit: number }
 interface RosterEntry { name: string; position: 'OUTSIDE STAFF' | 'BAR LADY' | 'VIP BAR' | 'SHISHA COUNTER' | 'KITCHEN COUNTER'; outlet: string }
@@ -127,5 +170,7 @@ export async function seedCore(prisma: any) {
     }
   }
 
-  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing }
+  const reconRoleDefaults = await seedReconciliationRoleDefaults(prisma)
+
+  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults }
 }
