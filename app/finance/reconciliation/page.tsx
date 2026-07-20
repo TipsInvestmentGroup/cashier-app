@@ -7,6 +7,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 interface CompanyAccount { id: string; accountName: string }
@@ -33,6 +34,8 @@ export default function ReconciliationPage() {
   const [periodEnd, setPeriodEnd] = useState('')
   const [statementBalance, setStatementBalance] = useState('')
   const [lines, setLines] = useState<{ date: string; description: string; amount: string }[]>([{ date: '', description: '', amount: '' }])
+  const [fileName, setFileName] = useState('')
+  const [parsing, setParsing] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -50,6 +53,70 @@ export default function ReconciliationPage() {
   const updateLine = (i: number, field: 'date' | 'description' | 'amount', value: string) =>
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, [field]: value } : l)))
   const removeLine = (i: number) => setLines((prev) => prev.filter((_, idx) => idx !== i))
+
+  /** Bank/mobile-money statement import — same client-side xlsx parsing
+   *  convention as components/SystemSalesUploadModal.tsx and
+   *  components/UploadSalesModal.tsx: read entirely in the browser, never
+   *  send the raw file to the server, and only populate the (already
+   *  editable) statement lines below — nothing is submitted until the user
+   *  reviews them and clicks "Create & Match", same as every other import
+   *  in this app. Accepts either a single Amount column (+ = in, − = out)
+   *  or separate Debit/Credit columns (amount = credit − debit). */
+  const onFile = async (file: File) => {
+    setParsing(true); setFileName(file.name)
+    try {
+      const XLSX = await import('xlsx')
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const aoa: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+
+      const DATE_KEYS = ['date']
+      const DESC_KEYS = ['description', 'narrative', 'details', 'particulars', 'memo']
+      const AMOUNT_KEYS = ['amount', 'value']
+      const DEBIT_KEYS = ['debit', 'withdrawal', 'money out', 'paid out']
+      const CREDIT_KEYS = ['credit', 'deposit', 'money in', 'paid in']
+      const row = (i: number) => (aoa[i] || []).map((c) => String(c).toLowerCase().trim())
+
+      let hi = -1
+      for (let i = 0; i < Math.min(aoa.length, 8); i++) {
+        const r = row(i)
+        const hasDate = r.some((h) => DATE_KEYS.some((k) => h.includes(k)))
+        const hasAmount = r.some((h) => AMOUNT_KEYS.some((k) => h.includes(k))) || r.some((h) => DEBIT_KEYS.some((k) => h.includes(k))) || r.some((h) => CREDIT_KEYS.some((k) => h.includes(k)))
+        if (hasDate && hasAmount) { hi = i; break }
+      }
+      if (hi < 0) { toast.error('Could not find a header row with a Date column and an Amount (or Debit/Credit) column.'); setFileName(''); return }
+
+      const headers = row(hi)
+      const di = headers.findIndex((h) => DATE_KEYS.some((k) => h.includes(k)))
+      const desci = headers.findIndex((h) => DESC_KEYS.some((k) => h.includes(k)))
+      const ai = headers.findIndex((h) => AMOUNT_KEYS.some((k) => h.includes(k)))
+      const debiti = headers.findIndex((h) => DEBIT_KEYS.some((k) => h.includes(k)))
+      const crediti = headers.findIndex((h) => CREDIT_KEYS.some((k) => h.includes(k)))
+      if (di < 0 || (ai < 0 && debiti < 0 && crediti < 0)) { toast.error('Could not find the Date and Amount/Debit/Credit columns.'); setFileName(''); return }
+
+      const parseNum = (v: unknown) => Number(String(v ?? '').replace(/[, ]/g, '')) || 0
+      const parseDate = (v: unknown) => {
+        if (v instanceof Date) return v
+        const d = new Date(String(v))
+        return Number.isNaN(d.getTime()) ? null : d
+      }
+
+      const parsed: { date: string; description: string; amount: string }[] = []
+      for (const r of aoa.slice(hi + 1)) {
+        const date = parseDate(r[di])
+        if (!date) continue
+        const amount = ai >= 0 ? parseNum(r[ai]) : parseNum(r[crediti]) - parseNum(r[debiti])
+        if (!amount) continue
+        parsed.push({ date: date.toISOString().slice(0, 10), description: desci >= 0 ? String(r[desci] ?? '') : '', amount: String(amount) })
+      }
+      if (!parsed.length) { toast.error('No valid rows found (need a date and a non-zero amount).'); setFileName(''); return }
+      setLines(parsed)
+      toast.success(`Parsed ${parsed.length} statement lines`)
+    } catch {
+      toast.error('Could not read the file. Use .xlsx or .csv.'); setFileName('')
+    } finally { setParsing(false) }
+  }
 
   const createReconciliation = async () => {
     if (!accountId || !periodStart || !periodEnd || !statementBalance) return toast.error('Account, period, and the statement closing balance are required')
@@ -108,7 +175,14 @@ export default function ReconciliationPage() {
             <input type="number" value={statementBalance} onChange={(e) => setStatementBalance(e.target.value)} placeholder="Statement closing balance"
               className="w-52 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
           </div>
-          <p className="text-xs text-gray-400 mb-2">Statement lines (from the bank/mobile-money statement):</p>
+          <label className="flex items-center gap-3 border-2 border-dashed border-gray-200 rounded-xl p-4 mb-3 cursor-pointer hover:border-indigo-300 transition">
+            <FileSpreadsheet className="w-6 h-6 text-gray-400 shrink-0" />
+            <span className="text-sm text-gray-600 font-medium flex-1">{fileName || 'Import a statement file (.xlsx or .csv) — needs a Date column and an Amount (or Debit/Credit) column'}</span>
+            {parsing && <span className="text-xs text-gray-400">Reading…</span>}
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
+          </label>
+          <p className="text-xs text-gray-400 mb-2">Statement lines — imported rows land here too, still editable before you match:</p>
           <div className="space-y-2 mb-3">
             {lines.map((l, i) => (
               <div key={i} className="flex gap-2">
