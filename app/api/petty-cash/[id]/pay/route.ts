@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canDisbursePetty } from '@/lib/petty-access'
 import { roundMoney } from '@/lib/utils'
+import { postJournalEntry } from '@/lib/ledger'
+import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 
 // New petty-cash models/fields aren't in the stale local Prisma client yet.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,6 +69,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           fundId, type: 'PAYMENT', amount: -amount, pettyCashId: id,
           note: `Payment: ${existing.purpose}`, createdById: user.userId, createdByName: user.name,
         },
+      })
+    }
+
+    // GL: recognize the expense and the cash/bank outflow when the money is
+    // actually disbursed — Dr Petty Cash Expense / Cr <payment-method account>
+    // (D17). Petty cash previously never touched the ledger. Cash-in-Hand is
+    // computed from the PettyCash table (approved), not the GL, so this does
+    // not double-count there.
+    const outlet = existing.outletId ? await tx.outlet.findUnique({ where: { id: existing.outletId }, select: { companyId: true } }) : null
+    const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
+    if (companyId) {
+      const expenseAccountId = await resolveAccountId(tx, { companyId, key: 'PETTY_CASH_EXPENSE' })
+      const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: method, outletId: existing.outletId || undefined })
+      await postJournalEntry(tx, {
+        companyId, entryDate: paidAt, sourceModule: 'MANUAL', sourceType: 'PettyCash', sourceId: id,
+        description: `Petty cash payout — ${existing.purpose}`, createdById: user.userId,
+        lines: [
+          { accountId: expenseAccountId, debit: amount, outletId: existing.outletId || undefined },
+          { accountId: cashAccountId, credit: amount, outletId: existing.outletId || undefined },
+        ],
       })
     }
     return pc

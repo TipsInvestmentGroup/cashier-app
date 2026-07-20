@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canRequestPetty } from '@/lib/petty-access'
 import { roundMoney } from '@/lib/utils'
+import { postJournalEntry } from '@/lib/ledger'
+import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -46,31 +48,55 @@ export async function POST(req: NextRequest) {
   // record (paymentStatus=PAID) stamps the payer immediately.
   const isPaid = String(paymentStatus || 'UNPAID').toUpperCase() === 'PAID'
 
-  const item = await prisma.pettyCash.create({
-    data: {
-      date: date ? new Date(date) : new Date(),
-      requestedBy,
-      department: department || null,
-      functionName: functionName || null,
-      purpose,
-      amount: grandTotal,
-      paymentMethod: method,
-      payeeName: payeeName || null,
-      payeeAccount: payeeAccount || null,
-      paymentStatus: isPaid ? 'PAID' : 'UNPAID',
-      pettyType: type,
-      approvedBy: approvedBy || null,
-      status: approvedBy ? 'APPROVED' : 'PENDING',
-      outletId: outletId || user.outletId || null,
-      cashierId: user.userId,
-      ...(isPaid ? { paidAt: new Date(), paidById: user.userId, paidByName: user.name } : {}),
-      ...(lineItems.length ? { items: { create: lineItems } } : {}),
-    },
-    include: { items: true },
-  })
+  const outletIdVal = outletId || user.outletId || null
 
-  await prisma.auditLog.create({
-    data: { userId: user.userId, action: 'CREATE', entity: 'PettyCash', entityId: item.id, details: `Petty cash ${grandTotal} for ${purpose}${lineItems.length ? ` (${lineItems.length} items)` : ''}` },
+  const item = await prisma.$transaction(async (tx) => {
+    const created = await tx.pettyCash.create({
+      data: {
+        date: date ? new Date(date) : new Date(),
+        requestedBy,
+        department: department || null,
+        functionName: functionName || null,
+        purpose,
+        amount: grandTotal,
+        paymentMethod: method,
+        payeeName: payeeName || null,
+        payeeAccount: payeeAccount || null,
+        paymentStatus: isPaid ? 'PAID' : 'UNPAID',
+        pettyType: type,
+        approvedBy: approvedBy || null,
+        status: approvedBy ? 'APPROVED' : 'PENDING',
+        outletId: outletIdVal,
+        cashierId: user.userId,
+        ...(isPaid ? { paidAt: new Date(), paidById: user.userId, paidByName: user.name } : {}),
+        ...(lineItems.length ? { items: { create: lineItems } } : {}),
+      },
+      include: { items: true },
+    })
+
+    await tx.auditLog.create({
+      data: { userId: user.userId, action: 'CREATE', entity: 'PettyCash', entityId: created.id, details: `Petty cash ${grandTotal} for ${purpose}${lineItems.length ? ` (${lineItems.length} items)` : ''}` },
+    })
+
+    // A record created already-paid disburses immediately — post the same
+    // Dr Petty Cash Expense / Cr <method account> entry as the pay route (D17).
+    if (isPaid) {
+      const outlet = outletIdVal ? await tx.outlet.findUnique({ where: { id: outletIdVal }, select: { companyId: true } }) : null
+      const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
+      if (companyId) {
+        const expenseAccountId = await resolveAccountId(tx, { companyId, key: 'PETTY_CASH_EXPENSE' })
+        const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: method, outletId: outletIdVal || undefined })
+        await postJournalEntry(tx, {
+          companyId, entryDate: created.date, sourceModule: 'MANUAL', sourceType: 'PettyCash', sourceId: created.id,
+          description: `Petty cash payout — ${purpose}`, createdById: user.userId,
+          lines: [
+            { accountId: expenseAccountId, debit: grandTotal, outletId: outletIdVal || undefined },
+            { accountId: cashAccountId, credit: grandTotal, outletId: outletIdVal || undefined },
+          ],
+        })
+      }
+    }
+    return created
   })
 
   return NextResponse.json(item, { status: 201 })
