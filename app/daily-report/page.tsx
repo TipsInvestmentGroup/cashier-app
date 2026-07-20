@@ -19,6 +19,7 @@ interface ReportData {
   paid: { byMethod: { code: string; label: string; amount: number }[]; rows: { name: string; category: string; method: string; amount: number }[]; total: number; cash: number }
   cancellations: { rows: { product: string; staff: string; qty: number; amount: number; reason: string }[]; total: number }
   pettyCash: { rows: { purpose: string; by: string; dept: string; method: string; amount: number; status: string }[]; total: number; approved: number }
+  settlementsPaidFromTill?: number
   cashInHand: number
 }
 
@@ -125,7 +126,10 @@ export default function DailyReportPage() {
     autoTable(doc, {
       ...base, startY: afterY(),
       head: [['SUMMARY', 'TZS']],
-      body: [['Approved Petty Cash Paid Out', n(d.pettyCash.approved)]],
+      body: [
+        ['Approved Petty Cash Paid Out', n(d.pettyCash.approved)],
+        ...(d.settlementsPaidFromTill ? [['Cash Settlements Paid From Till', n(d.settlementsPaidFromTill)]] : []),
+      ],
       foot: [['CASH IN HAND', n(d.cashInHand)]], footStyles: foot([79, 70, 229], true),
     })
     doc.setFontSize(8); doc.setTextColor(150)
@@ -315,11 +319,19 @@ export default function DailyReportPage() {
               )}
             </Section>
 
+            {/* Settlements paid from the till (separate from operational collections) */}
+            {!!data.settlementsPaidFromTill && data.settlementsPaidFromTill !== 0 && (
+              <Section title="6 · SETTLEMENTS PAID FROM TILL">
+                <Row label="Excess/reconciliation payouts (cash)" value={money(data.settlementsPaidFromTill)} bold accent />
+                <p className="text-xs text-gray-400 mt-1">Cash paid out to settle payable over-collections — reduces cash in hand, not an operational expense.</p>
+              </Section>
+            )}
+
             {/* Cash in hand */}
             <div className="mt-6 rounded-xl bg-indigo-50 border-2 border-indigo-200 p-4 flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-indigo-900">Cash in Hand</p>
-                <p className="text-xs text-indigo-500">Cash collected + cash debts − approved petty cash</p>
+                <p className="text-xs text-indigo-500">Cash collected + cash debts − approved petty cash{data.settlementsPaidFromTill ? ' − cash settlements paid' : ''}</p>
               </div>
               <p className="text-2xl font-extrabold text-indigo-700">{money(data.cashInHand)}</p>
             </div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { resolveAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { BILL_TYPE_CODES } from '@/lib/bill-types'
 import { channelAmountsFor } from '@/lib/collection-channels-shared'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
@@ -95,8 +96,33 @@ export async function GET(req: NextRequest) {
   const pettyTotal = roundMoney(pettyCash.reduce((s, p) => s + p.amount, 0))
   const pettyApproved = roundMoney(pettyCash.filter((p) => p.status === 'APPROVED').reduce((s, p) => s + p.amount, 0))
 
-  // --- Cash in hand = cash collected + cash debts collected − approved petty cash paid out ---
-  const cashInHand = roundMoney(collection.cash + paidCash - pettyApproved)
+  // --- Settlements paid out of the till (cash) ---
+  // Cash physically leaves the drawer when a payable over-collection is paid
+  // out, but that isn't an operational collection or petty cash. Derived
+  // precisely from the GL: the Cash-account credits posted by excess
+  // settlements (Dr Excess-Payable / Cr Cash), net of any unsettle reversals
+  // (Dr Cash), on this day for this outlet. Falls back to 0 for a company with
+  // no such postings, so nothing changes for outlets that don't use this.
+  let settlementsPaidFromTill = 0
+  const companyId = outletId
+    ? (await prisma.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } }))?.companyId
+    : await resolveDefaultCompanyId(prisma)
+  if (companyId) {
+    const cashAccountId = await resolveAccountId(prisma, { companyId, key: 'CASH' })
+    const cashLines = await prisma.journalLine.findMany({
+      where: {
+        accountId: cashAccountId,
+        ...(outletId ? { outletId } : {}),
+        journalEntry: { sourceType: { in: ['ExcessSettlement', 'ExcessSettlementReversal'] }, entryDate: range },
+      },
+      select: { debit: true, credit: true },
+    })
+    // credit = cash out (settlement), debit = cash back in (reversal)
+    settlementsPaidFromTill = roundMoney(cashLines.reduce((s, l) => s + (l.credit || 0) - (l.debit || 0), 0))
+  }
+
+  // --- Cash in hand = cash collected + cash debts collected − approved petty cash − cash settlements paid out ---
+  const cashInHand = roundMoney(collection.cash + paidCash - pettyApproved - settlementsPaidFromTill)
 
   const outletName = outletRec?.name || collections[0]?.outlet?.name || (outletId ? 'Outlet' : 'All Outlets')
 
@@ -113,6 +139,7 @@ export async function GET(req: NextRequest) {
     paid: { byMethod: paidByMethod, rows: paidRows, total: paidTotal, cash: paidCash },
     cancellations: { rows: cancelRows, total: cancelTotal },
     pettyCash: { rows: pettyRows, total: pettyTotal, approved: pettyApproved },
+    settlementsPaidFromTill,
     cashInHand,
   })
 }

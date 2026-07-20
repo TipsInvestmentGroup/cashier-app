@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { sendMail } from '@/lib/email'
 import { roundMoney } from '@/lib/utils'
+import { resolveAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { getCompanyConfig } from '@/lib/company-config'
 import { DEFAULT_COMPANY_CONFIG, formatAmountLabel } from '@/lib/company-config-shared'
 import { resolveEffectiveConfig, resolveBusinessDate } from '@/lib/business-calendar'
@@ -49,7 +50,27 @@ export async function sendDailySummary(opts: { date?: string | null; outletId?: 
   const paidCash = roundMoney(paid.filter((p) => (p.paymentMethod || '').toUpperCase() === 'CASH').reduce((s, p) => s + p.amountPaid, 0))
   const cancelTotal = roundMoney(cancellations.reduce((s, c) => s + (c.amount || 0), 0))
   const pettyApproved = roundMoney(petty.filter((p) => p.status === 'APPROVED').reduce((s, p) => s + p.amount, 0))
-  const cashInHand = roundMoney(col.cash + paidCash - pettyApproved)
+
+  // Cash paid out of the till to settle payable over-collections — derived
+  // from the GL (Cash-account credits from excess settlements, net of unsettle
+  // reversals), same basis as the daily-report route so the two agree.
+  let settlementsPaidFromTill = 0
+  const companyId = opts.outletId
+    ? (await prisma.outlet.findUnique({ where: { id: opts.outletId }, select: { companyId: true } }))?.companyId
+    : await resolveDefaultCompanyId(prisma)
+  if (companyId) {
+    const cashAccountId = await resolveAccountId(prisma, { companyId, key: 'CASH' })
+    const cashLines = await prisma.journalLine.findMany({
+      where: {
+        accountId: cashAccountId,
+        ...(opts.outletId ? { outletId: opts.outletId } : {}),
+        journalEntry: { sourceType: { in: ['ExcessSettlement', 'ExcessSettlementReversal'] }, entryDate: range },
+      },
+      select: { debit: true, credit: true },
+    })
+    settlementsPaidFromTill = roundMoney(cashLines.reduce((s, l) => s + (l.credit || 0) - (l.debit || 0), 0))
+  }
+  const cashInHand = roundMoney(col.cash + paidCash - pettyApproved - settlementsPaidFromTill)
 
   let recipients = opts.recipients
   if (!recipients || recipients.length === 0) {
@@ -84,6 +105,7 @@ export async function sendDailySummary(opts: { date?: string | null; outletId?: 
       ${row('✅ Paid Bills (recovered)', fmt(paidTotal))}
       ${row('🚫 Cancellations', fmt(cancelTotal))}
       ${row('💸 Petty Cash (approved)', fmt(pettyApproved))}
+      ${settlementsPaidFromTill ? row('💵 Settlements Paid From Till', fmt(settlementsPaidFromTill)) : ''}
     </table>
     <p style="color:#888;font-size:12px;margin-top:16px">Generated automatically by the Cashier Sales Management System.</p>
   </div>`
