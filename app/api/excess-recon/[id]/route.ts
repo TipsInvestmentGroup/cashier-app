@@ -6,6 +6,8 @@ import { hasPermission, RESOURCES } from '@/lib/rbac'
 import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
 import { classForReason } from '@/lib/reconciliation-classification'
 import { UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
+import { postJournalEntry } from '@/lib/ledger'
+import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
@@ -36,13 +38,39 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!(await hasPermission(user.email, user.userId, RESOURCES.EXCESS_RECON, 'unsettle'))) {
       return NextResponse.json({ error: 'You are not authorized to unsettle excess payments' }, { status: 403 })
     }
-    const updated = await model.update({ where: { id }, data: { paidAmount: 0, paidAt: null } })
-    await prisma.auditLog.create({
-      data: {
-        userId: user.userId, action: 'UPDATE',
-        entity: source === 'CASH_RECON' ? 'CashReconExcess' : 'CollectionExcess', entityId: id,
-        details: `Unsettled excess payment — reset paid ${existing.paidAmount} back to 0`,
-      },
+    // Reverse the settlement GL if one was posted (COLLECTION-source PAYABLE):
+    // re-establish the liability — Dr Cash / Cr Excess-Payable.
+    const reverseGl = source === 'COLLECTION' && existing.paidAmount > 0 && classForReason(existing.reason, existing.category) === 'PAYABLE'
+    const priorPaid = existing.paidAmount
+    const updated = await prisma.$transaction(async (tx) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const txModel = (source === 'CASH_RECON' ? tx.cashReconExcess : tx.collectionExcess) as any
+      const upd = await txModel.update({ where: { id }, data: { paidAmount: 0, paidAt: null } })
+      if (reverseGl) {
+        const coll = await tx.collectionExcess.findUnique({ where: { id }, include: { collection: { include: { outlet: true } } } })
+        const outletId = coll?.collection.outletId
+        const companyId = coll?.collection.outlet?.companyId || (await resolveDefaultCompanyId(tx))
+        if (companyId && outletId) {
+          const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: existing.channelCode || 'CASH', outletId })
+          const excessPayableAccountId = await resolveAccountId(tx, { companyId, key: 'EXCESS_PAYABLE' })
+          await postJournalEntry(tx, {
+            companyId, entryDate: new Date(), sourceModule: 'COLLECTIONS', sourceType: 'ExcessSettlementReversal', sourceId: id,
+            description: `Excess payout reversal — collection excess ${id}`, createdById: user.userId,
+            lines: [
+              { accountId: cashAccountId, debit: priorPaid, outletId },
+              { accountId: excessPayableAccountId, credit: priorPaid, outletId },
+            ],
+          })
+        }
+      }
+      await tx.auditLog.create({
+        data: {
+          userId: user.userId, action: 'UPDATE',
+          entity: source === 'CASH_RECON' ? 'CashReconExcess' : 'CollectionExcess', entityId: id,
+          details: `Unsettled excess payment — reset paid ${priorPaid} back to 0${reverseGl ? ' — posted Dr Cash / Cr Excess-Payable reversal' : ''}`,
+        },
+      })
+      return upd
     })
     return NextResponse.json({ ...updated, balance: roundMoney(updated.amount - updated.paidAmount) })
   }
@@ -65,14 +93,41 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const newPaid = roundMoney(existing.paidAmount + amount)
-  const updated = await model.update({ where: { id }, data: { paidAmount: newPaid, paidAt: new Date() } })
-
-  await prisma.auditLog.create({
-    data: {
-      userId: user.userId, action: 'UPDATE',
-      entity: source === 'CASH_RECON' ? 'CashReconExcess' : 'CollectionExcess', entityId: id,
-      details: `Excess payment ${amount} recorded (paid ${newPaid} of ${existing.amount})`,
-    },
+  // A COLLECTION-source PAYABLE over-collection accrued to Excess-Payable at
+  // collection time; paying it out now relieves that liability against cash:
+  //   Dr Excess-Payable  Cr Cash/channel.
+  // Cash-recon excess and non-PAYABLE rows keep their prior non-GL behavior
+  // (cash-recon excess is a different economic event — see D10, deferred).
+  const postGl = source === 'COLLECTION' && classForReason(existing.reason, existing.category) === 'PAYABLE'
+  const updated = await prisma.$transaction(async (tx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const txModel = (source === 'CASH_RECON' ? tx.cashReconExcess : tx.collectionExcess) as any
+    const upd = await txModel.update({ where: { id }, data: { paidAmount: newPaid, paidAt: new Date() } })
+    if (postGl) {
+      const coll = await tx.collectionExcess.findUnique({ where: { id }, include: { collection: { include: { outlet: true } } } })
+      const outletId = coll?.collection.outletId
+      const companyId = coll?.collection.outlet?.companyId || (await resolveDefaultCompanyId(tx))
+      if (companyId && outletId) {
+        const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: existing.channelCode || 'CASH', outletId })
+        const excessPayableAccountId = await resolveAccountId(tx, { companyId, key: 'EXCESS_PAYABLE' })
+        await postJournalEntry(tx, {
+          companyId, entryDate: new Date(), sourceModule: 'COLLECTIONS', sourceType: 'ExcessSettlement', sourceId: id,
+          description: `Excess payout — collection excess ${id}`, createdById: user.userId,
+          lines: [
+            { accountId: excessPayableAccountId, debit: amount, outletId },
+            { accountId: cashAccountId, credit: amount, outletId },
+          ],
+        })
+      }
+    }
+    await tx.auditLog.create({
+      data: {
+        userId: user.userId, action: 'UPDATE',
+        entity: source === 'CASH_RECON' ? 'CashReconExcess' : 'CollectionExcess', entityId: id,
+        details: `Excess payment ${amount} recorded (paid ${newPaid} of ${existing.amount})${postGl ? ' — posted Dr Excess-Payable / Cr Cash' : ''}`,
+      },
+    })
+    return upd
   })
 
   return NextResponse.json({ ...updated, balance: roundMoney(updated.amount - updated.paidAmount) })

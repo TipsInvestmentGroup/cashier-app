@@ -219,6 +219,14 @@ export async function POST(req: NextRequest) {
     const lossAmount = roundMoney((Number(systemSales) || 0) - total - signedTotal - paidStaffLoss - discount)
     let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
     let excess: { amount: number; items: number } | null = null
+    // Portion of an over-collection that belongs to a third party (kitchen
+    // transfer, customer overpayment — accountingClass PAYABLE). At collection
+    // this is credited to the Excess-Payable liability clearing instead of
+    // Sales Revenue, so revenue isn't overstated and the obligation is on the
+    // balance sheet until it's paid out (relieved in Excess Recon settlement).
+    // ADJUSTMENT-class overages (pass-through staff tips) stay in revenue —
+    // their cash-handling basis is handled separately.
+    let payableExcessForGl = 0
     // "The" payment channel this collection's money came in through, for
     // auto-inheriting onto any payable excess record (no re-entry needed).
     const primaryChannelCode = primaryChannelFromAmounts(Number(cash) || 0, channelAmounts)
@@ -274,6 +282,7 @@ export async function POST(req: NextRequest) {
           },
         })
         if (category === 'PAYABLE_EXCESS') payableItemCount++
+        if (classForReason(it.reason, category) === 'PAYABLE') payableExcessForGl = roundMoney(payableExcessForGl + it.amount)
       }
       if (payableItemCount > 0) excess = { amount: roundMoney(items.filter((it) => categories.get(it.reason) === 'PAYABLE_EXCESS').reduce((s, it) => s + it.amount, 0)), items: payableItemCount }
 
@@ -326,11 +335,23 @@ export async function POST(req: NextRequest) {
       for (const [accountId, amount] of accountTotals) debitLines.push({ accountId, debit: amount, outletId: usedOutletId })
 
       if (debitLines.length) {
+        // Split the credit: the third-party payable portion of an over-collection
+        // goes to the Excess-Payable liability, the rest to Sales Revenue.
+        // (debits already sum to `total`, so credits must too — they do:
+        //  revenueCredit + payableGl = total.)
+        const payableGl = roundMoney(Math.min(Math.max(0, payableExcessForGl), total))
+        const revenueCredit = roundMoney(total - payableGl)
         const salesRevenueAccountId = await resolveAccountId(tx, { companyId, key: 'SALES_REVENUE' })
+        const creditLines: { accountId: string; credit: number; outletId: string }[] = []
+        if (revenueCredit > 0) creditLines.push({ accountId: salesRevenueAccountId, credit: revenueCredit, outletId: usedOutletId })
+        if (payableGl > 0) {
+          const excessPayableAccountId = await resolveAccountId(tx, { companyId, key: 'EXCESS_PAYABLE' })
+          creditLines.push({ accountId: excessPayableAccountId, credit: payableGl, outletId: usedOutletId })
+        }
         await postJournalEntry(tx, {
           companyId, entryDate: collDate, sourceModule: 'COLLECTIONS', sourceType: 'DailyCollection', sourceId: collection.id,
           description: `Daily collection ${collection.id}`, createdById: user.userId,
-          lines: [...debitLines, { accountId: salesRevenueAccountId, credit: total, outletId: usedOutletId }],
+          lines: [...debitLines, ...creditLines],
         })
       }
     }

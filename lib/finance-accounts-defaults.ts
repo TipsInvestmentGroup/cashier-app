@@ -35,4 +35,13 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   // Reconciliation Workflow Engine — approved write-offs of reconciliation
   // discrepancies (cash shortages, unreconciled variances) post here.
   { code: '5930', name: 'Reconciliation Write-Off Expense', type: 'EXPENSE', mappingKey: 'WRITE_OFF_EXPENSE' },
+  // Excess/Reconciliation accounting redesign (Phase 3) — GL targets for
+  // settling reconciliation differences by accounting class:
+  //   PAYABLE excess (kitchen-sales transfer, customer overpayment) accrues to
+  //   a liability clearing account at collection and is relieved when paid out.
+  //   Petty-cash outflow and cash over/short finally get a GL home too.
+  { code: '2200', name: 'Excess Payable (Third-Party Collections Clearing)', type: 'LIABILITY', mappingKey: 'EXCESS_PAYABLE' },
+  { code: '2210', name: 'Customer Refunds Payable', type: 'LIABILITY', mappingKey: 'CUSTOMER_REFUND_PAYABLE' },
+  { code: '5940', name: 'Petty Cash Expense (unclassified)', type: 'EXPENSE', mappingKey: 'PETTY_CASH_EXPENSE' },
+  { code: '5950', name: 'Cash Over / Short', type: 'EXPENSE', mappingKey: 'CASH_OVER_SHORT' },
 ]
