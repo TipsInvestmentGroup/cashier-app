@@ -60,11 +60,11 @@ Severity: **Critical** = wrong money numbers / untracked cash or liability;
 - **Affected:** Cash Reconciliation, Daily Report, Finance.
 - **Fix:** Store the computed variance + a classification (Receivable/Payable/Adjustment) on the recon, feeding the same settlement pipeline.
 
-### D6 — Sales Revenue may be double-counted (recognition-basis mismatch) — **High**
-- **Issue:** Daily Collections credits `SALES_REVENUE` on **money collected** (cash + digital), while credit sales credit `SALES_REVENUE` on **accrual** when a bill is signed; the later receipt only relieves AR. A credit sale that is later paid and swept into a day's collected total can be recognized twice.
-- **Root cause:** `app/api/collections/route.ts:332` posts revenue off collected total, not `systemSales`; `lib/finance-ar.ts:57` posts revenue on accrual.
-- **Affected:** Finance, General Ledger, Financial Statements, Daily Report.
-- **Fix:** Pick one recognition basis. Recommended: recognize revenue on `systemSales` (accrual), and treat collections purely as cash-in relieving AR / clearing the day — so the two paths stop overlapping. (Needs confirmation of how cashiers key collected totals vs debt receipts.)
+### D6 — Sales Revenue double-count — **VERIFIED NOT AN ISSUE (resolved by design)**
+- **Original concern:** Daily Collections credits `SALES_REVENUE` on money collected, while credit sales credit `SALES_REVENUE` on accrual when signed; a credit sale later paid and *swept into a day's collected total* could be recognized twice.
+- **Resolution (verified 2026-07-21, owner + code):** Debt payments are keyed **only as Paid Bills**, never in the day's collected total (owner confirmed). And the code enforces the separation: `total = cash + channelAmounts` (`app/api/collections/route.ts:68`) never includes `paidInput`; paid bills are processed separately via `allocatePayment` → `postReceipt` (Dr Cash / Cr AR — relieves AR, posts **no** revenue). `paidTotal` is only used in the staff-loss/difference math, never in the revenue credit. So the two revenue paths do not overlap — no double-count occurs.
+- **Residual (separate, lower-priority observations — NOT bugs, would need their own decisions):**
+  - Revenue is recognized on **collected** total, not `systemSales`; a **staff-loss** shortfall therefore suppresses recognized revenue by the short amount (the STAFF_LOSS SignedBill posts no revenue), and pass-through **staff tips** remain in revenue until a cash-basis decision is made. These are recognition-policy refinements, not the double-count risk above.
 
 ### D7 — Approved refund is indistinguishable from unpaid; never records the payout — **Medium**
 - **Issue:** `ExcessRefund` carries only `approvalStatus` — no `paidAmount`, no `paidAt`, no `journalEntryId`. An approved refund looks identical to one not yet paid.
