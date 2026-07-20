@@ -41,6 +41,34 @@ export const BUSINESS_DAY_RESOURCES = {
 
 export type BusinessDayResource = (typeof BUSINESS_DAY_RESOURCES)[keyof typeof BUSINESS_DAY_RESOURCES]
 
+// Reconciliation Workflow Engine — boolean-only resources (no
+// add/edit/delete/settle/unsettle shape), resolved via resolveResourcePermission
+// below, same convention as BUSINESS_DAY_RESOURCES.
+export const RECONCILIATION_STAGE_RESOURCES = {
+  VIEW_RECONCILIATION_STAGES: 'VIEW_RECONCILIATION_STAGES',
+  CLOSE_CASHIER_RECON: 'CLOSE_CASHIER_RECON',
+  CLOSE_FINANCE_RECON: 'CLOSE_FINANCE_RECON',
+  CLOSE_FINANCIAL_CLOSE: 'CLOSE_FINANCIAL_CLOSE',
+  UNLOCK_RECONCILIATION_STAGE: 'UNLOCK_RECONCILIATION_STAGE',
+  APPROVE_RECONCILIATION_UNLOCK: 'APPROVE_RECONCILIATION_UNLOCK',
+  MANAGE_RECONCILIATION_CONFIG: 'MANAGE_RECONCILIATION_CONFIG',
+  VERIFY_PAYMENT: 'VERIFY_PAYMENT',
+  VIEW_RECONCILIATION_AUDIT_LOG: 'VIEW_RECONCILIATION_AUDIT_LOG',
+} as const
+
+export type ReconciliationStageResource = (typeof RECONCILIATION_STAGE_RESOURCES)[keyof typeof RECONCILIATION_STAGE_RESOURCES]
+
+// Controlled Write-Off workflow — request/approve are deliberately separate
+// resources so a cashier/supervisor can request without also being able to
+// approve their own request.
+export const WRITE_OFF_RESOURCES = {
+  REQUEST_WRITE_OFF: 'REQUEST_WRITE_OFF',
+  APPROVE_WRITE_OFF: 'APPROVE_WRITE_OFF',
+  VIEW_WRITE_OFFS: 'VIEW_WRITE_OFFS',
+} as const
+
+export type WriteOffResource = (typeof WRITE_OFF_RESOURCES)[keyof typeof WRITE_OFF_RESOURCES]
+
 const ACTION_FIELD: Record<Action, 'canAdd' | 'canEdit' | 'canDelete' | 'canSettle' | 'canUnsettle'> = {
   add: 'canAdd', edit: 'canEdit', delete: 'canDelete', settle: 'canSettle', unsettle: 'canUnsettle',
 }
@@ -100,7 +128,7 @@ export async function myPermissions(email: string | undefined, userId: string) {
  */
 export async function resolveResourcePermission(
   user: { email?: string; userId: string; role: string },
-  resource: BusinessDayResource
+  resource: BusinessDayResource | ReconciliationStageResource | WriteOffResource
 ): Promise<boolean> {
   if (isOwner(user.email)) return true
   const userRow = await prisma.userPermission.findUnique({ where: { userId_resource: { userId: user.userId, resource } } })
@@ -110,12 +138,12 @@ export async function resolveResourcePermission(
 }
 
 /** All role defaults for a resource, owner-only endpoint. */
-export async function listRolePermissions(resource: BusinessDayResource) {
+export async function listRolePermissions(resource: BusinessDayResource | ReconciliationStageResource | WriteOffResource) {
   return prisma.rolePermission.findMany({ where: { resource }, orderBy: { role: 'asc' } })
 }
 
 /** Owner sets/changes a role's default for a resource. */
-export async function setRolePermission(role: string, resource: BusinessDayResource, allowed: boolean) {
+export async function setRolePermission(role: string, resource: BusinessDayResource | ReconciliationStageResource | WriteOffResource, allowed: boolean) {
   return prisma.rolePermission.upsert({
     where: { role_resource: { role, resource } },
     update: { allowed },

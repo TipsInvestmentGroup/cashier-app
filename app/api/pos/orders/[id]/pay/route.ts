@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
 import { settlePosOrder, canActOnOrder } from '@/lib/pos-close'
 import { DEFAULT_PAYMENT_CHANNEL_CODES } from '@/lib/payment-channels-defaults'
+import { syncFromPosPayment } from '@/lib/payment-verification'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -67,6 +68,12 @@ export async function POST(req: NextRequest, { params }: Params) {
 
       return { payment, paidAmount: newPaid, balance: roundMoney(net - newPaid), settled }
     })
+
+    // Feeds the Reconciliation Workflow Engine's PaymentVerification pilot
+    // flow (source=SYSTEM_GENERATED, auto-verified — a POS payment is
+    // received and confirmed by staff in the same action) — no-op for any
+    // company that hasn't enabled the PAYMENT_VERIFICATION check.
+    await syncFromPosPayment(result.payment.id).catch(() => {})
 
     return NextResponse.json({ ok: true, ...result }, { status: 201 })
   } catch (err: unknown) {

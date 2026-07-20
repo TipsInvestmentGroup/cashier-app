@@ -4,6 +4,7 @@ import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
 import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
 import { getActiveDigitalChannels } from '@/lib/collection-channels'
+import { syncFromBankRecon } from '@/lib/payment-verification'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
@@ -116,8 +117,17 @@ export async function POST(req: NextRequest) {
       data.verifiedAmount = roundMoney(vc - vo)
       data.verifiedBy = user.name
     }
-    if (existing) await prisma.bankRecon.update({ where: { id: existing.id }, data })
-    else await prisma.bankRecon.create({ data })
+    const saved = existing
+      ? await prisma.bankRecon.update({ where: { id: existing.id }, data })
+      : await prisma.bankRecon.create({ data })
+
+    // Feeds the Reconciliation Workflow Engine's PaymentVerification pilot
+    // flow (source=SYSTEM_GENERATED) once an officer has verified this
+    // channel — no-op for any company that hasn't enabled the
+    // PAYMENT_VERIFICATION check.
+    if (wantsVerify) {
+      await syncFromBankRecon(saved.id).catch(() => {})
+    }
   }
 
   await prisma.auditLog.create({

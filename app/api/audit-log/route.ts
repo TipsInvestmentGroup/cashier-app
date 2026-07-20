@@ -13,10 +13,12 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const entity = searchParams.get('entity')
   const action = searchParams.get('action')
+  const entityId = searchParams.get('entityId')
 
   const where: Record<string, unknown> = {}
   if (entity) where.entity = entity
   if (action) where.action = action
+  if (entityId) where.entityId = entityId
 
   const logs = await prisma.auditLog.findMany({
     where,

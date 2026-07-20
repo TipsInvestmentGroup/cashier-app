@@ -29,7 +29,7 @@ export const DASHBOARD_STAT_WIDGETS: WidgetDef<DashboardData>[] = [
     label: 'This Week',
     getTotal: (d) => d.week.total,
     getInsight: (d) => d.insights?.week,
-    getSeries: (d) => d.dailyTrend.slice(-7),
+    getSeries: (d) => d.weekDailyTrend,
     dayDetailUrl: (day) => `/api/dashboard/day-detail?date=${day.date.slice(0, 10)}`,
   },
   {

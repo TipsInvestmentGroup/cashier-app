@@ -2,13 +2,25 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import { useApi } from '@/hooks/useApi'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDateTime, formatAuditDetails } from '@/lib/utils'
+import { Badge } from '@/components/ui/Badge'
 import type { TrendWidgetDef, TrendDay } from './types'
 
+interface SourceRecord {
+  id: string
+  staffName: string | null
+  total: number
+  outletName: string
+  cashierName: string
+  createdAt: string
+  updatedAt: string
+}
+interface AuditEntry { id: string; createdAt: string; action: string; details?: string; user: string; role: string }
 interface DayDetail {
   hourly: { hour: number; label: string; orders: number; revenue: number }[]
   topStaff: { staffName: string; officialCollection: number }[]
   paymentSplit: { cash: number; bank: number; mobileMoney: number }
+  sourceRecords: SourceRecord[]
 }
 
 const INSIGHT_STATUS_CLASS: Record<'good' | 'bad' | 'neutral', string> = {
@@ -25,6 +37,8 @@ export function TrendWidget<T>({ def, data }: { def: TrendWidgetDef<T>; data: T 
   const [open, setOpen] = useState(false)
   const [openDay, setOpenDay] = useState<string | null>(null)
   const [details, setDetails] = useState<Record<string, DayDetail | 'loading' | 'error'>>({})
+  const [openRecordId, setOpenRecordId] = useState<string | null>(null)
+  const [auditHistory, setAuditHistory] = useState<Record<string, AuditEntry[] | 'loading' | 'error'>>({})
 
   const total = def.getTotal(data)
   const insight = def.getInsight?.(data)
@@ -40,6 +54,20 @@ export function TrendWidget<T>({ def, data }: { def: TrendWidgetDef<T>; data: T 
         setDetails((d) => ({ ...d, [day.date]: result }))
       } catch {
         setDetails((d) => ({ ...d, [day.date]: 'error' }))
+      }
+    }
+  }
+
+  const toggleRecord = async (recordId: string) => {
+    const next = openRecordId === recordId ? null : recordId
+    setOpenRecordId(next)
+    if (next && !auditHistory[recordId]) {
+      setAuditHistory((h) => ({ ...h, [recordId]: 'loading' }))
+      try {
+        const result = await request(`/api/audit-log?entity=DailyCollection&entityId=${recordId}`)
+        setAuditHistory((h) => ({ ...h, [recordId]: result.logs || [] }))
+      } catch {
+        setAuditHistory((h) => ({ ...h, [recordId]: 'error' }))
       }
     }
   }
@@ -107,6 +135,48 @@ export function TrendWidget<T>({ def, data }: { def: TrendWidgetDef<T>; data: T 
                             <div className="bg-white rounded-lg px-2.5 py-1.5"><p className="text-gray-400">Bank</p><p className="font-semibold text-gray-800">{formatCurrency(detail.paymentSplit.bank)}</p></div>
                             <div className="bg-white rounded-lg px-2.5 py-1.5"><p className="text-gray-400">Mobile Money</p><p className="font-semibold text-gray-800">{formatCurrency(detail.paymentSplit.mobileMoney)}</p></div>
                           </div>
+                        </div>
+                        {/* Data-integrity drill-down: the exact source records behind this
+                            day's total — click one to trace who created/edited/deleted it,
+                            when, and why (immutable AuditLog trail). */}
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">Source Records</p>
+                          {detail.sourceRecords.length === 0 ? (
+                            <p className="text-xs text-gray-400">No collection records for this day</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {detail.sourceRecords.map((r) => {
+                                const history = auditHistory[r.id]
+                                const isRecordOpen = openRecordId === r.id
+                                return (
+                                  <div key={r.id} className="bg-white rounded-lg overflow-hidden">
+                                    <button onClick={() => toggleRecord(r.id)} className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs hover:bg-gray-50">
+                                      <span className="text-gray-700">{r.staffName || 'No staff'} · {r.outletName} · by {r.cashierName}</span>
+                                      <span className="font-semibold text-gray-900">{formatCurrency(r.total)}</span>
+                                    </button>
+                                    {isRecordOpen && (
+                                      <div className="px-2.5 pb-2 border-t border-gray-100">
+                                        <p className="text-[10px] text-gray-400 pt-1.5">Created {formatDateTime(r.createdAt)}{r.updatedAt !== r.createdAt ? ` · last updated ${formatDateTime(r.updatedAt)}` : ''}</p>
+                                        {history === 'loading' && <p className="text-[10px] text-gray-400 pt-1">Loading audit trail…</p>}
+                                        {history === 'error' && <p className="text-[10px] text-red-500 pt-1">Couldn&apos;t load audit trail.</p>}
+                                        {history && history !== 'loading' && history !== 'error' && (
+                                          <div className="space-y-1 pt-1">
+                                            {history.length === 0 ? <p className="text-[10px] text-gray-400">No audit entries</p> : history.map((a) => (
+                                              <div key={a.id} className="text-[10px] text-gray-500 flex gap-1.5">
+                                                <span className="whitespace-nowrap">{formatDateTime(a.createdAt)}</span>
+                                                <Badge tone="indigo" className="!px-1.5 !py-0">{a.action}</Badge>
+                                                <span className="truncate">{a.user} — {formatAuditDetails(a.details)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}

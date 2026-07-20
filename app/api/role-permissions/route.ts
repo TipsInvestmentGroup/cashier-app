@@ -1,9 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
-import { isOwner, listRolePermissions, setRolePermission, BUSINESS_DAY_RESOURCES, BusinessDayResource } from '@/lib/rbac'
+import {
+  isOwner, listRolePermissions, setRolePermission,
+  BUSINESS_DAY_RESOURCES, RECONCILIATION_STAGE_RESOURCES, WRITE_OFF_RESOURCES,
+  type BusinessDayResource, type ReconciliationStageResource, type WriteOffResource,
+} from '@/lib/rbac'
 import { prisma } from '@/lib/prisma'
 
-const VALID_RESOURCES = Object.values(BUSINESS_DAY_RESOURCES) as string[]
+type GrantableResource = BusinessDayResource | ReconciliationStageResource | WriteOffResource
+
+const VALID_RESOURCES = [
+  ...Object.values(BUSINESS_DAY_RESOURCES),
+  ...Object.values(RECONCILIATION_STAGE_RESOURCES),
+  ...Object.values(WRITE_OFF_RESOURCES),
+] as string[]
 
 /** Owner-only: list every role default for a resource. */
 export async function GET(req: NextRequest) {
@@ -14,7 +24,7 @@ export async function GET(req: NextRequest) {
   const resource = new URL(req.url).searchParams.get('resource')
   if (!resource || !VALID_RESOURCES.includes(resource)) return NextResponse.json({ error: 'Invalid resource' }, { status: 400 })
 
-  const rows = await listRolePermissions(resource as BusinessDayResource)
+  const rows = await listRolePermissions(resource as GrantableResource)
   return NextResponse.json(rows)
 }
 
@@ -29,7 +39,7 @@ export async function PUT(req: NextRequest) {
   if (!resource || !VALID_RESOURCES.includes(resource)) return NextResponse.json({ error: 'Invalid resource' }, { status: 400 })
   if (!role) return NextResponse.json({ error: 'role is required' }, { status: 400 })
 
-  const row = await setRolePermission(role, resource as BusinessDayResource, !!allowed)
+  const row = await setRolePermission(role, resource as GrantableResource, !!allowed)
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'UPDATE', entity: 'RolePermission', entityId: row.id, details: `Set ${resource} default for role ${role}: allowed=${!!allowed}` },
   })

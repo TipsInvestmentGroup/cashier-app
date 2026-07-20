@@ -1,0 +1,436 @@
+<title>Building a Collection Template</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #f6f6fb;
+    --surface: #ffffff;
+    --ink: #1b1b26;
+    --ink-soft: #5c5c70;
+    --ink-faint: #8888a0;
+    --accent: #4f46e5;
+    --accent-ink: #35309e;
+    --accent-soft: #eef0ff;
+    --line: #e4e4ee;
+    --good: #067a5a;
+    --good-soft: #e8f7f1;
+    --warn: #9a5b12;
+    --warn-soft: #fdf1e2;
+    --code-bg: #f1f1f8;
+    --shadow: 0 1px 2px rgba(27, 27, 38, 0.04), 0 8px 24px rgba(27, 27, 38, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121218;
+      --surface: #1a1a22;
+      --ink: #ecedf7;
+      --ink-soft: #a7a7bd;
+      --ink-faint: #6f6f85;
+      --accent: #9089f5;
+      --accent-ink: #cfcbfb;
+      --accent-soft: rgba(144, 137, 245, 0.14);
+      --line: #2c2c38;
+      --good: #4fd6ab;
+      --good-soft: rgba(79, 214, 171, 0.1);
+      --warn: #e8ab5c;
+      --warn-soft: rgba(232, 171, 92, 0.1);
+      --code-bg: #22222c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121218; --surface: #1a1a22; --ink: #ecedf7; --ink-soft: #a7a7bd; --ink-faint: #6f6f85;
+    --accent: #9089f5; --accent-ink: #cfcbfb; --accent-soft: rgba(144, 137, 245, 0.14);
+    --line: #2c2c38; --good: #4fd6ab; --good-soft: rgba(79, 214, 171, 0.1);
+    --warn: #e8ab5c; --warn-soft: rgba(232, 171, 92, 0.1); --code-bg: #22222c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f6fb; --surface: #ffffff; --ink: #1b1b26; --ink-soft: #5c5c70; --ink-faint: #8888a0;
+    --accent: #4f46e5; --accent-ink: #35309e; --accent-soft: #eef0ff;
+    --line: #e4e4ee; --good: #067a5a; --good-soft: #e8f7f1;
+    --warn: #9a5b12; --warn-soft: #fdf1e2; --code-bg: #f1f1f8;
+    --shadow: 0 1px 2px rgba(27, 27, 38, 0.04), 0 8px 24px rgba(27, 27, 38, 0.05);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--accent-soft); }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 700px);
+    gap: 56px;
+    align-items: start;
+  }
+  @media (max-width: 880px) {
+    .shell { grid-template-columns: 1fr; padding: 32px 20px 72px; }
+    nav.toc { display: none; }
+  }
+
+  header.masthead {
+    grid-column: 1 / -1;
+    padding-bottom: 28px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    margin-bottom: 14px;
+  }
+  h1.title {
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: clamp(28px, 4vw, 38px);
+    font-weight: 400;
+    line-height: 1.15;
+    margin: 0 0 10px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  p.dek {
+    margin: 0;
+    max-width: 62ch;
+    color: var(--ink-soft);
+    font-size: 16.5px;
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 40px;
+    font-size: 13px;
+  }
+  nav.toc .toc-label {
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-size: 11px;
+    margin-bottom: 10px;
+  }
+  nav.toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-left: 1px solid var(--line);
+  }
+  nav.toc a {
+    display: block;
+    padding: 6px 0 6px 14px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    margin-left: -1px;
+  }
+  nav.toc a:hover { color: var(--ink); border-left-color: var(--ink-faint); }
+
+  main { min-width: 0; }
+
+  section.step {
+    padding: 30px 0;
+    border-bottom: 1px solid var(--line);
+    scroll-margin-top: 24px;
+  }
+  section.step:last-of-type { border-bottom: none; }
+
+  .step-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+  .step-num {
+    font-family: Georgia, serif;
+    font-size: 14px;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  h2 {
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-weight: 400;
+    font-size: 22px;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 14.5px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 22px 0 10px;
+  }
+  p { margin: 0 0 12px; color: var(--ink); }
+  p.lede { color: var(--ink-soft); }
+  ul.plain, ol.plain { margin: 0 0 12px; padding-left: 22px; }
+  ul.plain li, ol.plain li { margin-bottom: 6px; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+    color: var(--accent-ink);
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 0 0 14px;
+  }
+  pre code { background: none; padding: 0; color: var(--ink); }
+
+  .table-wrap { overflow-x: auto; margin: 0 0 16px; border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; background: var(--surface); }
+  th, td { text-align: left; padding: 10px 14px; vertical-align: top; }
+  thead th {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--ink-faint); font-weight: 700; border-bottom: 1px solid var(--line);
+  }
+  tbody tr + tr td { border-top: 1px solid var(--line); }
+  tbody td:first-child { font-weight: 600; white-space: nowrap; }
+  td code { white-space: nowrap; }
+
+  .callout {
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin: 4px 0 16px;
+    font-size: 14px;
+  }
+  .callout.tip { background: var(--good-soft); color: var(--ink); }
+  .callout.tip strong { color: var(--good); }
+  .callout.warn { background: var(--warn-soft); color: var(--ink); }
+  .callout.warn strong { color: var(--warn); }
+  .callout p:last-child { margin-bottom: 0; }
+
+  .example {
+    background: var(--accent-soft);
+    border-radius: 16px;
+    padding: 26px 28px;
+    margin-top: 8px;
+  }
+  .example h3 { margin-top: 0; color: var(--accent-ink); }
+  .example .stage-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    box-shadow: var(--shadow);
+  }
+  .example .stage-card h4 { margin: 0 0 8px; font-size: 13px; letter-spacing: 0.02em; }
+  .example .field-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 0;
+    font-size: 13.5px;
+    border-top: 1px dashed var(--line);
+  }
+  .example .field-row:first-of-type { border-top: none; }
+  .example .field-row .fname { color: var(--ink); }
+  .example .field-row .fmeta { color: var(--ink-faint); font-family: ui-monospace, monospace; font-size: 12px; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--code-bg);
+    color: var(--ink-soft);
+  }
+
+  footer.end {
+    grid-column: 1 / -1;
+    margin-top: 8px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--ink-faint);
+    font-size: 13px;
+  }
+
+  a.jump { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+  a.jump:hover { border-bottom-color: var(--accent); }
+</style>
+
+<div class="shell">
+  <header class="masthead">
+    <span class="eyebrow">Setup → Collection Templates</span>
+    <h1 class="title">Building a Collection Template</h1>
+    <p class="dek">A field guide for TIPS admins: what to select and fill in, in order, to turn a collection form you can picture into one cashiers can actually use.</p>
+  </header>
+
+  <nav class="toc">
+    <div class="toc-label">On this page</div>
+    <ol>
+      <li><a href="#what-is-it">What a template is</a></li>
+      <li><a href="#step-1">1. Name the template</a></li>
+      <li><a href="#step-2">2. Add a stage</a></li>
+      <li><a href="#step-3">3. Pick an entry mode</a></li>
+      <li><a href="#step-4">4. Add sections</a></li>
+      <li><a href="#step-5">5. Add fields</a></li>
+      <li><a href="#step-6">6. Set validation rules</a></li>
+      <li><a href="#step-7">7. Save and test</a></li>
+      <li><a href="#example">Worked example</a></li>
+      <li><a href="#after">After you save</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <section class="step" id="what-is-it">
+      <p class="lede">A <strong>template</strong> is the blueprint for one kind of collection: what gets asked, in what order, and how it's entered. Every template is built from three nested pieces —</p>
+      <ul class="plain">
+        <li><strong>Stages</strong> — the big steps of the form (e.g. "Sales", "Bills"). Each stage picks one entry mode.</li>
+        <li><strong>Sections</strong> — groups of related fields inside a stage (e.g. "Payment Channels").</li>
+        <li><strong>Fields</strong> — the actual inputs (e.g. "Cash", a number).</li>
+      </ul>
+      <p>Build from the outside in: name the template, add a stage, then fill that stage with sections and fields. The rest of this guide walks through each choice in the order the editor asks for it.</p>
+    </section>
+
+    <section class="step" id="step-1">
+      <div class="step-head"><span class="step-num">1</span><h2>Name the template</h2></div>
+      <p>Give it a name a cashier or manager would recognize on sight — <code>Restaurant &amp; Bar Collection</code>, not <code>Template 3</code>. The description is optional but worth a sentence: it's the only hint anyone gets before opening the form.</p>
+      <div class="callout tip"><p><strong>Leave "Active" checked.</strong> An inactive template disappears from the Collection Sessions picker — use it to retire a template without deleting its history.</p></div>
+    </section>
+
+    <section class="step" id="step-2">
+      <div class="step-head"><span class="step-num">2</span><h2>Add a stage</h2></div>
+      <p>Click <strong>+ Add Stage</strong> and name it after what happens in it — <code>Sales</code>, <code>Bills</code>, <code>Cash Reconciliation</code>. Two settings sit next to the name:</p>
+      <ul class="plain">
+        <li><strong>Optional stage</strong> — check this if a cashier can finish the session without ever opening it (e.g. a "Damages" stage that's usually empty).</li>
+        <li><strong>Entry mode</strong> — covered next; it decides how the stage gets filled in.</li>
+      </ul>
+      <p>Stages run top to bottom in the order you leave them, so put the one that has to happen first — usually Sales — at the top. Use the <span class="pill">↑ ↓</span> arrows to reorder.</p>
+    </section>
+
+    <section class="step" id="step-3">
+      <div class="step-head"><span class="step-num">3</span><h2>Pick an entry mode</h2></div>
+      <p class="lede">This is the choice with the biggest effect on the cashier's day. Match it to how the work actually happens at the outlet:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Entry mode</th><th>How it works</th><th>Use it when…</th></tr></thead>
+          <tbody>
+            <tr><td>Single Staff</td><td>One form, one staff member, save, then the next.</td><td>Each cashier hands in their own numbers separately, like the original Daily Collections form.</td></tr>
+            <tr><td>Multi‑Staff Grid</td><td>One table, every active staff member as a row, one save for everyone.</td><td>You collect the same few numbers from the whole floor at once — e.g. end‑of‑shift tips.</td></tr>
+            <tr><td>Batch Entry</td><td>Pick a subset of staff first, then fill just those rows.</td><td>Only some staff are relevant this round — e.g. only the waiters who worked a private event.</td></tr>
+            <tr><td>Excel Import</td><td>Upload a spreadsheet; rows are matched to staff by name and to fields by column header.</td><td>The numbers already exist somewhere else — a POS export, a supervisor's tally sheet.</td></tr>
+            <tr><td>POS Auto Sync</td><td>Reserved for a future direct POS connection — currently shows "not connected yet".</td><td>Don't pick this yet. Use Single Staff or Grid and switch later once a POS integration exists.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout warn"><p><strong>Excel Import needs a matching header row.</strong> The spreadsheet must have a column named Staff/Attendant/Name, plus one column per field whose header contains that field's label — so name fields to match what the sheet will say.</p></div>
+    </section>
+
+    <section class="step" id="step-4">
+      <div class="step-head"><span class="step-num">4</span><h2>Add sections</h2></div>
+      <p>Inside a stage, click <strong>+ Add section</strong> for each logical group of fields. Typing a name shows suggestions — <code>SALES</code>, <code>PAYMENT_CHANNELS</code>, <code>BILLS</code>, <code>DISCOUNTS</code>, <code>CANCELLATIONS</code>, <code>EXCESS</code>, <code>CASH_RECON</code> — but any label works.</p>
+      <p>Check <strong>Mandatory</strong> on a section that must never be skipped in practice, even though nothing currently blocks skipping it — it's a note to future-you and to whoever edits the template next, not an enforced rule by itself. (Individual fields marked <strong>Required</strong>, in the next step, are what actually get enforced.)</p>
+    </section>
+
+    <section class="step" id="step-5">
+      <div class="step-head"><span class="step-num">5</span><h2>Add fields</h2></div>
+      <p>Click <strong>+ Add field</strong> inside a section for every value you need to capture. Give each one a plain label and pick its type:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Field type</th><th>Renders as</th><th>Use it for</th></tr></thead>
+          <tbody>
+            <tr><td>Number</td><td>Numeric input</td><td>Cash, System Sales, discounts — anything counted or measured.</td></tr>
+            <tr><td>Text</td><td>Free text</td><td>A reference number, a short note.</td></tr>
+            <tr><td>Select</td><td>Free text (typed value)</td><td>A short category the cashier types rather than picks — reasons, labels.</td></tr>
+            <tr><td>Staff Picker</td><td>Dropdown of active staff</td><td>Whoever the entry is <em>about</em> — this doubles as the "which staff is this row for" answer in Single Staff mode.</td></tr>
+            <tr><td>Person Picker</td><td>Dropdown of persons/customers</td><td>A named customer, director, or other person tied to the entry.</td></tr>
+            <tr><td>Date</td><td>Date picker</td><td>A date other than the session's own date.</td></tr>
+            <tr><td>Boolean</td><td>Checkbox</td><td>A yes/no flag — "Approved by manager?", "Till balanced?".</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Check <strong>Required</strong> on any field the form should refuse to save without — this one <em>is</em> enforced, at save time.</p>
+      <div class="callout tip"><p><strong>Grid and Batch modes skip picker columns.</strong> In a table where every row already <em>is</em> one staff member, a Staff Picker or Person Picker column has nothing left to ask — the row itself is the answer. Keep those two field types for Single Staff stages.</p></div>
+    </section>
+
+    <section class="step" id="step-6">
+      <div class="step-head"><span class="step-num">6</span><h2>Set validation rules (optional)</h2></div>
+      <p class="lede">Rules sit below the stages and apply to the whole template. Each rule type is fixed — you configure it with a small JSON object, not free-form logic:</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Rule</th><th>What it does</th><th>Config</th></tr></thead>
+          <tbody>
+            <tr><td>Stage Sequence</td><td>Blocks a stage until every earlier required stage has at least one completed entry.</td><td><code>—</code> none needed</td></tr>
+            <tr><td>Cash ≤ System Sales</td><td>Blocks saving if cash collected exceeds system sales, unless an excess-reason field is filled.</td><td><pre><code>{"cashFieldKey":"CASH",
+ "systemSalesFieldKey":"SYSTEM_SALES",
+ "reasonFieldKey":"EXCESS_REASON"}</code></pre></td></tr>
+            <tr><td>Discount Approval Limit</td><td>Above the limit, the entry still saves but goes to <strong>Collection Approvals</strong> for a manager's sign-off instead of completing outright.</td><td><pre><code>{"fieldKey":"DISCOUNT","limit":50000,
+ "approverRole":"MANAGER"}</code></pre></td></tr>
+            <tr><td>No Negative Balance</td><td>Rejects a negative value in the named field.</td><td><pre><code>{"fieldKey":"CASH"}</code></pre> — omit <code>fieldKey</code> to check every number field</td></tr>
+            <tr><td>Required Field</td><td>No‑op — required fields are already enforced per‑field in step 5.</td><td><code>—</code> none needed</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The <code>FieldKey</code> values in a rule's config must match a field's <strong>key</strong> exactly — that's the all‑caps code shown once you've named the field (e.g. naming a field "Discount" gives it the key <code>DISCOUNT</code>).</p>
+    </section>
+
+    <section class="step" id="step-7">
+      <div class="step-head"><span class="step-num">7</span><h2>Save, then test it as a cashier would</h2></div>
+      <p>Click <strong>Save Template</strong>. Then open <strong>Daily → Collection Sessions</strong>, pick the outlet and this template, and open today's session — filling it out yourself once catches a mislabeled field or a rule that's stricter than intended before a cashier ever sees it.</p>
+      <div class="callout warn"><p><strong>Editing later:</strong> a stage, section, or field that already has real entries against it can't be deleted — the save will fail with a clear reason instead of silently losing data. Renaming labels is always safe; only removal is blocked once data exists.</p></div>
+    </section>
+
+    <section class="step example" id="example" style="border-bottom:none;">
+      <div class="step-head"><span class="step-num">✓</span><h2>Worked example — Restaurant &amp; Bar Collection</h2></div>
+      <p class="lede">One way to build the first stage of a multi‑staff restaurant/bar template:</p>
+
+      <div class="stage-card">
+        <h4>Stage 1 · "Sales &amp; Bills" — entry mode: <span class="pill">Multi‑Staff Grid</span></h4>
+        <p style="margin:0 0 10px;color:var(--ink-soft);font-size:13px;">Section: Sales</p>
+        <div class="field-row"><span class="fname">System Sales</span><span class="fmeta">NUMBER · required</span></div>
+        <p style="margin:14px 0 10px;color:var(--ink-soft);font-size:13px;">Section: Payment Channels</p>
+        <div class="field-row"><span class="fname">Cash</span><span class="fmeta">NUMBER</span></div>
+        <div class="field-row"><span class="fname">CRDB</span><span class="fmeta">NUMBER</span></div>
+        <div class="field-row"><span class="fname">CRDB Lipa Hapa</span><span class="fmeta">NUMBER</span></div>
+        <div class="field-row"><span class="fname">Stanbic</span><span class="fmeta">NUMBER</span></div>
+        <div class="field-row"><span class="fname">M‑Pesa</span><span class="fmeta">NUMBER</span></div>
+        <p style="margin:14px 0 10px;color:var(--ink-soft);font-size:13px;">Section: Signed Bills</p>
+        <div class="field-row"><span class="fname">Admin</span><span class="fmeta">NUMBER</span></div>
+        <div class="field-row"><span class="fname">Director</span><span class="fmeta">NUMBER</span></div>
+        <div class="field-row"><span class="fname">Customers</span><span class="fmeta">NUMBER</span></div>
+      </div>
+
+      <p style="margin-top:16px;">Because the stage is <strong>Multi‑Staff Grid</strong>, there's no separate Staff Picker field to add — every row of the table already belongs to one staff member. A follow‑on <strong>Cash Reconciliation</strong> stage, added the same way, could hold the excess/shortfall fields and a <code>Cash ≤ System Sales</code> rule pointing at the fields above.</p>
+    </section>
+
+    <section class="step" id="after" style="border-bottom:none;">
+      <div class="step-head"><span class="step-num">→</span><h2>After you save</h2></div>
+      <p>The template appears at <a class="jump" href="#" onclick="return false;">Daily → Collection Sessions</a> for every cashier, manager, and admin — that's where the form actually gets filled in, day to day. Anything pending a discount sign‑off shows up for managers at <strong>Collection Approvals</strong>. The <strong>Standard Staff Collection</strong> template is untouched by any of this — outlets that don't need the new form keep using the original Daily Collections screen exactly as before.</p>
+    </section>
+  </main>
+
+  <footer class="end">TIPS Cashier Manager — Setup → Collection Templates</footer>
+</div>

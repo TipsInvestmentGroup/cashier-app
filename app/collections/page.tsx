@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { Modal } from '@/components/ui/Modal'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { CashReconForm } from '@/components/recon/CashReconForm'
 import { DigitalReconForm } from '@/components/recon/DigitalReconForm'
@@ -357,15 +358,25 @@ export default function CollectionsPage() {
     setShowForm((s) => !s)
   }
 
-  const deleteCollection = async (c: Collection) => {
-    if (!(await confirm({ title: 'Delete collection', message: `Delete this collection${c.staffName ? ` for ${c.staffName}` : ''}? Any auto staff-loss linked to it will also be removed.`, danger: true, confirmLabel: 'Delete' }))) return
+  // A reason is required to delete a collection — captured in the audit
+  // trail alongside a full snapshot of the deleted record (see
+  // app/api/collections/[id]/route.ts DELETE), since once deleted the
+  // record itself is gone and this is the only remaining trace of it.
+  const [deleteTarget, setDeleteTarget] = useState<Collection | null>(null)
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleting, setDeleting] = useState(false)
+
+  const submitDelete = async () => {
+    if (!deleteTarget || !deleteReason.trim()) return toast.error('A reason is required to delete a collection')
+    setDeleting(true)
     try {
-      const res = await request(`/api/collections/${c.id}`, { method: 'DELETE' })
+      const res = await request(`/api/collections/${deleteTarget.id}`, { method: 'DELETE', body: JSON.stringify({ reason: deleteReason }) })
       toast.success(res?.removedStaffLoss ? 'Collection + linked staff loss deleted' : 'Collection deleted')
+      setDeleteTarget(null); setDeleteReason('')
       load()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error deleting')
-    }
+    } finally { setDeleting(false) }
   }
 
   // Compute active date interval from the selected range
@@ -1123,7 +1134,7 @@ export default function CollectionsPage() {
                             <>
                               <button onClick={() => startEdit(c)} title="Edit"
                                 className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>
-                              <button onClick={() => deleteCollection(c)} title="Delete"
+                              <button onClick={() => setDeleteTarget(c)} title="Delete"
                                 className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>
                             </>
                           )}
@@ -1281,6 +1292,23 @@ export default function CollectionsPage() {
           </div>
         )}
       </div>
+
+      <Modal open={!!deleteTarget} onClose={() => { setDeleteTarget(null); setDeleteReason('') }} title="Delete Collection">
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            Delete this collection{deleteTarget?.staffName ? ` for ${deleteTarget.staffName}` : ''}? Any auto staff-loss linked to it will also be removed.
+            A snapshot of the record and this reason are kept in the audit trail.
+          </p>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Reason</label>
+            <textarea value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)} rows={3}
+              className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm" />
+          </div>
+          <button disabled={deleting} onClick={submitDelete} className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 disabled:opacity-60">
+            {deleting ? 'Deleting…' : 'Delete Collection'}
+          </button>
+        </div>
+      </Modal>
     </AppShell>
   )
 }

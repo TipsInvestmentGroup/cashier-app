@@ -176,8 +176,22 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const shortfall = await prisma.$transaction((tx) => recomputeStaffLoss(tx, id))
   const staffLoss = staffName && shortfall > 0 ? { amount: shortfall, staffName } : null
 
+  // Before/after snapshot of the fields that actually changed, plus the
+  // caller's stated reason (if any) — so an admin tracing a discrepancy back
+  // through /audit sees exactly what changed and why, not just the new total.
+  const CHANGED_FIELDS = ['cash', 'crdb', 'stanbic', 'mpesa', 'total', 'staffName', 'systemSales', 'discount', 'notes', 'outletId', 'date'] as const
+  const changes: Record<string, { from: unknown; to: unknown }> = {}
+  for (const field of CHANGED_FIELDS) {
+    const before = existing[field] instanceof Date ? existing[field].toISOString() : existing[field]
+    const after = updated[field] instanceof Date ? updated[field].toISOString() : updated[field]
+    if (before !== after) changes[field] = { from: before, to: after }
+  }
+
   await prisma.auditLog.create({
-    data: { userId: user.userId, action: 'UPDATE', entity: 'DailyCollection', entityId: id, details: `Total ${total}, staffLoss ${shortfall > 0 ? shortfall : 0}` },
+    data: {
+      userId: user.userId, action: 'UPDATE', entity: 'DailyCollection', entityId: id,
+      details: JSON.stringify({ changes, staffLoss: shortfall > 0 ? shortfall : 0, reason: body.reason || null }),
+    },
   })
 
   return NextResponse.json({ ...updated, staffLoss })
@@ -190,7 +204,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!ALLOWED.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const existing = await prisma.dailyCollection.findUnique({ where: { id } })
+  const body = await req.json().catch(() => ({}))
+  const existing = await prisma.dailyCollection.findUnique({ where: { id }, include: { outlet: { select: { name: true } } } })
   if (!existing) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
   if (!CROSS_OUTLET.includes(user.role) && user.outletId && existing.outletId !== user.outletId) {
     return NextResponse.json({ error: 'You can only delete collections from your own outlet' }, { status: 403 })
@@ -213,8 +228,25 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   await prisma.cancellation.deleteMany({ where: { collectionId: id } })
   await prisma.dailyCollection.delete({ where: { id } })
 
+  // Full snapshot of the deleted record (not just its id) — once deleted,
+  // dailyCollection.findUnique(entityId) returns nothing, so this audit row
+  // is the ONLY place an admin can later see what the record actually
+  // contained (staff, amounts, outlet, date) alongside who deleted it, when,
+  // and why.
   await prisma.auditLog.create({
-    data: { userId: user.userId, action: 'DELETE', entity: 'DailyCollection', entityId: id, details: `Deleted collection${sl ? ' + linked staff loss' : ''}` },
+    data: {
+      userId: user.userId, action: 'DELETE', entity: 'DailyCollection', entityId: id,
+      details: JSON.stringify({
+        reason: body.reason || null,
+        removedStaffLoss: !!sl,
+        snapshot: {
+          date: existing.date.toISOString(), outletName: existing.outlet.name, staffName: existing.staffName,
+          total: existing.total, cash: existing.cash, crdb: existing.crdb, stanbic: existing.stanbic, mpesa: existing.mpesa,
+          systemSales: existing.systemSales, creditSales: existing.creditSales, paymentsReceived: existing.paymentsReceived,
+          discount: existing.discount, notes: existing.notes, createdAt: existing.createdAt.toISOString(),
+        },
+      }),
+    },
   })
 
   return NextResponse.json({ ok: true, removedStaffLoss: !!sl })

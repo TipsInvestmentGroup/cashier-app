@@ -57,6 +57,34 @@ export function formatDateTime(date: Date | string): string {
   return format(new Date(date), 'dd MMM yyyy HH:mm')
 }
 
+// Some AuditLog entries (e.g. DailyCollection create/update/delete) store a
+// structured JSON snapshot/diff instead of a plain sentence — render it
+// readably; every other entity's still-plain-string details pass through
+// unchanged. Shared by app/audit/page.tsx and the dashboard drill-down
+// (components/widgets/TrendWidget.tsx) so both read one AuditLog row the
+// same way.
+export function formatAuditDetails(details?: string | null): string {
+  if (!details) return '—'
+  if (!details.trim().startsWith('{')) return details
+  try {
+    const parsed = JSON.parse(details)
+    const parts: string[] = []
+    if (parsed.reason) parts.push(`Reason: ${parsed.reason}`)
+    if (parsed.changes) {
+      const changed = Object.entries(parsed.changes as Record<string, { from: unknown; to: unknown }>)
+        .map(([field, { from, to }]) => `${field}: ${from} → ${to}`)
+      if (changed.length) parts.push(changed.join(', '))
+    }
+    if (parsed.snapshot) {
+      const s = parsed.snapshot
+      parts.push(`[${s.staffName || 'no staff'}] total ${s.total ?? ''}${s.outletName ? ` @ ${s.outletName}` : ''}`)
+    }
+    return parts.length ? parts.join(' — ') : details
+  } catch {
+    return details
+  }
+}
+
 export function getTodayRange() {
   const now = new Date()
   return { start: startOfDay(now), end: endOfDay(now) }

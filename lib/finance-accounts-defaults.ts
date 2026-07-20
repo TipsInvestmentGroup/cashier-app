@@ -32,4 +32,7 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   // Stage 3 — Banking & Cash Management
   { code: '5920', name: 'Bank Charges Expense', type: 'EXPENSE', mappingKey: 'BANK_CHARGES_EXPENSE' },
   { code: '4900', name: 'Interest Income', type: 'INCOME', mappingKey: 'INTEREST_INCOME' },
+  // Reconciliation Workflow Engine — approved write-offs of reconciliation
+  // discrepancies (cash shortages, unreconciled variances) post here.
+  { code: '5930', name: 'Reconciliation Write-Off Expense', type: 'EXPENSE', mappingKey: 'WRITE_OFF_EXPENSE' },
 ]

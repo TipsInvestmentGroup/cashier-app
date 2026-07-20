@@ -6,6 +6,7 @@ import { canVerifyCash } from '@/lib/cash-verify'
 import { roundMoney } from '@/lib/utils'
 import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { generateBillReference } from '@/lib/bill-reference'
+import { syncFromCashRecon } from '@/lib/payment-verification'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
@@ -196,6 +197,13 @@ export async function POST(req: NextRequest) {
   await prisma.auditLog.create({
     data: { userId: user.userId, action: existing ? 'UPDATE' : 'CREATE', entity: 'CashRecon', entityId: item.id, details: `Deposited ${deposited}${excess > 0 ? `, excess ${excess} (${excessItems.length} item${excessItems.length === 1 ? '' : 's'})` : ''}, closing ${closing}` },
   })
+
+  // Feeds the Reconciliation Workflow Engine's PaymentVerification pilot flow
+  // (source=SYSTEM_GENERATED) once an officer has verified the cash amount —
+  // no-op for any company that hasn't enabled the PAYMENT_VERIFICATION check.
+  if (data.verifiedAmount !== undefined) {
+    await syncFromCashRecon(item.id).catch(() => {})
+  }
 
   const withItems = await prisma.cashRecon.findUnique({ where: { id: item.id }, include: { excessItems: true } })
   return NextResponse.json(withItems, { status: 201 })

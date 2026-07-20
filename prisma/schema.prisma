@@ -164,6 +164,11 @@ model Company {
   companyPaymentAccounts CompanyPaymentAccount[]
   bankTransactions       BankTransaction[]
   budgets                Budget[]
+
+  reconciliationStages         ReconciliationStage[]
+  paymentVerifications         PaymentVerification[]
+  paymentIntegrationConnectors PaymentIntegrationConnector[]
+  writeOffRequests             WriteOffRequest[]
 }
 
 model Outlet {
@@ -217,6 +222,9 @@ model Outlet {
   transactionSessions    TransactionSession[]
   businessSessions       BusinessSession[]
   businessDays           BusinessDay[]
+
+  reconciliationStages ReconciliationStage[]
+  paymentVerifications PaymentVerification[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -2873,4 +2881,324 @@ model ReconciliationItem {
   createdAt           DateTime              @default(now())
 
   @@index([reconciliationId, matchStatus])
+}
+
+// ─── Reconciliation Workflow Engine ────────────────────────────────────────
+// Configurable Business Day -> Cashier Reconciliation -> Finance Reconciliation
+// -> Financial Close -> Archived pipeline. Generalizes BusinessDay (which
+// keeps meaning "stage = BUSINESS_DAY", untouched, so every existing
+// screen/report/API keeps working) into a 5-stage per-(company[,outlet],date)
+// lock unit, each independently configurable (window, close mode, required
+// permissions/checks) rather than hardcoded. See
+// docs/reconciliation-workflow-engine-design.md for the full design.
+//   ReconciliationStage.stageKey: BUSINESS_DAY | CASHIER_RECON | FINANCE_RECON |
+//                                 FINANCIAL_CLOSE | ARCHIVED
+//   ReconciliationStage.status:   PENDING | OPEN | INCOMPLETE | CLOSED | REOPENED |
+//                                 SKIPPED | ARCHIVED
+//   ReconciliationStage.lastReminderTier: 0=none | 1=first reminder sent |
+//                                 2=second/supervisor reminder sent | 3=escalated
+// BUSINESS_DAY and CASHIER_RECON are per-OUTLET (outletId set). FINANCE_RECON
+// and FINANCIAL_CLOSE default to COMPANY-wide (outletId null) — Finance owns
+// the whole company's position, including receipts that never touch an
+// outlet (sponsor payments, direct bank deposits, head-office receipts);
+// drill-down to outlet/department/counter/cashier/channel/business day is a
+// read query joining back to the child CASHIER_RECON stages and their
+// DailyCollection/CashRecon/BankRecon records, not a separate storage layer.
+// A company that wants Finance Recon signed off per outlet instead sets an
+// OUTLET-scope ReconciliationStageConfig override for that stageKey.
+model ReconciliationStage {
+  id                String    @id @default(cuid())
+  companyId         String
+  company           Company   @relation(fields: [companyId], references: [id])
+  outletId          String? // null for company-wide stages (FINANCE_RECON, FINANCIAL_CLOSE by default)
+  outlet            Outlet?   @relation(fields: [outletId], references: [id])
+  date              DateTime
+  stageKey          String
+  status            String    @default("PENDING")
+  openedAt          DateTime?
+  closedAt          DateTime?
+  closedById        String?
+  closedByName      String?
+  autoClosed        Boolean   @default(false) // true only when ForceAutoClose policy actually closed it
+  gracePeriodEndsAt DateTime? // endTime + graceMinutes — after this, escalation fires
+  lastReminderTier  Int       @default(0)
+  escalatedAt       DateTime?
+  escalatedToRoles  String? // JSON array of role strings notified on escalation
+  result            String? // MATCHED | SHORTAGE | EXCESS | MISSING_TRANSACTION (Cashier/Finance Recon only)
+  resultDetail      String? // JSON — variance breakdown by outlet/channel/counter/cashier
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  unlockRequests   ReconciliationStageUnlockRequest[]
+  auditLogs        ReconciliationStageAuditLog[]
+  checkResults     ReconciliationCheckResult[]
+  writeOffRequests WriteOffRequest[]
+
+  @@unique([companyId, outletId, date, stageKey])
+  @@index([companyId, stageKey, status])
+  @@index([outletId, stageKey, status])
+  @@index([date])
+}
+
+/// Request -> Approval -> Reopen workflow for any stage, generalizing
+/// BusinessDayUnlockRequest. Plain string actor fields (no User relation),
+/// matching BusinessDayAuditLog's convention rather than adding new User
+/// relations.
+model ReconciliationStageUnlockRequest {
+  id                String              @id @default(cuid())
+  stageId           String
+  stage             ReconciliationStage @relation(fields: [stageId], references: [id])
+  requestedById     String
+  requestedByName   String
+  reason            String
+  requestedDuration String? // "15m" | "30m" | "1h" | "CUSTOM"
+  requestedMinutes  Int?
+  status            String              @default("PENDING") // PENDING | APPROVED | REJECTED | COMPLETED | EXPIRED
+  approverId        String?
+  approverName      String?
+  approverComment   String?
+  resolvedAt        DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([stageId, status])
+}
+
+/// Immutable field-diff + approval audit trail for ReconciliationStage
+/// actions — INSERT-ONLY by convention, same as BusinessDayAuditLog.
+model ReconciliationStageAuditLog {
+  id             String              @id @default(cuid())
+  stageId        String
+  stage          ReconciliationStage @relation(fields: [stageId], references: [id])
+  action         String // OPEN | CLOSE | REOPEN | LOCK | AUTO_LOCK | UNLOCK_REQUESTED |
+  // UNLOCK_APPROVED | UNLOCK_REJECTED | UNLOCK_EXPIRED | ARCHIVE |
+  // REMINDER_SENT | ESCALATED | RECONCILE_MATCHED | RECONCILE_VARIANCE
+  field          String?
+  previousValue  String?
+  newValue       String?
+  reason         String?
+  approvedById   String?
+  approvedByName String?
+  userId         String?
+  userName       String?
+  createdAt      DateTime            @default(now())
+
+  @@index([stageId, createdAt])
+  @@index([action])
+}
+
+/// Per-scope, per-stage config — window, close mode, required permission,
+/// validation strictness, auto-close policy, notification channels. Same
+/// GLOBAL->COMPANY->OUTLET shape as BusinessDayPolicyConfig/
+/// CollectionModeConfig, narrowest wins. `scope` also picks the grain a
+/// stage instance is created at (see ReconciliationStage comment above).
+model ReconciliationStageConfig {
+  id                   String  @id @default(cuid())
+  scope                String // GLOBAL | COMPANY | OUTLET
+  scopeId              String?
+  stageKey             String // BUSINESS_DAY | CASHIER_RECON | FINANCE_RECON | FINANCIAL_CLOSE
+  startTime            String? // "HH:mm" — when the stage becomes eligible to open; null = opens on prior stage close
+  endTime              String? // "HH:mm" — deadline before escalation/auto-close validation runs
+  closeMode            String  @default("MANUAL") // MANUAL | AUTO
+  requiredRoles        String? // JSON array of role strings allowed to close/approve this stage
+  validationStrictness String  @default("BLOCK_ON_MISSING") // BLOCK_ON_MISSING | WARN_ON_MISSING | ALLOW
+  graceMinutes         Int     @default(0) // window after endTime before escalation fires
+  isEnabled            Boolean @default(true) // lets a company skip Finance Recon / Financial Close entirely
+
+  // Auto-close policy: the engine only NOTIFIES + ESCALATES on a missed
+  // deadline by default — it never silently locks a stage with unresolved
+  // discrepancies. forceAutoClose must be explicitly turned on for
+  // closeMode=AUTO to actually transition OPEN/INCOMPLETE -> CLOSED once
+  // graceMinutes elapses; escalationRoles are notified either way.
+  forceAutoClose  Boolean @default(false)
+  escalationRoles String? // JSON array of role strings notified when grace period expires
+
+  // Notification channels for Level 1 reminders (JSON array, e.g. ["IN_APP"]
+  // or ["IN_APP","EMAIL"]); escalation (Level 2) always sends EMAIL in
+  // addition to IN_APP regardless of this setting — see lib/reconciliation-notify.ts.
+  notifyChannels String? @default("[\"IN_APP\"]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scope, scopeId, stageKey])
+}
+
+/// Configurable reminder/escalation cadence — same GLOBAL->COMPANY->OUTLET
+/// scope shape, optionally narrowed further to one stageKey (null = applies
+/// to all stages at this scope). Default values (used when no row exists at
+/// any scope) match the brief's example cadence: 30 min / 2 hours / end of
+/// window. Fired lazily on read (see checkGraceAndEscalate in
+/// lib/reconciliation-stage.ts), same "no per-minute cron" pattern as
+/// autoLockExpiredBusinessDays.
+model ReconciliationReminderPolicy {
+  id                      String   @id @default(cuid())
+  scope                   String // GLOBAL | COMPANY | OUTLET
+  scopeId                 String?
+  stageKey                String?
+  reminderAnchor          String   @default("STAGE_OPEN") // STAGE_OPEN | END_TIME
+  firstReminderMinutes    Int      @default(30) // -> notify responsible user (Level 1)
+  secondReminderMinutes   Int      @default(120) // -> notify supervisor (Level 1, escalated recipient)
+  escalationAtEndOfWindow Boolean  @default(true) // Level 2 fires at endTime+graceMinutes regardless of the above
+  generateExceptionReport Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([scope, scopeId, stageKey])
+}
+
+/// Plugin-style required-check registry — which reconciliation checks must
+/// be COMPLETE before a given stage instance can close, configured per
+/// scope+stageKey rather than hardcoded. A new check type is a new row here
+/// plus a resolver function registered in lib/reconciliation-checks.ts's
+/// CHECK_REGISTRY — the stage engine itself never changes.
+///   checkType: CASH_RECON | BANK_RECON | MOBILE_MONEY_RECON | SPONSOR_RECON |
+///              INVENTORY_RECON | PAYMENT_VERIFICATION | <custom>
+model ReconciliationRequirement {
+  id         String   @id @default(cuid())
+  scope      String // GLOBAL | COMPANY | OUTLET
+  scopeId    String?
+  stageKey   String
+  checkType  String
+  isRequired Boolean  @default(true) // false = informational only, doesn't block close
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([scope, scopeId, stageKey, checkType])
+}
+
+/// One row per (stage instance, checkType) — the evaluated result of running
+/// a ReconciliationRequirement's resolver against that stage's data.
+/// Recomputed each time the stage's close-validation runs; kept (not
+/// deleted) so the audit trail shows exactly what passed/failed at close
+/// time.
+model ReconciliationCheckResult {
+  id          String              @id @default(cuid())
+  stageId     String
+  stage       ReconciliationStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  checkType   String
+  status      String              @default("PENDING") // PENDING | COMPLETE | FAILED | SKIPPED
+  detail      String? // JSON — e.g. { missingOutlets: [...], variance: 12000 }
+  sourceModel String? // e.g. "CashRecon", "BankRecon" — which existing table this check read
+  sourceId    String? // id of the specific record checked, when applicable
+  evaluatedAt DateTime            @default(now())
+
+  @@unique([stageId, checkType])
+}
+
+/// Real-time payment verification, independent of which stage is currently
+/// open — a payment can be verified the moment it's received, ahead of
+/// Cashier Recon. Sourced from an internal system event (Cash/Bank/Mobile
+/// Money/POS — this app's own CashRecon/BankRecon/PosPayment rows,
+/// source=SYSTEM_GENERATED), a file import (source=IMPORT), a live API/
+/// webhook connector (source=API), or manual entry (source=MANUAL, the
+/// fallback). Ingestion priority on a conflicting match (same channel +
+/// reference + amount): API > IMPORT > MANUAL — a later lower-priority
+/// arrival for an already-VERIFIED reference is written as DUPLICATE with
+/// duplicateOfId set, never silently overwriting the earlier record.
+model PaymentVerification {
+  id             String    @id @default(cuid())
+  outletId       String? // null for company-level receipts not tied to an outlet (sponsor/head-office)
+  outlet         Outlet?   @relation(fields: [outletId], references: [id])
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id])
+  date           DateTime
+  reference      String? // payment reference/code (bank ref, MoMo txn id, till slip no.)
+  channel        String // CASH | CRDB | STANBIC | MPESA | ... (same channel codes as BankRecon)
+  amount         Float
+  customerName   String?
+  paidAt         DateTime?
+  status         String    @default("PENDING") // PENDING | VERIFIED | FAILED | DUPLICATE
+  source         String    @default("MANUAL") // API | IMPORT | MANUAL | SYSTEM_GENERATED
+  sourceRef      String? // integration connector id, import batch id, or origin record id (e.g. a CashRecon/PosPayment id)
+  matchedStageId String? // links to the ReconciliationStage it was verified against, once matched
+  verifiedById   String?
+  verifiedAt     DateTime?
+  failureReason  String?
+  duplicateOfId  String? // self-reference when status = DUPLICATE
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([companyId, date, status])
+  @@index([outletId, date, status])
+  @@index([reference])
+}
+
+/// One row per configured inbound integration (bank/MoMo/gateway webhook, or
+/// a scheduled file-import connector) that can create PaymentVerification
+/// rows with source=API or source=IMPORT. Kept generic (name + kind + config
+/// JSON) so adding a new provider is a data row, not a schema change. Phase 1
+/// ships zero rows here — the internal Cash/Bank/MobileMoney/POS pilot flow
+/// writes PaymentVerification directly with source=SYSTEM_GENERATED; this
+/// table is the extension point for a real external connector later.
+model PaymentIntegrationConnector {
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id])
+  name       String // e.g. "CRDB Bank Webhook", "M-Pesa API", "Monthly Bank Statement Import"
+  kind       String // API_WEBHOOK | FILE_IMPORT
+  channel    String // CRDB | STANBIC | MPESA | ...
+  config     String? // JSON — connector-specific settings (endpoint, mapping, credentials ref)
+  isActive   Boolean   @default(true)
+  lastSyncAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([companyId, isActive])
+}
+
+/// A controlled, non-destructive write-off of a reconciliation discrepancy.
+/// Never edits the original CashRecon/BankRecon/DailyCollection/Excess row —
+/// the raw discrepancy stays exactly as recorded; this is a separate
+/// approved adjustment that references it. Requires evidence + a Finance
+/// Manager approval (WRITE_OFF_RESOURCES.APPROVE); on approval,
+/// lib/write-off.ts posts a JournalEntry adjustment and stamps
+/// journalEntryId back onto the request.
+model WriteOffRequest {
+  id                    String               @id @default(cuid())
+  companyId             String
+  company               Company              @relation(fields: [companyId], references: [id])
+  reconciliationStageId String?
+  reconciliationStage   ReconciliationStage? @relation(fields: [reconciliationStageId], references: [id])
+  sourceModel           String // "CashRecon" | "BankRecon" | "CollectionExcess" | "CashReconExcess" | ...
+  sourceId              String // id of the specific discrepancy record being written off
+  channelKey            String               @default("CASH") // FinanceAccountMapping key for the asset account being reduced (CASH | BANK | MOBILE_MONEY)
+  outletId              String?
+  expectedAmount        Float
+  receivedAmount        Float
+  amount                Float // expectedAmount - receivedAmount, the amount being written off
+  reason                String
+  evidenceUrl           String? // uploaded evidence attachment (receipt, screenshot, statement excerpt)
+  status                String               @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED
+  requestedById         String
+  requestedByName       String
+  approverId            String?
+  approverName          String?
+  approverComment       String?
+  resolvedAt            DateTime?
+  journalEntryId        String? // set once approved — the accounting adjustment entry created
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  auditLogs WriteOffAuditLog[]
+
+  @@index([status])
+  @@index([sourceModel, sourceId])
+}
+
+/// Immutable audit trail for WriteOffRequest actions — INSERT-ONLY by
+/// convention, same shape as ReconciliationStageAuditLog.
+model WriteOffAuditLog {
+  id         String          @id @default(cuid())
+  writeOffId String
+  writeOff   WriteOffRequest @relation(fields: [writeOffId], references: [id])
+  action     String // REQUESTED | APPROVED | REJECTED | CANCELLED | JOURNAL_ENTRY_CREATED
+  reason     String?
+  userId     String?
+  userName   String?
+  createdAt  DateTime        @default(now())
+
+  @@index([writeOffId, createdAt])
 }

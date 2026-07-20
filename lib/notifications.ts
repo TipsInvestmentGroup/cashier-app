@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { isSingleOutletRole } from '@/lib/auth'
+import { sendMail } from '@/lib/email'
 
 export type NotificationType =
   | 'MISSING_DATA_DETECTED'
@@ -8,6 +9,15 @@ export type NotificationType =
   | 'UNLOCK_REJECTED'
   | 'UNLOCK_EXPIRED'
   | 'DAY_REOPENED'
+  // Reconciliation Workflow Engine
+  | 'RECONCILIATION_REMINDER'
+  | 'RECONCILIATION_ESCALATION'
+  | 'RECONCILIATION_STAGE_CLOSED'
+  | 'RECONCILIATION_STAGE_REOPENED'
+  | 'PAYMENT_VERIFICATION_FAILED'
+  | 'WRITE_OFF_REQUESTED'
+  | 'WRITE_OFF_APPROVED'
+  | 'WRITE_OFF_REJECTED'
 
 export async function createNotification(input: {
   userId: string
@@ -74,4 +84,51 @@ export async function notifyResourceHolders(
       entityId: input.entityId ?? null,
     })),
   })
+}
+
+/**
+ * Fan out to every user holding `resource` for the given outlet, in-app
+ * always, and additionally by email when `sendEmail` is true. Used by the
+ * Reconciliation Workflow Engine's notifier (lib/reconciliation-notify.ts) —
+ * Level 1 reminders are in-app only by default (per stage config), Level 2
+ * escalations always add email regardless of config. Email failures are
+ * swallowed (logged) so a broken SMTP config never blocks the in-app
+ * notification or the caller's own workflow.
+ */
+export async function notifyResourceHoldersMultiChannel(
+  resource: string,
+  outletId: string | null,
+  input: Omit<Parameters<typeof createNotification>[0], 'userId'>,
+  opts: { sendEmail?: boolean; emailSubject?: string; emailHtml?: string } = {}
+) {
+  const users = await listUsersWithResourcePermission(resource, outletId)
+  if (!users.length) return
+
+  await prisma.notification.createMany({
+    data: users.map((u) => ({
+      userId: u.id,
+      type: input.type,
+      title: input.title,
+      message: input.message,
+      entityType: input.entityType ?? null,
+      entityId: input.entityId ?? null,
+    })),
+  })
+
+  if (!opts.sendEmail) return
+  const withEmail = await prisma.user.findMany({
+    where: { id: { in: users.map((u) => u.id) } },
+    select: { email: true },
+  })
+  const to = withEmail.map((u) => u.email).filter((e): e is string => !!e)
+  if (!to.length) return
+  try {
+    await sendMail({
+      to,
+      subject: opts.emailSubject || input.title,
+      html: opts.emailHtml || `<p>${input.message}</p>`,
+    })
+  } catch (err) {
+    console.error('notifyResourceHoldersMultiChannel: email send failed', err)
+  }
 }

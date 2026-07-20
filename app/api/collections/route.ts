@@ -129,7 +129,10 @@ export async function POST(req: NextRequest) {
     await syncCollectionChannels(tx, collection.id, channelAmounts)
 
     await tx.auditLog.create({
-      data: { userId: user.userId, action: 'CREATE', entity: 'DailyCollection', entityId: collection.id, details: `Total: ${total}` },
+      data: {
+        userId: user.userId, action: 'CREATE', entity: 'DailyCollection', entityId: collection.id,
+        details: JSON.stringify({ snapshot: { total, staffName: staffName || null, cash: roundMoney(cash), systemSales: roundMoney(systemSales), date: collDate.toISOString() } }),
+      },
     })
 
     // 1) Signed bills (credit sales) recorded by this staff

@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, FINANCE_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
-import { formatDateTime } from '@/lib/utils'
+import { formatDateTime, formatAuditDetails } from '@/lib/utils'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -18,6 +18,7 @@ function tone(action: string): 'green' | 'red' | 'amber' | 'indigo' | 'gray' {
   if (/UPDATE|REOPEN/.test(action)) return 'amber'
   return 'indigo'
 }
+
 
 export default function AuditLogPage() {
   const { request } = useApi()
@@ -93,7 +94,7 @@ export default function AuditLogPage() {
                       <td className="px-4 py-3"><span className="font-medium text-gray-800">{l.user}</span>{l.role && <span className="text-xs text-gray-400 ml-1">· {l.role}</span>}</td>
                       <td className="px-4 py-3"><Badge tone={tone(l.action)}>{l.action}</Badge></td>
                       <td className="px-4 py-3 text-gray-500">{l.entity}</td>
-                      <td className="px-4 py-3 text-gray-500 max-w-[420px] truncate" title={l.details || ''}>{l.details || '—'}</td>
+                      <td className="px-4 py-3 text-gray-500 max-w-[420px] truncate" title={l.details || ''}>{formatAuditDetails(l.details)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -94,6 +94,11 @@ export const FINANCE_TABS: Tab[] = [
   { href: '/finance/reconciliation', label: 'Reconciliation', icon: ListChecks, roles: MGMT },
   { href: '/finance/statements', label: 'Financial Statements', icon: FileBarChart, roles: MGMT },
   { href: '/finance/dashboard', label: 'Finance Dashboard', icon: LayoutDashboard, roles: MGMT },
+  { href: '/reconciliation-stages', label: 'Reconciliation Stages', icon: Workflow, roles: MGMT },
+  { href: '/reconciliation-settings', label: 'Reconciliation Settings', icon: Lock, roles: MGMT },
+  { href: '/reconciliation-write-offs', label: 'Recon Write-Offs', icon: HandCoins, roles: MGMT },
+  { href: '/payment-verifications', label: 'Payment Verifications', icon: CreditCard, roles: MGMT },
+  { href: '/payment-integration-connectors', label: 'Payment Connectors', icon: Landmark, roles: MGMT },
 ]
 
 /** Horizontal tab bar shown at the top of a section's pages. */

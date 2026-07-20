@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { getSessionsByStaff, getSessionTotals } from '@/lib/bi/business-sessions'
 import { getHourlyOrderBreakdown } from '@/lib/bi/hourly-orders'
@@ -21,14 +22,27 @@ export async function GET(req: NextRequest) {
   if (!isValid(parsed)) return NextResponse.json({ error: 'Invalid or missing date' }, { status: 400 })
   const dateRange = { gte: startOfDay(parsed), lte: endOfDay(parsed) }
 
-  const [hourly, staffTotals, totals] = await Promise.all([
+  const [hourly, staffTotals, totals, sourceCollections] = await Promise.all([
     getHourlyOrderBreakdown({ outletId, date: parsed }),
     getSessionsByStaff({ outletId, dateRange }),
     getSessionTotals({ outletId, dateRange }),
+    // Data-integrity drill-down: the exact DailyCollection rows behind this
+    // day's total, so a suspicious amount (e.g. a stray "1") can be traced
+    // straight to its source record, who created/edited/deleted it, and why
+    // — see components/widgets/TrendWidget.tsx's "Source Records" section.
+    prisma.dailyCollection.findMany({
+      where: { ...(outletId ? { outletId } : {}), date: dateRange },
+      include: { cashier: { select: { name: true } }, outlet: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+    }),
   ])
 
   const topStaff = [...staffTotals].sort((a, b) => b.officialCollection - a.officialCollection).slice(0, 5)
   const paymentSplit = { cash: totals.cash, bank: totals.bank, mobileMoney: totals.mobileMoney }
+  const sourceRecords = sourceCollections.map((c) => ({
+    id: c.id, staffName: c.staffName, total: c.total, outletName: c.outlet.name,
+    cashierName: c.cashier?.name || '—', createdAt: c.createdAt, updatedAt: c.updatedAt,
+  }))
 
-  return NextResponse.json({ hourly, topStaff, paymentSplit })
+  return NextResponse.json({ hourly, topStaff, paymentSplit, sourceRecords })
 }

@@ -93,6 +93,17 @@ export async function GET(req: NextRequest) {
     }),
   ])
 
+  // Same calendar-week boundaries as `week.total` above, same one-row-per-
+  // DailyCollection-record shape as `dailyTrend` — the "This Week" TrendWidget's
+  // daily breakdown must reconcile with the total shown above it, which
+  // `dailyTrend.slice(-7)` (a rolling 30-day window, not aligned to any
+  // calendar week) never did.
+  const weekDailyTrend = await prisma.dailyCollection.findMany({
+    where: { ...outletFilter, date: { gte: weekStart, lte: weekEnd } },
+    orderBy: { date: 'asc' },
+    select: { date: true, total: true },
+  })
+
   const [templateToday, templateWeek, templateMonth] = await Promise.all([
     getCollectionSessionTotals({ outletId, dateRange: { gte: todayStart, lte: todayEnd } }),
     getCollectionSessionTotals({ outletId, dateRange: { gte: weekStart, lte: weekEnd } }),
@@ -207,6 +218,7 @@ export async function GET(req: NextRequest) {
     paymentMethodBreakdown,
     recentBills,
     dailyTrend,
+    weekDailyTrend,
     insights,
     staffPerformance,
     pendingApprovals,

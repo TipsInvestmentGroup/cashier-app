@@ -32,6 +32,7 @@ export interface DashboardData {
   paymentMethodBreakdown: { paymentMethod: string; _sum: { amountPaid: number } }[]
   recentBills: { id: string; personName: string; amount: number; billType: string; status: string; date: string }[]
   dailyTrend: { date: string; total: number }[]
+  weekDailyTrend: { date: string; total: number }[]
   insights?: {
     today: { text: string; status: 'good' | 'bad' | 'neutral' } | null
     week: { text: string; status: 'good' | 'bad' | 'neutral' } | null
