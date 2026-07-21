@@ -1073,6 +1073,58 @@ model BusinessCalendarAuditLog {
   @@index([scope, scopeId, createdAt])
 }
 
+// ─── Business Period cycles (effective-dated, versioned) ───────────────────
+// The four configurable MONTHLY cycles that sit on top of the day/week/FY
+// engine above: Business Month (operational reporting), Financial Month
+// (accounting), Payroll Period, and Credit Cycle. Each cycle is defined by a
+// single START DAY; the end day is always derived (day before the next start),
+// which makes overlaps/gaps structurally impossible.
+//
+// Unlike BusinessCalendarConfig (one row per scope), these are VERSIONED: each
+// save inserts a new row stamped with `effectiveDate`. Resolving the cycles for
+// any date picks, per scope, the newest version with effectiveDate <= that date
+// — so re-running an old month's report reproduces the grouping that was in
+// force then (historical-accuracy requirement #6). Scope resolution is the same
+// GLOBAL -> COMPANY -> OUTLET, narrowest-wins chain as BusinessCalendarConfig.
+// Zero rows anywhere ⇒ hardcoded default of start day 1 everywhere = plain
+// calendar months, identical to pre-engine grouping. Field math + validation
+// live in lib/business-periods-shared.ts; the resolver in lib/business-periods.ts.
+model BusinessPeriodVersion {
+  id            String   @id @default(cuid())
+  scope         String // GLOBAL | COMPANY | OUTLET
+  scopeId       String? // null only for GLOBAL; else Company.id or Outlet.id
+  effectiveDate DateTime // this version applies to dates on/after this day
+
+  presetName String @default("CUSTOM") // CALENDAR | MID_MONTH_25 | CUSTOM
+
+  // Business Month — operational/sales/inventory/KPI reporting month.
+  businessMonthStartDay Int @default(1) // 1-31 (clamped per month)
+
+  // Financial Month — accounting period month (financial YEAR start still lives
+  // on BusinessCalendarConfig.fyStartMonth/fyStartDay).
+  financialMonthStartDay Int @default(1)
+
+  // Payroll Period — settlement events are day-of-month in the month AFTER the
+  // period's start month (e.g. period 25 Jun→24 Jul ⇒ processing/pay in July).
+  payrollStartDay      Int @default(1)
+  payrollProcessingDay Int @default(1)
+  payrollPaymentDay    Int @default(1)
+  payrollLockDay       Int @default(1)
+
+  // Credit Cycle — resetDay defaults to the cycle start; graceDays extends the
+  // due window past the cycle end before a balance is overdue.
+  creditStartDay  Int @default(1)
+  creditResetDay  Int @default(1)
+  creditGraceDays Int @default(0)
+
+  reason        String?
+  createdBy     String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+
+  @@index([scope, scopeId, effectiveDate])
+}
+
 // ─── Transaction Management (staff self-declared transactions) ─────────────
 // Simplified layer in front of DailyCollection: the cashier only imports the
 // daily System Sales report (defines the expected staff roster); each service

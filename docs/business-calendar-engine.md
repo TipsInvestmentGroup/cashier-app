@@ -167,3 +167,89 @@ currently a flat string on `User`).
 - Bill reference generated at 02:00 now matches the Collections business date for the same sale.
 - Week/FY boundaries: date exactly on `weekStartDay` / `fyStartDay` falls into the *new* period, not the old one.
 - Audit log gets exactly one row per field changed, with correct previous/new values.
+
+## 10. Period cycles (Business Month / Financial Month / Payroll / Credit)
+
+The day/week/FY engine above answers *"which day/week/year does this moment
+belong to"*. This layer answers *"which **monthly period** does it belong to"*
+for the four cycles a business runs on, each configurable and independent:
+
+| Cycle | Drives |
+|-------|--------|
+| **Business Month** | Operational, sales, inventory, stock-valuation, KPI & BI reports |
+| **Financial Month** | GL, trial balance, P&L, balance sheet, cash flow, journals (FY start stays on `BusinessCalendarConfig`) |
+| **Payroll Period** | Attendance, overtime, leave, advances, loans, allowances, bonuses, statutory deductions, final pay |
+| **Credit Cycle** | Employee/director/customer credit, signed bills, limits, outstanding balances, aging |
+
+### 10.1 Start-day-only model (no overlaps, no gaps)
+
+Each cycle is defined by a single **start day of month** (1–31). The end day is
+*always derived* as the day before the next cycle's start, so overlaps and gaps
+are structurally impossible — validation requirement #7 is satisfied by the data
+model itself, not by runtime overlap checks. A start day `1` yields plain
+calendar months. Days above 28 are **clamped** to each month's real last day
+(31 ⇒ 28/29 in February), handling 28/29/30/31-day months automatically.
+
+Naming follows the operational convention — a period is named for the month it
+*ends* in (`25 Jun → 24 Jul` is "Jul 2026"), which reduces to the natural month
+name when start day is 1.
+
+Payroll settlement events (**lock / processing / salary payment**) are days of
+the month resolved in the **settlement month = the calendar month after the
+period's start month**. So a `25 Jun → 24 Jul` period with processing=25,
+payment=28 gives processing 25 Jul, payment 28 Jul. Credit **reset day** defaults
+to the next cycle start; **grace days** extend the due window past the cycle end.
+
+### 10.2 Effective-dated versioning (historical accuracy)
+
+Unlike `BusinessCalendarConfig` (one row per scope), period cycles are
+**versioned**: `BusinessPeriodVersion` stores one row per `(scope, scopeId,
+effectiveDate)`. Resolving the cycles for a date picks, per scope, the newest
+version with `effectiveDate <= date`; the narrowest scope that has *any* such
+version wins (OUTLET → COMPANY → GLOBAL → hardcoded default of start day 1
+everywhere). A brand-new outlet version effective 1 Mar therefore does **not**
+retro-apply to February — February resolves through whatever was in force then.
+Re-running an old month's report always reproduces its original grouping
+(requirement #6). Zero versions anywhere ⇒ calendar months ⇒ behaviour identical
+to before this layer existed.
+
+### 10.3 Code
+
+- `lib/business-periods-shared.ts` — pure, dependency-free date math + validation
+  (`monthlyPeriodForDate`, `nextMonthlyPeriod`, `generateMonthlyPeriods`,
+  `payrollPeriodForDate`, `creditCycleForDate`, `clampDayToMonth`). Imported by
+  both the API and the client preview so the UI shows exactly what the server
+  will compute.
+- `lib/business-periods.ts` — server resolver (`resolveEffectivePeriodFields`),
+  `saveBusinessPeriodVersion` (writes one `BusinessCalendarAuditLog` row per
+  changed field vs. the previously-effective version), `getBusinessMonthRange`
+  (the single helper a report route calls to group a date), and
+  `getBusinessPeriodSnapshot`.
+- API: `GET/PUT/DELETE /api/business-calendar/periods`,
+  `GET /api/business-calendar/periods/snapshot?outletId=&at=`.
+- UI: `components/BusinessCalendar/PeriodSettings.tsx`, embedded in
+  `/business-calendar` — scope picker, effective-date, presets, per-cycle fields
+  with live previews and auto-generated upcoming months, plus version history.
+
+### 10.4 Deferred (config built now, consumers wired later)
+
+Report/BI rewiring to call `getBusinessMonthRange` instead of
+`date-fns`'s `startOfMonth/endOfMonth` (`lib/dateRange.ts`) is mechanical and
+per-report; done as each report is touched. Payroll and Credit **modules do not
+exist yet** — their period configs are built ahead of them per the HR-system
+blueprint, ready to consume when those modules land. The existing
+`/api/finance/periods` (accounting open/close periods) is a natural downstream
+consumer of Financial Month and can be fed from `getBusinessMonthRange` later.
+An authorized per-report period override (requirement #8) rides on the existing
+range-picker pattern.
+
+### 10.5 Test scenarios (all verified end-to-end)
+
+- Zero versions ⇒ start day 1 everywhere ⇒ calendar months (`1 Jul → 31 Jul`).
+- Start day 25 ⇒ business month `25 Jun 2026 → 24 Jul 2026`, named "Jul 2026".
+- Payroll start 25 / lock 24 / processing 25 / payment 28 ⇒ settlement dates land
+  24 / 25 / 28 Jul for the Jun–Jul period.
+- Credit start 25, reset 25, grace 5 ⇒ reset 25 Jul, grace ends 29 Jul.
+- Version effective 2026-01-01: a `?at=2025-06-15` snapshot falls back to calendar
+  months (pre-effective); `?at=2026-03-10` uses the 25th cycle.
+- Start day 31 in February ⇒ clamps to 28 (or 29 in a leap year).

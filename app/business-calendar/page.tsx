@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
+import { PeriodSettings } from '@/components/BusinessCalendar/PeriodSettings'
 import { useApi } from '@/hooks/useApi'
 import {
   DEFAULT_BUSINESS_CALENDAR,
@@ -203,6 +204,8 @@ export default function BusinessCalendarPage() {
           <ScopeList title="By Outlet" rows={outletRows} nameFor={(id) => outlets.find((o) => o.id === id)?.name || id} onRemove={removeOverride} />
           {!global && <p className="text-xs text-gray-400">No Global Default saved yet — the engine falls back to today&apos;s exact 05:00 cutover behavior.</p>}
         </div>
+
+        <PeriodSettings outlets={outlets} companies={companies} />
 
         {audit.length > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
