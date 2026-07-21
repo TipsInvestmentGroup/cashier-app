@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
+import { SalesAnalytics } from '@/components/SalesAnalytics'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { format, parse, isValid } from 'date-fns'
 import { FileSpreadsheet, CheckCircle2, AlertTriangle, Users, Package, Trash2, Eye, ArrowLeft, ClipboardList } from 'lucide-react'
@@ -44,7 +45,7 @@ export default function SalesImportPage() {
   const canApprove = MGMT.includes(user?.role || '')
   const canUpload = UPLOADERS.includes(user?.role || '')
 
-  const [tab, setTab] = useState<'new' | 'history'>('new')
+  const [tab, setTab] = useState<'new' | 'history' | 'analytics'>('new')
 
   // Master + config
   const [outlets, setOutlets] = useState<Outlet[]>([])
@@ -291,13 +292,15 @@ export default function SalesImportPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 border-b border-gray-200 mt-4 mb-5">
-          {(['new', 'history'] as const).map((t) => (
+          {(['new', 'history', 'analytics'] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition ${tab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
-              {t === 'new' ? 'New Import' : 'Import History'}
+              {t === 'new' ? 'New Import' : t === 'history' ? 'Import History' : 'Analytics'}
             </button>
           ))}
         </div>
+
+        {tab === 'analytics' && <SalesAnalytics />}
 
         {tab === 'new' && (
           <div className="space-y-5">
