@@ -263,12 +263,16 @@ paid-bills, customer-bills, tips-dj-bills, cancellations, petty-cash and
 pos/reports. Safe by construction — `getRangeInterval` falls back to the calendar
 month when no window is supplied, so the option can never break an unwired page.
 
-**Deferred (config built now, consumers wired later):** a few pages still define
-their own local `RangeKey` (excess-loss, excess-recon, collections) and would each
-need the same small treatment. Payroll and Credit **modules do not exist yet** —
-their period configs are built ahead of them per the HR-system blueprint, ready to
-consume when those modules land. An authorized per-report period override
-(requirement #8) rides on the existing range-picker pattern.
+The three pages with their own local `RangeKey` (excess-loss, excess-recon,
+collections) got the same `businessMonth` option + `useBusinessMonth` treatment
+directly in their local range switch — so every date-filtered report surface in
+the app now offers Business Month.
+
+**Deferred (config built now, consumers wired later):** Payroll and Credit
+**modules do not exist yet** — their period configs are built ahead of them per
+the HR-system blueprint, ready to consume when those modules land. An authorized
+per-report period override (requirement #8) rides on the existing range-picker
+pattern.
 
 ### 10.5 Test scenarios (all verified end-to-end)
 

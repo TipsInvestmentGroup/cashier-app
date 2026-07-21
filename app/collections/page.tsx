@@ -11,6 +11,7 @@ import { DigitalReconForm } from '@/components/recon/DigitalReconForm'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { resolveBusinessDateLocal, DEFAULT_BUSINESS_CALENDAR } from '@/lib/business-calendar-shared'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import { formatCurrency, formatDateTime, roundMoney } from '@/lib/utils'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
@@ -20,11 +21,12 @@ import { EXCESS_REASONS, SHORTFALL_REASONS, UNASSIGNED_EXCESS_REASON } from '@/l
 import toast from 'react-hot-toast'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns'
 
-type RangeKey = 'today' | 'week' | 'month' | 'custom'
+type RangeKey = 'today' | 'week' | 'month' | 'businessMonth' | 'custom'
 const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
   { key: 'today', label: 'Today' },
   { key: 'week', label: 'This Week' },
   { key: 'month', label: 'This Month' },
+  { key: 'businessMonth', label: 'Business Month' },
   { key: 'custom', label: 'Custom' },
 ]
 
@@ -114,6 +116,7 @@ export default function CollectionsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [range, setRange] = useState<RangeKey>('today')
+  const bizMonth = useBusinessMonth(user?.outlet?.id || undefined)
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [closedDays, setClosedDays] = useState<string[]>([]) // start-of-day ISO strings
@@ -389,6 +392,8 @@ export default function CollectionsPage() {
         return { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) }
       case 'month':
         return { start: startOfMonth(now), end: endOfMonth(now) }
+      case 'businessMonth':
+        return bizMonth.range ?? { start: startOfMonth(now), end: endOfMonth(now) }
       case 'custom':
         return { start: startOfDay(parseISO(customFrom)), end: endOfDay(parseISO(customTo)) }
     }
@@ -997,6 +1002,9 @@ export default function CollectionsPage() {
                 <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
                   className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
               </div>
+            )}
+            {range === 'businessMonth' && bizMonth.label && (
+              <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full">{bizMonth.label}</span>
             )}
           </div>
         </div>

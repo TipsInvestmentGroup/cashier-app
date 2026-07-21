@@ -7,12 +7,13 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import toast from 'react-hot-toast'
 
-type RangeKey = 'today' | 'week' | 'month' | 'custom'
+type RangeKey = 'today' | 'week' | 'month' | 'businessMonth' | 'custom'
 const RANGES: { key: RangeKey; label: string }[] = [
   { key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' },
-  { key: 'month', label: 'This Month' }, { key: 'custom', label: 'Custom' },
+  { key: 'month', label: 'This Month' }, { key: 'businessMonth', label: 'Business Month' }, { key: 'custom', label: 'Custom' },
 ]
 
 interface Outlet { id: string; name: string }
@@ -32,6 +33,7 @@ function ExcessLossPage() {
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [outletId, setOutletId] = useState('')
+  const bizMonth = useBusinessMonth(outletId || undefined)
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [data, setData] = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(false)
@@ -48,6 +50,7 @@ function ExcessLossPage() {
       case 'today': return { start: startOfDay(now), end: endOfDay(now) }
       case 'week': return { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) }
       case 'month': return { start: startOfMonth(now), end: endOfMonth(now) }
+      case 'businessMonth': return bizMonth.range ?? { start: startOfMonth(now), end: endOfMonth(now) }
       case 'custom': return { start: startOfDay(new Date(customFrom)), end: endOfDay(new Date(customTo)) }
     }
   })()
@@ -61,7 +64,7 @@ function ExcessLossPage() {
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not load report')
     } finally { setLoading(false) }
-  }, [request, isCashier, outletId, range, customFrom, customTo]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [request, isCashier, outletId, range, customFrom, customTo, bizMonth.range]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load() }, [load])
 
@@ -108,6 +111,9 @@ function ExcessLossPage() {
               <span className="text-gray-400 text-sm">to</span>
               <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
             </div>
+          )}
+          {range === 'businessMonth' && bizMonth.label && (
+            <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full">{bizMonth.label}</span>
           )}
           {!isCashier && (
             <select value={outletId} onChange={(e) => setOutletId(e.target.value)} className="ml-auto px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">

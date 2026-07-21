@@ -8,16 +8,17 @@ import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { MoneyInput } from '@/components/MoneyInput'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import { EXCESS_REASONS } from '@/lib/excess-reasons'
 import { ManageAccessModal } from '@/components/ManageAccessModal'
 import { AddExcessModal } from '@/components/AddExcessModal'
 import { ShieldCheck, Pencil, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-type RangeKey = 'today' | 'week' | 'month' | 'all' | 'custom'
+type RangeKey = 'today' | 'week' | 'month' | 'businessMonth' | 'all' | 'custom'
 const RANGES: { key: RangeKey; label: string }[] = [
   { key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' },
-  { key: 'month', label: 'This Month' }, { key: 'all', label: 'All' }, { key: 'custom', label: 'Custom' },
+  { key: 'month', label: 'This Month' }, { key: 'businessMonth', label: 'Business Month' }, { key: 'all', label: 'All' }, { key: 'custom', label: 'Custom' },
 ]
 type StatusFilter = 'ALL' | 'PENDING' | 'SETTLED'
 
@@ -57,6 +58,7 @@ export default function ExcessReconPage() {
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [outletId, setOutletId] = useState('')
+  const bizMonth = useBusinessMonth(outletId || undefined)
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('PENDING')
   const [rows, setRows] = useState<Row[]>([])
@@ -88,6 +90,7 @@ export default function ExcessReconPage() {
         const interval = range === 'today' ? { start: startOfDay(now), end: endOfDay(now) }
           : range === 'week' ? { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) }
           : range === 'month' ? { start: startOfMonth(now), end: endOfMonth(now) }
+          : range === 'businessMonth' ? (bizMonth.range ?? { start: startOfMonth(now), end: endOfMonth(now) })
           : { start: startOfDay(new Date(customFrom)), end: endOfDay(new Date(customTo)) }
         qs.set('startDate', format(interval.start, 'yyyy-MM-dd'))
         qs.set('endDate', format(interval.end, 'yyyy-MM-dd'))
@@ -107,7 +110,7 @@ export default function ExcessReconPage() {
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not load Excess Recon')
     } finally { setLoading(false) }
-  }, [request, isCashier, outletId, range, customFrom, customTo])
+  }, [request, isCashier, outletId, range, customFrom, customTo, bizMonth.range])
 
   useEffect(() => { load() }, [load])
 
@@ -371,6 +374,9 @@ export default function ExcessReconPage() {
               <span className="text-gray-400 text-sm">to</span>
               <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
             </div>
+          )}
+          {range === 'businessMonth' && bizMonth.label && (
+            <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full">{bizMonth.label}</span>
           )}
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1 ml-1">
             {(['PENDING', 'SETTLED', 'ALL'] as StatusFilter[]).map((s) => (
