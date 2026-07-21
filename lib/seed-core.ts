@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { seedStandardCollectionTemplate } from './collection-template-seed'
 import { seedCreditFramework } from './credit-seed'
+import { seedPayrollFramework } from './payroll-seed'
 import { RECONCILIATION_STAGE_RESOURCES as RSR, WRITE_OFF_RESOURCES as WOR } from './rbac'
 import { classForReason } from './reconciliation-classification'
 
@@ -200,5 +201,11 @@ export async function seedCore(prisma: any) {
   // persons above exist so accounts can bind to them.
   const credit = await seedCreditFramework(prisma)
 
-  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts }
+  // Universal Payroll Framework (Phase 1 — foundation): module config (DISABLED),
+  // employee categories + pay groups, and one Employee per User. Idempotent,
+  // additive — runs after users exist so employees can bind to them. Changes no
+  // behaviour while the module is disabled.
+  const payroll = await seedPayrollFramework(prisma)
+
+  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees }
 }

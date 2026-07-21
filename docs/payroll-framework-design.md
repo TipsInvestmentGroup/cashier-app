@@ -433,3 +433,42 @@ Seeding is idempotent & additive (`lib/payroll-seed.ts`, called from
 
 Each phase is additive and independently shippable — zero-config always reduces
 to today's exact behaviour, the invariant every engine in this codebase holds.
+
+---
+
+## Phase 1 (implemented) — foundation, module disabled
+
+- **Schema** (`prisma/schema.prisma`): `PayrollModuleConfig` (scoped
+  GLOBAL→COMPANY→OUTLET, mirrors `CreditModuleConfig`; ships `enabled = false`),
+  `EmployeeCategory` + `PayGroup` (`@@unique([companyId, code])`, soft-deletable),
+  and `Employee`. One bridge line added to `Person` (`employee Employee?`);
+  `Employee.personId` carries the relation, `Employee.userId` is a bare unique
+  scalar with no relation (leaves the large `User` model untouched, exactly as
+  `CreditAccount.userId`).
+- **Design refinement vs the sketch above:** `Employee.personId` and `userId` are
+  **both nullable & unique, at least one required** (app-enforced) — not a strict
+  1:1-over-`Person`. Reality forced this: floor staff exist only as a `User` (no
+  `Person`), directors/admins often only as a `Person`. `Employee` is the unifier
+  that holds whichever links exist. Tenant scope (`companyId`/`outletId`) and
+  `departmentId` are bare indexed scalars in Phase 1 (a formal `Department` FK
+  arrives with cost-centre reporting later).
+- **Resolver** (`lib/payroll-config.ts`): `resolvePayrollConfig`
+  (OUTLET→COMPANY→GLOBAL, falls back to a **disabled** module),
+  `isPayrollEnabled` (the gate every future payroll action must check),
+  `resolvePayrollTerminology`, `setPayrollModuleConfig` (GLOBAL via `findFirst`,
+  same NULL-scopeId handling as `setCreditModuleConfig`). Mirrors
+  `lib/credit-config.ts` exactly.
+- **Seed** (`lib/payroll-seed.ts`, called from `lib/seed-core.ts`): idempotent &
+  additive — module config (GLOBAL, disabled), 5 employee categories, 3 pay
+  groups, and **one `Employee` per `User`**. Deliberately does **not** fuzzy-match
+  `User`→`Person` by name (error-prone); the `personId` link (which lets a Phase-3
+  run settle a person's signed bills) is a curated admin action. So Phase-1
+  employees carry `userId`, `personId = null`.
+- **Verified end-to-end** on local SQLite: `prisma validate` + `generate` +
+  `db push` clean; `tsc --noEmit` and `eslint` pass; seed produces config
+  (`enabled=false`), 5 categories, 3 pay groups, 58 employees = 58 users
+  (all `userId`-set, `personId` null); a second full seed reproduces identical
+  counts (idempotent, no duplicates). Module disabled ⇒ existing deduction report
+  and all other behaviour unchanged.
+
+### Next: Phase 2 — components + formula engine + read-only payslip preview.

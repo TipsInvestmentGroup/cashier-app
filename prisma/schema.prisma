@@ -42,6 +42,17 @@ datasource db {
 //   TransactionSession.status:      OPEN | VALIDATED | CLOSED
 //   StaffTransaction.category:      PAYMENT | SIGNED_BILL | DISCOUNT | CANCELLATION | CREDIT_SALE
 //   StaffTransaction.status:        DECLARED | PENDING_APPROVAL | APPROVED | REJECTED
+//   ── Universal Payroll Framework (Phase 1 — see docs/payroll-framework-design.md) ──
+//   PayrollModuleConfig.scope:              GLOBAL | COMPANY | OUTLET
+//   PayrollModuleConfig.exchangeRatePolicy: RUN_DATE | PERIOD_END | MANUAL
+//   PayrollModuleConfig.roundingPolicy:     NONE | NEAREST_0_01 | NEAREST_1 | NEAREST_5 | NEAREST_10
+//   PayrollModuleConfig.negativeNetPolicy:  BLOCK | CARRY_FORWARD | CAP
+//   PayrollModuleConfig.payElementVisibilityDefault: SUMMARY | FULL | MASKED
+//   EmployeeCategory.status:                ACTIVE | INACTIVE
+//   EmployeeCategory.defaultPayFrequency:   MONTHLY | FORTNIGHTLY | WEEKLY | DAILY | HOURLY
+//   PayGroup.status:                        ACTIVE | INACTIVE
+//   Employee.status:                        ACTIVE | PROBATION | SUSPENDED | ON_LEAVE | TERMINATED
+//   Employee.paymentMethod:                 BANK | MOBILE_MONEY | CASH
 
 model User {
   id                String    @id @default(cuid())
@@ -1292,6 +1303,11 @@ model Person {
 
   // Universal Credit Framework: optional 1:1 credit account (the debtor record).
   creditAccount CreditAccount?
+
+  // Universal Payroll Framework: optional 1:1 employee record. Person is the
+  // identity master a compensation record binds to (same 1:1-over-Person move
+  // CreditAccount makes). Nullable — most Persons (customers) are not employees.
+  employee Employee?
 
   @@unique([type, code])
   @@index([type])
@@ -3807,4 +3823,183 @@ model CreditAccountGroup {
 
   @@index([accountId])
   @@index([groupId])
+}
+
+// ─── Universal Payroll Management Framework (Phase 1 — foundation) ────────────
+// The compensation domain the app lacks today. Until this, "payroll" meant only
+// the deduction-recovery report (lib/payroll.ts) over SignedBill/Person — no one
+// was ever paid, and User (login) and Person (party) were not linked by any FK.
+//
+// Phase 1 is FOUNDATION ONLY and ships DISABLED (PayrollModuleConfig.enabled =
+// false): the Employee master that unifies User + Person, the module config
+// (scoped like CreditModuleConfig / CollectionModeConfig), employee categories
+// and pay groups. It computes no pay and posts no GL — later phases add
+// PayComponent + the formula engine (Phase 2), PayrollRun + payslips + GL
+// posting (Phase 3, which also closes Credit-framework Phase 5), statutory packs
+// + attendance/leave (Phase 4). Additive & reversible: with the module disabled
+// and nothing reading these tables, behaviour is byte-identical to before.
+// Periods are NOT modelled here — payroll reuses BusinessPeriodVersion's
+// payroll* fields via lib/business-periods.ts. See docs/payroll-framework-design.md.
+
+/// Module identity + global switches for payroll — what "payroll" is CALLED and
+/// how it behaves, per scope. Same GLOBAL→COMPANY→OUTLET narrowest-wins shape as
+/// CreditModuleConfig (resolved in lib/payroll-config.ts). Ships enabled = false
+/// so installing this framework changes nothing until an admin turns it on.
+///   scope:                    GLOBAL | COMPANY | OUTLET
+///   exchangeRatePolicy:       RUN_DATE | PERIOD_END | MANUAL
+///   roundingPolicy:           NONE | NEAREST_0_01 | NEAREST_1 | NEAREST_5 | NEAREST_10
+///   negativeNetPolicy:        BLOCK | CARRY_FORWARD | CAP (deductions > gross)
+///   payElementVisibilityDefault: SUMMARY | FULL | MASKED (field-level salary confidentiality)
+model PayrollModuleConfig {
+  id                          String   @id @default(cuid())
+  scope                       String
+  // Null only for GLOBAL; else a Company.id or Outlet.id depending on scope.
+  scopeId                     String?
+  moduleName                  String   @default("Payroll") // "Wage Advice", "Salaries", ...
+  // JSON map of generic label → tenant label, e.g.
+  // {"module":"Payroll","employee":"Staff","payslip":"Payslip","run":"Pay Run","earning":"Earning","deduction":"Deduction"}.
+  terminology                 String?
+  enabled                     Boolean  @default(false) // DISABLED on install — zero behaviour change
+  defaultCurrency             String   @default("TZS")
+  exchangeRatePolicy          String   @default("RUN_DATE")
+  approvalRequiredDefault     Boolean  @default(true)
+  roundingPolicy              String   @default("NEAREST_1")
+  negativeNetPolicy           String   @default("CARRY_FORWARD")
+  payElementVisibilityDefault String   @default("SUMMARY")
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  @@unique([scope, scopeId])
+}
+
+/// Configurable employee classification — Permanent / Casual / Contract /
+/// Consultant / Intern / Director / Seasonal / Part-time, unlimited & admin-
+/// defined. Generalizes today's single boolean User.isCasual into first-class
+/// rows. Soft-deleted (status = INACTIVE) — historical employees reference it.
+model EmployeeCategory {
+  id                  String   @id @default(cuid())
+  companyId           String
+  code                String // stable machine key, e.g. "PERMANENT"
+  name                String // display, e.g. "Permanent"
+  description         String?
+  status              String   @default("ACTIVE")
+  defaultPayFrequency String   @default("MONTHLY")
+  // Some categories (e.g. short-term casuals, foreign consultants) may be exempt
+  // from some statutory deductions — the flag is read by the Phase-4 statutory
+  // engine; ignored in Phase 1.
+  isStatutoryExempt   Boolean  @default(false)
+  priority            Int      @default(0)
+  attributes          String? // JSON extensibility escape hatch
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employees Employee[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+}
+
+/// The configurable payroll rule bundle (the payroll analogue of CreditGroup):
+/// which components apply, at what cadence, under whose approval. In Phase 1 it
+/// is mostly identity + approver routing; componentSet / policy FKs are consumed
+/// by later phases. approverRoles mirrors CreditGroup.approverRoles (Phase-1
+/// role-based approval, reusing WorkflowApproval). Soft-deleted (INACTIVE).
+model PayGroup {
+  id          String  @id @default(cuid())
+  companyId   String
+  code        String // stable machine key, e.g. "FLOOR_STAFF"
+  name        String // display, e.g. "Floor Staff"
+  description String?
+  status      String  @default("ACTIVE")
+
+  // Null = follow the period cycle from BusinessPeriodVersion; set only to
+  // override the cadence for this group (MONTHLY | FORTNIGHTLY | WEEKLY | DAILY | HOURLY).
+  payFrequency String?
+
+  // JSON array of default PayComponent codes for this group (consumed in Phase 2).
+  componentSet String?
+
+  // Approval routing (Phase 1: role-based, reusing WorkflowApproval). JSON array
+  // of role strings, e.g. ["MANAGER","DIRECTOR"]. A first-class WorkflowDefinition
+  // graph (shared with Credit) replaces this in a later phase.
+  approverRoles String?
+
+  // Reserved FKs, wired in Phase 4 (kept as loose ids to avoid forward-declaring
+  // models that don't exist yet).
+  overtimePolicyId   String?
+  leaveSchemeId      String?
+  statutoryProfileId String?
+
+  priority    Int      @default(0)
+  terminology String?
+  attributes  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employees Employee[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+}
+
+/// THE MISSING MASTER — one compensation identity per staff member, unifying the
+/// two records that exist today but have no FK between them: a login (User) and
+/// a party record (Person). Both links are nullable & unique and AT LEAST ONE is
+/// required (enforced in app code, not the schema): floor staff exist only as a
+/// User (no Person), directors/admins often only as a Person, some staff as both.
+/// personId carries a relation (Person is the identity master, cf. CreditAccount);
+/// userId is a bare unique scalar with NO relation, to leave the large User model
+/// untouched — exactly as CreditAccount.userId does. Tenant scope (companyId /
+/// outletId) and departmentId are bare scalars for the same reason.
+///   status:        ACTIVE | PROBATION | SUSPENDED | ON_LEAVE | TERMINATED
+///   paymentMethod: BANK | MOBILE_MONEY | CASH
+model Employee {
+  id String @id @default(cuid())
+
+  personId String? @unique
+  person   Person? @relation(fields: [personId], references: [id])
+  userId   String? @unique // login link; no relation, to keep the User model untouched
+
+  // Reuses Person.code EMPLOYEE_NUMBER mode when present; free to differ.
+  employeeNumber String?
+
+  categoryId String
+  category   EmployeeCategory @relation(fields: [categoryId], references: [id])
+  payGroupId String
+  payGroup   PayGroup         @relation(fields: [payGroupId], references: [id])
+
+  // Cost-centre dimensions. departmentId is a bare scalar in Phase 1 (Department
+  // is a lookup used only by budgets today); a formal FK arrives with cost-centre
+  // reporting in a later phase.
+  departmentId String?
+  costCenter   String?
+
+  // Tenant scope — bare indexed scalars (a Company.id / Outlet.id), no relation,
+  // resolved the same way scoped-config scopeId is.
+  companyId String?
+  outletId  String?
+
+  hireDate         DateTime?
+  probationEndDate DateTime?
+  terminationDate  DateTime?
+  status           String    @default("ACTIVE")
+
+  baseCurrency  String  @default("TZS")
+  // Base periodic pay in baseCurrency. The formula engine (Phase 2) reads this
+  // as the `base` variable; 0 until set. Not itself a payslip line.
+  baseSalary    Float   @default(0)
+  paymentMethod String  @default("BANK")
+  // Opaque payout handles (bank account / mobile-money number). Never widen the
+  // confidentiality surface beyond what today's Outlet/User fields already hold.
+  bankRef        String?
+  mobileMoneyRef String?
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([categoryId])
+  @@index([payGroupId])
+  @@index([userId])
 }
