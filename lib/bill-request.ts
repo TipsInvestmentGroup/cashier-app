@@ -3,11 +3,15 @@ import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { postCreditSale } from '@/lib/finance-ar'
+import { resolveCreditTags } from '@/lib/credit-config'
 
 interface ItemInput { productId?: string; productName?: string; unitPrice?: number; quantity?: number }
 interface BillRequestArgs {
   billType: string
   personName: string
+  // Optional — used only to resolve the CreditAccount tag; the bill itself stays
+  // name-only (personId is not written) to preserve today's request behavior.
+  personId?: string | null
   serviceStaff?: string | null
   amount?: number
   items?: ItemInput[]
@@ -38,6 +42,7 @@ export async function createBillRequest(a: BillRequestArgs) {
     const ref = await generateBillReference(tx, {
       recordId, sourceModel: 'SignedBill', billTypeCode, date: billDate, outletId: a.outletId,
     })
+    const tags = await resolveCreditTags(tx, { billType: a.billType, personId: a.personId || null, outletId: a.outletId })
 
     const bill = await tx.signedBill.create({
       data: {
@@ -50,6 +55,8 @@ export async function createBillRequest(a: BillRequestArgs) {
         internalBillId: ref.internalBillId,
         displayReference: ref.displayReference,
         billTypeConfigId: ref.billTypeConfigId,
+        creditGroupId: tags.creditGroupId,
+        creditAccountId: tags.creditAccountId,
         status: 'UNPAID',
         approvalStatus: 'PENDING',
         outletId: a.outletId,

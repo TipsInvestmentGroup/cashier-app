@@ -5,6 +5,7 @@ import { getAuthUser, requireRole, readOutletScope, writeOutletId } from '@/lib/
 import { roundMoney } from '@/lib/utils'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { checkCreditLimit, postCreditSale } from '@/lib/finance-ar'
+import { resolveCreditTags } from '@/lib/credit-config'
 
 const CAN_WRITE = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
@@ -81,7 +82,13 @@ export async function POST(req: NextRequest) {
   const itemsTotal = roundMoney(itemsInput.reduce((s, it) => s + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0), 0))
   const finalAmount = roundMoney(itemsInput.length ? itemsTotal : Number(amount))
 
-  const { limitExceeded, exceededAmount } = await checkCreditLimit(prisma, { personId, billType, newAmount: finalAmount })
+  const { limitExceeded, exceededAmount, behavior } = await checkCreditLimit(prisma, { personId, billType, newAmount: finalAmount, outletId: usedOutletId })
+
+  // Config-driven enforcement: only BLOCK stops creation; WARN/APPROVE still
+  // create the bill and surface limitExceeded to the client (today's behavior).
+  if (limitExceeded && behavior === 'BLOCK') {
+    return NextResponse.json({ error: `Credit limit exceeded by ${exceededAmount}. This bill is blocked by policy.`, limitExceeded: true, exceededAmount }, { status: 422 })
+  }
 
   const billDate = date ? new Date(date) : new Date()
 
@@ -91,6 +98,7 @@ export async function POST(req: NextRequest) {
     const ref = await generateBillReference(tx, {
       recordId, sourceModel: 'SignedBill', billTypeCode, date: billDate, personId: personId || null, outletId: usedOutletId,
     })
+    const tags = await resolveCreditTags(tx, { billType, personId: personId || null, outletId: usedOutletId })
 
     const created = await tx.signedBill.create({
       data: {
@@ -106,6 +114,8 @@ export async function POST(req: NextRequest) {
         internalBillId: ref.internalBillId,
         displayReference: ref.displayReference,
         billTypeConfigId: ref.billTypeConfigId,
+        creditGroupId: tags.creditGroupId,
+        creditAccountId: tags.creditAccountId,
         outletId: usedOutletId,
         cashierId: user.userId,
         date: billDate,

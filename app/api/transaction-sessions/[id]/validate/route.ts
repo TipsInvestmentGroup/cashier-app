@@ -7,6 +7,7 @@ import { resolvePerson } from '@/lib/resolve-person'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { syncBusinessSession } from '@/lib/business-session'
+import { resolveCreditTags } from '@/lib/credit-config'
 
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
 
@@ -148,6 +149,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const ref = await generateBillReference(tx, {
         recordId, sourceModel: 'SignedBill', billTypeCode, date: session.date, personId: person?.id ?? null, outletId: session.outletId,
       })
+      const tags = await resolveCreditTags(tx, { billType: 'CUSTOMER', personId: person?.id ?? null, outletId: session.outletId })
       await tx.signedBill.create({
         data: {
           id: recordId,
@@ -156,6 +158,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           description: `Credit sale declared by ${staff.name} via Transaction Session ${id}`,
           status: 'UNPAID', date: session.date, outletId: session.outletId, cashierId: user.userId,
           internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+          creditGroupId: tags.creditGroupId, creditAccountId: tags.creditAccountId,
         },
       })
       creditSales += amt
@@ -198,6 +201,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const ref = await generateBillReference(tx, {
         recordId, sourceModel: 'SignedBill', billTypeCode, date: session.date, personId: person?.id ?? null, outletId: session.outletId,
       })
+      const tags = await resolveCreditTags(tx, { billType: 'STAFF_LOSS', personId: person?.id ?? null, outletId: session.outletId })
       await tx.signedBill.create({
         data: {
           id: recordId,
@@ -206,6 +210,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           description: `Auto staff loss: System ${systemSalesRow?.amount || 0} − collected ${total} − credit sales ${creditSales} − payments received ${paymentsReceived} − discount ${discount} (Transaction Session ${id})`,
           status: 'UNPAID', date: session.date, outletId: session.outletId, cashierId: user.userId,
           internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+          creditGroupId: tags.creditGroupId, creditAccountId: tags.creditAccountId,
           autoSourceCollectionId: created.id,
         },
       })

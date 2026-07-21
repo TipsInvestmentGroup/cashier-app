@@ -3,6 +3,7 @@ import { roundMoney } from './utils'
 import { syncCollectionExcessTotal } from './collection-excess'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from './bill-reference'
 import { syncBusinessSession } from './business-session'
+import { resolveCreditTags } from './credit-config'
 
 // Loose type — works with both the prisma singleton and a transaction client,
 // and avoids depending on generated Prisma types (regenerated on deploy).
@@ -91,6 +92,7 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
       const ref = await generateBillReference(db, {
         recordId, sourceModel: 'SignedBill', billTypeCode, date: c.date, personId: person?.id ?? null, outletId: c.outletId,
       })
+      const tags = await resolveCreditTags(db, { billType: 'STAFF_LOSS', personId: person?.id ?? null, outletId: c.outletId })
       await db.signedBill.create({
         data: {
           id: recordId,
@@ -99,6 +101,7 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
           description: `Auto staff loss (recomputed): collection ${collectionId}`,
           status: 'UNPAID', date: c.date, outletId: c.outletId, cashierId: c.cashierId,
           internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+          creditGroupId: tags.creditGroupId, creditAccountId: tags.creditAccountId,
           autoSourceCollectionId: collectionId,
         },
       })

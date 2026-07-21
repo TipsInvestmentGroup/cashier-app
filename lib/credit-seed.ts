@@ -136,7 +136,11 @@ export async function seedCreditFramework(prisma: any): Promise<{ groups: number
         displayName: p.name,
         personId: p.id,
         currency: 'TZS',
-        creditLimitOverride: p.creditLimit && p.creditLimit > 0 ? p.creditLimit : null,
+        // creditLimitOverride is left null on purpose: the person's limit flows
+        // through resolveEffectiveLimit's PERSON source (read live from
+        // Person.creditLimit). Copying it here would create a second source of
+        // truth that silently diverges when the person limit is later edited.
+        // An override is only ever set by an explicit admin action.
       },
     })
     accountsCreated++

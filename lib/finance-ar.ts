@@ -8,7 +8,8 @@ import { prisma } from './prisma'
 import { roundMoney } from './utils'
 import { postJournalEntry, type Db } from './ledger'
 import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from './finance-mapping'
-import { CREDIT_BILL_TYPES, REQUEST_BILL_TYPES, CREDIT_LIMIT_BILL_TYPES } from './bill-types'
+import { CREDIT_BILL_TYPES, REQUEST_BILL_TYPES } from './bill-types'
+import { resolveEffectiveLimit, type LimitSource, type OverLimitBehavior, resolveCreditModuleConfig } from './credit-config'
 
 async function resolveCompanyIdForOutlet(db: Db, outletId: string): Promise<string | null> {
   const outlet = await db.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } })
@@ -105,24 +106,40 @@ export async function postReceipt(db: Db, paidBill: PaidBillForPosting, createdB
   await db.paidBill.update({ where: { id: paidBill.id }, data: { journalEntryId } })
 }
 
+export interface CreditLimitResult {
+  limitExceeded: boolean
+  exceededAmount: number
+  /** The effective limit that applied (0 = none). */
+  limit: number
+  /** Where the limit came from — see resolveEffectiveLimit. */
+  limitSource: LimitSource
+  /** The configured over-limit behavior (BLOCK | WARN | APPROVE). */
+  behavior: OverLimitBehavior
+}
+
 /**
- * Warn-only credit-limit check (matches the existing behavior in
- * app/api/signed-bills/route.ts, extracted here so lib/bill-request.ts can
- * share it too) — only meaningful for CREDIT_LIMIT_BILL_TYPES (ADMIN/
- * DIRECTOR today); a Person.creditLimit of 0 means "no limit configured",
- * not "no credit allowed", so unconfigured people are never blocked.
+ * Config-driven credit-limit check for a new bill. The effective limit is
+ * resolved through the Credit Framework (account override → group ceiling →
+ * legacy Person.creditLimit for ADMIN/DIRECTOR), and the over-limit behavior
+ * (BLOCK/WARN/APPROVE) comes from the resolved module config. Backward
+ * compatible: with the current seed (group maxCredit = 0, no overrides, WARN)
+ * this reduces to exactly today's behavior — warn-only, and only ADMIN/DIRECTOR
+ * person limits fire. A limit of 0 means "no limit configured", never blocks.
+ * Total exposure is the person's non-PAID signed bills + the new amount
+ * (unchanged from the original person-wide check).
  */
-export async function checkCreditLimit(db: Db, opts: { personId?: string | null; billType: string; newAmount: number }): Promise<{ limitExceeded: boolean; exceededAmount: number }> {
-  if (!opts.personId || !CREDIT_LIMIT_BILL_TYPES.includes(opts.billType as (typeof CREDIT_LIMIT_BILL_TYPES)[number])) {
-    return { limitExceeded: false, exceededAmount: 0 }
-  }
-  const person = await db.person.findUnique({ where: { id: opts.personId } })
-  if (!person || person.creditLimit <= 0) return { limitExceeded: false, exceededAmount: 0 }
+export async function checkCreditLimit(db: Db, opts: { personId?: string | null; billType: string; newAmount: number; outletId?: string | null }): Promise<CreditLimitResult> {
+  const [effective, config] = await Promise.all([
+    resolveEffectiveLimit(db, { personId: opts.personId, billType: opts.billType, outletId: opts.outletId }),
+    resolveCreditModuleConfig(db, { outletId: opts.outletId }),
+  ])
+  const base = { limit: effective.limit, limitSource: effective.source, behavior: config.allowOverLimit }
+  if (!opts.personId || effective.limit <= 0) return { limitExceeded: false, exceededAmount: 0, ...base }
 
   const outstanding = await db.signedBill.aggregate({ where: { personId: opts.personId, status: { not: 'PAID' } }, _sum: { amount: true } })
   const totalOwed = roundMoney((outstanding._sum.amount || 0) + opts.newAmount)
-  if (totalOwed > person.creditLimit) return { limitExceeded: true, exceededAmount: roundMoney(totalOwed - person.creditLimit) }
-  return { limitExceeded: false, exceededAmount: 0 }
+  if (totalOwed > effective.limit) return { limitExceeded: true, exceededAmount: roundMoney(totalOwed - effective.limit), ...base }
+  return { limitExceeded: false, exceededAmount: 0, ...base }
 }
 
 export interface WriteOffInput {

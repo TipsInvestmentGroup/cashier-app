@@ -191,14 +191,34 @@ billType codes, plus a `CreditAccount` per existing `Person` linked to its group
 Seeding is idempotent & additive (`lib/credit-seed.ts`, called from
 `lib/seed-core.ts`).
 
+## Phase 2 (implemented) — resolver + capture + config-driven limits
+
+- **`lib/credit-config.ts`** — read-time resolver mirroring
+  `lib/collection-mode.ts`: `resolveCreditModuleConfig` (OUTLET→COMPANY→GLOBAL,
+  falls back to today's behavior), `resolveTerminology`, `resolveGroupForBillType`
+  (the `legacyBillTypeCode` bridge), `resolveEffectiveLimit`, `resolveCreditTags`.
+- **Effective-limit priority:** account override → group `maxCredit` (when > 0) →
+  `Person.creditLimit` (only for legacy `CREDIT_LIMIT_BILL_TYPES` = ADMIN/DIRECTOR)
+  → none. Sources 1–2 are additive; with the shipped seed (maxCredit 0, no
+  overrides) it reduces to **exactly today's behavior** (verified).
+- **`checkCreditLimit`** (`lib/finance-ar.ts`) now delegates to the resolver and
+  returns `{ limit, limitSource, behavior }`. The signed-bills route enforces
+  `BLOCK` (422) when resolved `allowOverLimit = BLOCK`; WARN/APPROVE stay
+  warn-only (today's UX). No longer imports hardcoded `CREDIT_LIMIT_BILL_TYPES`.
+- **Capture wired at all six `SignedBill.create` sites** (signed-bills,
+  customer/tips-dj via `createBillRequest`, collections auto-gen ×2, staff-loss,
+  transaction-session validate ×2) — each stamps `creditGroupId`/`creditAccountId`
+  via `resolveCreditTags` (both nullable/best-effort).
+  `scripts/backfill-credit-tags.ts` tags historical bills.
+- **Correction:** the Phase-1 seed's copy of `Person.creditLimit` into
+  `CreditAccount.creditLimitOverride` (a dual source of truth) was removed;
+  `scripts/fix-credit-override-dupe.ts` nulls the auto-copied values (leaves
+  genuine admin overrides untouched).
+
 ## Next phases
 
-1. **Resolver + config lib** — `lib/credit-config.ts` (scope resolution,
-   effective limit, terminology) mirroring `lib/collection-mode.ts`.
-2. **Wire SignedBill capture** to tag `creditGroupId`/`creditAccountId` and
-   enforce limits via the resolver (replacing the hardcoded `bill-types.ts`
-   reads incrementally).
 3. **Credit Settings admin UI** (module, groups, policies, accounts).
 4. **Append-only `CreditTransaction` ledger** + materialized-balance
-   reconciliation.
-5. **Payroll-deduction settlement** integration.
+   reconciliation (populate `CreditAccount.currentBalance`).
+5. **Payroll-deduction settlement** integration (consumes
+   `defaultSettlementMethod = PAYROLL_DEDUCTION`).

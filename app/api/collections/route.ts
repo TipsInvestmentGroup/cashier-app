@@ -14,6 +14,7 @@ import { syncBusinessSession } from '@/lib/business-session'
 import { postJournalEntry } from '@/lib/ledger'
 import { resolveAccountId, resolveDefaultCompanyId, resolveChannelAccountId } from '@/lib/finance-mapping'
 import { postCreditSale } from '@/lib/finance-ar'
+import { resolveCreditTags } from '@/lib/credit-config'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -150,6 +151,7 @@ export async function POST(req: NextRequest) {
       const ref = await generateBillReference(tx, {
         recordId, sourceModel: 'SignedBill', billTypeCode, date: collDate, personId: person?.id ?? null, outletId: usedOutletId,
       })
+      const tags = await resolveCreditTags(tx, { billType: type, personId: person?.id ?? null, outletId: usedOutletId })
       const createdSignedBill = await tx.signedBill.create({
         data: {
           id: recordId,
@@ -157,6 +159,7 @@ export async function POST(req: NextRequest) {
           amount: amt, serviceStaff: staffName || null, description: `Recorded during daily collection ${collection.id}`,
           status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
           internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+          creditGroupId: tags.creditGroupId, creditAccountId: tags.creditAccountId,
         },
       })
       // Finance Platform (Stage 2): posts Dr AR / Cr Sales Revenue for
@@ -295,6 +298,7 @@ export async function POST(req: NextRequest) {
         const ref = await generateBillReference(tx, {
           recordId, sourceModel: 'SignedBill', billTypeCode, date: collDate, personId: person?.id ?? null, outletId: usedOutletId,
         })
+        const tags = await resolveCreditTags(tx, { billType: 'STAFF_LOSS', personId: person?.id ?? null, outletId: usedOutletId })
         const bill = await tx.signedBill.create({
           data: {
             id: recordId,
@@ -303,6 +307,7 @@ export async function POST(req: NextRequest) {
             description: `Staff loss (Difference Reason): System ${Number(systemSales)} − collected ${total} − signed ${signedTotal} − paid·staffloss ${paidStaffLoss} − discount ${discount} (collection ${collection.id})`,
             status: 'UNPAID', date: collDate, outletId: usedOutletId, cashierId: user.userId,
             internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+            creditGroupId: tags.creditGroupId, creditAccountId: tags.creditAccountId,
             autoSourceCollectionId: collection.id,
           },
         })

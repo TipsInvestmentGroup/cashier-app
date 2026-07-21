@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (!body.personName) return NextResponse.json({ error: 'Customer name is required' }, { status: 400 })
 
   const bill = await createBillRequest({
-    billType: 'CUSTOMER', personName: body.personName, serviceStaff: body.serviceStaff,
+    billType: 'CUSTOMER', personName: body.personName, personId: body.personId, serviceStaff: body.serviceStaff,
     amount: body.amount, items: body.items, outletId: usedOutletId, cashierId: user.userId, date: body.date,
   })
   await prisma.auditLog.create({ data: { userId: user.userId, action: 'CREATE', entity: 'SignedBill', entityId: bill.id, details: `Customer bill request for ${body.personName}` } })
