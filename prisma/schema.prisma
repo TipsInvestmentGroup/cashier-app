@@ -227,6 +227,7 @@ model Outlet {
   reconciliationStages ReconciliationStage[]
   paymentVerifications PaymentVerification[]
   priceLists           PriceList[]
+  dailyReports         DailyReport[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -528,6 +529,33 @@ model Promotion {
   @@index([status])
   @@index([productId])
   @@index([categoryId])
+}
+
+/// A cashier's saved Daily Report for an outlet+day. Can be saved as a DRAFT
+/// (partial, editable) even while imported sales are still pending approval.
+/// When those imports are later approved the draft is flagged needsReview so the
+/// cashier re-checks and FINALIZES. Only FINALIZED reports are authoritative for
+/// reconciliation / finance / reports / BI. `data` is the JSON snapshot at save.
+model DailyReport {
+  id             String    @id @default(cuid())
+  outletId       String
+  outlet         Outlet    @relation(fields: [outletId], references: [id])
+  date           DateTime
+  status         String    @default("DRAFT") // DRAFT | FINALIZED
+  data           String? // JSON snapshot of the computed report at save/finalize
+  notes          String?
+  needsReview    Boolean   @default(false) // underlying sales changed after last save
+  reviewReason   String?
+  savedById      String?
+  savedByName    String?
+  finalizedById  String?
+  finalizedByName String?
+  finalizedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([outletId, date])
+  @@index([status])
 }
 
 /// Locks a single outlet's day. Once a (outlet, date) is closed, cashiers can no

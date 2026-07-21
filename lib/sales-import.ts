@@ -15,6 +15,7 @@ import { roundMoney } from '@/lib/utils'
 import { startOfDay, format } from 'date-fns'
 import { normalizeName, bestMatch } from '@/lib/fuzzy-match'
 import { resolvePrices } from '@/lib/pricing'
+import { createNotification } from '@/lib/notifications'
 
 // SalesImport* client types are generated on deploy; assert to avoid local drift.
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -374,6 +375,19 @@ export async function commitImport(importId: string, actor: { userId: string; us
       data: { userId: actor.userId, action: 'IMPORT', entity: 'SalesImport', entityId: importId, details: `Imported ${lines.length} sales lines → ${metricRows.length} metric rows (${dates.join(', ')})` },
     })
   })
+
+  // A saved Daily Report for any of these days is now out of date — flag it for
+  // review (reverting a FINALIZED one to DRAFT) and notify the cashier who saved
+  // it to refresh and re-finalize. Non-fatal.
+  try {
+    const reports = await db.dailyReport.findMany({ where: { outletId, date: { in: dayStarts } } }) as { id: string; date: Date; status: string; savedById: string | null }[]
+    for (const r of reports) {
+      await db.dailyReport.update({ where: { id: r.id }, data: { needsReview: true, reviewReason: 'Imported sales were approved after this report was saved — refresh and finalize.', ...(r.status === 'FINALIZED' ? { status: 'DRAFT' } : {}) } })
+      if (r.savedById) {
+        await createNotification({ userId: r.savedById, type: 'DAILY_REPORT_REVIEW', title: 'Daily Report needs review', message: `Approved sales for ${dayKey(r.date)} changed the figures. Please review and finalize the Daily Report.`, entityType: 'DailyReport', entityId: r.id })
+      }
+    }
+  } catch { /* notification/flagging is best-effort */ }
 
   return { ok: true, salesMetricRows: metricRows.length, lineCount: lines.length }
 }

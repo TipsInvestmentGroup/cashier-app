@@ -18,6 +18,8 @@ export type NotificationType =
   | 'WRITE_OFF_REQUESTED'
   | 'WRITE_OFF_APPROVED'
   | 'WRITE_OFF_REJECTED'
+  // Daily Report draft lifecycle
+  | 'DAILY_REPORT_REVIEW'
 
 export async function createNotification(input: {
   userId: string

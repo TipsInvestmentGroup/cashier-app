@@ -181,6 +181,29 @@ export default function DailyReportPage() {
     } finally { setEmailing(false) }
   }
 
+  // ── Draft / finalize lifecycle ──
+  const [savedReport, setSavedReport] = useState<{ status: string; needsReview: boolean; reviewReason?: string; savedByName?: string; finalizedByName?: string; finalizedAt?: string } | null>(null)
+  const [draftBusy, setDraftBusy] = useState(false)
+  const loadSaved = useCallback(async () => {
+    try { const qs = new URLSearchParams({ date }); if (!isCashier && outletId) qs.set('outletId', outletId); const r = await request(`/api/daily-reports?${qs}`); setSavedReport(r.report) }
+    catch { setSavedReport(null) }
+  }, [date, outletId, isCashier, request])
+  useEffect(() => { loadSaved() }, [loadSaved])
+
+  const canFinalize = isCashier || !!outletId // mgmt must pick a specific outlet
+  const submitReport = async (mode: 'draft' | 'finalize' | 'reopen') => {
+    if (mode !== 'reopen' && !data) return
+    if (!isCashier && !outletId) return toast.error('Select a specific outlet to save or finalize.')
+    setDraftBusy(true)
+    try {
+      const bodyBase = { date, outletId: isCashier ? undefined : outletId, data }
+      if (mode === 'draft') { await request('/api/daily-reports', { method: 'POST', body: JSON.stringify(bodyBase) }); toast.success('Saved as draft — you can keep editing.') }
+      else if (mode === 'finalize') { await request('/api/daily-reports', { method: 'PATCH', body: JSON.stringify({ ...bodyBase, action: 'finalize' }) }); toast.success('Report finalized.') }
+      else { await request('/api/daily-reports', { method: 'PATCH', body: JSON.stringify({ date, outletId: isCashier ? undefined : outletId, action: 'reopen' }) }); toast.success('Report reopened for editing.') }
+      loadSaved()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed') } finally { setDraftBusy(false) }
+  }
+
   const money = (n: number) => formatCurrency(n)
   const prettyDate = data ? format(new Date(data.date), 'EEEE, dd MMMM yyyy') : ''
 
@@ -222,6 +245,23 @@ export default function DailyReportPage() {
               className="px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition disabled:opacity-50">
               🖨 Print
             </button>
+            {savedReport?.status !== 'FINALIZED' && (
+              <button onClick={() => submitReport('draft')} disabled={!data || draftBusy}
+                className="px-4 py-2.5 bg-white border-2 border-indigo-200 text-indigo-700 rounded-xl font-medium hover:bg-indigo-50 transition disabled:opacity-50">
+                💾 Save Draft
+              </button>
+            )}
+            {savedReport?.status === 'FINALIZED' ? (
+              <button onClick={() => submitReport('reopen')} disabled={draftBusy}
+                className="px-4 py-2.5 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition disabled:opacity-50">
+                🔓 Reopen
+              </button>
+            ) : (
+              <button onClick={() => submitReport('finalize')} disabled={!data || draftBusy || !canFinalize}
+                className="px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium hover:bg-green-800 transition shadow disabled:opacity-50">
+                {draftBusy ? 'Saving…' : '✅ Finalize'}
+              </button>
+            )}
             {!isCashier && (
               <button onClick={emailSummary} disabled={!data || emailing}
                 className="px-4 py-2.5 bg-amber-500 text-white rounded-xl font-medium hover:bg-amber-600 transition shadow disabled:opacity-50">
@@ -232,8 +272,24 @@ export default function DailyReportPage() {
         </div>
 
         <p className="no-print text-xs text-gray-400">
-          Tap <b>📲 Share to WhatsApp</b> on your phone to send the PDF straight to the directors&apos; group. On a computer, use <b>📥 PDF</b> to download, or <b>🖨 Print</b> → “Save as PDF”.
+          Tap <b>📲 Share to WhatsApp</b> on your phone to send the PDF straight to the directors&apos; group. On a computer, use <b>📥 PDF</b> to download, or <b>🖨 Print</b> → “Save as PDF”. Save a <b>Draft</b> while imported sales await approval, then <b>Finalize</b> once the figures are confirmed — only finalized reports are used for reconciliation & finance.
         </p>
+
+        {/* Draft / finalize status banner (hidden when printing) */}
+        {savedReport && (
+          <div className={`no-print rounded-xl px-4 py-3 text-sm border flex items-center gap-2 ${
+            savedReport.needsReview ? 'bg-amber-50 border-amber-200 text-amber-800'
+            : savedReport.status === 'FINALIZED' ? 'bg-green-50 border-green-200 text-green-800'
+            : 'bg-indigo-50 border-indigo-200 text-indigo-800'}`}>
+            {savedReport.needsReview ? (
+              <span>⚠ <b>Needs review:</b> {savedReport.reviewReason || 'Sales changed after this report was saved.'} The figures below are refreshed — review and <b>Finalize</b>.</span>
+            ) : savedReport.status === 'FINALIZED' ? (
+              <span>✅ <b>Finalized</b>{savedReport.finalizedByName ? ` by ${savedReport.finalizedByName}` : ''}{savedReport.finalizedAt ? ` on ${format(new Date(savedReport.finalizedAt), 'dd MMM yyyy HH:mm')}` : ''}. This report is authoritative for reconciliation & finance.</span>
+            ) : (
+              <span>📝 <b>Draft saved</b>{savedReport.savedByName ? ` by ${savedReport.savedByName}` : ''}. Keep editing, then Finalize when confirmed.</span>
+            )}
+          </div>
+        )}
 
         {loading && <div className="py-16 text-center text-gray-400">Loading report…</div>}
 
