@@ -24,7 +24,7 @@ interface ResolvedLine {
 interface Outlet { id: string; name: string }
 interface Person { id: string; name: string }
 interface Product { id: string; name: string; sellingPrice: number; categoryId: string | null; productCategory?: { label: string } | null }
-interface ImportRow { id: string; fileName: string; status: string; rowCount: number; totalQty: number; totalAmount: number; unmatchedStaff: number; unmatchedProducts: number; createdByName?: string; createdAt: string; approvedByName?: string; rejectedReason?: string; outlet?: { name: string }; periodFrom?: string; periodTo?: string; _count?: { lines: number } }
+interface ImportRow { id: string; fileName: string; status: string; rowCount: number; totalQty: number; totalAmount: number; unmatchedStaff: number; unmatchedProducts: number; priceExceptions?: number; createdByName?: string; createdAt: string; approvedByName?: string; rejectedReason?: string; outlet?: { name: string }; periodFrom?: string; periodTo?: string; _count?: { lines: number } }
 
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const UPLOADERS = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -50,6 +50,11 @@ export default function SalesImportPage() {
   // Master + config
   const [outlets, setOutlets] = useState<Outlet[]>([])
   const [outletId, setOutletId] = useState('')
+  const [events, setEvents] = useState<Outlet[]>([])
+  const [groups, setGroups] = useState<Outlet[]>([])
+  const [priceLists, setPriceLists] = useState<{ id: string; name: string; isDefault?: boolean }[]>([])
+  const [eventId, setEventId] = useState('')
+  const [customerGroupId, setCustomerGroupId] = useState('')
   const [defaultDate, setDefaultDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [persons, setPersons] = useState<Person[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -73,6 +78,9 @@ export default function SalesImportPage() {
     request('/api/outlets').then((o: Outlet[]) => { setOutlets(o || []); if (o?.[0]) setOutletId((cur) => cur || o[0].id) }).catch(() => {})
     request('/api/persons').then((p: Person[]) => setPersons(p || [])).catch(() => {})
     request('/api/products').then((p: Product[]) => setProducts((p || []).filter((x) => x))).catch(() => {})
+    request('/api/events').then((e: { rows?: Outlet[] } | Outlet[]) => setEvents(Array.isArray(e) ? e : (e.rows || []))).catch(() => {})
+    request('/api/customer-groups').then((g: { rows: Outlet[] }) => setGroups(g.rows || [])).catch(() => {})
+    request('/api/price-lists').then((r: { rows: { id: string; name: string; isDefault?: boolean }[] }) => setPriceLists(r.rows || [])).catch(() => {})
   }, [request])
 
   const loadHistory = useCallback(async () => {
@@ -86,11 +94,11 @@ export default function SalesImportPage() {
   const runPreview = useCallback(async (raw: RawLine[], dd: string) => {
     setPreviewing(true)
     try {
-      const r = await request('/api/sales-imports/preview', { method: 'POST', body: JSON.stringify({ outletId, defaultDate: dd, rows: raw }) })
+      const r = await request('/api/sales-imports/preview', { method: 'POST', body: JSON.stringify({ outletId, eventId, customerGroupId, defaultDate: dd, rows: raw }) })
       setLines(r.lines || [])
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Preview failed') }
     finally { setPreviewing(false) }
-  }, [request, outletId])
+  }, [request, outletId, eventId, customerGroupId])
 
   // ── Client-side item-level parse ──
   const onFile = useCallback(async (file: File) => {
@@ -170,6 +178,8 @@ export default function SalesImportPage() {
 
   // Re-run preview if the user changes the default date after parsing.
   const repreview = () => { if (rawLines.length) runPreview(rawLines, defaultDate) }
+  // Re-resolve expected prices whenever the sales context changes.
+  useEffect(() => { if (rawLines.length) runPreview(rawLines, defaultDate) }, [eventId, customerGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Resolution helpers (mutate the working set client-side) ──
   const recomputeIssues = (l: ResolvedLine): IssueCode[] => {
@@ -205,6 +215,20 @@ export default function SalesImportPage() {
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not create staff (managers only)') }
   }
 
+  // ── Price Exceptions ──
+  const [acceptedExc, setAcceptedExc] = useState<Set<string>>(new Set())
+  const [savePriceListId, setSavePriceListId] = useState('')
+  const acceptException = (productId: string) => { setAcceptedExc((s) => { const n = new Set(s); n.add(productId); return n }); toast.success('Exception accepted — the uploaded price will be kept as the actual selling price.') }
+  const savePriceToList = async (productId: string, unitPrice: number) => {
+    const listId = savePriceListId || priceLists.find((l) => l.isDefault)?.id || priceLists[0]?.id
+    if (!listId) return toast.error('Create a price list first (Pricing → Price Lists).')
+    try {
+      await request(`/api/price-lists/${listId}/items`, { method: 'POST', body: JSON.stringify({ productId, sellingPrice: unitPrice, reason: 'Set from sales import exception' }) })
+      toast.success('Price saved to the list — re-checking…')
+      runPreview(rawLines, defaultDate) // exception clears once the uploaded price matches the new active price
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not save price (managers only)') }
+  }
+
   // ── Submit / approve ──
   const submit = async (approveNow: boolean) => {
     if (!lines.length) return
@@ -213,7 +237,7 @@ export default function SalesImportPage() {
     if (blocking.length) return toast.error(`${blocking.length} row(s) still need an attendant match or a value. Resolve them first.`)
     setSubmitting(true)
     try {
-      const created = await request('/api/sales-imports', { method: 'POST', body: JSON.stringify({ outletId, fileName, sourceLabel, periodFrom: period.from, periodTo: period.to, lines }) })
+      const created = await request('/api/sales-imports', { method: 'POST', body: JSON.stringify({ outletId, eventId, customerGroupId, fileName, sourceLabel, periodFrom: period.from, periodTo: period.to, lines }) })
       if (approveNow && canApprove) {
         await request(`/api/sales-imports/${created.import.id}`, { method: 'PATCH', body: JSON.stringify({ action: 'approve' }) })
         toast.success('Imported — dashboards, targets and day-close now see this sales data.')
@@ -277,6 +301,16 @@ export default function SalesImportPage() {
     }
     return [...m.values()]
   }, [lines])
+  // Price Exceptions: matched products whose calculated unit price ≠ the active
+  // price for the context (or no price on file). Grouped by product.
+  const priceExceptionGroups = useMemo(() => {
+    const m = new Map<string, { productId: string; name: string; uploaded: number; expected: number; count: number }>()
+    for (const l of lines) if (l.priceMismatch && l.productId && !acceptedExc.has(l.productId)) {
+      const cur = m.get(l.productId) || { productId: l.productId, name: l.productName, uploaded: l.unitPriceUploaded || 0, expected: l.unitPriceMaster || 0, count: 0 }
+      cur.count++; m.set(l.productId, cur)
+    }
+    return [...m.values()]
+  }, [lines, acceptedExc])
 
   const blockingCount = summary.unmatchedStaff + summary.missing
 
@@ -331,8 +365,25 @@ export default function SalesImportPage() {
                         <input type="file" accept=".xlsx,.xls,.xlsb,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
                       </label>
                     </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Event <span className="text-gray-400">(optional)</span></label>
+                      <select value={eventId} onChange={(e) => setEventId(e.target.value)}
+                        className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                        <option value="">None</option>
+                        {events.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1">Customer group <span className="text-gray-400">(optional)</span></label>
+                      <select value={customerGroupId} onChange={(e) => setCustomerGroupId(e.target.value)}
+                        className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
+                        <option value="">None</option>
+                        {groups.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                      </select>
+                    </div>
                   </div>
-                  {sourceLabel && <p className="text-[11px] text-gray-400 mt-2 truncate">Source: {sourceLabel}{period.from && ` · ${period.from} → ${period.to}`}</p>}
+                  <p className="text-[11px] text-gray-400 mt-2">Unit Price is calculated as <strong>Amount ÷ Qty</strong> and checked against the price list for this <strong>outlet / event / customer group / date</strong>. Set the context so the expected price resolves correctly.</p>
+                  {sourceLabel && <p className="text-[11px] text-gray-400 mt-1 truncate">Source: {sourceLabel}{period.from && ` · ${period.from} → ${period.to}`}</p>}
                   {(parsing || previewing) && <p className="text-sm text-indigo-500 mt-3 animate-pulse">{parsing ? 'Reading file…' : 'Matching to master data…'}</p>}
                 </div>
 
@@ -389,6 +440,31 @@ export default function SalesImportPage() {
                       </ResolvePanel>
                     )}
 
+                    {/* Price exceptions — unit price ≠ active price for the context */}
+                    {priceExceptionGroups.length > 0 && (
+                      <ResolvePanel title={`Price exceptions (${priceExceptionGroups.length})`} tone="amber" hint="The calculated unit price doesn't match an active price for this outlet/event/customer-group/date. Review each — the import is never rejected; unresolved exceptions still import at the uploaded price and are flagged in analytics.">
+                        {canApprove && priceLists.length > 0 && (
+                          <div className="flex items-center gap-2 py-1.5 text-xs">
+                            <span className="text-gray-500">Save new prices into:</span>
+                            <select value={savePriceListId} onChange={(e) => setSavePriceListId(e.target.value)} className="px-2 py-1 rounded-lg border-2 border-gray-200 focus:border-indigo-500 focus:outline-none bg-white">
+                              <option value="">Default list</option>
+                              {priceLists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        {priceExceptionGroups.slice(0, 40).map((g) => (
+                          <div key={g.productId} className="flex items-center justify-between gap-2 flex-wrap py-1.5">
+                            <span className="text-sm"><span className="font-medium text-gray-800">{g.name}</span> <span className="text-gray-400 text-xs">×{g.count}</span><br /><span className="text-xs text-gray-500">Uploaded <strong className="text-amber-700">{formatCurrency(g.uploaded)}</strong> {g.expected > 0 ? <>vs expected <strong>{formatCurrency(g.expected)}</strong></> : <em className="text-gray-400">(no price on file)</em>}</span></span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button onClick={() => acceptException(g.productId)} className="px-2 py-1 rounded-lg text-xs font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200">Accept price</button>
+                              {canApprove && <button onClick={() => savePriceToList(g.productId, g.uploaded)} className="px-2 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Save {formatCurrency(g.uploaded)} to price list</button>}
+                            </div>
+                          </div>
+                        ))}
+                        {priceExceptionGroups.length > 40 && <p className="text-xs text-gray-400 pt-1">+ {priceExceptionGroups.length - 40} more…</p>}
+                      </ResolvePanel>
+                    )}
+
                     {/* Preview table */}
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
@@ -404,6 +480,8 @@ export default function SalesImportPage() {
                               <th className="px-3 py-2 text-left font-semibold">Category</th>
                               <th className="px-3 py-2 text-right font-semibold">Qty</th>
                               <th className="px-3 py-2 text-right font-semibold">Amount</th>
+                              <th className="px-3 py-2 text-right font-semibold">Unit price</th>
+                              <th className="px-3 py-2 text-right font-semibold">Expected</th>
                               <th className="px-3 py-2 text-left font-semibold">Flags</th>
                             </tr>
                           </thead>
@@ -416,6 +494,8 @@ export default function SalesImportPage() {
                                 <td className="px-3 py-1.5 text-gray-500">{l.categoryName || '—'}</td>
                                 <td className="px-3 py-1.5 text-right text-gray-700">{l.qty || ''}</td>
                                 <td className="px-3 py-1.5 text-right font-semibold text-gray-900">{l.amount ? formatCurrency(l.amount) : ''}</td>
+                                <td className={`px-3 py-1.5 text-right ${l.priceMismatch ? 'text-amber-700 font-semibold' : 'text-gray-700'}`}>{l.unitPriceUploaded != null ? formatCurrency(l.unitPriceUploaded) : ''}</td>
+                                <td className="px-3 py-1.5 text-right text-gray-500">{l.unitPriceMaster ? formatCurrency(l.unitPriceMaster) : '—'}</td>
                                 <td className="px-3 py-1.5"><Flags issues={l.issues} /></td>
                               </tr>
                             ))}
@@ -467,7 +547,7 @@ export default function SalesImportPage() {
                         <td className="px-4 py-2.5 text-gray-600">{r.outlet?.name || '—'}</td>
                         <td className="px-4 py-2.5 text-right text-gray-700">{r._count?.lines ?? r.rowCount}</td>
                         <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{formatCurrency(r.totalAmount)}</td>
-                        <td className="px-4 py-2.5"><span className={`inline-block px-2.5 py-1 rounded-lg text-xs font-semibold border ${STATUS_STYLE[r.status] || STATUS_STYLE.DRAFT}`}>{statusLabel(r.status)}</span>{r.unmatchedStaff > 0 && r.status === 'PENDING_APPROVAL' && <span className="ml-1 text-[10px] text-red-500">{r.unmatchedStaff} unmatched</span>}</td>
+                        <td className="px-4 py-2.5"><span className={`inline-block px-2.5 py-1 rounded-lg text-xs font-semibold border ${STATUS_STYLE[r.status] || STATUS_STYLE.DRAFT}`}>{statusLabel(r.status)}</span>{r.unmatchedStaff > 0 && r.status === 'PENDING_APPROVAL' && <span className="ml-1 text-[10px] text-red-500">{r.unmatchedStaff} unmatched</span>}{(r.priceExceptions ?? 0) > 0 && <span className="ml-1 text-[10px] text-amber-600">{r.priceExceptions} price exc</span>}</td>
                         <td className="px-4 py-2.5 text-gray-500 text-xs">{r.createdByName}</td>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
@@ -512,7 +592,7 @@ function QualityBar({ summary }: { summary: { unmatchedStaff: number; unmatchedP
     { label: 'Unknown staff', n: summary.unmatchedStaff, tone: 'red' },
     { label: 'Missing values', n: summary.missing, tone: 'red' },
     { label: 'Unmatched products', n: summary.unmatchedProducts, tone: 'amber' },
-    { label: 'Price mismatches', n: summary.priceMismatch, tone: 'amber' },
+    { label: 'Price exceptions', n: summary.priceMismatch, tone: 'amber' },
     { label: 'Duplicates', n: summary.dupes, tone: 'amber' },
     { label: 'Low-confidence', n: summary.lowConf, tone: 'amber' },
   ].filter((i) => i.n > 0)
@@ -545,7 +625,7 @@ const ISSUE_LABEL: Record<string, { text: string; cls: string }> = {
   MISSING_STAFF: { text: 'no staff', cls: 'bg-red-100 text-red-700' },
   MISSING_VALUE: { text: 'no value', cls: 'bg-red-100 text-red-700' },
   UNKNOWN_PRODUCT: { text: 'product?', cls: 'bg-amber-100 text-amber-700' },
-  PRICE_MISMATCH: { text: 'price≠', cls: 'bg-amber-100 text-amber-700' },
+  PRICE_MISMATCH: { text: 'price exc', cls: 'bg-amber-100 text-amber-700' },
   DUPLICATE: { text: 'dupe', cls: 'bg-amber-100 text-amber-700' },
   LOW_CONFIDENCE_STAFF: { text: '~staff', cls: 'bg-indigo-100 text-indigo-700' },
   LOW_CONFIDENCE_PRODUCT: { text: '~product', cls: 'bg-indigo-100 text-indigo-700' },
@@ -570,7 +650,7 @@ function DetailModal({ detail, onClose }: { detail: { import: ImportRow; lines: 
         <div className="overflow-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-600 text-[11px] uppercase tracking-wide sticky top-0">
-              <tr><th className="px-3 py-2 text-left font-semibold">Date</th><th className="px-3 py-2 text-left font-semibold">Attendant</th><th className="px-3 py-2 text-left font-semibold">Product</th><th className="px-3 py-2 text-left font-semibold">Category</th><th className="px-3 py-2 text-right font-semibold">Qty</th><th className="px-3 py-2 text-right font-semibold">Amount</th></tr>
+              <tr><th className="px-3 py-2 text-left font-semibold">Date</th><th className="px-3 py-2 text-left font-semibold">Attendant</th><th className="px-3 py-2 text-left font-semibold">Product</th><th className="px-3 py-2 text-left font-semibold">Category</th><th className="px-3 py-2 text-right font-semibold">Qty</th><th className="px-3 py-2 text-right font-semibold">Amount</th><th className="px-3 py-2 text-right font-semibold">Unit</th><th className="px-3 py-2 text-right font-semibold">Expected</th></tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {detail.lines.map((l) => (
@@ -581,6 +661,8 @@ function DetailModal({ detail, onClose }: { detail: { import: ImportRow; lines: 
                   <td className="px-3 py-1.5 text-gray-500">{l.categoryName || '—'}</td>
                   <td className="px-3 py-1.5 text-right text-gray-700">{l.qty || ''}</td>
                   <td className="px-3 py-1.5 text-right font-semibold text-gray-900">{l.amount ? formatCurrency(l.amount) : ''}</td>
+                  <td className={`px-3 py-1.5 text-right ${l.priceMismatch ? 'text-amber-700 font-semibold' : 'text-gray-600'}`}>{l.unitPriceUploaded != null ? formatCurrency(l.unitPriceUploaded) : ''}</td>
+                  <td className="px-3 py-1.5 text-right text-gray-500">{l.unitPriceMaster ? formatCurrency(l.unitPriceMaster) : '—'}</td>
                 </tr>
               ))}
             </tbody>

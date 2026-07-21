@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   // Overlay Price-List-Engine expected prices (outlet + date aware) so mismatch
   // flags reflect the actual applicable price list, not the product's raw price.
   const dd = parse(defaultDate, 'yyyy-MM-dd', new Date())
-  lines = await overlayEnginePrices(lines, { outletId: body.outletId || null, date: isValid(dd) ? dd : new Date() })
+  lines = await overlayEnginePrices(lines, { outletId: body.outletId || null, eventId: body.eventId || null, customerGroupId: body.customerGroupId || null, date: isValid(dd) ? dd : new Date() })
 
   return NextResponse.json({ lines, summary: summarize(lines) })
 }

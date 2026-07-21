@@ -37,7 +37,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const body = await req.json().catch(() => ({}))
   const action = String(body.action || '')
 
-  const imp = await db.salesImport.findUnique({ where: { id }, select: { id: true, status: true, createdById: true } })
+  const imp = await db.salesImport.findUnique({ where: { id }, select: { id: true, status: true, createdById: true, eventId: true, customerGroupId: true } })
   if (!imp) return NextResponse.json({ error: 'Import not found' }, { status: 404 })
 
   if (action === 'approve') {
@@ -73,14 +73,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!p) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
       data.productId = p.id; data.productName = p.name; data.productMatched = true
       data.categoryId = p.categoryId; data.categoryName = p.productCategory?.label || p.category || null
-      // Expected price from the Price List Engine (outlet + line date aware).
-      const resolved = await resolvePrice(p.id, { outletId: line.outletId, date: line.date })
+      // Expected price from the Price List Engine (full sales context aware).
+      const resolved = await resolvePrice(p.id, { outletId: line.outletId, eventId: imp.eventId, customerGroupId: imp.customerGroupId, date: line.date })
       const expected = resolved?.price ?? 0
       data.unitPriceMaster = expected
       data.priceListId = resolved?.priceListId ?? null
       const qty = Number(line.qty) || 0
       const up = qty > 0 ? roundMoney((Number(line.amount) || 0) / qty) : null
-      data.priceMismatch = !!(up && expected > 0 && Math.abs(up - expected) / expected > 0.01)
+      // Price Exception: mismatch vs an active price, or no price on file.
+      data.priceMismatch = !!(up && up > 0 && (expected > 0 ? Math.abs(up - expected) / expected > 0.01 : true))
     }
     // Recompute the line's issue flags after the fix.
     const merged = { ...line, ...data }
@@ -118,12 +119,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
 /** Recompute a batch's roll-up counters after a line edit. */
 async function recountImport(id: string) {
-  const lines = await db.salesImportLine.findMany({ where: { importId: id }, select: { qty: true, amount: true, staffMatched: true, productMatched: true, rawProductName: true } })
-  let totalQty = 0, totalAmount = 0, unmatchedStaff = 0, unmatchedProducts = 0
-  for (const l of lines as { qty: number; amount: number; staffMatched: boolean; productMatched: boolean; rawProductName: string }[]) {
+  const lines = await db.salesImportLine.findMany({ where: { importId: id }, select: { qty: true, amount: true, staffMatched: true, productMatched: true, rawProductName: true, priceMismatch: true } })
+  let totalQty = 0, totalAmount = 0, unmatchedStaff = 0, unmatchedProducts = 0, priceExceptions = 0
+  for (const l of lines as { qty: number; amount: number; staffMatched: boolean; productMatched: boolean; rawProductName: string; priceMismatch: boolean }[]) {
     totalQty += l.qty || 0; totalAmount += l.amount || 0
     if (!l.staffMatched) unmatchedStaff++
     if (l.rawProductName && !l.productMatched) unmatchedProducts++
+    if (l.priceMismatch) priceExceptions++
   }
-  await db.salesImport.update({ where: { id }, data: { rowCount: lines.length, totalQty: roundMoney(totalQty), totalAmount: roundMoney(totalAmount), unmatchedStaff, unmatchedProducts } })
+  await db.salesImport.update({ where: { id }, data: { rowCount: lines.length, totalQty: roundMoney(totalQty), totalAmount: roundMoney(totalAmount), unmatchedStaff, unmatchedProducts, priceExceptions } })
 }

@@ -303,6 +303,10 @@ model SalesImport {
   companyId         String?
   outletId          String?
   outlet            Outlet?   @relation(fields: [outletId], references: [id])
+  // Sales context used by the Price List Engine to resolve the expected price
+  // (alongside outlet + line date). Optional.
+  eventId           String?
+  customerGroupId   String?
   fileName          String
   sourceLabel       String? // e.g. the sheet title / "FROM …" period text
   periodFrom        DateTime?
@@ -313,6 +317,7 @@ model SalesImport {
   totalAmount       Float     @default(0)
   unmatchedStaff    Int       @default(0)
   unmatchedProducts Int       @default(0)
+  priceExceptions   Int       @default(0) // lines whose unit price != the active price-list price
   createdById       String?
   createdByName     String?
   approvedById      String?

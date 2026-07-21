@@ -231,7 +231,7 @@ export function resolveLines(raw: RawLine[], master: MasterData, defaultDate: st
  * aware engine price, records which price list supplied it, and recomputes the
  * PRICE_MISMATCH flag. Call after resolveLines, before preview/persist.
  */
-export async function overlayEnginePrices(lines: ResolvedLine[], ctx: { outletId?: string | null; date?: Date }): Promise<ResolvedLine[]> {
+export async function overlayEnginePrices(lines: ResolvedLine[], ctx: { outletId?: string | null; eventId?: string | null; customerGroupId?: string | null; date?: Date }): Promise<ResolvedLine[]> {
   const ids = [...new Set(lines.filter((l) => l.productId).map((l) => l.productId as string))]
   if (!ids.length) return lines
   const prices = await resolvePrices(ids, ctx)
@@ -240,7 +240,12 @@ export async function overlayEnginePrices(lines: ResolvedLine[], ctx: { outletId
     const rp = prices.get(l.productId)
     if (!rp) return l
     const up = l.unitPriceUploaded
-    const priceMismatch = !!(rp.price > 0 && up && up > 0 && Math.abs(up - rp.price) / rp.price > PRICE_TOLERANCE)
+    const hasExpected = rp.price > 0
+    // Price Exception = the calculated unit price doesn't match an active price
+    // for this context, OR there's no price on file at all.
+    const mismatch = hasExpected && !!up && up > 0 && Math.abs(up - rp.price) / rp.price > PRICE_TOLERANCE
+    const noPrice = !hasExpected && !!up && up > 0
+    const priceMismatch = mismatch || noPrice
     const issues: IssueCode[] = l.issues.filter((i) => i !== 'PRICE_MISMATCH')
     if (priceMismatch) issues.push('PRICE_MISMATCH')
     return { ...l, unitPriceMaster: rp.price, priceListId: rp.priceListId, priceMismatch, issues }

@@ -55,18 +55,22 @@ export async function POST(req: NextRequest) {
 
   const company = await prisma.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } })
 
-  // Re-overlay Price-List-Engine prices server-side so expected prices/mismatch
+  const eventId = body.eventId || null
+  const customerGroupId = body.customerGroupId || null
+
+  // Re-overlay Price-List-Engine prices server-side so expected prices/exception
   // flags are authoritative even if the client matched a product after preview.
   const refDate = lines.find((l) => l.date)?.date
-  const priced = await overlayEnginePrices(lines, { outletId, date: refDate ? new Date(refDate) : new Date() })
+  const priced = await overlayEnginePrices(lines, { outletId, eventId, customerGroupId, date: refDate ? new Date(refDate) : new Date() })
 
-  let totalQty = 0, totalAmount = 0, unmatchedStaff = 0, unmatchedProducts = 0
+  let totalQty = 0, totalAmount = 0, unmatchedStaff = 0, unmatchedProducts = 0, priceExceptions = 0
   const lineData = priced.map((l) => {
     const qty = roundMoney(Number(l.qty) || 0)
     const amount = roundMoney(Number(l.amount) || 0)
     totalQty += qty; totalAmount += amount
     if (!l.staffMatched) unmatchedStaff++
     if (l.rawProductName && !l.productMatched) unmatchedProducts++
+    if (l.priceMismatch) priceExceptions++
     return {
       date: l.date ? startOfDay(new Date(l.date)) : startOfDay(new Date()),
       outletId,
@@ -95,6 +99,8 @@ export async function POST(req: NextRequest) {
     data: {
       companyId: company?.companyId || null,
       outletId,
+      eventId,
+      customerGroupId,
       fileName: fileName.slice(0, 300),
       sourceLabel: body.sourceLabel ? String(body.sourceLabel).slice(0, 300) : null,
       periodFrom: parseD(body.periodFrom),
@@ -105,6 +111,7 @@ export async function POST(req: NextRequest) {
       totalAmount: roundMoney(totalAmount),
       unmatchedStaff,
       unmatchedProducts,
+      priceExceptions,
       createdById: user.userId,
       createdByName: user.name || user.email || 'Unknown',
       lines: { create: lineData },
