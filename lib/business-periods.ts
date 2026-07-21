@@ -32,23 +32,26 @@ interface ScopeKey {
 }
 
 // Same shape as lib/business-calendar.ts's scopeChainFor — kept local so the
-// two engines stay independently changeable.
-async function scopeChainFor(outletId?: string | null): Promise<ScopeKey[]> {
+// two engines stay independently changeable. Accepts an outletId (walks
+// OUTLET → COMPANY → GLOBAL) or, for company-level callers with no outlet
+// (e.g. accounting periods), a bare companyId (walks COMPANY → GLOBAL).
+async function scopeChainFor(outletId?: string | null, companyId?: string | null): Promise<ScopeKey[]> {
   const chain: ScopeKey[] = []
-  let companyId: string | null = null
+  let company: string | null = companyId || null
   if (outletId) {
     const outlet = await prisma.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } })
-    companyId = outlet?.companyId || null
+    company = outlet?.companyId || company
     chain.push({ scope: 'OUTLET', scopeId: outletId })
   }
-  if (companyId) chain.push({ scope: 'COMPANY', scopeId: companyId })
+  if (company) chain.push({ scope: 'COMPANY', scopeId: company })
   chain.push({ scope: 'GLOBAL', scopeId: null })
   return chain
 }
 
-/** Resolve the monthly-cycle fields effective for an outlet (or globally) on `date`. */
-export async function resolveEffectivePeriodFields({ outletId, date }: { outletId?: string | null; date?: Date } = {}): Promise<BusinessPeriodFields> {
-  const chain = await scopeChainFor(outletId) // narrowest first
+/** Resolve the monthly-cycle fields effective for an outlet, a company, or
+ *  globally on `date` (narrowest of the three that has a version wins). */
+export async function resolveEffectivePeriodFields({ outletId, companyId, date }: { outletId?: string | null; companyId?: string | null; date?: Date } = {}): Promise<BusinessPeriodFields> {
+  const chain = await scopeChainFor(outletId, companyId) // narrowest first
   const at = date ?? new Date()
 
   const rows = await prisma.businessPeriodVersion.findMany({

@@ -244,14 +244,22 @@ by the business month at once. Purely additive: existing presets are unchanged,
 and until the snapshot resolves it falls back to the calendar month. The hub
 shows the resolved window as a chip (e.g. "25 Jun 2026 → 24 Jul 2026").
 
+**Done — Financial Periods (`lib/finance-periods.ts`):** "Financial Year
+Management" (`generateFinancialYearPeriods`, behind `/api/finance/periods/generate-year`)
+now aligns the 12 MONTHLY accounting periods — and the quarter/annual boundaries
+that must nest around them — to the company's configured **Financial Month start
+day** (resolved company-scoped + effective-dated). A 25th-cycle books its months
+as `25 Dec → 24 Jan` (named by end-month key, e.g. `2026-01`); start day 1 reduces
+to calendar months, byte-identical to before. `resolveEffectivePeriodFields` gained
+a `companyId` option (walks COMPANY → GLOBAL) for company-level callers with no
+outlet.
+
 **Deferred (config built now, consumers wired later):** report routes that build
 their own month range from `date-fns` `startOfMonth/endOfMonth` (`lib/dateRange.ts`)
 rather than the analytics scope should switch to `getBusinessMonthRange`
 (mechanical, per-report). Payroll and Credit **modules do not exist yet** — their
 period configs are built ahead of them per the HR-system blueprint, ready to
-consume when those modules land. The existing `/api/finance/periods` (accounting
-open/close periods) is a natural downstream consumer of Financial Month and can be
-fed from `getBusinessMonthRange` later. An authorized per-report period override
+consume when those modules land. An authorized per-report period override
 (requirement #8) rides on the existing range-picker pattern.
 
 ### 10.5 Test scenarios (all verified end-to-end)
