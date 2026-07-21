@@ -336,6 +336,14 @@ async function reverseRun(db: Db, runId: string, user: RunUser, reason?: string)
 
     if (run.journalEntryId) await reverseJournalEntry(tx, { journalEntryId: run.journalEntryId, userId: user.userId, reason: reason ?? `Payroll run ${run.periodKey} reversed` })
 
+    // If the run was already PAID, reverse the payout settlement entry too and
+    // mark the batch REVERSED — otherwise the GL would keep a phantom payout.
+    const paidBatch = await tx.paymentBatch.findFirst({ where: { runId, status: 'PAID' } })
+    if (paidBatch) {
+      if (paidBatch.journalEntryId) await reverseJournalEntry(tx, { journalEntryId: paidBatch.journalEntryId, userId: user.userId, reason: `Payroll run ${run.periodKey} payout reversed` })
+      await tx.paymentBatch.update({ where: { id: paidBatch.id }, data: { status: 'REVERSED', reversedAt: new Date() } })
+    }
+
     // Undo this run's payroll payments and restore bill statuses.
     const billRef = `PAYROLL-RUN-${run.id}`
     const payments = await tx.paidBill.findMany({ where: { billRef }, select: { id: true, signedBillId: true, personId: true } })

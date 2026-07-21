@@ -644,4 +644,35 @@ The inputs that make overtime and absences move pay. Still additive; module ship
 **Note (existing installs):** `proratable` is per-component config; fresh installs
 get it from the seed, a pre-4b install sets it via config (the dev DB was healed).
 
-### Next: Phase 5 — reports & analytics + payment-file / mobile-money export + Employee Self-Service.
+## Phase 5a (implemented) — payout, settlement, reports, ESS
+
+Completes the money loop and the reporting/output surface. Additive; module disabled.
+
+- **Schema**: `PaymentBatch` (one payout batch per posted run + its settlement JE)
+  and `PaymentInstruction` (one payee line — net, method, opaque ref).
+- **Payout** (`lib/payroll-payment.ts`): `createPaymentBatch` (POSTED run → one
+  instruction per payslip with net > 0; payee name resolved from the linked
+  Person/User), `buildPaymentCsv` (quoted CSV payout file), `markBatchExported`,
+  and `markBatchPaid` — which posts the **settlement entry** (Dr NET_PAY_PAYABLE /
+  Cr Cash·Bank·MobileMoney per method) that clears the liability POST created,
+  then moves the run to PAID. Reversing a PAID run now also reverses this payout
+  entry and marks the batch REVERSED (GL stays consistent).
+- **Reports** (`lib/payroll-reports.ts`): `payrollRegister` (per-employee +
+  per-component + grand totals), `statutoryReport` (totals per statutory/employer
+  component to remit), `payrollVariance` (headline deltas between two runs). All
+  read materialized totals + the append-only line ledger — never re-aggregate.
+- **APIs**: `GET/POST /api/payroll/payment-batches` (+ `/[id]` — `?format=csv`
+  export, `{action:'pay'}`), `GET /api/payroll/runs/[id]/report?type=register|statutory`,
+  `GET /api/payroll/reports/variance?a=&b=`, and **ESS**
+  `GET /api/payroll/my-payslips` (each user sees only their own finalized payslips).
+- **Verified end-to-end** on local SQLite (21 checks): a 2-employee FLOOR_STAFF
+  run (each net 1,372,000) → batch (2 instructions, total 2,744,000) → CSV export
+  → **mark paid**: balanced settlement JE (**Dr Net-Pay-Payable 2,744,000 = Cr Bank
+  2,744,000**), run + batch + instructions PAID; register/statutory (PAYE 856,000)
+  /variance reports correct; ESS returns only the employee's PAID payslip;
+  **reverse** unwinds both the post and payout JEs and marks the batch REVERSED.
+  `prisma validate`/`generate`/`db push`, `tsc`, `eslint` clean; data purged,
+  module disabled.
+
+### Remaining: Phase 5b — the admin/ESS **UI** (`/payroll` settings + run console +
+### payslip views). Everything above is engine + API; no payroll screens exist yet.

@@ -70,6 +70,9 @@ datasource db {
 //   AttendanceRecord.status:                PRESENT | ABSENT | UNPAID_LEAVE | PAID_LEAVE | HOLIDAY | HALF_DAY
 //   LeaveType.status:                       ACTIVE | INACTIVE
 //   LeaveRequest.status:                    PENDING | APPROVED | REJECTED | CANCELLED
+//   PaymentBatch.status:                    PENDING | EXPORTED | PAID | REVERSED
+//   PaymentBatch.method:                    BANK | MOBILE_MONEY | CASH | MIXED
+//   PaymentInstruction.status:              PENDING | PAID
 
 model User {
   id                String    @id @default(cuid())
@@ -4188,6 +4191,8 @@ model PayrollRun {
   totalEmployerCost Float @default(0)
   employeeCount     Int   @default(0)
 
+  paymentBatches PaymentBatch[]
+
   // GL + lifecycle linkage. journalEntryId is the posted entry; reversalOfId
   // points to the run this one corrects (a CORRECTION run).
   journalEntryId String?
@@ -4233,7 +4238,8 @@ model Payslip {
   warnings        String? // JSON array captured at calc time
   createdAt       DateTime @default(now())
 
-  lines PayslipLine[]
+  lines               PayslipLine[]
+  paymentInstructions PaymentInstruction[]
 
   @@unique([runId, employeeId])
   @@index([employeeId])
@@ -4424,4 +4430,53 @@ model LeaveRequest {
 
   @@index([employeeId, status])
   @@index([leaveTypeId])
+}
+
+// ─── Universal Payroll Framework (Phase 5 — payout & settlement) ──────────────
+// The final step of the money loop. A POSTED run left a NET_PAY_PAYABLE liability
+// (Cr) on the GL; a PaymentBatch exports the payout file (bank / mobile-money /
+// cash) and, when marked PAID, posts the settlement entry (Dr NET_PAY_PAYABLE /
+// Cr Cash-Bank-MobileMoney) that clears it — then the run becomes PAID. Reversing
+// a PAID run also reverses this settlement. See docs/payroll-framework-design.md §9-10.
+
+/// One payout batch per posted run. Materialized total + the settlement JE.
+model PaymentBatch {
+  id            String     @id @default(cuid())
+  runId         String
+  run           PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  companyId     String
+  status        String     @default("PENDING")
+  method        String     @default("BANK") // dominant/mixed method across instructions
+  totalAmount   Float      @default(0)
+  employeeCount Int        @default(0)
+  journalEntryId String? // the settlement entry, set when marked PAID
+  createdById   String?
+  exportedAt    DateTime?
+  paidAt        DateTime?
+  reversedAt    DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  instructions PaymentInstruction[]
+
+  @@index([runId])
+  @@index([companyId, status])
+}
+
+/// One payee line in a batch — an employee's net pay and how it's paid.
+model PaymentInstruction {
+  id         String       @id @default(cuid())
+  batchId    String
+  batch      PaymentBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  payslipId  String
+  payslip    Payslip      @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+  employeeId String
+  payeeName  String
+  method     String       @default("BANK")
+  payeeRef   String? // bank account / mobile-money handle (opaque)
+  amount     Float
+  status     String        @default("PENDING")
+  createdAt  DateTime      @default(now())
+
+  @@index([batchId])
 }
