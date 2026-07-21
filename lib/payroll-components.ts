@@ -10,6 +10,7 @@ import type { Db } from '@/lib/ledger'
 import { roundMoney } from '@/lib/utils'
 import { evaluateExpression, FormulaError } from '@/lib/payroll-formula'
 import { PAYROLL_ELIGIBLE_BILL_TYPES } from '@/lib/bill-types'
+import { resolveStatutoryRule, computeStatutory } from '@/lib/payroll-statutory'
 
 export const EARNING_TYPES = ['EARNING', 'ALLOWANCE', 'BENEFIT'] as const
 export const DEDUCTION_TYPES = ['DEDUCTION', 'STATUTORY'] as const
@@ -100,6 +101,8 @@ export async function resolveEffectiveComponents(db: Db, employee: { id: string;
 export interface SourceContext {
   db: Db
   employee: { id: string; personId: string | null; userId: string | null; outletId: string | null }
+  companyId: string | null // for resolving effective-dated StatutoryRule packs
+  date: Date // effectiveness date (period end) for statutory resolution
   month: string | null // 'YYYY-MM' of the payroll period, for period-scoped sources
   manualAmounts: Record<string, number> // per-run one-off entries, keyed by component code
 }
@@ -113,7 +116,7 @@ export interface SourceContext {
  *   MANUAL — a one-off amount entered on the run (manualAmounts[code]).
  *   LOAN_SCHEDULE | ADVANCE | STATUTORY — reserved for later phases; 0 for now.
  */
-async function resolveSourcedAmount(source: string, code: string, ctx: SourceContext): Promise<number> {
+async function resolveSourcedAmount(source: string, code: string, params: Record<string, unknown>, ctx: SourceContext, vars: Record<string, number>): Promise<number> {
   switch (source) {
     case 'CREDIT_BALANCE': {
       // The employee's outstanding on PAYROLL-ELIGIBLE signed bills — the exact
@@ -139,16 +142,23 @@ async function resolveSourcedAmount(source: string, code: string, ctx: SourceCon
     }
     case 'MANUAL':
       return Math.max(0, ctx.manualAmounts[code] ?? 0)
+    case 'STATUTORY': {
+      // parameters.statutoryCode names the effective-dated StatutoryRule to apply
+      // (e.g. "PAYE"). Resolved for the run's company + date; 0 when unconfigured.
+      const statCode = String(params.statutoryCode ?? code)
+      if (!ctx.companyId) return 0
+      const rule = await resolveStatutoryRule(ctx.db, ctx.companyId, statCode, ctx.date)
+      return rule ? computeStatutory(rule, vars) : 0
+    }
     case 'LOAN_SCHEDULE':
     case 'ADVANCE':
-    case 'STATUTORY':
       return 0 // wired in a later phase
     default:
       throw new FormulaError(`Unknown SOURCED source "${source}"`)
   }
 }
 
-function progressiveTable(x: number, bands: [number, number][]): number {
+export function progressiveTable(x: number, bands: [number, number][]): number {
   // bands = [[lowerBound, marginalRate], ...] ascending by lowerBound.
   const sorted = [...bands].sort((a, b) => a[0] - b[0])
   let tax = 0
@@ -224,7 +234,7 @@ export async function computeComponentAmount(comp: ResolvedComponent, vars: Reco
         }
         case 'SOURCED': {
           const src = String(p.source ?? '')
-          amount = await resolveSourcedAmount(src, comp.code, ctx)
+          amount = await resolveSourcedAmount(src, comp.code, p, ctx, vars)
           break
         }
         default:

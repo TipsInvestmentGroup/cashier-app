@@ -64,6 +64,8 @@ datasource db {
 //   Payslip.status:                         CALCULATED | LOCKED | PAID
 //   PayslipLine.bucket:                     EARNING | DEDUCTION | EMPLOYER
 //   PayrollAuditLog.action:                 CREATE | CALCULATE | SUBMIT | APPROVE | REJECT | LOCK | POST | PAY | REVERSE
+//   StatutoryRule.ruleType:                 TAX_BAND | FLAT_RATE | CAP | THRESHOLD
+//   StatutoryRule.authority (TZ):           TRA | NSSF | PSSSF | NHIF | WCF | SDL | HESLB | ...
 
 model User {
   id                String    @id @default(cuid())
@@ -4270,4 +4272,52 @@ model PayrollAuditLog {
   createdAt     DateTime @default(now())
 
   @@index([runId])
+}
+
+// ─── Universal Payroll Framework (Phase 4 — statutory engine) ─────────────────
+// Effective-dated tax / pension / social-security config — the COMPLIANCE PACK.
+// Rates are NEVER in code: PAYE bands, PSSSF/NSSF, NHIF, WCF, SDL, etc. are
+// StatutoryRule rows an authorized person seeds and keeps current, resolved by
+// date so re-running an old period reproduces the rule in force then (the same
+// historical-accuracy guarantee BusinessPeriodVersion gives periods). A
+// PayComponent with calcMethod = SOURCED, parameters.source = "STATUTORY",
+// parameters.statutoryCode = "PAYE" pulls its amount from the resolved rule
+// (lib/payroll-statutory.ts); the component still owns classification (taxable /
+// glMappingKey / EARNING-DEDUCTION-EMPLOYER bucket). The framework guarantees the
+// MECHANISM (correct rule for the run's date); the RATES are the organisation's
+// responsibility — this is not tax advice. See docs/payroll-framework-design.md §11.
+
+/// One effective-dated statutory rule version. Resolve with the newest version
+/// whose effectiveFrom <= target date (and effectiveTo null or >= date).
+///   ruleType: TAX_BAND (progressive marginal bands) | FLAT_RATE | CAP | THRESHOLD
+model StatutoryRule {
+  id           String  @id @default(cuid())
+  companyId    String
+  code         String // e.g. "PAYE" | "PSSSF_EE" | "PSSSF_ER" | "NHIF" | "WCF" | "SDL"
+  name         String
+  jurisdiction String  @default("TZ")
+  authority    String?
+  ruleType     String
+  // The variable the rule reads from the payslip namespace (taxable | pensionable | gross | base).
+  baseVar      String  @default("taxable")
+  // Method-specific config as JSON:
+  //   TAX_BAND:  {"bands": [[0,0],[270000,0.08],[520000,0.20],...]}  (marginal)
+  //   FLAT_RATE: {"rate": 0.10}  (or use employeeRate/employerRate below)
+  parameters   String?
+  // Convenience flat rates (used when parameters.rate is absent).
+  employeeRate Float?
+  employerRate Float?
+  ceiling      Float? // cap the base before applying the rate
+  floor        Float? // no charge below this base
+  // Where this line posts (FinanceAccountMapping key, e.g. PAYE_PAYABLE).
+  glMappingKey String?
+  isEmployer   Boolean @default(false) // employer contribution vs employee deduction
+  effectiveFrom DateTime @default(now())
+  effectiveTo   DateTime?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([companyId, code, effectiveFrom])
+  @@index([companyId, code])
 }

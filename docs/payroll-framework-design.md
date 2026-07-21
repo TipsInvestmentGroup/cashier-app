@@ -565,4 +565,43 @@ enabled (unlike the Phase-2 preview).
   outstanding restored to 100,000. `prisma validate`/`generate`/`db push`, `tsc`,
   `eslint` clean; test data purged (0 runs), module returned to disabled.
 
-### Next: Phase 4 — TZ statutory packs (effective-dated) + attendance/timesheets/leave.
+## Phase 4a (implemented) — statutory engine + TZ pack
+
+Splitting the doc's Phase 4: the **statutory engine** ships here (the money-critical
+compliance layer that makes `SOURCED=STATUTORY` compute real tax); **attendance /
+timesheets / leave** is the next sub-phase (4b).
+
+- **Schema**: `StatutoryRule` — effective-dated (`@@unique([companyId, code,
+  effectiveFrom])`) tax/pension/social-security config. `ruleType` ∈ TAX_BAND
+  (progressive marginal) | FLAT_RATE | CAP | THRESHOLD; carries `baseVar` (which
+  payslip variable it reads), `parameters` JSON (bands/rate), convenience
+  `employeeRate`/`employerRate`, `ceiling`/`floor`, `glMappingKey`, `isEmployer`.
+- **Engine** (`lib/payroll-statutory.ts`): `resolveStatutoryRule` (newest version
+  with `effectiveFrom <= date` and `effectiveTo` open/future — the same
+  historical-accuracy resolution the Business Period Engine uses) and
+  `computeStatutory` (progressive marginal for TAX_BAND; `base × rate` with
+  floor/ceiling for the flat types). Rates live entirely in data; this file only
+  interprets them.
+- **Wiring**: the Phase-2 `SOURCED` adapter's `STATUTORY` case (previously a 0
+  stub) now resolves the rule named by `parameters.statutoryCode` for the run's
+  company + **period-end date** and computes it against the payslip namespace.
+  `SourceContext` gained `companyId` + `date`; `previewPayslip` passes both.
+- **TZ pack seed** (illustrative, admin-editable, effective 2023-07-01 — **not tax
+  advice**; rates must be verified vs TRA/PSSSF): `PAYE` (TAX_BAND, resident
+  monthly marginal bands), `PSSSF_EE` and `PSSSF_ER` (FLAT_RATE 10%). Components
+  added: `PAYE` (STATUTORY deduction → PAYE_PAYABLE) and `PSSSF_ER`
+  (EMPLOYER_CONTRIBUTION → PENSION_PAYABLE), assigned to the pay groups. The
+  Phase-2 `PENSION_EE` stays as the employee pension (no double-count).
+- **Read API**: `GET /api/payroll/statutory[?at=YYYY-MM-DD]` — all versions, or
+  the version of each code effective on a date.
+- **Verified end-to-end** on local SQLite (20 checks): PAYE resolves for 2024 /
+  is null before its effective date; PAYE on 2,000,000 taxable = **428,000** (and
+  2,400 on 300,000); employer pension 200,000; **effective-dated versioning** (a
+  2099 flat-50% version wins only from 2099, the 2023 bands still apply in 2050);
+  full run with PAYE + employer pension → net **excludes** the employer
+  contribution, employerCost 200,000, and a balanced JE (**Dr Salaries 2,000,000
+  + Dr Employer-Contrib 200,000 = Cr Net 1,272,000 + Cr PAYE 428,000 + Cr Pension
+  400,000 (EE+ER) + Cr A/R 100,000**). `prisma validate`/`generate`/`db push`,
+  `tsc`, `eslint` clean; test data purged, module returned to disabled.
+
+### Next: Phase 4b — attendance/timesheets/overtime + leave (accrual/approval/payroll impact).

@@ -111,7 +111,7 @@ function orderTier(comps: ResolvedComponent[]): { ordered: ResolvedComponent[]; 
 export async function previewPayslip(db: Db, employeeId: string, inputs: PreviewInputs = {}): Promise<PayslipPreview> {
   const employee = await db.employee.findUnique({
     where: { id: employeeId },
-    select: { id: true, employeeNumber: true, categoryId: true, payGroupId: true, personId: true, userId: true, outletId: true, baseSalary: true },
+    select: { id: true, employeeNumber: true, categoryId: true, payGroupId: true, personId: true, userId: true, outletId: true, companyId: true, baseSalary: true },
   })
   if (!employee) throw new Error('Employee not found')
 
@@ -142,6 +142,8 @@ export async function previewPayslip(db: Db, employeeId: string, inputs: Preview
   const srcCtx: SourceContext = {
     db,
     employee: { id: employee.id, personId: employee.personId, userId: employee.userId, outletId: employee.outletId },
+    companyId: employee.companyId,
+    date: pp.end, // statutory rules resolve as of period end, like components
     month: monthKey,
     manualAmounts: inputs.manualAmounts ?? {},
   }

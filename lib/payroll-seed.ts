@@ -82,15 +82,44 @@ const PAYROLL_COMPONENTS: ComponentSeed[] = [
   { code: 'HOUSING_ALLOWANCE', name: 'Housing Allowance', componentType: 'ALLOWANCE', calcMethod: 'PERCENTAGE', parameters: { percent: 20, of: 'base' }, taxable: true, pensionable: false, priority: 10, glMappingKey: 'SALARY_EXPENSE', description: '20% of base pay.' },
   { code: 'OVERTIME', name: 'Overtime', componentType: 'EARNING', calcMethod: 'RATE_QTY', parameters: { rate: 5000, qtyVar: 'overtimeHours' }, taxable: true, pensionable: false, priority: 20, glMappingKey: 'SALARY_EXPENSE', description: 'Rate per overtime hour worked.' },
   { code: 'PENSION_EE', name: 'Pension (Employee)', componentType: 'DEDUCTION', calcMethod: 'PERCENTAGE', parameters: { percent: 10, of: 'pensionable' }, taxable: false, pensionable: false, priority: 10, glMappingKey: 'PENSION_PAYABLE', description: 'Employee pension contribution — 10% of pensionable pay.' },
+  // Phase 4 — statutory: PAYE (employee income tax) + employer pension. Both
+  // pull effective-dated rates from StatutoryRule via SOURCED=STATUTORY.
+  { code: 'PAYE', name: 'PAYE (Income Tax)', componentType: 'STATUTORY', calcMethod: 'SOURCED', parameters: { source: 'STATUTORY', statutoryCode: 'PAYE' }, taxable: false, pensionable: false, priority: 30, glMappingKey: 'PAYE_PAYABLE', description: 'Pay-As-You-Earn income tax (TRA), progressive on taxable pay.' },
+  { code: 'PSSSF_ER', name: 'Pension (Employer)', componentType: 'EMPLOYER_CONTRIBUTION', calcMethod: 'SOURCED', parameters: { source: 'STATUTORY', statutoryCode: 'PSSSF_ER' }, taxable: false, pensionable: false, priority: 40, glMappingKey: 'PENSION_PAYABLE', description: 'Employer pension contribution (PSSSF).' },
   { code: 'STAFF_PURCHASES', name: 'Staff Purchases', componentType: 'DEDUCTION', calcMethod: 'SOURCED', parameters: { source: 'CREDIT_BALANCE' }, taxable: false, pensionable: false, priority: 90, glMappingKey: 'ACCOUNTS_RECEIVABLE', description: 'Recovery of the employee’s outstanding signed-bill balance (Credit framework).' },
 ]
 
 // Which components each pay group grants (group-level assignments).
 const GROUP_COMPONENTS: Record<string, string[]> = {
-  MANAGEMENT: ['BASIC_SALARY', 'HOUSING_ALLOWANCE', 'PENSION_EE', 'STAFF_PURCHASES'],
-  FLOOR_STAFF: ['BASIC_SALARY', 'OVERTIME', 'PENSION_EE', 'STAFF_PURCHASES'],
-  CASUAL_EVENT: ['BASIC_SALARY', 'STAFF_PURCHASES'],
+  MANAGEMENT: ['BASIC_SALARY', 'HOUSING_ALLOWANCE', 'PENSION_EE', 'PAYE', 'PSSSF_ER', 'STAFF_PURCHASES'],
+  FLOOR_STAFF: ['BASIC_SALARY', 'OVERTIME', 'PENSION_EE', 'PAYE', 'PSSSF_ER', 'STAFF_PURCHASES'],
+  CASUAL_EVENT: ['BASIC_SALARY', 'PAYE', 'STAFF_PURCHASES'],
 }
+
+// ── Phase 4: TZ statutory pack, effective-dated. THESE ARE ILLUSTRATIVE
+// STARTING VALUES an authorized person must verify against current TRA / PSSSF
+// guidance — the framework guarantees the mechanism (correct rule for the run's
+// date), not the rates. All admin-editable; effective 2023-07-01. ──
+interface StatutorySeed {
+  code: string
+  name: string
+  authority: string
+  ruleType: string
+  baseVar: string
+  parameters?: Record<string, unknown>
+  employeeRate?: number
+  employerRate?: number
+  glMappingKey: string
+  isEmployer: boolean
+}
+
+const TZ_STATUTORY_EFFECTIVE_FROM = new Date('2023-07-01T00:00:00.000Z')
+const TZ_STATUTORY: StatutorySeed[] = [
+  // Resident individual monthly PAYE (marginal bands) — verify vs TRA.
+  { code: 'PAYE', name: 'PAYE (Income Tax)', authority: 'TRA', ruleType: 'TAX_BAND', baseVar: 'taxable', parameters: { bands: [[0, 0], [270000, 0.08], [520000, 0.20], [760000, 0.25], [1000000, 0.30]] }, glMappingKey: 'PAYE_PAYABLE', isEmployer: false },
+  { code: 'PSSSF_EE', name: 'Pension — Employee (PSSSF)', authority: 'PSSSF', ruleType: 'FLAT_RATE', baseVar: 'pensionable', employeeRate: 0.10, glMappingKey: 'PENSION_PAYABLE', isEmployer: false },
+  { code: 'PSSSF_ER', name: 'Pension — Employer (PSSSF)', authority: 'PSSSF', ruleType: 'FLAT_RATE', baseVar: 'pensionable', employerRate: 0.10, glMappingKey: 'PENSION_PAYABLE', isEmployer: true },
+]
 
 /**
  * Idempotent. Seeds the payroll module config (GLOBAL, disabled), the employee
@@ -98,7 +127,7 @@ const GROUP_COMPONENTS: Record<string, string[]> = {
  * Returns counts for the seed summary.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function seedPayrollFramework(prisma: any): Promise<{ categories: number; payGroups: number; employees: number; components: number; assignments: number }> {
+export async function seedPayrollFramework(prisma: any): Promise<{ categories: number; payGroups: number; employees: number; components: number; assignments: number; statutoryRules: number }> {
   const company = await prisma.company.upsert({
     where: { name: 'TIPS Investment Group' },
     update: {},
@@ -241,5 +270,28 @@ export async function seedPayrollFramework(prisma: any): Promise<{ categories: n
     }
   }
 
-  return { categories: TIPS_CATEGORIES.length, payGroups: TIPS_PAY_GROUPS.length, employees: employeesCreated, components: PAYROLL_COMPONENTS.length, assignments: assignmentsCreated }
+  // ── Phase 4: TZ statutory pack (create-only, effective-dated) ──
+  for (const s of TZ_STATUTORY) {
+    await prisma.statutoryRule.upsert({
+      where: { companyId_code_effectiveFrom: { companyId: company.id, code: s.code, effectiveFrom: TZ_STATUTORY_EFFECTIVE_FROM } },
+      update: {},
+      create: {
+        companyId: company.id,
+        code: s.code,
+        name: s.name,
+        jurisdiction: 'TZ',
+        authority: s.authority,
+        ruleType: s.ruleType,
+        baseVar: s.baseVar,
+        parameters: s.parameters ? JSON.stringify(s.parameters) : null,
+        employeeRate: s.employeeRate ?? null,
+        employerRate: s.employerRate ?? null,
+        glMappingKey: s.glMappingKey,
+        isEmployer: s.isEmployer,
+        effectiveFrom: TZ_STATUTORY_EFFECTIVE_FROM,
+      },
+    })
+  }
+
+  return { categories: TIPS_CATEGORIES.length, payGroups: TIPS_PAY_GROUPS.length, employees: employeesCreated, components: PAYROLL_COMPONENTS.length, assignments: assignmentsCreated, statutoryRules: TZ_STATUTORY.length }
 }
