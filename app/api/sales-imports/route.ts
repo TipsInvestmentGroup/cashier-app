@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole, writeOutletId, readOutletScope, CASHIER_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay } from 'date-fns'
-import type { ResolvedLine } from '@/lib/sales-import'
+import { overlayEnginePrices, type ResolvedLine } from '@/lib/sales-import'
 
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -55,8 +55,13 @@ export async function POST(req: NextRequest) {
 
   const company = await prisma.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } })
 
+  // Re-overlay Price-List-Engine prices server-side so expected prices/mismatch
+  // flags are authoritative even if the client matched a product after preview.
+  const refDate = lines.find((l) => l.date)?.date
+  const priced = await overlayEnginePrices(lines, { outletId, date: refDate ? new Date(refDate) : new Date() })
+
   let totalQty = 0, totalAmount = 0, unmatchedStaff = 0, unmatchedProducts = 0
-  const lineData = lines.map((l) => {
+  const lineData = priced.map((l) => {
     const qty = roundMoney(Number(l.qty) || 0)
     const amount = roundMoney(Number(l.amount) || 0)
     totalQty += qty; totalAmount += amount
@@ -78,6 +83,7 @@ export async function POST(req: NextRequest) {
       amount,
       unitPriceUploaded: l.unitPriceUploaded ?? null,
       unitPriceMaster: l.unitPriceMaster ?? null,
+      priceListId: l.priceListId ?? null,
       priceMismatch: !!l.priceMismatch,
       issues: l.issues?.length ? JSON.stringify(l.issues) : null,
     }

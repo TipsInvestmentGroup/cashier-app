@@ -226,6 +226,7 @@ model Outlet {
 
   reconciliationStages ReconciliationStage[]
   paymentVerifications PaymentVerification[]
+  priceLists           PriceList[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -349,7 +350,8 @@ model SalesImportLine {
   qty               Float       @default(0)
   amount            Float       @default(0)
   unitPriceUploaded Float?
-  unitPriceMaster   Float?
+  unitPriceMaster   Float? // expected unit price from the Price List Engine at import time
+  priceListId       String? // which price list supplied the expected price (null = product fallback)
   priceMismatch     Boolean     @default(false)
   issues            String? // JSON array of data-quality flags
   // When a later import is approved for the same (outlet, day), the prior
@@ -397,6 +399,135 @@ model SalesProductAlias {
 
   @@unique([companyId, alias])
   @@index([alias])
+}
+
+// ─── Configurable Price List Engine ──────────────────────────────────────────
+// One product, many prices. Product master holds no selling price of its own in
+// the end state; during the safe phased cutover Product.sellingPrice seeds the
+// auto-created "Default" price list and acts as the resolver's last-resort
+// fallback. Resolution priority (Event > Outlet > Customer Group > Default) is
+// configurable via the Setting key PRICE_RESOLUTION_ORDER. See lib/pricing.ts.
+
+/// A pricing segment (e.g. VIP, Corporate, Staff) that prices can target.
+model CustomerGroup {
+  id        String   @id @default(cuid())
+  companyId String?
+  name      String
+  code      String?
+  isActive  Boolean  @default(true)
+  createdById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  priceLists PriceList[]
+  promotions Promotion[]
+  persons    Person[]
+
+  @@index([isActive])
+}
+
+/// A named, scoped, time-bounded collection of product prices. Scope is any
+/// combination of outlet/event/customerGroup (all null = the Default list).
+model PriceList {
+  id              String         @id @default(cuid())
+  companyId       String?
+  name            String
+  description     String?
+  outletId        String?
+  outlet          Outlet?        @relation(fields: [outletId], references: [id])
+  eventId         String?
+  event           Event?         @relation(fields: [eventId], references: [id])
+  customerGroupId String?
+  customerGroup   CustomerGroup? @relation(fields: [customerGroupId], references: [id])
+  currency        String         @default("TZS")
+  effectiveFrom   DateTime?
+  effectiveTo     DateTime?
+  status          String         @default("ACTIVE") // ACTIVE | INACTIVE | PENDING_APPROVAL | REJECTED
+  priority        Int            @default(0) // tie-break within the same scope class; higher wins
+  isDefault       Boolean        @default(false) // the base list seeded from Product.sellingPrice
+  approvedById    String?
+  approvedByName  String?
+  approvedAt      DateTime?
+  createdById     String?
+  createdByName   String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  items PriceListItem[]
+
+  @@index([status])
+  @@index([outletId])
+  @@index([eventId])
+  @@index([customerGroupId])
+  @@index([isDefault])
+}
+
+/// One product's price within a price list. A product may appear in many lists.
+model PriceListItem {
+  id           String    @id @default(cuid())
+  priceListId  String
+  priceList    PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product   @relation(fields: [productId], references: [id])
+  sellingPrice Float
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([priceListId, productId])
+  @@index([productId])
+}
+
+/// Immutable log of every price change, so price history is preserved even as
+/// list items are edited.
+model PriceChangeLog {
+  id            String   @id @default(cuid())
+  priceListId   String
+  priceListName String?
+  productId     String
+  productName   String?
+  oldPrice      Float?
+  newPrice      Float
+  action        String   @default("UPDATE") // CREATE | UPDATE | DELETE
+  changedById   String?
+  changedByName String?
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  @@index([productId])
+  @@index([priceListId])
+  @@index([createdAt])
+}
+
+/// Promotions are kept separate from price lists and apply AFTER the selling
+/// price is resolved. type drives which fields matter.
+model Promotion {
+  id              String         @id @default(cuid())
+  companyId       String?
+  name            String
+  type            String // PERCENTAGE | FIXED | BUY_X_GET_Y | BUNDLE
+  value           Float          @default(0) // PERCENTAGE: 0-100 | FIXED: amount off
+  outletId        String?
+  eventId         String?
+  customerGroupId String?
+  customerGroup   CustomerGroup? @relation(fields: [customerGroupId], references: [id])
+  productId       String? // target a single product (line promos, BUY_X_GET_Y)
+  categoryId      String? // or a whole category
+  buyQty          Float? // BUY_X_GET_Y
+  getQty          Float?
+  bundleConfig    String? // BUNDLE: JSON [{productId, qty}]
+  bundlePrice     Float? // BUNDLE: total price for the bundle
+  effectiveFrom   DateTime?
+  effectiveTo     DateTime?
+  status          String         @default("ACTIVE") // ACTIVE | INACTIVE
+  priority        Int            @default(0)
+  createdById     String?
+  createdByName   String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([status])
+  @@index([productId])
+  @@index([categoryId])
 }
 
 /// Locks a single outlet's day. Once a (outlet, date) is closed, cashiers can no
@@ -1061,12 +1192,18 @@ model Person {
   code     String?
   codeMode String  @default("AUTO")
 
+  // Optional pricing segment — lets the Price List Engine resolve a
+  // customer-group-specific selling price (see lib/pricing.ts).
+  customerGroupId String?
+  customerGroup   CustomerGroup? @relation(fields: [customerGroupId], references: [id])
+
   signedBills   SignedBill[]
   paidBills     PaidBill[]
   excessRefunds ExcessRefund[]
 
   @@unique([type, code])
   @@index([type])
+  @@index([customerGroupId])
 }
 
 model SignedBill {
@@ -1329,6 +1466,7 @@ model Product {
   purchaseOrderItems  PurchaseOrderItem[]
   eventProducts       EventProduct[]
   cancellationReasons CancellationReasonProduct[]
+  priceListItems      PriceListItem[]
 
   @@index([name])
   @@index([categoryId])
@@ -2381,6 +2519,7 @@ model Event {
   expenses      EventExpense[]
   sponsors      EventSponsor[]
   products      EventProduct[]
+  priceLists    PriceList[]
   targets       EventTarget[]
   ticketTypes   EventTicketType[]
   tickets       TicketBooking[]

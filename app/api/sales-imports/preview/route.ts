@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, requireRole, CASHIER_ROLES } from '@/lib/auth'
-import { loadMasterData, resolveLines, type RawLine, type ResolvedLine } from '@/lib/sales-import'
+import { loadMasterData, resolveLines, overlayEnginePrices, type RawLine, type ResolvedLine } from '@/lib/sales-import'
+import { parse, isValid } from 'date-fns'
 
 /**
  * POST — the Clean + Validate + Map stages. Takes raw parsed rows and returns
@@ -21,7 +22,11 @@ export async function POST(req: NextRequest) {
   if (rows.length > 20000) return NextResponse.json({ error: 'Too many rows in one file (max 20,000). Split the export.' }, { status: 400 })
 
   const master = await loadMasterData('')
-  const lines = resolveLines(rows, master, defaultDate)
+  let lines = resolveLines(rows, master, defaultDate)
+  // Overlay Price-List-Engine expected prices (outlet + date aware) so mismatch
+  // flags reflect the actual applicable price list, not the product's raw price.
+  const dd = parse(defaultDate, 'yyyy-MM-dd', new Date())
+  lines = await overlayEnginePrices(lines, { outletId: body.outletId || null, date: isValid(dd) ? dd : new Date() })
 
   return NextResponse.json({ lines, summary: summarize(lines) })
 }

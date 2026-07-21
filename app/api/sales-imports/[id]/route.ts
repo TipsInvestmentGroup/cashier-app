@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole, CASHIER_ROLES, MGMT_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { commitImport } from '@/lib/sales-import'
+import { resolvePrice } from '@/lib/pricing'
 
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -68,14 +69,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const data: Record<string, unknown> = {}
     if (typeof body.staffName === 'string' && body.staffName.trim()) { data.staffName = body.staffName.trim().slice(0, 200); data.staffMatched = true }
     if (typeof body.productId === 'string' && body.productId) {
-      const p = await prisma.product.findUnique({ where: { id: body.productId }, select: { id: true, name: true, sellingPrice: true, categoryId: true, category: true, productCategory: { select: { label: true } } } })
+      const p = await prisma.product.findUnique({ where: { id: body.productId }, select: { id: true, name: true, categoryId: true, category: true, productCategory: { select: { label: true } } } })
       if (!p) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
       data.productId = p.id; data.productName = p.name; data.productMatched = true
       data.categoryId = p.categoryId; data.categoryName = p.productCategory?.label || p.category || null
-      data.unitPriceMaster = p.sellingPrice
+      // Expected price from the Price List Engine (outlet + line date aware).
+      const resolved = await resolvePrice(p.id, { outletId: line.outletId, date: line.date })
+      const expected = resolved?.price ?? 0
+      data.unitPriceMaster = expected
+      data.priceListId = resolved?.priceListId ?? null
       const qty = Number(line.qty) || 0
       const up = qty > 0 ? roundMoney((Number(line.amount) || 0) / qty) : null
-      data.priceMismatch = !!(up && p.sellingPrice > 0 && Math.abs(up - p.sellingPrice) / p.sellingPrice > 0.01)
+      data.priceMismatch = !!(up && expected > 0 && Math.abs(up - expected) / expected > 0.01)
     }
     // Recompute the line's issue flags after the fix.
     const merged = { ...line, ...data }

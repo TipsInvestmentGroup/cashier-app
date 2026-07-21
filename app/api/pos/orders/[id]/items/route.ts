@@ -3,6 +3,7 @@ import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
 import { allowedCountersForCategory } from '@/lib/shared-constants'
+import { resolvePrice } from '@/lib/pricing'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -54,7 +55,10 @@ export async function POST(req: NextRequest, { params }: Params) {
   }
 
   const qty = Number(quantity)
-  const unitPrice = eventProduct?.eventPrice ?? product.sellingPrice
+  // Selling price from the Price List Engine (event/outlet aware); falls back to
+  // the event-product override, then the product's legacy price during cutover.
+  const resolved = await resolvePrice(productId, { outletId: order.outletId, eventId: order.eventId, date: new Date() })
+  const unitPrice = resolved?.price ?? eventProduct?.eventPrice ?? product.sellingPrice
   const amount = roundMoney(unitPrice * qty)
 
   let item

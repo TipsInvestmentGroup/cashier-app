@@ -9,7 +9,7 @@ import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
 import { VALID_ROLES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
-import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, type LucideIcon } from 'lucide-react'
+import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, Tag, type LucideIcon } from 'lucide-react'
 
 const ALL = VALID_ROLES
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -29,6 +29,8 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
   { href: '/petty-cash', icon: Wallet, label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals', '/petty-payments'] },
 
   { href: '/analytics', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/analytics', '/receivables', '/admin-director-bills', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/trends', '/payroll', '/reports', '/audit', '/business-days', '/business-day-management', '/business-day-unlock-requests', '/business-day-exceptions-report'] },
+
+  { href: '/pricing', icon: Tag, label: 'Pricing', section: 'Finance', roles: MGMT, match: ['/pricing'] },
 
   { href: '/setup', icon: Settings, label: 'Setup', section: 'Setup', roles: ALL, match: ['/setup', ...SETUP_TABS.map((t) => t.href)] },
 ]

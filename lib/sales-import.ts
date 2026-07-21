@@ -14,6 +14,7 @@ import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, format } from 'date-fns'
 import { normalizeName, bestMatch } from '@/lib/fuzzy-match'
+import { resolvePrices } from '@/lib/pricing'
 
 // SalesImport* client types are generated on deploy; assert to avoid local drift.
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -62,7 +63,8 @@ export interface ResolvedLine {
   qty: number
   amount: number
   unitPriceUploaded: number | null
-  unitPriceMaster: number | null
+  unitPriceMaster: number | null // expected unit price (Price List Engine)
+  priceListId: string | null // which price list supplied the expected price
   priceMismatch: boolean
   issues: IssueCode[]
 }
@@ -217,8 +219,30 @@ export function resolveLines(raw: RawLine[], master: MasterData, defaultDate: st
     return {
       date, rawStaffName: staffRaw, staffName, staffMatched, staffSuggestion,
       rawProductName: productRaw, productId, productName, productMatched, productSuggestion,
-      categoryId, categoryName, qty, amount, unitPriceUploaded, unitPriceMaster, priceMismatch, issues,
+      categoryId, categoryName, qty, amount, unitPriceUploaded, unitPriceMaster, priceListId: null, priceMismatch, issues,
     }
+  })
+}
+
+/**
+ * Overlay Price-List-Engine expected prices onto resolved lines. Replaces the
+ * naive Product.sellingPrice comparison from resolveLines with the outlet/date-
+ * aware engine price, records which price list supplied it, and recomputes the
+ * PRICE_MISMATCH flag. Call after resolveLines, before preview/persist.
+ */
+export async function overlayEnginePrices(lines: ResolvedLine[], ctx: { outletId?: string | null; date?: Date }): Promise<ResolvedLine[]> {
+  const ids = [...new Set(lines.filter((l) => l.productId).map((l) => l.productId as string))]
+  if (!ids.length) return lines
+  const prices = await resolvePrices(ids, ctx)
+  return lines.map((l) => {
+    if (!l.productId) return l
+    const rp = prices.get(l.productId)
+    if (!rp) return l
+    const up = l.unitPriceUploaded
+    const priceMismatch = !!(rp.price > 0 && up && up > 0 && Math.abs(up - rp.price) / rp.price > PRICE_TOLERANCE)
+    const issues: IssueCode[] = l.issues.filter((i) => i !== 'PRICE_MISMATCH')
+    if (priceMismatch) issues.push('PRICE_MISMATCH')
+    return { ...l, unitPriceMaster: rp.price, priceListId: rp.priceListId, priceMismatch, issues }
   })
 }
 
