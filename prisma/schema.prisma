@@ -169,6 +169,10 @@ model Company {
   paymentVerifications         PaymentVerification[]
   paymentIntegrationConnectors PaymentIntegrationConnector[]
   writeOffRequests             WriteOffRequest[]
+
+  creditPolicies  CreditPolicy[]
+  creditGroups    CreditGroup[]
+  creditAccounts  CreditAccount[]
 }
 
 model Outlet {
@@ -1286,6 +1290,9 @@ model Person {
   paidBills     PaidBill[]
   excessRefunds ExcessRefund[]
 
+  // Universal Credit Framework: optional 1:1 credit account (the debtor record).
+  creditAccount CreditAccount?
+
   @@unique([type, code])
   @@index([type])
   @@index([customerGroupId])
@@ -1350,11 +1357,21 @@ model SignedBill {
   payments PaidBill[]
   items    BillItem[]
 
+  // Universal Credit Framework (Phase 1 bridge) — nullable/additive. New bills
+  // may tag the resolved credit group + debtor account; existing bills keep
+  // classifying via billType/legacyBillTypeCode until backfilled.
+  creditGroupId   String?
+  creditGroup     CreditGroup?   @relation(fields: [creditGroupId], references: [id])
+  creditAccountId String?
+  creditAccount   CreditAccount? @relation(fields: [creditAccountId], references: [id])
+
   @@index([date])
   @@index([billType])
   @@index([status])
   @@index([outletId])
   @@index([personId])
+  @@index([creditGroupId])
+  @@index([creditAccountId])
 }
 
 // Product line items on a signed bill (Customer / Tips / DJ etc.).
@@ -3546,4 +3563,213 @@ model WriteOffAuditLog {
   createdAt  DateTime        @default(now())
 
   @@index([writeOffId, createdAt])
+}
+
+// ─── Universal Credit Management Framework (Phase 1 — config + classification) ─
+// A configuration & classification layer that turns the app's existing,
+// working Accounts-Receivable core into an industry-agnostic, admin-configurable
+// credit module WITHOUT forking the transactional core. Nothing here replaces
+// SignedBill (the credit invoice), PaidBill (the receipt), SignedBillWriteOff,
+// WorkflowApproval, or the GL posting in lib/finance-ar.ts — those remain the
+// single source of truth for credit money. Instead these models generalize the
+// currently-hardcoded billType groupings in lib/bill-types.ts
+// (CREDIT_BILL_TYPES / REQUEST_BILL_TYPES / PAYROLL_ELIGIBLE_BILL_TYPES /
+// CREDIT_LIMIT_BILL_TYPES) into admin-defined records, so "Signed Bills" /
+// "House Accounts" / "Accounts Receivable" and their groups become
+// configuration, not code. See docs/credit-management-framework-design.md.
+//
+// Design decisions (Phase 1 scope):
+//   • Invoice/payment/write-off = existing SignedBill/PaidBill/SignedBillWriteOff.
+//     An append-only CreditTransaction ledger is a later phase; not forked now.
+//   • Approval = existing WorkflowApproval + role-based gating. A first-class
+//     WorkflowDefinition/Step graph is a later phase; CreditGroup carries
+//     approverRoles JSON in the meantime.
+//   • Bridge FKs on SignedBill (creditGroupId/creditAccountId) and the 1:1
+//     CreditAccount↔Person link are all NULLABLE — purely additive, zero
+//     behavior change until app code opts in.
+
+/// Module identity + global switches for the credit module — what "credit" is
+/// CALLED and how it behaves, per scope. Same GLOBAL→COMPANY→OUTLET, narrowest-
+/// wins shape as CollectionModeConfig/FinanceAccountMapping (resolved in
+/// lib/credit-config.ts). Zero rows anywhere ⇒ module disabled / today's
+/// hardcoded billType behavior, unchanged.
+///   scope:         GLOBAL | COMPANY | OUTLET
+///   allowOverLimit: BLOCK | WARN | APPROVE
+model CreditModuleConfig {
+  id                      String   @id @default(cuid())
+  scope                   String
+  // Null only for GLOBAL; else a Company.id or Outlet.id depending on scope.
+  scopeId                 String?
+  moduleName              String   @default("Signed Bills") // "House Accounts", "Accounts Receivable", ...
+  // JSON map of generic label → tenant label, e.g.
+  // {"account":"Person","invoice":"Signed Bill","payment":"Paid Bill","group":"Bill Type"}.
+  terminology             String?
+  enabled                 Boolean  @default(true)
+  defaultCurrency         String   @default("TZS")
+  approvalRequiredDefault Boolean  @default(false)
+  allowPartialPayments    Boolean  @default(true)
+  allowOverLimit          String   @default("WARN")
+  requireAttachmentsDefault Boolean @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([scope, scopeId])
+}
+
+/// A reusable, versioned rule bundle referenced by credit groups — separating
+/// policy from group so "Standard Net-30 + 1.5%/mo" can be shared across many
+/// groups. parameters holds the method-specific config as JSON (rate, period,
+/// tiers, caps). effectiveFrom/To version a policy so re-pricing an old period
+/// reproduces the rule in force then.
+///   policyType: INTEREST | PENALTY | LIMIT | SETTLEMENT | WRITEOFF
+///   method:     NONE | FLAT | PERCENT_PER_PERIOD | TIERED | COMPOUND | ...
+model CreditPolicy {
+  id            String    @id @default(cuid())
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id])
+  code          String
+  name          String
+  policyType    String
+  method        String    @default("NONE")
+  parameters    String? // JSON: {rate, periodDays, tiers[], cap, ...}
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  interestGroups CreditGroup[] @relation("GroupInterestPolicy")
+  penaltyGroups  CreditGroup[] @relation("GroupPenaltyPolicy")
+  limitGroups    CreditGroup[] @relation("GroupLimitPolicy")
+
+  @@unique([companyId, code])
+  @@index([companyId, policyType])
+}
+
+/// The configurable classifier — the admin-defined "Admin / Director / Customer
+/// / Tips Bills / DJ Bills / Insurance / Corporate …" records. This table is
+/// why nothing is hardcoded: each generalizes one entry of the fixed billType
+/// vocabulary + its groupings. legacyBillTypeCode bridges a group to the
+/// existing SignedBill.billType so today's bills classify without a data
+/// migration. Deletion is soft (status=INACTIVE) — historical bills reference it.
+///   status:      ACTIVE | INACTIVE
+///   riskRating:  LOW | MEDIUM | HIGH (or admin-defined)
+model CreditGroup {
+  id          String  @id @default(cuid())
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id])
+  code        String // stable machine key, e.g. "TIPS_BILLS"
+  name        String // display, e.g. "Tips Bills"
+  description String?
+  status      String  @default("ACTIVE")
+
+  // Bridge to the existing fixed vocabulary (lib/bill-types.ts): ADMIN |
+  // DIRECTOR | CUSTOMER | TIPS | DJ | STAFF_LOSS | null. Lets the resolver map
+  // an existing SignedBill.billType to its group with no data migration.
+  legacyBillTypeCode String?
+
+  // Generalizes the hardcoded arrays in lib/bill-types.ts:
+  isCreditBearing Boolean @default(true) // = CREDIT_BILL_TYPES membership (real receivable, not an internal marker like STAFF_LOSS)
+  requiresApproval Boolean @default(false) // = REQUEST_BILL_TYPES (formal request awaiting sign-off before it counts as debt)
+
+  // Settlement — "Both (configurable)": allowed methods is a JSON array; the
+  // default is picked from it. PAYROLL_DEDUCTION | CASH | BANK | MOBILE_MONEY.
+  settlementMethods       String  @default("[\"CASH\",\"BANK\",\"MOBILE_MONEY\"]")
+  defaultSettlementMethod String  @default("CASH")
+
+  // Limits & terms (0 maxCredit = no group-level ceiling; per-account override
+  // on CreditAccount still applies). Aging/grace ride the Business Period
+  // Engine's Credit Cycle (BusinessPeriodVersion.credit*Day) when set.
+  maxCredit        Float @default(0)
+  paymentTermsDays Int   @default(0)
+  gracePeriodDays  Int   @default(0)
+
+  interestPolicyId String?
+  interestPolicy   CreditPolicy? @relation("GroupInterestPolicy", fields: [interestPolicyId], references: [id])
+  penaltyPolicyId  String?
+  penaltyPolicy    CreditPolicy? @relation("GroupPenaltyPolicy", fields: [penaltyPolicyId], references: [id])
+  limitPolicyId    String?
+  limitPolicy      CreditPolicy? @relation("GroupLimitPolicy", fields: [limitPolicyId], references: [id])
+
+  // Approval routing (Phase 1: role-based, reusing WorkflowApproval). JSON
+  // array of role strings, e.g. ["MANAGER","DIRECTOR"]. A first-class
+  // WorkflowDefinition graph replaces this in a later phase.
+  approverRoles String?
+
+  riskRating       String  @default("LOW")
+  priority         Int     @default(0)
+  documentsRequired String? // JSON array of required doc-type labels
+  // Allowed-scope restrictions kept as JSON id-arrays in Phase 1 (graduate to
+  // child tables when the admin UI needs relational queries over them).
+  allowedOutletIds        String?
+  allowedProductIds       String?
+  allowedCustomerGroupIds String?
+  attributes              String? // extensibility escape hatch (industry-specific fields)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  accountLinks CreditAccountGroup[]
+  signedBills  SignedBill[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+  @@index([legacyBillTypeCode])
+}
+
+/// The debtor — a thin wrapper over the existing Person (1:1) that adds a
+/// materialized balance, credit status, and many-to-many group membership.
+/// personId is the primary bridge; userId links staff accounts (payroll-
+/// deduction settlement). currentBalance is a maintained projection of the
+/// SignedBill/PaidBill A/R (reconciled by a scheduled self-diagnostic, never
+/// the authoritative figure); balanceVersion guards concurrent limit checks.
+///   accountType: INDIVIDUAL | COMPANY | STAFF | GOVERNMENT | GROUP
+///   status:      ACTIVE | SUSPENDED | CLOSED | BLACKLISTED
+model CreditAccount {
+  id          String  @id @default(cuid())
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id])
+  accountType String  @default("INDIVIDUAL")
+  displayName String
+
+  // 1:1 bridge to the existing customer/staff master. Nullable so a company/
+  // government account with no Person row can still exist.
+  personId String? @unique
+  person   Person? @relation(fields: [personId], references: [id])
+  userId   String? // staff account → User (payroll settlement); no relation to keep User model untouched
+
+  status              String  @default("ACTIVE")
+  creditLimitOverride Float? // beats the group limit when set
+  currentBalance      Float   @default(0) // materialized; A/R remains source of truth
+  balanceVersion      Int     @default(0)
+  currency            String  @default("TZS")
+  riskRating          String  @default("LOW")
+  notes               String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  groupLinks  CreditAccountGroup[]
+  signedBills SignedBill[]
+
+  @@index([companyId, status])
+  @@index([userId])
+}
+
+/// M:N membership — "one account may belong to multiple credit groups"
+/// (effective-dated so limit/terms re-resolve without rewriting history). When
+/// an account is in several groups, limit resolution is config-driven
+/// (default: min of the group limits); see lib/credit-config.ts.
+model CreditAccountGroup {
+  id            String        @id @default(cuid())
+  accountId     String
+  account       CreditAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  groupId       String
+  group         CreditGroup   @relation(fields: [groupId], references: [id])
+  effectiveFrom DateTime      @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime      @default(now())
+
+  @@index([accountId])
+  @@index([groupId])
 }

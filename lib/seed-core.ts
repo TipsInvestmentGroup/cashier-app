@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
 import { seedStandardCollectionTemplate } from './collection-template-seed'
+import { seedCreditFramework } from './credit-seed'
 import { RECONCILIATION_STAGE_RESOURCES as RSR, WRITE_OFF_RESOURCES as WOR } from './rbac'
 import { classForReason } from './reconciliation-classification'
 
@@ -194,5 +195,10 @@ export async function seedCore(prisma: any) {
   const reconRoleDefaults = await seedReconciliationRoleDefaults(prisma)
   const excessClassBackfill = await backfillExcessReasonAccountingClass(prisma)
 
-  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill }
+  // Universal Credit Framework (Phase 1): module config + 6 TIPS credit groups
+  // + a CreditAccount per Person. Idempotent, additive — safe to run after the
+  // persons above exist so accounts can bind to them.
+  const credit = await seedCreditFramework(prisma)
+
+  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts }
 }
