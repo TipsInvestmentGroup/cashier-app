@@ -213,6 +213,7 @@ model Outlet {
   posBlockedItems        PosBlockedItem[]
   dayClosures            DayClosure[]
   salesMetrics           SalesMetric[]
+  salesImports           SalesImport[]
   scheduleAssignments    ScheduleAssignment[]
   scheduleConfig         OutletScheduleConfig?
   events                 Event[]
@@ -284,6 +285,112 @@ model SalesMetricLock {
 
   @@unique([outletId, department, date])
   @@index([department])
+}
+
+// ─── Sales Import Center ─────────────────────────────────────────────────────
+// A generic, category-agnostic import pipeline that replaces the old
+// Shisha/Food-only "Upload Sales" flow. Raw POS exports (e.g. the
+// "$Attendant Sales In Details" sheet: Attendant | Item Name | Qty | Amount)
+// are captured at item level, cleaned/validated/mapped to master data, and only
+// feed SalesMetric + analytics once APPROVED. See lib/sales-import.ts.
+
+/// One import batch moving through Upload → Clean → Validate → Map → Preview →
+/// Approval → Import. Only status IMPORTED writes SalesMetric / feeds analytics.
+model SalesImport {
+  id                String    @id @default(cuid())
+  companyId         String?
+  outletId          String?
+  outlet            Outlet?   @relation(fields: [outletId], references: [id])
+  fileName          String
+  sourceLabel       String? // e.g. the sheet title / "FROM …" period text
+  periodFrom        DateTime?
+  periodTo          DateTime?
+  status            String    @default("PENDING_APPROVAL") // DRAFT | PENDING_APPROVAL | APPROVED | REJECTED | IMPORTED
+  rowCount          Int       @default(0)
+  totalQty          Float     @default(0)
+  totalAmount       Float     @default(0)
+  unmatchedStaff    Int       @default(0)
+  unmatchedProducts Int       @default(0)
+  createdById       String?
+  createdByName     String?
+  approvedById      String?
+  approvedByName    String?
+  approvedAt        DateTime?
+  rejectedReason    String?
+  importedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  lines SalesImportLine[]
+
+  @@index([outletId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// One item-level line of a SalesImport — the granular record product analytics
+/// is built from. Raw uploaded values are preserved alongside the resolved
+/// master-data matches for a full audit trail.
+model SalesImportLine {
+  id                String      @id @default(cuid())
+  importId          String
+  import            SalesImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  date              DateTime
+  outletId          String?
+  rawStaffName      String
+  staffName         String // resolved canonical staff name (raw if unmatched)
+  staffMatched      Boolean     @default(false)
+  rawProductName    String
+  productId         String?
+  productName       String // resolved product name (raw if unmatched)
+  productMatched    Boolean     @default(false)
+  categoryId        String?
+  categoryName      String?
+  qty               Float       @default(0)
+  amount            Float       @default(0)
+  unitPriceUploaded Float?
+  unitPriceMaster   Float?
+  priceMismatch     Boolean     @default(false)
+  issues            String? // JSON array of data-quality flags
+  createdAt         DateTime    @default(now())
+
+  @@index([importId])
+  @@index([date])
+  @@index([productId])
+}
+
+/// Remembered staff-name mapping: a raw uploaded attendant name → canonical
+/// staff. Populated when an import is approved so future imports auto-match.
+/// companyId defaults to "" (single-company / global) so the unique key holds
+/// on both SQLite and Postgres (NULLs would defeat the constraint).
+model SalesStaffAlias {
+  id          String   @id @default(cuid())
+  companyId   String   @default("")
+  alias       String // normalized raw name (uppercased, whitespace-collapsed)
+  staffName   String // canonical Person/collections name
+  personId    String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, alias])
+  @@index([alias])
+}
+
+/// Remembered product-name mapping: a raw uploaded item name → catalogue
+/// Product. Populated on approval so future imports auto-match.
+model SalesProductAlias {
+  id          String   @id @default(cuid())
+  companyId   String   @default("")
+  alias       String // normalized raw item name
+  productId   String
+  productName String
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, alias])
+  @@index([alias])
 }
 
 /// Locks a single outlet's day. Once a (outlet, date) is closed, cashiers can no

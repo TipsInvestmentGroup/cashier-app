@@ -10,7 +10,6 @@ import { cn } from '@/lib/utils'
 import { VALID_ROLES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, type LucideIcon } from 'lucide-react'
-import { UploadSalesModal } from '@/components/UploadSalesModal'
 
 const ALL = VALID_ROLES
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
@@ -45,7 +44,6 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   const [pwOpen, setPwOpen] = useState(false)
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
   const [pwBusy, setPwBusy] = useState(false)
-  const [uploadOpen, setUploadOpen] = useState(false)
   const canUpload = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'].includes(user?.role || '')
 
   const changePassword = async (e: React.FormEvent) => {
@@ -112,11 +110,16 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
                   )
                 })}
                 {sec === 'Targets' && canUpload && (
-                  <button onClick={() => setUploadOpen(true)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-indigo-200 hover:bg-indigo-700/60 hover:text-white transition-all">
+                  <Link href="/sales-import" onClick={onClose}
+                    className={cn(
+                      'w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all',
+                      pathname === '/sales-import' || pathname.startsWith('/sales-import/')
+                        ? 'bg-white text-indigo-900 shadow-lg'
+                        : 'text-indigo-200 hover:bg-indigo-700/60 hover:text-white'
+                    )}>
                     <Upload className="w-5 h-5 flex-shrink-0" />
-                    <span>Upload Sales</span>
-                  </button>
+                    <span>Sales Import</span>
+                  </Link>
                 )}
               </div>
             </div>
@@ -173,8 +176,6 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           </form>
         </div>
       )}
-
-      <UploadSalesModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
     </div>
   )
 }
