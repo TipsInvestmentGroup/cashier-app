@@ -309,6 +309,19 @@ export async function commitImport(importId: string, actor: { userId: string; us
 
   await prisma.$transaction(async (tx) => {
     const tdb = tx as any // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    // Supersede prior IMPORTED lines for exactly these (outlet, day) pairs so
+    // analytics/BI never double-count a re-imported day. Line-level (not batch-
+    // level) so a multi-day batch keeps its non-overlapping days. Two-step to
+    // avoid a relation filter inside updateMany.
+    const priorImported = await tdb.salesImport.findMany({ where: { outletId, status: 'IMPORTED', id: { not: importId } }, select: { id: true } }) as { id: string }[]
+    if (priorImported.length) {
+      await tdb.salesImportLine.updateMany({
+        where: { importId: { in: priorImported.map((p) => p.id) }, date: { in: dayStarts }, superseded: false },
+        data: { superseded: true, supersededByImportId: importId },
+      })
+    }
+
     // Authoritative replace of the SHISHA/FOOD buckets for exactly these
     // (outlet, day) pairs — precise { in } match, no gap-spanning range.
     await tdb.salesMetric.deleteMany({ where: { outletId, department: { in: ['SHISHA', 'FOOD'] }, date: { in: dayStarts } } })

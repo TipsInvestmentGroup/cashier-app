@@ -352,11 +352,17 @@ model SalesImportLine {
   unitPriceMaster   Float?
   priceMismatch     Boolean     @default(false)
   issues            String? // JSON array of data-quality flags
+  // When a later import is approved for the same (outlet, day), the prior
+  // import's lines for that day are superseded so analytics never double-counts
+  // a re-imported day. Superseded lines are excluded from all BI reads.
+  superseded          Boolean   @default(false)
+  supersededByImportId String?
   createdAt         DateTime    @default(now())
 
   @@index([importId])
   @@index([date])
   @@index([productId])
+  @@index([superseded])
 }
 
 /// Remembered staff-name mapping: a raw uploaded attendant name → canonical

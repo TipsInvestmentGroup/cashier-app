@@ -94,7 +94,7 @@ export async function runMissingDataDetection({ outletId, date }: { outletId: st
     prisma.salesMetric.count({ where: { outletId, date: range } }),
     // A committed Sales Import counts as sales figures even when the day has no
     // SHISHA/FOOD line (e.g. a drinks-only day writes no SalesMetric row).
-    db.salesImportLine.count({ where: { outletId, date: range, import: { status: 'IMPORTED' } } }),
+    db.salesImportLine.count({ where: { outletId, date: range, superseded: false, import: { status: 'IMPORTED' } } }),
     prisma.posShift.findMany({ where: { outletId, date: range }, select: { name: true, closedAt: true } }),
     prisma.posCounter.findMany({ where: { outletId, isActive: true }, select: { code: true, label: true } }),
   ])

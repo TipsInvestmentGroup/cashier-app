@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = {
     import: { status: 'IMPORTED' },
+    superseded: false, // a re-imported day supersedes the prior batch's lines
     date: { gte: startOfDay(from), lte: endOfDay(to) },
   }
   if (outletId) where.outletId = outletId
