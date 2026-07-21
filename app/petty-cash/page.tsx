@@ -13,6 +13,7 @@ import { SearchBox } from '@/components/SearchBox'
 import { MoneyInput } from '@/components/MoneyInput'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
@@ -49,6 +50,7 @@ function PettyCashPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [range, setRange] = useState<RangeKey>('month')
+  const bizMonth = useBusinessMonth()
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState({ ...INIT })
@@ -274,7 +276,7 @@ function PettyCashPage() {
 
   const q = search.trim().toLowerCase()
   const filtered = items.filter((i) => {
-    if (!inRange(i.date, range, customFrom, customTo)) return false
+    if (!inRange(i.date, range, customFrom, customTo, bizMonth.range)) return false
     if (statusFilter === 'PAID' || statusFilter === 'UNPAID') {
       if ((i.paymentStatus || 'PAID') !== statusFilter) return false
     } else if (statusFilter && i.status !== statusFilter) return false
@@ -377,13 +379,13 @@ function PettyCashPage() {
 
             <SearchBox value={search} onChange={setSearch} placeholder="Search by requester, purpose, department or payee…" />
 
-            <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
+            <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} businessMonthLabel={bizMonth.label} />
 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-gray-600 mr-1">Status:</span>
               {[['', 'All'], ['PENDING', 'Pending'], ['APPROVED', 'Approved'], ['REJECTED', 'Rejected'], ['PAID', 'Paid'], ['UNPAID', 'Unpaid']].map(([s, label]) => {
                 const isPay = s === 'PAID' || s === 'UNPAID'
-                const count = s ? items.filter((i) => (isPay ? (i.paymentStatus || 'PAID') === s : i.status === s) && inRange(i.date, range, customFrom, customTo)).length : null
+                const count = s ? items.filter((i) => (isPay ? (i.paymentStatus || 'PAID') === s : i.status === s) && inRange(i.date, range, customFrom, customTo, bizMonth.range)).length : null
                 const activeColor = s === 'APPROVED' || s === 'PAID' ? 'bg-green-600 text-white'
                   : s === 'REJECTED' ? 'bg-red-600 text-white'
                   : s === 'PENDING' || s === 'UNPAID' ? 'bg-orange-500 text-white'

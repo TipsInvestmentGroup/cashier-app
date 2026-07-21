@@ -16,6 +16,7 @@ import { SearchBox } from '@/components/SearchBox'
 import { MoneyInput } from '@/components/MoneyInput'
 import { PaymentStoryModal } from '@/components/PaymentStoryModal'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import { Pencil, Trash2, ShieldCheck } from 'lucide-react'
 import { ManageAccessModal } from '@/components/ManageAccessModal'
 
@@ -56,6 +57,7 @@ export default function SignedBillsPage() {
   const [filterStatus, setFilterStatus] = useState('')
   const [search, setSearch] = useState('')
   const [range, setRange] = useState<RangeKey>('month')
+  const bizMonth = useBusinessMonth()
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [form, setForm] = useState(INIT_FORM)
@@ -189,7 +191,7 @@ export default function SignedBillsPage() {
   const filtered = bills.filter((b) => {
     if (filterType && b.billType !== filterType) return false
     if (filterStatus && b.status !== filterStatus) return false
-    if (!inRange(b.date, range, customFrom, customTo)) return false
+    if (!inRange(b.date, range, customFrom, customTo, bizMonth.range)) return false
     if (q && !(`${b.personName} ${b.voucherNumber || ''} ${b.displayReference || ''} ${b.legacyReference || ''} ${b.serviceStaff || ''}`.toLowerCase().includes(q))) return false
     return true
   })
@@ -388,7 +390,7 @@ export default function SignedBillsPage() {
         {/* Date Range Filter */}
         <DateRangeFilter range={range} setRange={setRange}
           customFrom={customFrom} setCustomFrom={setCustomFrom}
-          customTo={customTo} setCustomTo={setCustomTo} />
+          customTo={customTo} setCustomTo={setCustomTo} businessMonthLabel={bizMonth.label} />
 
         {/* Totals Summary */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

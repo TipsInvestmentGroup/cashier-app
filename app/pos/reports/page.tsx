@@ -6,6 +6,7 @@ import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { ExportBar } from '@/components/ExportBar'
 import { useApi } from '@/hooks/useApi'
 import { RangeKey, getRangeInterval } from '@/lib/dateRange'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 
 // ---- Shared types for the various report response shapes ----
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -247,6 +248,7 @@ export default function PosReportsPage() {
 
   // ---- Shared filter bar state ----
   const [range, setRange] = useState<RangeKey>('month')
+  const bizMonth = useBusinessMonth()
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [outletId, setOutletId] = useState('')
@@ -295,7 +297,7 @@ export default function PosReportsPage() {
 
   // ---- Build the query string shared by every report endpoint ----
   const filterParams = useMemo(() => {
-    const { start, end } = getRangeInterval(range, customFrom, customTo)
+    const { start, end } = getRangeInterval(range, customFrom, customTo, bizMonth.range)
     const p = new URLSearchParams()
     p.set('startDate', start.toISOString())
     p.set('endDate', end.toISOString())
@@ -307,7 +309,7 @@ export default function PosReportsPage() {
     else if (category) p.set('category', category)
     if (paymentMethod) p.set('paymentMethod', paymentMethod)
     return p
-  }, [range, customFrom, customTo, outletId, shiftId, staffId, counterCode, productId, category, paymentMethod])
+  }, [range, customFrom, customTo, bizMonth.range, outletId, shiftId, staffId, counterCode, productId, category, paymentMethod])
 
   // Guards against an out-of-order response: the very first data fetch fires
   // before AuthContext finishes hydrating the token from localStorage (a
@@ -369,7 +371,7 @@ export default function PosReportsPage() {
 
         {/* Filter bar */}
         <div className="space-y-3 mb-4 print:hidden">
-          <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
+          <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} businessMonthLabel={bizMonth.label} />
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 flex flex-wrap gap-2">
             <select value={outletId} onChange={(e) => { setOutletId(e.target.value); setShiftId(''); setCounterCode('') }} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none">
               <option value="">Outlet zote</option>

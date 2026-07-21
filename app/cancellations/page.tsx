@@ -10,6 +10,7 @@ import { SearchBox } from '@/components/SearchBox'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { ExportBar } from '@/components/ExportBar'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
@@ -37,6 +38,7 @@ function CancellationsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [range, setRange] = useState<RangeKey>('month')
+  const bizMonth = useBusinessMonth()
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [statusFilter, setStatusFilter] = useState('')
@@ -111,7 +113,7 @@ function CancellationsPage() {
 
   const q = search.trim().toLowerCase()
   const filtered = items.filter((c) => {
-    if (!inRange(c.date, range, customFrom, customTo)) return false
+    if (!inRange(c.date, range, customFrom, customTo, bizMonth.range)) return false
     if (statusFilter && c.status !== statusFilter) return false
     if (q && !`${c.staffName} ${c.productName} ${c.reason}`.toLowerCase().includes(q)) return false
     return true
@@ -228,7 +230,7 @@ function CancellationsPage() {
         </div>
 
         <SearchBox value={search} onChange={setSearch} placeholder="Search by staff, product or reason…" />
-        <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
+        <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} businessMonthLabel={bizMonth.label} />
 
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-gray-600">View:</span>

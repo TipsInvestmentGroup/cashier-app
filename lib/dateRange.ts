@@ -3,16 +3,20 @@ import {
   startOfMonth, endOfMonth, isWithinInterval, parseISO,
 } from 'date-fns'
 
-export type RangeKey = 'today' | 'week' | 'month' | 'custom'
+export type RangeKey = 'today' | 'week' | 'month' | 'businessMonth' | 'custom'
 
 export const RANGE_OPTIONS: { key: RangeKey; label: string }[] = [
   { key: 'today', label: 'Today' },
   { key: 'week', label: 'This Week' },
   { key: 'month', label: 'This Month' },
+  { key: 'businessMonth', label: 'Business Month' },
   { key: 'custom', label: 'Custom' },
 ]
 
-export function getRangeInterval(range: RangeKey, customFrom: string, customTo: string): { start: Date; end: Date } {
+/** A pre-resolved business-month window (from the Business Period engine). */
+export interface BizMonthRange { start: Date; end: Date }
+
+export function getRangeInterval(range: RangeKey, customFrom: string, customTo: string, bizMonth?: BizMonthRange): { start: Date; end: Date } {
   const now = new Date()
   switch (range) {
     case 'today':
@@ -21,15 +25,19 @@ export function getRangeInterval(range: RangeKey, customFrom: string, customTo: 
       return { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) }
     case 'month':
       return { start: startOfMonth(now), end: endOfMonth(now) }
+    case 'businessMonth':
+      // Falls back to the calendar month until the configured window resolves,
+      // so a page that hasn't supplied one still behaves sensibly.
+      return bizMonth ?? { start: startOfMonth(now), end: endOfMonth(now) }
     case 'custom':
       return { start: startOfDay(parseISO(customFrom)), end: endOfDay(parseISO(customTo)) }
   }
 }
 
 /** Returns true if an ISO date string falls within the given range. */
-export function inRange(isoDate: string, range: RangeKey, customFrom: string, customTo: string): boolean {
+export function inRange(isoDate: string, range: RangeKey, customFrom: string, customTo: string, bizMonth?: BizMonthRange): boolean {
   try {
-    return isWithinInterval(parseISO(isoDate), getRangeInterval(range, customFrom, customTo))
+    return isWithinInterval(parseISO(isoDate), getRangeInterval(range, customFrom, customTo, bizMonth))
   } catch {
     return false
   }

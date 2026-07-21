@@ -8,9 +8,11 @@ interface Props {
   setCustomFrom: (v: string) => void
   customTo: string
   setCustomTo: (v: string) => void
+  /** When provided, shown as a chip while the Business Month range is active. */
+  businessMonthLabel?: string
 }
 
-export function DateRangeFilter({ range, setRange, customFrom, setCustomFrom, customTo, setCustomTo }: Props) {
+export function DateRangeFilter({ range, setRange, customFrom, setCustomFrom, customTo, setCustomTo, businessMonthLabel }: Props) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -29,6 +31,9 @@ export function DateRangeFilter({ range, setRange, customFrom, setCustomFrom, cu
             <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
               className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
           </div>
+        )}
+        {range === 'businessMonth' && businessMonthLabel && (
+          <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full">{businessMonthLabel}</span>
         )}
       </div>
     </div>

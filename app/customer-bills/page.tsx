@@ -12,6 +12,7 @@ import { SearchBox } from '@/components/SearchBox'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { ExportBar } from '@/components/ExportBar'
 import { RangeKey, inRange } from '@/lib/dateRange'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
@@ -39,6 +40,7 @@ function CustomerBillsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [range, setRange] = useState<RangeKey>('month')
+  const bizMonth = useBusinessMonth()
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [statusFilter, setStatusFilter] = useState('')
@@ -108,7 +110,7 @@ function CustomerBillsPage() {
 
   const q = search.trim().toLowerCase()
   const filtered = items.filter((b) => {
-    if (!inRange(b.date, range, customFrom, customTo)) return false
+    if (!inRange(b.date, range, customFrom, customTo, bizMonth.range)) return false
     if (statusFilter && b.status !== statusFilter) return false
     if (q && !`${b.serviceStaff} ${b.personName}`.toLowerCase().includes(q)) return false
     return true
@@ -242,7 +244,7 @@ function CustomerBillsPage() {
         </div>
 
         <SearchBox value={search} onChange={setSearch} placeholder="Search by staff or customer…" />
-        <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} />
+        <DateRangeFilter range={range} setRange={setRange} customFrom={customFrom} setCustomFrom={setCustomFrom} customTo={customTo} setCustomTo={setCustomTo} businessMonthLabel={bizMonth.label} />
 
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-gray-600">View:</span>

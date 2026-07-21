@@ -254,11 +254,19 @@ to calendar months, byte-identical to before. `resolveEffectivePeriodFields` gai
 a `companyId` option (walks COMPANY → GLOBAL) for company-level callers with no
 outlet.
 
-**Deferred (config built now, consumers wired later):** report routes that build
-their own month range from `date-fns` `startOfMonth/endOfMonth` (`lib/dateRange.ts`)
-rather than the analytics scope should switch to `getBusinessMonthRange`
-(mechanical, per-report). Payroll and Credit **modules do not exist yet** — their
-period configs are built ahead of them per the HR-system blueprint, ready to
+**Done — shared date-range filter (`lib/dateRange.ts` + `DateRangeFilter`):** a
+`businessMonth` option sits alongside Today/This Week/This Month/Custom. Pages
+resolve the window with the `useBusinessMonth` hook (periods snapshot,
+effective-dated + outlet-scoped) and pass it into `getRangeInterval`/`inRange`;
+the filter shows the resolved window as a chip. Wired into signed-bills,
+paid-bills, customer-bills, tips-dj-bills, cancellations, petty-cash and
+pos/reports. Safe by construction — `getRangeInterval` falls back to the calendar
+month when no window is supplied, so the option can never break an unwired page.
+
+**Deferred (config built now, consumers wired later):** a few pages still define
+their own local `RangeKey` (excess-loss, excess-recon, collections) and would each
+need the same small treatment. Payroll and Credit **modules do not exist yet** —
+their period configs are built ahead of them per the HR-system blueprint, ready to
 consume when those modules land. An authorized per-report period override
 (requirement #8) rides on the existing range-picker pattern.
 

@@ -13,6 +13,7 @@ import { SearchBox } from '@/components/SearchBox'
 import { BillSelector, BillLite } from '@/components/BillSelector'
 import { MoneyInput } from '@/components/MoneyInput'
 import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
+import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import { Modal } from '@/components/ui/Modal'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { ManageAccessModal } from '@/components/ManageAccessModal'
@@ -54,6 +55,7 @@ export default function PaidBillsPage() {
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [range, setRange] = useState<RangeKey>('month')
+  const bizMonth = useBusinessMonth()
   const [search, setSearch] = useState('')
   const [linkQuery, setLinkQuery] = useState('')
   const [linkOpen, setLinkOpen] = useState(false)
@@ -224,7 +226,7 @@ export default function PaidBillsPage() {
 
   const q = search.trim().toLowerCase()
   const filtered = paidBills.filter((p) => {
-    if (!inRange(p.date, range, customFrom, customTo)) return false
+    if (!inRange(p.date, range, customFrom, customTo, bizMonth.range)) return false
     if (q && !(`${p.payerName} ${p.billRef || ''} ${p.displayReference || ''} ${p.legacyReference || ''} ${p.signedBill?.voucherNumber || ''} ${p.signedBill?.displayReference || ''} ${p.signedBill?.legacyReference || ''}`.toLowerCase().includes(q))) return false
     return true
   })
@@ -259,7 +261,7 @@ export default function PaidBillsPage() {
         {/* Date Range Filter */}
         <DateRangeFilter range={range} setRange={setRange}
           customFrom={customFrom} setCustomFrom={setCustomFrom}
-          customTo={customTo} setCustomTo={setCustomTo} />
+          customTo={customTo} setCustomTo={setCustomTo} businessMonthLabel={bizMonth.label} />
 
         {/* Totals Summary */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
