@@ -471,4 +471,50 @@ to today's exact behaviour, the invariant every engine in this codebase holds.
   counts (idempotent, no duplicates). Module disabled ⇒ existing deduction report
   and all other behaviour unchanged.
 
-### Next: Phase 2 — components + formula engine + read-only payslip preview.
+## Phase 2 (implemented) — components + formula engine + read-only preview
+
+- **Schema**: `PayComponent` (one table for every payslip line kind, discriminated
+  by `componentType` + `calcMethod`; `parameters` JSON per method), `PayrollFormula`
+  (reusable expression registry), `ComponentAssignment` (attach to a pay group or
+  a single employee, effective-dated, employee overrides group). Back-relations
+  added to `PayGroup`/`Employee`. Still no run/payslip persistence and no GL.
+- **Formula engine** (`lib/payroll-formula.ts`): a **safe, hand-written evaluator**
+  — tokenizer + recursive-descent parser over a fixed grammar (arithmetic,
+  comparisons, `&&`/`||`/`!`, and a whitelisted function set: `min` `max` `abs`
+  `round` `floor` `ceil` `if` `clamp` `prorate`). **Not `eval`**: no property
+  access, no host calls, variables come only from the supplied namespace, unknown
+  var/function or division-by-zero throw `FormulaError`. `extractVariables` +
+  `validateExpression` support dependency ordering and write-time validation.
+- **Component calc** (`lib/payroll-components.ts`): `resolveEffectiveComponents`
+  (employee-override-beats-group, effective-dated) and `computeComponentAmount`
+  for every `calcMethod` — `FIXED` / `PERCENTAGE` (of a named var) / `RATE_QTY` /
+  `TABLE` (progressive marginal bands) / `FORMULA` / `SOURCED`. Never throws: a
+  bad component yields `{ amount: 0, error }`. **`SOURCED=CREDIT_BALANCE` reads
+  the employee's outstanding from the Credit framework** (`CreditAccount.currentBalance`,
+  matched by `personId` then `userId`) — returns 0 when unlinked (the normal
+  Phase-1 state), so it is safe and activates the moment an admin links an
+  Employee to a Person. `LOAN_SCHEDULE`/`ADVANCE`/`STATUTORY` sources are stubbed
+  to 0 (later phases); `MANUAL` reads a per-run entry.
+- **Preview engine** (`lib/payroll-calc.ts`): `previewPayslip` — **read-only**,
+  two-tier (earnings define gross/taxable/pensionable → deductions/employer read
+  them), topological ordering within each tier by declared dependencies then
+  priority (cycle-safe with a warning), `negativeNetPolicy` applied, period window
+  from the **Business Period Engine** (`resolveEffectivePeriodFields` +
+  `payrollPeriodForDate` — reused, not reinvented). Returns lines + gross /
+  taxable / pensionable / totalDeductions / net / employerCost / totalCost /
+  warnings, plus `moduleEnabled`.
+- **API**: `GET /api/payroll/preview?employeeId=&date=&overtimeHours=` —
+  supervisor-gated (ACCOUNTANT/MANAGER/DIRECTOR/ADMIN), read-only, works whether
+  or not the module is enabled (dry-run before switching on).
+- **Seed** (`lib/payroll-seed.ts`): a `BASE_PAY` formula, 5 demonstrative
+  components (Basic Salary FORMULA, Housing 20% PERCENTAGE, Overtime RATE_QTY,
+  Pension 10% PERCENTAGE, Staff Purchases SOURCED=CREDIT_BALANCE) and group-level
+  assignments. Idempotent (create-only).
+- **Verified end-to-end** on local SQLite (30 checks): evaluator precedence /
+  functions / rejection of unknown var/function & div-by-zero; MANAGEMENT preview
+  (base 1,000,000 → gross 1,200,000, pension 100,000, net 1,100,000);
+  FLOOR_STAFF + 10h overtime (gross 350,000, net 320,000); `CREDIT_BALANCE`
+  picking up a linked account's real 100,000 balance. `prisma validate`/`generate`/
+  `db push`, `tsc`, `eslint` all clean. Module still disabled ⇒ nothing pays anyone.
+
+### Next: Phase 3 — PayrollRun + payslips + approvals + GL posting (closes Credit Phase 5).

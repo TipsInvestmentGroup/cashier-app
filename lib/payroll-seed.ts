@@ -54,13 +54,51 @@ function classifyUser(role: string, isCasual: boolean): { categoryCode: string; 
   return { categoryCode: 'PERMANENT', payGroupCode: 'MANAGEMENT' }
 }
 
+// ── Phase 2: a demonstrative set of pay components + a formula + group
+// assignments. Minimal but exercises every calcMethod path: FORMULA (base pay),
+// PERCENTAGE (housing/pension), RATE_QTY (overtime), and SOURCED=CREDIT_BALANCE
+// (staff purchases → the Credit-framework loop). Real amounts/rates are TIPS
+// placeholders an admin edits later. Idempotent (create-only). ──
+interface ComponentSeed {
+  code: string
+  name: string
+  componentType: string
+  calcMethod: string
+  parameters?: Record<string, unknown>
+  formulaCode?: string
+  taxable: boolean
+  pensionable: boolean
+  priority: number
+  glMappingKey?: string
+  description: string
+}
+
+const PAYROLL_FORMULAS = [
+  { code: 'BASE_PAY', name: 'Base Pay', expression: 'base', variables: ['base'], description: 'Basic salary = the employee base pay.' },
+]
+
+const PAYROLL_COMPONENTS: ComponentSeed[] = [
+  { code: 'BASIC_SALARY', name: 'Basic Salary', componentType: 'EARNING', calcMethod: 'FORMULA', formulaCode: 'BASE_PAY', taxable: true, pensionable: true, priority: 0, glMappingKey: 'SALARY_EXPENSE', description: 'Monthly basic salary.' },
+  { code: 'HOUSING_ALLOWANCE', name: 'Housing Allowance', componentType: 'ALLOWANCE', calcMethod: 'PERCENTAGE', parameters: { percent: 20, of: 'base' }, taxable: true, pensionable: false, priority: 10, glMappingKey: 'SALARY_EXPENSE', description: '20% of base pay.' },
+  { code: 'OVERTIME', name: 'Overtime', componentType: 'EARNING', calcMethod: 'RATE_QTY', parameters: { rate: 5000, qtyVar: 'overtimeHours' }, taxable: true, pensionable: false, priority: 20, glMappingKey: 'SALARY_EXPENSE', description: 'Rate per overtime hour worked.' },
+  { code: 'PENSION_EE', name: 'Pension (Employee)', componentType: 'DEDUCTION', calcMethod: 'PERCENTAGE', parameters: { percent: 10, of: 'pensionable' }, taxable: false, pensionable: false, priority: 10, glMappingKey: 'PENSION_PAYABLE', description: 'Employee pension contribution — 10% of pensionable pay.' },
+  { code: 'STAFF_PURCHASES', name: 'Staff Purchases', componentType: 'DEDUCTION', calcMethod: 'SOURCED', parameters: { source: 'CREDIT_BALANCE' }, taxable: false, pensionable: false, priority: 90, glMappingKey: 'ACCOUNTS_RECEIVABLE', description: 'Recovery of the employee’s outstanding signed-bill balance (Credit framework).' },
+]
+
+// Which components each pay group grants (group-level assignments).
+const GROUP_COMPONENTS: Record<string, string[]> = {
+  MANAGEMENT: ['BASIC_SALARY', 'HOUSING_ALLOWANCE', 'PENSION_EE', 'STAFF_PURCHASES'],
+  FLOOR_STAFF: ['BASIC_SALARY', 'OVERTIME', 'PENSION_EE', 'STAFF_PURCHASES'],
+  CASUAL_EVENT: ['BASIC_SALARY', 'STAFF_PURCHASES'],
+}
+
 /**
  * Idempotent. Seeds the payroll module config (GLOBAL, disabled), the employee
  * categories and pay groups, then create-if-absent one Employee per User.
  * Returns counts for the seed summary.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function seedPayrollFramework(prisma: any): Promise<{ categories: number; payGroups: number; employees: number }> {
+export async function seedPayrollFramework(prisma: any): Promise<{ categories: number; payGroups: number; employees: number; components: number; assignments: number }> {
   const company = await prisma.company.upsert({
     where: { name: 'TIPS Investment Group' },
     update: {},
@@ -152,5 +190,56 @@ export async function seedPayrollFramework(prisma: any): Promise<{ categories: n
     employeesCreated++
   }
 
-  return { categories: TIPS_CATEGORIES.length, payGroups: TIPS_PAY_GROUPS.length, employees: employeesCreated }
+  // ── Phase 2: formulas, components, and group-level assignments (create-only) ──
+  const formulaByCode: Record<string, string> = {}
+  for (const f of PAYROLL_FORMULAS) {
+    const row = await prisma.payrollFormula.upsert({
+      where: { companyId_code: { companyId: company.id, code: f.code } },
+      update: {},
+      create: { companyId: company.id, code: f.code, name: f.name, description: f.description, expression: f.expression, variables: JSON.stringify(f.variables), returnType: 'NUMBER' },
+    })
+    formulaByCode[f.code] = row.id
+  }
+
+  const componentByCode: Record<string, string> = {}
+  for (const c of PAYROLL_COMPONENTS) {
+    const row = await prisma.payComponent.upsert({
+      where: { companyId_code: { companyId: company.id, code: c.code } },
+      update: {},
+      create: {
+        companyId: company.id,
+        code: c.code,
+        name: c.name,
+        description: c.description,
+        status: 'ACTIVE',
+        componentType: c.componentType,
+        calcMethod: c.calcMethod,
+        parameters: c.parameters ? JSON.stringify(c.parameters) : null,
+        formulaId: c.formulaCode ? formulaByCode[c.formulaCode] : null,
+        taxable: c.taxable,
+        pensionable: c.pensionable,
+        priority: c.priority,
+        glMappingKey: c.glMappingKey ?? null,
+      },
+    })
+    componentByCode[c.code] = row.id
+  }
+
+  // Group-level assignments — create-if-absent (no natural unique key, so guard
+  // on componentId + payGroupId with employeeId null).
+  let assignmentsCreated = 0
+  for (const [groupCode, codes] of Object.entries(GROUP_COMPONENTS)) {
+    const payGroupId = payGroupByCode[groupCode]
+    if (!payGroupId) continue
+    for (const code of codes) {
+      const componentId = componentByCode[code]
+      if (!componentId) continue
+      const existing = await prisma.componentAssignment.findFirst({ where: { componentId, payGroupId, employeeId: null } })
+      if (existing) continue
+      await prisma.componentAssignment.create({ data: { componentId, payGroupId } })
+      assignmentsCreated++
+    }
+  }
+
+  return { categories: TIPS_CATEGORIES.length, payGroups: TIPS_PAY_GROUPS.length, employees: employeesCreated, components: PAYROLL_COMPONENTS.length, assignments: assignmentsCreated }
 }

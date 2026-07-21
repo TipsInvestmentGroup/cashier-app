@@ -53,6 +53,12 @@ datasource db {
 //   PayGroup.status:                        ACTIVE | INACTIVE
 //   Employee.status:                        ACTIVE | PROBATION | SUSPENDED | ON_LEAVE | TERMINATED
 //   Employee.paymentMethod:                 BANK | MOBILE_MONEY | CASH
+//   PayComponent.status:                    ACTIVE | INACTIVE
+//   PayComponent.componentType:             EARNING | ALLOWANCE | BENEFIT | DEDUCTION | EMPLOYER_CONTRIBUTION | STATUTORY
+//   PayComponent.calcMethod:                FIXED | PERCENTAGE | RATE_QTY | FORMULA | TABLE | SOURCED
+//   PayComponent.frequency:                 PER_RUN | ONE_TIME | MONTHLY | ANNUAL
+//   PayComponent SOURCED source (parameters.source): CREDIT_BALANCE | LOAN_SCHEDULE | ADVANCE | MANUAL | STATUTORY
+//   PayrollFormula.returnType:              NUMBER | BOOLEAN
 
 model User {
   id                String    @id @default(cuid())
@@ -3936,7 +3942,8 @@ model PayGroup {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  employees Employee[]
+  employees            Employee[]
+  componentAssignments ComponentAssignment[]
 
   @@unique([companyId, code])
   @@index([companyId, status])
@@ -3967,6 +3974,8 @@ model Employee {
   category   EmployeeCategory @relation(fields: [categoryId], references: [id])
   payGroupId String
   payGroup   PayGroup         @relation(fields: [payGroupId], references: [id])
+
+  componentAssignments ComponentAssignment[]
 
   // Cost-centre dimensions. departmentId is a bare scalar in Phase 1 (Department
   // is a lookup used only by budgets today); a formal FK arrives with cost-centre
@@ -4002,4 +4011,126 @@ model Employee {
   @@index([categoryId])
   @@index([payGroupId])
   @@index([userId])
+}
+
+// ─── Universal Payroll Framework (Phase 2 — components + formula engine) ──────
+// PayComponent is ONE table for every payslip line kind (earning / allowance /
+// benefit / deduction / employer contribution / statutory), discriminated by
+// componentType + calcMethod — generalizing the hardcoded bill-type/payroll math
+// into admin data, exactly as CreditGroup generalized billType. ComponentAssignment
+// attaches a component to a pay group or a single employee (employee overrides
+// group). PayrollFormula is the reusable expression registry evaluated by the
+// SAFE evaluator in lib/payroll-formula.ts (a whitelisted DSL — never JS eval).
+// Read-only in Phase 2: lib/payroll-calc.ts computes a DRAFT payslip preview;
+// nothing is persisted and no GL posts (that is Phase 3). See docs/payroll-framework-design.md.
+
+/// A reusable, versioned formula referenced by FORMULA-method components — its
+/// expression is evaluated against a per-employee variable namespace (base,
+/// prior component amounts by code, aggregates like gross/taxable/pensionable,
+/// and attendance inputs) by lib/payroll-formula.ts. NOT eval: a fixed grammar
+/// (arithmetic, comparisons, min/max/round/if/clamp/prorate/…) over named vars.
+///   returnType: NUMBER | BOOLEAN
+model PayrollFormula {
+  id          String  @id @default(cuid())
+  companyId   String
+  code        String
+  name        String
+  description String?
+  // The safe expression string, e.g. "max(0, taxable * 0.1 - 50000)".
+  expression  String
+  // JSON array of the variable names the expression reads (declared inputs, for
+  // dependency ordering + write-time validation), e.g. ["base","taxable"].
+  variables   String?
+  returnType  String    @default("NUMBER")
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  components PayComponent[]
+
+  @@unique([companyId, code])
+}
+
+/// The configurable payslip-line definition — the heart of "nothing hardcoded".
+/// Basic Salary, Housing, Tips, Overtime, PAYE, Staff Purchases are all ROWS.
+/// parameters holds the calcMethod-specific config as JSON:
+///   FIXED:      {"amount": 500000}
+///   PERCENTAGE: {"percent": 20, "of": "base"}          (of = a variable name)
+///   RATE_QTY:   {"rate": 5000, "qtyVar": "overtimeHours"}
+///   TABLE:      {"var": "taxable", "bands": [[0,0],[270000,0.09],...]}  (progressive)
+///   SOURCED:    {"source": "CREDIT_BALANCE"|"LOAN_SCHEDULE"|"ADVANCE"|"MANUAL"|"STATUTORY"}
+///   FORMULA:    (uses formulaId)
+/// Soft-deleted (status = INACTIVE) — historical payslips reference it.
+model PayComponent {
+  id            String  @id @default(cuid())
+  companyId     String
+  code          String // stable machine key, e.g. "BASIC_SALARY"
+  name          String // display, e.g. "Basic Salary"
+  description   String?
+  status        String  @default("ACTIVE")
+  componentType String
+  calcMethod    String
+  parameters    String?
+  formulaId     String?
+  formula       PayrollFormula? @relation(fields: [formulaId], references: [id])
+
+  taxable     Boolean @default(false)
+  pensionable Boolean @default(false)
+  frequency   String  @default("PER_RUN")
+  priority    Int     @default(0) // calc-order tiebreak within the dependency order
+  proratable  Boolean @default(false)
+  minLimit    Float?
+  maxLimit    Float?
+  // Per-component rounding; null = follow PayrollModuleConfig.roundingPolicy.
+  roundingRule String?
+  // → FinanceAccountMapping key for the GL line this component posts (Phase 3).
+  glMappingKey String?
+  // JSON: cost-centre split, e.g. {"OUTLET_A":0.6,"OUTLET_B":0.4}.
+  costCenterAllocation String?
+  requiresApproval     Boolean @default(false)
+
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  terminology   String?
+  attributes    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  assignments ComponentAssignment[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+  @@index([componentType])
+}
+
+/// Attaches a component to EITHER a pay group OR a single employee (mutually
+/// exclusive; exactly one set, enforced in app code). Effective-dated so the set
+/// of components a person earns can change without rewriting history. Resolution
+/// (lib/payroll-components.ts): employee-level assignment overrides group-level;
+/// an override may replace the component's parameters and/or pin a flat amount.
+model ComponentAssignment {
+  id          String       @id @default(cuid())
+  componentId String
+  component   PayComponent @relation(fields: [componentId], references: [id])
+
+  payGroupId String?
+  payGroup   PayGroup? @relation(fields: [payGroupId], references: [id])
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  // Null = inherit the component default. parametersOverride is the same JSON
+  // shape as PayComponent.parameters; amountOverride pins a flat result.
+  parametersOverride String?
+  amountOverride     Float?
+
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([componentId])
+  @@index([payGroupId])
+  @@index([employeeId])
 }
