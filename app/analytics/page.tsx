@@ -79,6 +79,9 @@ export default function AnalyticsHubPage() {
               <input type="date" value={scope.customTo} onChange={(e) => scope.setCustom(scope.customFrom, e.target.value)} className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none" />
             </div>
           )}
+          {scope.businessMonthLabel && (
+            <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-full">{scope.businessMonthLabel}</span>
+          )}
           {outlets.length > 1 && (
             <select value={scope.outletId} onChange={(e) => scope.setOutlet(e.target.value)}
               className="ml-auto px-3 py-2 border-2 border-gray-200 rounded-xl text-sm font-medium text-gray-700 focus:border-indigo-500 focus:outline-none">

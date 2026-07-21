@@ -231,17 +231,28 @@ to before this layer existed.
   `/business-calendar` — scope picker, effective-date, presets, per-cycle fields
   with live previews and auto-generated upcoming months, plus version history.
 
-### 10.4 Deferred (config built now, consumers wired later)
+### 10.4 Report wiring
 
-Report/BI rewiring to call `getBusinessMonthRange` instead of
-`date-fns`'s `startOfMonth/endOfMonth` (`lib/dateRange.ts`) is mechanical and
-per-report; done as each report is touched. Payroll and Credit **modules do not
-exist yet** — their period configs are built ahead of them per the HR-system
-blueprint, ready to consume when those modules land. The existing
-`/api/finance/periods` (accounting open/close periods) is a natural downstream
-consumer of Financial Month and can be fed from `getBusinessMonthRange` later.
-An authorized per-report period override (requirement #8) rides on the existing
-range-picker pattern.
+**Done — Analytics hub (`useAnalyticsScope`):** a `businessMonth` preset sits
+alongside Today/This Week/This Month/etc. When selected it resolves the
+configured operational month for the current outlet from
+`/api/business-calendar/periods/snapshot` (effective-dated + outlet-scoped,
+server-side) and feeds its `startYMD`/`endYMD` into the shared `from`/`to` that
+every analytics report drill-down already consumes via the URL query string — so
+Trends, Peak Hours, Outlet Comparison, Staff Scorecard and the hub KPIs all group
+by the business month at once. Purely additive: existing presets are unchanged,
+and until the snapshot resolves it falls back to the calendar month. The hub
+shows the resolved window as a chip (e.g. "25 Jun 2026 → 24 Jul 2026").
+
+**Deferred (config built now, consumers wired later):** report routes that build
+their own month range from `date-fns` `startOfMonth/endOfMonth` (`lib/dateRange.ts`)
+rather than the analytics scope should switch to `getBusinessMonthRange`
+(mechanical, per-report). Payroll and Credit **modules do not exist yet** — their
+period configs are built ahead of them per the HR-system blueprint, ready to
+consume when those modules land. The existing `/api/finance/periods` (accounting
+open/close periods) is a natural downstream consumer of Financial Month and can be
+fed from `getBusinessMonthRange` later. An authorized per-report period override
+(requirement #8) rides on the existing range-picker pattern.
 
 ### 10.5 Test scenarios (all verified end-to-end)
 

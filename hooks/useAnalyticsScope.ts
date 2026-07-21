@@ -1,27 +1,41 @@
 'use client'
 import { useCallback, useEffect, useState } from 'react'
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, subDays } from 'date-fns'
+import { useApi } from '@/hooks/useApi'
 
 // Shared, persistent analytics filters (period + outlet) used by the Analytics
 // hub and carried into each report via the URL query string. Stored in
 // localStorage so the scope survives navigation and reloads.
+//
+// The `businessMonth` preset resolves the configured operational month
+// (Business Period engine) for the selected outlet — start day, effective-dated
+// version and outlet scope all resolved server-side via the periods snapshot,
+// so a "25th→24th" business keeps its real month here. It is purely additive:
+// every other preset behaves exactly as before, and until the snapshot loads it
+// falls back to the calendar month so `from`/`to` are never undefined.
 
-export type Preset = 'today' | 'week' | 'month' | 'quarter' | '30d' | 'custom'
+export type Preset = 'today' | 'week' | 'month' | 'businessMonth' | 'quarter' | '30d' | 'custom'
 export const PRESETS: { key: Preset; label: string }[] = [
   { key: 'today', label: 'Today' }, { key: 'week', label: 'This Week' }, { key: 'month', label: 'This Month' },
+  { key: 'businessMonth', label: 'Business Month' },
   { key: 'quarter', label: 'This Quarter' }, { key: '30d', label: 'Last 30 Days' }, { key: 'custom', label: 'Custom' },
 ]
 
 interface Stored { preset: Preset; customFrom: string; customTo: string; outletId: string }
+interface BizMonth { fromYMD: string; toYMD: string; label: string }
 const KEY = 'tips.analyticsScope'
 const todayStr = () => format(new Date(), 'yyyy-MM-dd')
 
-function resolveRange(preset: Preset, customFrom: string, customTo: string): { from: Date; to: Date } {
+function resolveRange(preset: Preset, customFrom: string, customTo: string, biz: BizMonth | null): { from: Date; to: Date } {
   const now = new Date()
   switch (preset) {
     case 'today': return { from: startOfDay(now), to: endOfDay(now) }
     case 'week': return { from: startOfWeek(now, { weekStartsOn: 1 }), to: endOfWeek(now, { weekStartsOn: 1 }) }
     case 'month': return { from: startOfMonth(now), to: endOfMonth(now) }
+    case 'businessMonth':
+      // Fall back to calendar month until the snapshot resolves.
+      if (!biz) return { from: startOfMonth(now), to: endOfMonth(now) }
+      return { from: startOfDay(new Date(`${biz.fromYMD}T00:00:00`)), to: endOfDay(new Date(`${biz.toYMD}T00:00:00`)) }
     case 'quarter': return { from: startOfQuarter(now), to: endOfQuarter(now) }
     case '30d': return { from: subDays(now, 29), to: now }
     case 'custom': return { from: startOfDay(new Date(customFrom)), to: endOfDay(new Date(customTo)) }
@@ -29,18 +43,36 @@ function resolveRange(preset: Preset, customFrom: string, customTo: string): { f
 }
 
 export function useAnalyticsScope() {
+  const { request } = useApi()
   const [state, setState] = useState<Stored>(() => {
     if (typeof window !== 'undefined') {
       try { const raw = window.localStorage.getItem(KEY); if (raw) return JSON.parse(raw) as Stored } catch { /* ignore */ }
     }
     return { preset: 'month', customFrom: format(subDays(new Date(), 29), 'yyyy-MM-dd'), customTo: todayStr(), outletId: '' }
   })
+  const [bizMonth, setBizMonth] = useState<BizMonth | null>(null)
 
   useEffect(() => {
     try { window.localStorage.setItem(KEY, JSON.stringify(state)) } catch { /* ignore */ }
   }, [state])
 
-  const { from, to } = resolveRange(state.preset, state.customFrom, state.customTo)
+  // Resolve the configured business month for the selected outlet. Fetched only
+  // when the preset is active (and re-fetched when the outlet changes), so the
+  // effective-dated, outlet-scoped range comes straight from the engine.
+  useEffect(() => {
+    if (state.preset !== 'businessMonth') return
+    let cancelled = false
+    const qs = state.outletId ? `?outletId=${state.outletId}` : ''
+    request(`/api/business-calendar/periods/snapshot${qs}`)
+      .then((snap) => {
+        if (cancelled || !snap?.businessMonth) return
+        setBizMonth({ fromYMD: snap.businessMonth.startYMD, toYMD: snap.businessMonth.endYMD, label: snap.businessMonth.rangeLabel })
+      })
+      .catch(() => { /* falls back to calendar month */ })
+    return () => { cancelled = true }
+  }, [state.preset, state.outletId, request])
+
+  const { from, to } = resolveRange(state.preset, state.customFrom, state.customTo, bizMonth)
   const fromStr = format(from, 'yyyy-MM-dd')
   const toStr = format(to, 'yyyy-MM-dd')
 
@@ -56,5 +88,7 @@ export function useAnalyticsScope() {
     return qs.toString()
   }, [fromStr, toStr, state.outletId])
 
-  return { ...state, from, to, fromStr, toStr, setPreset, setCustom, setOutlet, query }
+  const businessMonthLabel = state.preset === 'businessMonth' ? bizMonth?.label ?? null : null
+
+  return { ...state, from, to, fromStr, toStr, businessMonthLabel, setPreset, setCustom, setOutlet, query }
 }

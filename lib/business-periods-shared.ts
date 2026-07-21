@@ -109,6 +109,11 @@ export function normalizeBusinessPeriodFields(raw: unknown): BusinessPeriodField
 export interface MonthlyPeriod {
   start: Date // 00:00 of the first day of the period (local wall-clock date)
   end: Date // 00:00 of the LAST day of the period (inclusive; caller adds end-of-day)
+  /** Calendar day of `start`/`end` as "YYYY-MM-DD", read from the Date's own
+   *  parts — tz-proof, so a client in any zone gets the same business day the
+   *  server computed (never re-derived from a UTC timestamp). */
+  startYMD: string
+  endYMD: string
   /** Human name, by the month the period predominantly falls in — its END month.
    *  e.g. a 25 Jun→24 Jul period is "Jul 2026" (24 of its 30 days are July). */
   name: string
@@ -116,6 +121,11 @@ export interface MonthlyPeriod {
   rangeLabel: string
   /** Stable sortable key of the period's end month, e.g. "2026-07". */
   key: string
+}
+
+/** "YYYY-MM-DD" from a Date's local parts (matches how periods are built). */
+export function formatYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -153,6 +163,8 @@ export function monthlyPeriodForDate(date: Date, startDay: number): MonthlyPerio
   return {
     start,
     end,
+    startYMD: formatYMD(start),
+    endYMD: formatYMD(end),
     name: `${MONTHS_SHORT[end.getMonth()]} ${end.getFullYear()}`,
     rangeLabel: `${fmt(start)} → ${fmt(end)}`,
     key: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}`,
