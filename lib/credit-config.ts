@@ -18,6 +18,11 @@ export type CreditScope = (typeof CREDIT_SCOPES)[number]
 export const OVER_LIMIT_BEHAVIORS = ['BLOCK', 'WARN', 'APPROVE'] as const
 export type OverLimitBehavior = (typeof OVER_LIMIT_BEHAVIORS)[number]
 
+// The settlement methods a credit group may allow. PAYROLL_DEDUCTION is only
+// meaningful for staff-facing groups; the Payroll module consumes it later.
+export const SETTLEMENT_METHODS = ['PAYROLL_DEDUCTION', 'CASH', 'BANK', 'MOBILE_MONEY'] as const
+export type SettlementMethod = (typeof SETTLEMENT_METHODS)[number]
+
 export interface CreditTerminology {
   module: string
   account: string
@@ -210,4 +215,46 @@ export async function resolveCreditTags(db: Db, opts: { billType: string; person
     opts.personId ? db.creditAccount.findUnique({ where: { personId: opts.personId }, select: { id: true } }) : Promise.resolve(null),
   ])
   return { creditGroupId: group?.id ?? null, creditAccountId: account?.id ?? null }
+}
+
+// The module-config fields an admin may edit. terminology is passed as an object
+// and serialized here so callers never touch the JSON encoding.
+export interface CreditModuleConfigPatch {
+  moduleName?: string
+  enabled?: boolean
+  defaultCurrency?: string
+  approvalRequiredDefault?: boolean
+  allowPartialPayments?: boolean
+  allowOverLimit?: OverLimitBehavior
+  requireAttachmentsDefault?: boolean
+  terminology?: Partial<CreditTerminology>
+}
+
+/**
+ * Upsert one credit-module-config row. GLOBAL rows carry scopeId = null and
+ * can't use the DB compound-unique upsert (NULL != NULL), so they're looked up
+ * explicitly — same pattern as setCollectionMode. Returns the saved row.
+ */
+export async function setCreditModuleConfig(db: Db, scope: CreditScope, scopeId: string | null, patch: CreditModuleConfigPatch) {
+  const data: Record<string, unknown> = {}
+  if (patch.moduleName !== undefined) data.moduleName = patch.moduleName
+  if (patch.enabled !== undefined) data.enabled = patch.enabled
+  if (patch.defaultCurrency !== undefined) data.defaultCurrency = patch.defaultCurrency
+  if (patch.approvalRequiredDefault !== undefined) data.approvalRequiredDefault = patch.approvalRequiredDefault
+  if (patch.allowPartialPayments !== undefined) data.allowPartialPayments = patch.allowPartialPayments
+  if (patch.allowOverLimit !== undefined) data.allowOverLimit = patch.allowOverLimit
+  if (patch.requireAttachmentsDefault !== undefined) data.requireAttachmentsDefault = patch.requireAttachmentsDefault
+  if (patch.terminology !== undefined) data.terminology = JSON.stringify({ ...DEFAULT_TERMINOLOGY, ...patch.terminology })
+
+  if (scope === 'GLOBAL') {
+    const existing = await db.creditModuleConfig.findFirst({ where: { scope: 'GLOBAL', scopeId: null } })
+    if (existing) return db.creditModuleConfig.update({ where: { id: existing.id }, data })
+    return db.creditModuleConfig.create({ data: { scope: 'GLOBAL', scopeId: null, ...data } })
+  }
+  if (!scopeId) throw new Error(`scopeId is required for scope ${scope}`)
+  return db.creditModuleConfig.upsert({
+    where: { scope_scopeId: { scope, scopeId } },
+    update: data,
+    create: { scope, scopeId, ...data },
+  })
 }

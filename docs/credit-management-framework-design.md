@@ -215,9 +215,27 @@ Seeding is idempotent & additive (`lib/credit-seed.ts`, called from
   `scripts/fix-credit-override-dupe.ts` nulls the auto-copied values (leaves
   genuine admin overrides untouched).
 
+## Phase 3 (implemented) — Credit Settings admin UI
+
+- **`/credit-settings`** page (ADMIN-only, added to `SetupTabs`) with three tabs:
+  - **Module** — edit identity (name, currency, enabled), policy (over-limit
+    behavior, partial payments, approval/attachment defaults), and terminology.
+  - **Credit Groups** — list + create + edit + soft-deactivate; toggle
+    credit-bearing/approval, pick settlement methods + default, set max credit /
+    terms / priority.
+  - **Accounts** — search, list with groups + effective limit + **live
+    outstanding** (computed from non-PAID signed bills, *not* the not-yet-populated
+    `currentBalance`), and edit per-account override / status.
+- **API:** `/api/credit/config` (GET/PUT), `/api/credit/groups` (GET/POST) +
+  `/[id]` (PATCH/DELETE→soft), `/api/credit/accounts` (GET) + `/[id]` (PATCH).
+  All ADMIN-gated; every write audit-logged. Config setter `setCreditModuleConfig`
+  added to `lib/credit-config.ts` (GLOBAL upsert, same null-scopeId handling as
+  `setCollectionMode`).
+- Verified in-browser: all three tabs render seeded data; module PUT and group
+  PATCH round-trip and persist across reload; no console errors.
+
 ## Next phases
 
-3. **Credit Settings admin UI** (module, groups, policies, accounts).
 4. **Append-only `CreditTransaction` ledger** + materialized-balance
    reconciliation (populate `CreditAccount.currentBalance`).
 5. **Payroll-deduction settlement** integration (consumes

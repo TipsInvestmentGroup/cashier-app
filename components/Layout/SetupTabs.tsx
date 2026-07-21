@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, Workflow, GitBranch, CalendarClock, type LucideIcon } from 'lucide-react'
+import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, Workflow, GitBranch, CalendarClock, Landmark, type LucideIcon } from 'lucide-react'
 
 // The Setup groups, in the order they appear. Role-gated per group.
 export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles: string[] }[] = [
@@ -23,6 +23,7 @@ export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles:
   { href: '/business-calendar', label: 'Business Calendar', icon: CalendarClock, roles: ['ADMIN'] },
   { href: '/collection-templates', label: 'Collection Templates', icon: Workflow, roles: ['ADMIN'] },
   { href: '/collection-mode-settings', label: 'Collection Mode', icon: GitBranch, roles: ['ADMIN'] },
+  { href: '/credit-settings', label: 'Credit Settings', icon: Landmark, roles: ['ADMIN'] },
 ]
 
 /** Horizontal tab bar shown at the top of every Setup page. */
