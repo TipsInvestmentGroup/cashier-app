@@ -9,6 +9,7 @@
 // never clobbers an admin's later edits in Credit Settings, and creating no
 // rows at all leaves today's hardcoded behavior unchanged. See
 // docs/credit-management-framework-design.md.
+import { reconcileAllCreditLedgers } from './credit-ledger'
 
 // Settlement method presets — "Both (configurable)": each group carries the
 // full list of methods it ALLOWS plus the one it DEFAULTS to. Staff-facing
@@ -149,6 +150,11 @@ export async function seedCreditFramework(prisma: any): Promise<{ groups: number
       await prisma.creditAccountGroup.create({ data: { accountId: account.id, groupId } })
     }
   }
+
+  // Materialize each account's currentBalance + credit ledger from the existing
+  // A/R so a freshly seeded environment shows correct balances immediately
+  // (rather than zeros until the first reconcile). Drift-proof + idempotent.
+  await reconcileAllCreditLedgers(prisma)
 
   return { groups: TIPS_GROUPS.length, accounts: accountsCreated }
 }

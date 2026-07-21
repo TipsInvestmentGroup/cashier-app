@@ -4,6 +4,7 @@ import { syncCollectionExcessTotal } from './collection-excess'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from './bill-reference'
 import { syncBusinessSession } from './business-session'
 import { resolveCreditTags } from './credit-config'
+import { syncCreditForPerson, syncCreditForAccount } from './credit-ledger'
 
 // Loose type — works with both the prisma singleton and a transaction client,
 // and avoids depending on generated Prisma types (regenerated on deploy).
@@ -107,6 +108,8 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
       })
     }
     await syncBusinessSession(db, collectionId)
+    // Credit ledger (Phase 4): refresh the staff member's balance.
+    await syncCreditForPerson(db, person?.id ?? null)
     return shortfall
   }
 
@@ -114,6 +117,9 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
   if (sl) {
     await db.paidBill.deleteMany({ where: { signedBillId: sl.id } })
     await db.signedBill.delete({ where: { id: sl.id } })
+    // Credit ledger (Phase 4): the loss (and its payments) are gone — recompute.
+    if (sl.creditAccountId) await syncCreditForAccount(db, sl.creditAccountId)
+    else if (sl.personId) await syncCreditForPerson(db, sl.personId)
   }
   await syncBusinessSession(db, collectionId)
   return 0

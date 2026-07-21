@@ -3749,11 +3749,46 @@ model CreditAccount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  groupLinks  CreditAccountGroup[]
-  signedBills SignedBill[]
+  groupLinks   CreditAccountGroup[]
+  signedBills  SignedBill[]
+  transactions CreditTransaction[]
 
   @@index([companyId, status])
   @@index([userId])
+}
+
+/// The credit ledger (Phase 4) — a DERIVED, reconcilable projection over the
+/// authoritative SignedBill / PaidBill / SignedBillWriteOff A/R, one row per
+/// source record. It is NOT the canonical store (those three remain the source
+/// of truth for credit money); it exists so an account's outstanding balance
+/// and aging can be read/aggregated fast, and so CreditAccount.currentBalance
+/// can be materialized and drift-checked. Rebuilt from source per account by
+/// lib/credit-ledger.ts (delete-then-recreate), so it can never permanently
+/// drift — a full reconcile always reproduces it exactly.
+///   txnType:      INVOICE (+owed) | PAYMENT (−) | WRITEOFF (−)
+///   signedAmount: + increases what the account owes, − reduces it
+///   sourceType:   SignedBill | PaidBill | SignedBillWriteOff
+model CreditTransaction {
+  id              String        @id @default(cuid())
+  accountId       String
+  account         CreditAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  txnType         String
+  signedAmount    Float
+  currency        String        @default("TZS")
+  // Snapshot of the source bill's classification, so reports can split trade
+  // receivable (isCreditBearing) from internal markers (e.g. staff loss)
+  // without re-joining to the group.
+  billType        String?
+  isCreditBearing Boolean       @default(true)
+  sourceType      String
+  sourceId        String
+  // Economic date (bill/payment/write-off date) — the basis for aging buckets.
+  entryDate       DateTime
+  createdAt       DateTime      @default(now())
+
+  @@unique([sourceType, sourceId])
+  @@index([accountId])
+  @@index([entryDate])
 }
 
 /// M:N membership — "one account may belong to multiple credit groups"

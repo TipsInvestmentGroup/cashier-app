@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { roundMoney } from '@/lib/utils'
 
 /**
- * GET — list credit accounts with their groups, effective limit inputs, and
- * live outstanding (sum of the linked person's non-PAID signed bills, matching
- * the limit-check definition). ADMIN-only; Credit Settings. Supports ?q= name
+ * GET — list credit accounts with their groups, effective limit inputs, and the
+ * materialized outstanding balance (CreditAccount.currentBalance, kept fresh by
+ * the credit ledger — Phase 4). ADMIN-only; Credit Settings. Supports ?q= name
  * search and ?take= (default 500).
  */
 export async function GET(req: NextRequest) {
@@ -28,18 +27,6 @@ export async function GET(req: NextRequest) {
     },
   })
 
-  // One grouped aggregate for outstanding across all listed persons.
-  const personIds = accounts.map((a) => a.person?.id).filter((x): x is string => !!x)
-  const outstandingByPerson = new Map<string, number>()
-  if (personIds.length) {
-    const rows = await prisma.signedBill.groupBy({
-      by: ['personId'],
-      where: { personId: { in: personIds }, status: { not: 'PAID' } },
-      _sum: { amount: true },
-    })
-    for (const r of rows) if (r.personId) outstandingByPerson.set(r.personId, roundMoney(r._sum.amount || 0))
-  }
-
   const result = accounts.map((a) => ({
     id: a.id,
     displayName: a.displayName,
@@ -52,7 +39,8 @@ export async function GET(req: NextRequest) {
     personCreditLimit: a.person?.creditLimit ?? 0,
     // Displayed limit: override wins, else the person's legacy limit (0 = none).
     effectiveLimit: a.creditLimitOverride && a.creditLimitOverride > 0 ? a.creditLimitOverride : (a.person?.creditLimit ?? 0),
-    outstanding: a.person?.id ? (outstandingByPerson.get(a.person.id) || 0) : 0,
+    // Materialized balance from the credit ledger (Phase 4).
+    outstanding: a.currentBalance,
     groups: a.groupLinks.map((l) => ({ id: l.group.id, name: l.group.name, code: l.group.code })),
   }))
   return NextResponse.json(result)

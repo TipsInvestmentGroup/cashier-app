@@ -10,6 +10,7 @@ import { postJournalEntry, type Db } from './ledger'
 import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from './finance-mapping'
 import { CREDIT_BILL_TYPES, REQUEST_BILL_TYPES } from './bill-types'
 import { resolveEffectiveLimit, type LimitSource, type OverLimitBehavior, resolveCreditModuleConfig } from './credit-config'
+import { syncCreditForBill } from './credit-ledger'
 
 async function resolveCompanyIdForOutlet(db: Db, outletId: string): Promise<string | null> {
   const outlet = await db.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } })
@@ -59,6 +60,9 @@ export async function postCreditSale(db: Db, bill: SignedBillForPosting, created
     ],
   })
   await db.signedBill.update({ where: { id: bill.id }, data: { journalEntryId } })
+  // Credit ledger (Phase 4): a credit sale just became real — refresh the
+  // account's ledger + materialized balance.
+  await syncCreditForBill(db, bill.id)
 }
 
 interface PaidBillForPosting {
@@ -198,6 +202,9 @@ export async function writeOffSignedBill(input: WriteOffInput): Promise<{ id: st
 
     const fullyCovered = roundMoney(totalPaid + totalWrittenOff + amount) >= roundMoney(bill.amount) - 0.001
     if (fullyCovered) await tx.signedBill.update({ where: { id: bill.id }, data: { status: 'WRITTEN_OFF' } })
+
+    // Credit ledger (Phase 4): the write-off reduced the account's balance.
+    await syncCreditForBill(tx, bill.id)
 
     return { id: writeOff.id }
   })

@@ -3,6 +3,7 @@ import { CATEGORY_TO_BILLTYPE } from '@/lib/categories'
 import { roundMoney } from '@/lib/utils'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { postReceipt } from '@/lib/finance-ar'
+import { syncCreditForAccount, syncCreditForPerson } from '@/lib/credit-ledger'
 
 // Accepts a PrismaClient or an interactive-transaction client.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,6 +51,8 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
 
   let leftover = roundMoney(a.totalAmount)
   const allocations: { billId: string; amount: number }[] = []
+  // Credit ledger (Phase 4): accounts whose balance this payment moves.
+  const touchedAccountIds = new Set<string>()
 
   for (const b of ordered) {
     if (leftover <= 0) break
@@ -80,6 +83,7 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
     const tot = (agg._sum.amountPaid || 0) + pay
     await db.signedBill.update({ where: { id: b.id }, data: { status: tot >= b.amount ? 'PAID' : tot > 0 ? 'PARTIAL' : 'UNPAID' } })
     allocations.push({ billId: b.id, amount: pay })
+    if (b.creditAccountId) touchedAccountIds.add(b.creditAccountId)
     leftover = roundMoney(leftover - pay)
   }
 
@@ -103,6 +107,11 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
       },
     })
   }
+
+  // Refresh the credit ledger + balance for every account this payment moved,
+  // plus the payer's own account (covers unlinked credits). Best-effort.
+  for (const accountId of touchedAccountIds) await syncCreditForAccount(db, accountId)
+  await syncCreditForPerson(db, a.personId)
 
   return { allocations, leftover: leftover > 0 ? leftover : 0, billsPaid: allocations.length }
 }

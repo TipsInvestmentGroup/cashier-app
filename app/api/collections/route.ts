@@ -15,6 +15,7 @@ import { postJournalEntry } from '@/lib/ledger'
 import { resolveAccountId, resolveDefaultCompanyId, resolveChannelAccountId } from '@/lib/finance-mapping'
 import { postCreditSale } from '@/lib/finance-ar'
 import { resolveCreditTags } from '@/lib/credit-config'
+import { syncCreditForBill } from '@/lib/credit-ledger'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 export async function GET(req: NextRequest) {
@@ -315,6 +316,7 @@ export async function POST(req: NextRequest) {
           data: { userId: user.userId, action: 'CREATE', entity: 'SignedBill', entityId: bill.id, details: `Auto staff loss ${staffLossAmount} for ${staffName}` },
         })
         await postCreditSale(tx, bill, user.userId) // no-op: STAFF_LOSS isn't a CREDIT_BILL_TYPES receivable
+        await syncCreditForBill(tx, bill.id) // credit ledger: STAFF_LOSS still owed by the staff
         staffLoss = { amount: staffLossAmount, voucher: ref.displayReference, staffName }
       }
     }

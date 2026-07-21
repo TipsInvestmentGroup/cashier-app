@@ -234,9 +234,35 @@ Seeding is idempotent & additive (`lib/credit-seed.ts`, called from
 - Verified in-browser: all three tabs render seeded data; module PUT and group
   PATCH round-trip and persist across reload; no console errors.
 
+## Phase 4 (implemented) — credit ledger + materialized balance
+
+- **`CreditTransaction`** model — a DERIVED, reconcilable projection over the
+  authoritative SignedBill / PaidBill / SignedBillWriteOff A/R (one row per
+  source record; `@@unique([sourceType, sourceId])`). Not the canonical store —
+  those three remain the source of truth; the ledger is rebuilt from them and so
+  can never permanently drift.
+- **`lib/credit-ledger.ts`** — `rebuildAccountLedger` (delete-then-recreate from
+  source + set `currentBalance`), `syncCreditForAccount` / `syncCreditForPerson`
+  / `syncCreditForBill` (best-effort write-path hooks), `reconcileAllCreditLedgers`
+  (the authority — drift-proof, idempotent).
+- **Balance definition** = Σ(real invoices) − Σ(payments) − Σ(write-offs), where
+  "real" matches `approvalGate()` / `postCreditSale()` (approved, or a non-request
+  type) so `currentBalance` stays consistent with the GL. Includes internal
+  markers (STAFF_LOSS) as "total owed"; each row snapshots `isCreditBearing` so
+  reports can isolate trade receivable. (Note: this differs from Phase 2's
+  conservative `checkCreditLimit`, which counts pending exposure too — by design.)
+- **Live sync** wired at the low-level money hooks: `postCreditSale` (credit sale
+  becomes real), `allocatePayment` (payments), `writeOffSignedBill` (write-offs),
+  `staff-loss.ts` + the two inline STAFF_LOSS creates (collections, txn-validate).
+  `reconcileAllCreditLedgers` is the safety net and runs at seed time.
+- **Accounts UI** now reads the materialized `currentBalance` (replacing the
+  rough live groupBy). `scripts/reconcile-credit-balances.ts` = manual/scheduled
+  reconcile.
+- Verified: reconcile matches raw A/R; the approval hook moves a balance
+  0 → 25,000 (40k invoice − 15k payment, 2 ledger rows) → 0; Accounts tab shows
+  the materialized balance; no console errors.
+
 ## Next phases
 
-4. **Append-only `CreditTransaction` ledger** + materialized-balance
-   reconciliation (populate `CreditAccount.currentBalance`).
 5. **Payroll-deduction settlement** integration (consumes
-   `defaultSettlementMethod = PAYROLL_DEDUCTION`).
+   `defaultSettlementMethod = PAYROLL_DEDUCTION`) — depends on the Payroll module.

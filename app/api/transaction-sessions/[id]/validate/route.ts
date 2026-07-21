@@ -8,6 +8,7 @@ import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill
 import { allocatePayment } from '@/lib/payment-alloc'
 import { syncBusinessSession } from '@/lib/business-session'
 import { resolveCreditTags } from '@/lib/credit-config'
+import { syncCreditForBill } from '@/lib/credit-ledger'
 
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
 
@@ -214,6 +215,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           autoSourceCollectionId: created.id,
         },
       })
+      await syncCreditForBill(tx, recordId) // credit ledger: STAFF_LOSS owed by staff
     } else if (lossAmount < 0) {
       const excessAmount = roundMoney(Math.abs(lossAmount))
       const recordId = crypto.randomUUID()
