@@ -44,4 +44,17 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   { code: '2210', name: 'Customer Refunds Payable', type: 'LIABILITY', mappingKey: 'CUSTOMER_REFUND_PAYABLE' },
   { code: '5940', name: 'Petty Cash Expense (unclassified)', type: 'EXPENSE', mappingKey: 'PETTY_CASH_EXPENSE' },
   { code: '5950', name: 'Cash Over / Short', type: 'EXPENSE', mappingKey: 'CASH_OVER_SHORT' },
+  // Universal Payroll Framework (Phase 3) — GL targets a payroll run posts to.
+  // Earnings debit expense; net + statutory/other deductions credit liabilities;
+  // the staff-purchase deduction credits ACCOUNTS_RECEIVABLE (recovering the
+  // signed-bill balance — closes Credit-framework Phase 5) via the existing 1300.
+  { code: '5200', name: 'Salaries & Wages Expense', type: 'EXPENSE', mappingKey: 'SALARY_EXPENSE' },
+  { code: '5210', name: 'Employer Contributions Expense', type: 'EXPENSE', mappingKey: 'EMPLOYER_CONTRIB_EXPENSE' },
+  { code: '1310', name: 'Staff Advances Receivable', type: 'ASSET', mappingKey: 'STAFF_ADVANCE_RECEIVABLE' },
+  { code: '2300', name: 'Net Pay Payable', type: 'LIABILITY', mappingKey: 'NET_PAY_PAYABLE' },
+  { code: '2310', name: 'PAYE Payable', type: 'LIABILITY', mappingKey: 'PAYE_PAYABLE' },
+  { code: '2320', name: 'Pension Payable', type: 'LIABILITY', mappingKey: 'PENSION_PAYABLE' },
+  { code: '2330', name: 'Social Security Payable', type: 'LIABILITY', mappingKey: 'SSF_PAYABLE' },
+  { code: '2340', name: 'Health Insurance Payable', type: 'LIABILITY', mappingKey: 'HEALTH_PAYABLE' },
+  { code: '2350', name: 'Payroll Deductions Payable', type: 'LIABILITY', mappingKey: 'PAYROLL_DEDUCTIONS_PAYABLE' },
 ]

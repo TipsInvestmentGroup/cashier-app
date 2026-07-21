@@ -59,6 +59,11 @@ datasource db {
 //   PayComponent.frequency:                 PER_RUN | ONE_TIME | MONTHLY | ANNUAL
 //   PayComponent SOURCED source (parameters.source): CREDIT_BALANCE | LOAN_SCHEDULE | ADVANCE | MANUAL | STATUTORY
 //   PayrollFormula.returnType:              NUMBER | BOOLEAN
+//   PayrollRun.runType:                     REGULAR | OFF_CYCLE | BONUS | FINAL | CORRECTION
+//   PayrollRun.status:                      DRAFT | CALCULATED | PENDING_APPROVAL | APPROVED | LOCKED | POSTED | PAID | REVERSED
+//   Payslip.status:                         CALCULATED | LOCKED | PAID
+//   PayslipLine.bucket:                     EARNING | DEDUCTION | EMPLOYER
+//   PayrollAuditLog.action:                 CREATE | CALCULATE | SUBMIT | APPROVE | REJECT | LOCK | POST | PAY | REVERSE
 
 model User {
   id                String    @id @default(cuid())
@@ -4133,4 +4138,136 @@ model ComponentAssignment {
   @@index([componentId])
   @@index([payGroupId])
   @@index([employeeId])
+}
+
+// ─── Universal Payroll Framework (Phase 3 — runs, payslips, GL posting) ───────
+// The first phase that writes real financial records. A PayrollRun is an
+// IMMUTABLE batch moved through an explicit state machine (see the header enum);
+// a locked run is never edited — corrections are a CORRECTION run + a GL reversal
+// (reverse-never-edit, exactly like lib/ledger.ts and the Credit ledger). On
+// POST the run emits ONE balanced JournalEntry via lib/ledger.ts postJournalEntry
+// (Dr salary/employer expense; Cr net-pay-payable, statutory/other payables, and
+// — for staff-purchase recovery — Cr ACCOUNTS_RECEIVABLE, writing the matching
+// PaidBill{PAYROLL} subledger rows). That A/R credit CLOSES Credit-framework
+// Phase 5. Payslip/PayslipLine are per-employee snapshots taken at calc time.
+// Run creation/posting is gated on PayrollModuleConfig.enabled (unlike the
+// read-only Phase-2 preview). See docs/payroll-framework-design.md §9.
+
+/// An immutable payroll batch for a period + scope, moved through the lifecycle
+/// state machine. Totals are materialized (Σ payslips); PayslipLine is the
+/// detail of record. Period fields are resolved from the Business Period Engine
+/// (BusinessPeriodVersion payroll cycle) at creation and then frozen on the run.
+model PayrollRun {
+  id         String  @id @default(cuid())
+  companyId  String
+  outletId   String? // null = company-wide
+  payGroupId String? // null = all pay groups in scope
+  runType    String  @default("REGULAR")
+  status     String  @default("DRAFT")
+
+  periodKey      String // end-month key, e.g. "2026-07"
+  periodStart    DateTime
+  periodEnd      DateTime
+  processingDate DateTime
+  paymentDate    DateTime
+  lockDate       DateTime
+  currency       String   @default("TZS")
+
+  totalGross        Float @default(0)
+  totalDeductions   Float @default(0)
+  totalNet          Float @default(0)
+  totalEmployerCost Float @default(0)
+  employeeCount     Int   @default(0)
+
+  // GL + lifecycle linkage. journalEntryId is the posted entry; reversalOfId
+  // points to the run this one corrects (a CORRECTION run).
+  journalEntryId String?
+  reversalOfId   String?
+  notes          String?
+  createdById    String?
+  approvedById   String?
+  approvedAt     DateTime?
+  lockedById     String?
+  lockedAt       DateTime?
+  postedAt       DateTime?
+  reversedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  payslips Payslip[]
+
+  @@index([companyId, status])
+  @@index([periodKey])
+}
+
+/// A per-employee snapshot within a run: the employee's classification and
+/// computed totals as they were at calc time (so a locked payslip is a faithful
+/// historical record even after the employee/components later change).
+model Payslip {
+  id     String     @id @default(cuid())
+  runId  String
+  run    PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employeeNumber String?
+  categoryId     String?
+  payGroupId     String?
+  personId       String? // the identity this payslip settles credit against, if linked
+
+  currency        String @default("TZS")
+  gross           Float  @default(0)
+  taxable         Float  @default(0)
+  pensionable     Float  @default(0)
+  totalDeductions Float  @default(0)
+  net             Float  @default(0)
+  employerCost    Float  @default(0)
+  status          String @default("CALCULATED")
+  warnings        String? // JSON array captured at calc time
+  createdAt       DateTime @default(now())
+
+  lines PayslipLine[]
+
+  @@unique([runId, employeeId])
+  @@index([employeeId])
+}
+
+/// An APPEND-ONLY line on a payslip — one per computed component, snapshotting
+/// the component's code/name/type and the audit of the calc. Never edited.
+model PayslipLine {
+  id        String  @id @default(cuid())
+  payslipId String
+  payslip   Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  componentCode String
+  componentName String
+  componentType String
+  bucket        String // EARNING | DEDUCTION | EMPLOYER
+  amount        Float
+  taxable       Boolean @default(false)
+  pensionable   Boolean @default(false)
+  glMappingKey  String?
+  // Free-text ref back to what a SOURCED line settled (e.g. "SignedBill x3"),
+  // for the audit trail. Not an FK (a line can settle several bills).
+  sourceRef String?
+  sortOrder Int     @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([payslipId])
+}
+
+/// Insert-only field-diff audit for payroll runs — the house pattern
+/// (cf. BusinessDayAuditLog / WriteOffAuditLog). Coarse events are also emitted
+/// to the global AuditLog for the supervisor audit viewer.
+model PayrollAuditLog {
+  id            String   @id @default(cuid())
+  runId         String?
+  action        String
+  field         String?
+  previousValue String?
+  newValue      String?
+  reason        String?
+  userId        String?
+  userName      String?
+  createdAt     DateTime @default(now())
+
+  @@index([runId])
 }

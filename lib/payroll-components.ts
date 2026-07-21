@@ -9,6 +9,7 @@
 import type { Db } from '@/lib/ledger'
 import { roundMoney } from '@/lib/utils'
 import { evaluateExpression, FormulaError } from '@/lib/payroll-formula'
+import { PAYROLL_ELIGIBLE_BILL_TYPES } from '@/lib/bill-types'
 
 export const EARNING_TYPES = ['EARNING', 'ALLOWANCE', 'BENEFIT'] as const
 export const DEDUCTION_TYPES = ['DEDUCTION', 'STATUTORY'] as const
@@ -115,15 +116,26 @@ export interface SourceContext {
 async function resolveSourcedAmount(source: string, code: string, ctx: SourceContext): Promise<number> {
   switch (source) {
     case 'CREDIT_BALANCE': {
+      // The employee's outstanding on PAYROLL-ELIGIBLE signed bills — the exact
+      // set the run settles in the subledger at POST, so the GL A/R credit and
+      // the PaidBill{PAYROLL} rows always agree (no over-crediting A/R). We
+      // deliberately do NOT use CreditAccount.currentBalance, which is
+      // account-wide (may include non-deductible customer bills). Resolve the
+      // person via personId, else via a credit account linked by userId. 0 when
+      // unlinked (the normal Phase-1 state) — safe, not an error.
       const { db, employee } = ctx
-      let account: { currentBalance: number } | null = null
-      if (employee.personId) {
-        account = await db.creditAccount.findUnique({ where: { personId: employee.personId }, select: { currentBalance: true } })
+      let personId = employee.personId
+      if (!personId && employee.userId) {
+        const acct = await db.creditAccount.findFirst({ where: { userId: employee.userId }, select: { personId: true } })
+        personId = acct?.personId ?? null
       }
-      if (!account && employee.userId) {
-        account = await db.creditAccount.findFirst({ where: { userId: employee.userId }, select: { currentBalance: true } })
-      }
-      return account ? Math.max(0, account.currentBalance) : 0
+      if (!personId) return 0
+      const bills = await db.signedBill.findMany({
+        where: { personId, billType: { in: [...PAYROLL_ELIGIBLE_BILL_TYPES] }, status: { not: 'PAID' } },
+        include: { payments: { select: { amountPaid: true } } },
+      })
+      const outstanding = bills.reduce((s, b) => s + Math.max(0, b.amount - b.payments.reduce((x, p) => x + p.amountPaid, 0)), 0)
+      return roundMoney(outstanding)
     }
     case 'MANUAL':
       return Math.max(0, ctx.manualAmounts[code] ?? 0)

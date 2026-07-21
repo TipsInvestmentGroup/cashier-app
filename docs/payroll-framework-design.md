@@ -517,4 +517,52 @@ to today's exact behaviour, the invariant every engine in this codebase holds.
   picking up a linked account's real 100,000 balance. `prisma validate`/`generate`/
   `db push`, `tsc`, `eslint` all clean. Module still disabled ⇒ nothing pays anyone.
 
-### Next: Phase 3 — PayrollRun + payslips + approvals + GL posting (closes Credit Phase 5).
+## Phase 3 (implemented) — runs, payslips, GL posting — **closes Credit Phase 5**
+
+The first phase that writes real financial records. Gated on the module being
+enabled (unlike the Phase-2 preview).
+
+- **Schema**: `PayrollRun` (immutable batch + lifecycle state machine + frozen
+  period fields + materialized totals + GL/reversal linkage), `Payslip`
+  (per-employee snapshot), `PayslipLine` (append-only), `PayrollAuditLog`
+  (insert-only field-diff, house pattern). Added `PAYROLL` to `SOURCE_MODULES`
+  (`lib/ledger.ts`) and 9 payroll GL accounts to `DEFAULT_ACCOUNTS`
+  (`lib/finance-accounts-defaults.ts`): SALARY_EXPENSE, EMPLOYER_CONTRIB_EXPENSE,
+  STAFF_ADVANCE_RECEIVABLE, NET_PAY_PAYABLE, PAYE/PENSION/SSF/HEALTH_PAYABLE,
+  PAYROLL_DEDUCTIONS_PAYABLE (reusing ACCOUNTS_RECEIVABLE for recovery).
+- **Run engine** (`lib/payroll-run.ts`): `createPayrollRun` (period from the
+  Business Period Engine, gated on `enabled`), `calculateRun` (rebuilds a
+  `Payslip`+lines per in-scope active employee via `previewPayslip`, materializes
+  totals), `transitionRun` (the state machine: submit → approve → lock → post →
+  reverse, with the approver-role gate + **ADMIN override**), and the money paths:
+  - **`postRun`** — inside a `$transaction`, emits ONE balanced `JournalEntry`
+    via `postJournalEntry`: Dr salary/employer expense; Cr net-pay-payable,
+    per-key deduction/employer payables, and — for staff-purchase deductions
+    mapped to A/R — Cr ACCOUNTS_RECEIVABLE, **writing the matching
+    `PaidBill{PAYROLL}` subledger rows** (oldest-bill-first) and resyncing the
+    credit ledger. **This is Credit-framework Phase 5.** Skips posting if the run
+    has no non-zero lines.
+  - **`reverseRun`** — reverses the GL entry (`reverseJournalEntry`), deletes the
+    run's `PaidBill{PAYROLL}` rows, restores signed-bill statuses, resyncs credit,
+    marks the run REVERSED. Reverse-never-edit; corrections are a fresh CORRECTION run.
+- **GL/subledger consistency fix**: the `CREDIT_BALANCE` source (Phase 2) now
+  sums the employee's **payroll-eligible outstanding** (the exact set `postRun`
+  settles), not the account-wide `CreditAccount.currentBalance` — so the A/R
+  credit and the `PaidBill` rows always agree (no over-crediting A/R when an
+  account also holds non-deductible customer bills).
+- **Component effectiveness**: `previewPayslip`/`calculateRun` resolve components
+  **as of the period end** (the standard payroll snapshot), so an assignment made
+  mid-period still applies to that period's run.
+- **API**: `GET/POST /api/payroll/runs` (list; create+calculate) and
+  `GET/POST /api/payroll/runs/[id]` (detail; `{action}` = recalculate | submit |
+  approve | reject | lock | post | reverse). Supervisor-gated.
+- **Verified end-to-end** on local SQLite (21 checks): a FLOOR_STAFF run for a
+  linked debtor — calculate (Basic 2,000,000; Pension 200,000; Staff Purchases =
+  eligible outstanding 100,000; net 1,700,000) → approve → lock → **post**:
+  balanced JE (**Dr Salaries 2,000,000 = Cr Net 1,700,000 + Cr Pension 200,000 +
+  Cr A/R 100,000**), `PaidBill{PAYROLL}` total 100,000, debtor outstanding → 0 →
+  **reverse**: original JE REVERSED, balanced reversal posted, PaidBills removed,
+  outstanding restored to 100,000. `prisma validate`/`generate`/`db push`, `tsc`,
+  `eslint` clean; test data purged (0 runs), module returned to disabled.
+
+### Next: Phase 4 — TZ statutory packs (effective-dated) + attendance/timesheets/leave.

@@ -40,6 +40,7 @@ export interface PayslipLinePreview {
   taxable: boolean
   pensionable: boolean
   source: 'EMPLOYEE' | 'GROUP'
+  glMappingKey: string | null
   base?: number
   rate?: number
   qty?: number
@@ -145,7 +146,11 @@ export async function previewPayslip(db: Db, employeeId: string, inputs: Preview
     manualAmounts: inputs.manualAmounts ?? {},
   }
 
-  const all = await resolveEffectiveComponents(db, { id: employee.id, payGroupId: employee.payGroupId }, date)
+  // Resolve components as of the PERIOD END (the standard payroll snapshot): a
+  // component effective by the close of the period applies to it — not keyed to
+  // the raw anchor date, which for a mid-period calculation would wrongly exclude
+  // assignments made earlier in the same period.
+  const all = await resolveEffectiveComponents(db, { id: employee.id, payGroupId: employee.payGroupId }, pp.end)
   const earnings = all.filter((c) => bucketOf(c.componentType) === 'EARNING')
   const rest = all.filter((c) => bucketOf(c.componentType) !== 'EARNING')
 
@@ -162,7 +167,7 @@ export async function previewPayslip(db: Db, employeeId: string, inputs: Preview
     if (c.taxable) taxable += r.amount
     if (c.pensionable) pensionable += r.amount
     if (r.error) warnings.push(`${c.code}: ${r.error}`)
-    lines.push({ code: c.code, name: c.name, componentType: c.componentType, bucket: r.bucket, amount: r.amount, taxable: c.taxable, pensionable: c.pensionable, source: c.source, base: r.base, rate: r.rate, qty: r.qty, error: r.error })
+    lines.push({ code: c.code, name: c.name, componentType: c.componentType, bucket: r.bucket, amount: r.amount, taxable: c.taxable, pensionable: c.pensionable, source: c.source, glMappingKey: c.glMappingKey, base: r.base, rate: r.rate, qty: r.qty, error: r.error })
   }
   gross = roundMoney(gross); taxable = roundMoney(taxable); pensionable = roundMoney(pensionable)
   vars.gross = gross; vars.taxable = taxable; vars.pensionable = pensionable
@@ -177,7 +182,7 @@ export async function previewPayslip(db: Db, employeeId: string, inputs: Preview
     if (r.bucket === 'DEDUCTION') totalDeductions += r.amount
     else if (r.bucket === 'EMPLOYER') employer += r.amount
     if (r.error) warnings.push(`${c.code}: ${r.error}`)
-    lines.push({ code: c.code, name: c.name, componentType: c.componentType, bucket: r.bucket, amount: r.amount, taxable: c.taxable, pensionable: c.pensionable, source: c.source, base: r.base, rate: r.rate, qty: r.qty, error: r.error })
+    lines.push({ code: c.code, name: c.name, componentType: c.componentType, bucket: r.bucket, amount: r.amount, taxable: c.taxable, pensionable: c.pensionable, source: c.source, glMappingKey: c.glMappingKey, base: r.base, rate: r.rate, qty: r.qty, error: r.error })
   }
   totalDeductions = roundMoney(totalDeductions); employer = roundMoney(employer)
 
