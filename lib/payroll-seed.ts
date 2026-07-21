@@ -69,6 +69,7 @@ interface ComponentSeed {
   taxable: boolean
   pensionable: boolean
   priority: number
+  proratable?: boolean
   glMappingKey?: string
   description: string
 }
@@ -78,8 +79,8 @@ const PAYROLL_FORMULAS = [
 ]
 
 const PAYROLL_COMPONENTS: ComponentSeed[] = [
-  { code: 'BASIC_SALARY', name: 'Basic Salary', componentType: 'EARNING', calcMethod: 'FORMULA', formulaCode: 'BASE_PAY', taxable: true, pensionable: true, priority: 0, glMappingKey: 'SALARY_EXPENSE', description: 'Monthly basic salary.' },
-  { code: 'HOUSING_ALLOWANCE', name: 'Housing Allowance', componentType: 'ALLOWANCE', calcMethod: 'PERCENTAGE', parameters: { percent: 20, of: 'base' }, taxable: true, pensionable: false, priority: 10, glMappingKey: 'SALARY_EXPENSE', description: '20% of base pay.' },
+  { code: 'BASIC_SALARY', name: 'Basic Salary', componentType: 'EARNING', calcMethod: 'FORMULA', formulaCode: 'BASE_PAY', taxable: true, pensionable: true, priority: 0, proratable: true, glMappingKey: 'SALARY_EXPENSE', description: 'Monthly basic salary (prorated by days worked).' },
+  { code: 'HOUSING_ALLOWANCE', name: 'Housing Allowance', componentType: 'ALLOWANCE', calcMethod: 'PERCENTAGE', parameters: { percent: 20, of: 'base' }, taxable: true, pensionable: false, priority: 10, proratable: true, glMappingKey: 'SALARY_EXPENSE', description: '20% of base pay (prorated by days worked).' },
   { code: 'OVERTIME', name: 'Overtime', componentType: 'EARNING', calcMethod: 'RATE_QTY', parameters: { rate: 5000, qtyVar: 'overtimeHours' }, taxable: true, pensionable: false, priority: 20, glMappingKey: 'SALARY_EXPENSE', description: 'Rate per overtime hour worked.' },
   { code: 'PENSION_EE', name: 'Pension (Employee)', componentType: 'DEDUCTION', calcMethod: 'PERCENTAGE', parameters: { percent: 10, of: 'pensionable' }, taxable: false, pensionable: false, priority: 10, glMappingKey: 'PENSION_PAYABLE', description: 'Employee pension contribution — 10% of pensionable pay.' },
   // Phase 4 — statutory: PAYE (employee income tax) + employer pension. Both
@@ -113,6 +114,15 @@ interface StatutorySeed {
   isEmployer: boolean
 }
 
+// ── Phase 4b: leave types (config; admin-editable). Annual accrues 2.5 days/mo
+// (30/yr), paid; Sick paid; Unpaid leave prorates pay down. ──
+interface LeaveTypeSeed { code: string; name: string; paid: boolean; accrualDaysPerMonth: number; maxCarryForward: number | null; encashable: boolean; description: string }
+const LEAVE_TYPES: LeaveTypeSeed[] = [
+  { code: 'ANNUAL', name: 'Annual Leave', paid: true, accrualDaysPerMonth: 2.5, maxCarryForward: 30, encashable: true, description: 'Paid annual leave, accrues 2.5 days/month.' },
+  { code: 'SICK', name: 'Sick Leave', paid: true, accrualDaysPerMonth: 0, maxCarryForward: null, encashable: false, description: 'Paid sick leave.' },
+  { code: 'UNPAID', name: 'Unpaid Leave', paid: false, accrualDaysPerMonth: 0, maxCarryForward: null, encashable: false, description: 'Unpaid leave — prorates pay down.' },
+]
+
 const TZ_STATUTORY_EFFECTIVE_FROM = new Date('2023-07-01T00:00:00.000Z')
 const TZ_STATUTORY: StatutorySeed[] = [
   // Resident individual monthly PAYE (marginal bands) — verify vs TRA.
@@ -127,7 +137,7 @@ const TZ_STATUTORY: StatutorySeed[] = [
  * Returns counts for the seed summary.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function seedPayrollFramework(prisma: any): Promise<{ categories: number; payGroups: number; employees: number; components: number; assignments: number; statutoryRules: number }> {
+export async function seedPayrollFramework(prisma: any): Promise<{ categories: number; payGroups: number; employees: number; components: number; assignments: number; statutoryRules: number; leaveTypes: number }> {
   const company = await prisma.company.upsert({
     where: { name: 'TIPS Investment Group' },
     update: {},
@@ -248,6 +258,7 @@ export async function seedPayrollFramework(prisma: any): Promise<{ categories: n
         taxable: c.taxable,
         pensionable: c.pensionable,
         priority: c.priority,
+        proratable: c.proratable ?? false,
         glMappingKey: c.glMappingKey ?? null,
       },
     })
@@ -293,5 +304,14 @@ export async function seedPayrollFramework(prisma: any): Promise<{ categories: n
     })
   }
 
-  return { categories: TIPS_CATEGORIES.length, payGroups: TIPS_PAY_GROUPS.length, employees: employeesCreated, components: PAYROLL_COMPONENTS.length, assignments: assignmentsCreated, statutoryRules: TZ_STATUTORY.length }
+  // ── Phase 4b: leave types (create-only) ──
+  for (const l of LEAVE_TYPES) {
+    await prisma.leaveType.upsert({
+      where: { companyId_code: { companyId: company.id, code: l.code } },
+      update: {},
+      create: { companyId: company.id, code: l.code, name: l.name, description: l.description, status: 'ACTIVE', paid: l.paid, accrualDaysPerMonth: l.accrualDaysPerMonth, maxCarryForward: l.maxCarryForward, encashable: l.encashable, requiresApproval: true },
+    })
+  }
+
+  return { categories: TIPS_CATEGORIES.length, payGroups: TIPS_PAY_GROUPS.length, employees: employeesCreated, components: PAYROLL_COMPONENTS.length, assignments: assignmentsCreated, statutoryRules: TZ_STATUTORY.length, leaveTypes: LEAVE_TYPES.length }
 }

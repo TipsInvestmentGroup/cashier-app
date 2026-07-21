@@ -604,4 +604,44 @@ timesheets / leave** is the next sub-phase (4b).
   400,000 (EE+ER) + Cr A/R 100,000**). `prisma validate`/`generate`/`db push`,
   `tsc`, `eslint` clean; test data purged, module returned to disabled.
 
-### Next: Phase 4b — attendance/timesheets/overtime + leave (accrual/approval/payroll impact).
+## Phase 4b (implemented) — attendance & leave
+
+The inputs that make overtime and absences move pay. Still additive; module ships disabled.
+
+- **Schema**: `AttendanceRecord` (one row per employee-day, `@@unique`, pluggable
+  `source`), `LeaveType` (paid flag, monthly accrual, carry-forward cap,
+  approver roles), `LeaveBalance` (accrued/taken per employee-type;
+  balance = accrued − taken, computed), `LeaveRequest` (PENDING → APPROVED /
+  REJECTED / CANCELLED). Marked `BASIC_SALARY` / `HOUSING_ALLOWANCE` proratable.
+- **Attendance** (`lib/payroll-attendance.ts`): `aggregateAttendance` turns a
+  period's rows into `overtimeHours` (Σ) + `unpaidDays` (ABSENT/UNPAID_LEAVE
+  count, HALF_DAY = 0.5); `upsertAttendance` (latest write wins per day). No rows
+  ⇒ zeros ⇒ full-period pay — the pre-4b default.
+- **Leave** (`lib/payroll-leave.ts`): `createLeaveRequest`, `transitionLeaveRequest`
+  (role-gated approve, ADMIN override; on approve — in a transaction — bumps
+  `LeaveBalance.taken` and writes the days as `AttendanceRecord` rows: PAID_LEAVE
+  counts as worked, UNPAID_LEAVE prorates pay down — **single source, no
+  dual-counting**), and `accrueLeave` (monthly top-up capped by carry-forward).
+- **Calc wiring** (`lib/payroll-calc.ts`): `previewPayslip`/`calculateRun` now
+  pull `overtimeHours`/`unpaidDays` from attendance (explicit inputs still
+  override for what-ifs), derive `daysWorked` + `prorationFactor`, and **prorate
+  proratable earnings** by days worked. So an unpaid absence or unpaid-leave day
+  reduces basic pay (and therefore taxable → PAYE), while overtime and paid leave
+  behave correctly.
+- **APIs**: `GET/POST /api/payroll/attendance` (list / bulk upsert),
+  `GET/POST /api/payroll/leave-requests` (list / create),
+  `POST /api/payroll/leave-requests/[id]` (approve/reject/cancel). Supervisor-gated.
+- **Seed**: leave types ANNUAL (paid, 2.5 d/mo, cap 30, encashable), SICK (paid),
+  UNPAID (prorates). Create-only, idempotent.
+- **Verified end-to-end** on local SQLite (16 checks): attendance aggregation
+  (overtime 8h, 2 unpaid days); OVERTIME line = 5,000 × 8 = 40,000; **basic
+  prorated** (base 3,000,000 → 2,806,452 for 2 unpaid days); unpaid-leave request
+  → approve → balance taken 3 + three UNPAID_LEAVE rows → basic prorated to
+  2,709,677; **paid leave leaves pay unchanged** (balance taken 2, PAID_LEAVE
+  rows); accrual +2.5. `prisma validate`/`generate`/`db push`, `tsc`, `eslint`
+  clean; test data purged, module disabled.
+
+**Note (existing installs):** `proratable` is per-component config; fresh installs
+get it from the seed, a pre-4b install sets it via config (the dev DB was healed).
+
+### Next: Phase 5 — reports & analytics + payment-file / mobile-money export + Employee Self-Service.

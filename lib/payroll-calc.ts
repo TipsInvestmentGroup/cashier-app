@@ -14,6 +14,7 @@ import { resolvePayrollConfig, type ResolvedPayrollConfig } from '@/lib/payroll-
 import { resolveEffectivePeriodFields } from '@/lib/business-periods'
 import { payrollPeriodForDate } from '@/lib/business-periods-shared'
 import { extractVariables } from '@/lib/payroll-formula'
+import { aggregateAttendance } from '@/lib/payroll-attendance'
 import {
   resolveEffectiveComponents,
   computeComponentAmount,
@@ -127,15 +128,21 @@ export async function previewPayslip(db: Db, employeeId: string, inputs: Preview
 
   const warnings: string[] = []
 
-  // Base variable namespace. Attendance inputs default to a full period / no
-  // overtime (Phase 4 feeds these from real attendance).
-  const daysWorked = inputs.daysWorked ?? daysInPeriod
+  // Attendance drives overtime + unpaid absences (Phase 4b). Explicit inputs
+  // override the aggregated attendance (for what-if previews). unpaidDays reduces
+  // daysWorked, which prorates proratable earnings below.
+  const att = await aggregateAttendance(db, employee.id, pp.start, pp.end)
+  const overtimeHours = inputs.overtimeHours ?? att.overtimeHours
+  const unpaidDays = inputs.unpaidDays ?? att.unpaidDays
+  const daysWorked = inputs.daysWorked ?? Math.max(0, daysInPeriod - unpaidDays)
+  const prorationFactor = daysInPeriod > 0 ? Math.min(1, Math.max(0, daysWorked / daysInPeriod)) : 1
   const vars: Record<string, number> = {
     base: employee.baseSalary,
     daysInPeriod,
     daysWorked,
-    overtimeHours: inputs.overtimeHours ?? 0,
-    unpaidDays: inputs.unpaidDays ?? 0,
+    unpaidDays,
+    overtimeHours,
+    prorationFactor,
     ...(inputs.extraVars ?? {}),
   }
 
@@ -164,12 +171,16 @@ export async function previewPayslip(db: Db, employeeId: string, inputs: Preview
   let gross = 0, taxable = 0, pensionable = 0
   for (const c of t1.ordered) {
     const r = await computeComponentAmount(c, vars, srcCtx)
-    vars[c.code] = r.amount
-    gross += r.amount
-    if (c.taxable) taxable += r.amount
-    if (c.pensionable) pensionable += r.amount
+    // Proratable earnings (e.g. basic salary) are scaled by daysWorked/daysInPeriod
+    // so an unpaid absence reduces pay. Non-proratable earnings (e.g. overtime,
+    // already actual-hours) are untouched.
+    const amt = c.proratable && prorationFactor < 1 ? roundMoney(r.amount * prorationFactor) : r.amount
+    vars[c.code] = amt
+    gross += amt
+    if (c.taxable) taxable += amt
+    if (c.pensionable) pensionable += amt
     if (r.error) warnings.push(`${c.code}: ${r.error}`)
-    lines.push({ code: c.code, name: c.name, componentType: c.componentType, bucket: r.bucket, amount: r.amount, taxable: c.taxable, pensionable: c.pensionable, source: c.source, glMappingKey: c.glMappingKey, base: r.base, rate: r.rate, qty: r.qty, error: r.error })
+    lines.push({ code: c.code, name: c.name, componentType: c.componentType, bucket: r.bucket, amount: amt, taxable: c.taxable, pensionable: c.pensionable, source: c.source, glMappingKey: c.glMappingKey, base: r.base, rate: r.rate, qty: r.qty, error: r.error })
   }
   gross = roundMoney(gross); taxable = roundMoney(taxable); pensionable = roundMoney(pensionable)
   vars.gross = gross; vars.taxable = taxable; vars.pensionable = pensionable

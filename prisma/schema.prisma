@@ -66,6 +66,10 @@ datasource db {
 //   PayrollAuditLog.action:                 CREATE | CALCULATE | SUBMIT | APPROVE | REJECT | LOCK | POST | PAY | REVERSE
 //   StatutoryRule.ruleType:                 TAX_BAND | FLAT_RATE | CAP | THRESHOLD
 //   StatutoryRule.authority (TZ):           TRA | NSSF | PSSSF | NHIF | WCF | SDL | HESLB | ...
+//   AttendanceRecord.source:                MANUAL | SCHEDULE | POS_SHIFT | BIOMETRIC | IMPORT | API
+//   AttendanceRecord.status:                PRESENT | ABSENT | UNPAID_LEAVE | PAID_LEAVE | HOLIDAY | HALF_DAY
+//   LeaveType.status:                       ACTIVE | INACTIVE
+//   LeaveRequest.status:                    PENDING | APPROVED | REJECTED | CANCELLED
 
 model User {
   id                String    @id @default(cuid())
@@ -3983,6 +3987,9 @@ model Employee {
   payGroup   PayGroup         @relation(fields: [payGroupId], references: [id])
 
   componentAssignments ComponentAssignment[]
+  attendanceRecords    AttendanceRecord[]
+  leaveBalances        LeaveBalance[]
+  leaveRequests        LeaveRequest[]
 
   // Cost-centre dimensions. departmentId is a bare scalar in Phase 1 (Department
   // is a lookup used only by budgets today); a formal FK arrives with cost-centre
@@ -4320,4 +4327,101 @@ model StatutoryRule {
 
   @@unique([companyId, code, effectiveFrom])
   @@index([companyId, code])
+}
+
+// ─── Universal Payroll Framework (Phase 4b — attendance & leave) ──────────────
+// The inputs that feed the calc's attendance variables. AttendanceRecord is the
+// single source of truth for a period's overtime + unpaid absences; the
+// aggregator (lib/payroll-attendance.ts) turns it into overtimeHours / unpaidDays
+// / daysWorked, which drive RATE_QTY overtime and the PRORATION of proratable
+// earnings (an unpaid day reduces basic pay). Leave requests route through a
+// role-gated approval; approving a request decrements the balance and writes the
+// leave days as AttendanceRecord rows (PAID_LEAVE counts as worked; UNPAID_LEAVE
+// prorates pay down) — one source, no dual-counting. See docs/payroll-framework-design.md §8.
+
+/// One day of attendance for an employee (the pluggable capture point —
+/// `source` records where it came from). @@unique([employeeId, date]) = one row
+/// per day; the latest write wins (upsert).
+model AttendanceRecord {
+  id           String   @id @default(cuid())
+  employeeId   String
+  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date         DateTime // date-only (midnight); one row per calendar day
+  source       String   @default("MANUAL")
+  status       String   @default("PRESENT")
+  hoursWorked  Float    @default(0)
+  overtimeHours Float   @default(0)
+  outletId     String?
+  note         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([employeeId, date])
+}
+
+/// Configurable leave scheme — Annual / Sick / Unpaid / Maternity / … . `paid`
+/// decides the payroll impact: paid leave doesn't reduce pay; unpaid leave
+/// prorates it down. Soft-deleted (status = INACTIVE).
+model LeaveType {
+  id                 String  @id @default(cuid())
+  companyId          String
+  code               String
+  name               String
+  description        String?
+  status             String  @default("ACTIVE")
+  paid               Boolean @default(true)
+  accrualDaysPerMonth Float  @default(0)
+  maxCarryForward    Float?  // cap on accrued balance carried across periods; null = uncapped
+  encashable         Boolean @default(false)
+  requiresApproval   Boolean @default(true)
+  approverRoles      String? // JSON role array; falls back to the default approvers
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  balances LeaveBalance[]
+  requests LeaveRequest[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+}
+
+/// Per-employee, per-type running balance. balance = accrued − taken (computed;
+/// not stored, to avoid a third figure that can drift).
+model LeaveBalance {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
+  accrued     Float     @default(0)
+  taken       Float     @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([employeeId, leaveTypeId])
+  @@index([employeeId])
+}
+
+/// A leave request moved through PENDING → APPROVED/REJECTED (or CANCELLED).
+/// Approving decrements the balance and writes the days as AttendanceRecord rows.
+model LeaveRequest {
+  id            String    @id @default(cuid())
+  employeeId    String
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId   String
+  leaveType     LeaveType @relation(fields: [leaveTypeId], references: [id])
+  startDate     DateTime
+  endDate       DateTime
+  days          Float // requested leave days (may differ from calendar span, e.g. excluding weekends)
+  status        String    @default("PENDING")
+  reason        String?
+  requestedById String?
+  approvedById  String?
+  approvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([employeeId, status])
+  @@index([leaveTypeId])
 }

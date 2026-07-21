@@ -207,5 +207,5 @@ export async function seedCore(prisma: any) {
   // behaviour while the module is disabled.
   const payroll = await seedPayrollFramework(prisma)
 
-  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules }
+  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes }
 }
