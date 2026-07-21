@@ -228,6 +228,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   await prisma.cancellation.deleteMany({ where: { collectionId: id } })
   await prisma.dailyCollection.delete({ where: { id } })
 
+  // The BI layer's BusinessSession row is denormalized from this collection
+  // (written by syncBusinessSession, one row per staff/outlet/day). Nothing
+  // re-syncs it on delete, so without this the dashboard's Staff Performance
+  // widget keeps showing the deleted collection's staff/days/dailyLoss.
+  // Target by sourceCollectionId so a session re-synced from a *different*
+  // surviving collection for the same staff/outlet/day is left intact.
+  await db.businessSession.deleteMany({ where: { sourceCollectionId: id } })
+
   // Full snapshot of the deleted record (not just its id) — once deleted,
   // dailyCollection.findUnique(entityId) returns nothing, so this audit row
   // is the ONLY place an admin can later see what the record actually

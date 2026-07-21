@@ -24,14 +24,19 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ error: 'Add &confirm=RESET to confirm. This permanently deletes transactional data.' }, { status: 400 })
   }
 
+  // businessSession is the denormalized BI mirror of dailyCollection; clearing
+  // collections without it leaves every dashboard/report reading stale rows.
+  const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
+
   // Delete children before parents (foreign-key safe).
-  const [billItems, paidBills, cancellations, signedBills, collections, pettyCash, cashRecon, bankRecon, auditLogs] =
+  const [billItems, paidBills, cancellations, signedBills, collections, businessSessions, pettyCash, cashRecon, bankRecon, auditLogs] =
     await prisma.$transaction([
       prisma.billItem.deleteMany({}),
       prisma.paidBill.deleteMany({}),
       prisma.cancellation.deleteMany({}),
       prisma.signedBill.deleteMany({}),
       prisma.dailyCollection.deleteMany({}),
+      db.businessSession.deleteMany({}),
       prisma.pettyCash.deleteMany({}),
       prisma.cashRecon.deleteMany({}),
       prisma.bankRecon.deleteMany({}),
@@ -40,8 +45,8 @@ async function handle(req: NextRequest) {
 
   const deleted = {
     billItems: billItems.count, paidBills: paidBills.count, cancellations: cancellations.count,
-    signedBills: signedBills.count, collections: collections.count, pettyCash: pettyCash.count,
-    cashRecon: cashRecon.count, bankRecon: bankRecon.count, auditLogs: auditLogs.count,
+    signedBills: signedBills.count, collections: collections.count, businessSessions: businessSessions.count,
+    pettyCash: pettyCash.count, cashRecon: cashRecon.count, bankRecon: bankRecon.count, auditLogs: auditLogs.count,
   }
   return NextResponse.json({ ok: true, message: 'Transactional data cleared. Setup/master data kept.', deleted })
 }
