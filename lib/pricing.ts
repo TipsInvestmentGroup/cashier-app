@@ -208,6 +208,30 @@ export async function computePromotions(lines: CartLine[], ctx: PriceContext): P
 }
 
 /**
+ * Get or create the single canonical ACTIVE price list for one outlet or one
+ * event (scope is OUTLET or EVENT; no customer-group dimension). Because a
+ * given outlet/event has exactly one canonical list, and PriceListItem is
+ * unique per (priceListId, productId), a product can never end up with two
+ * active prices for the same outlet or the same event — the DB's unique
+ * constraint enforces "one active price per product per outlet/event" for
+ * free. This backs the product-centric Product Pricing module.
+ */
+export async function getOrCreateScopedList(scope: 'OUTLET' | 'EVENT', refId: string, actor?: { userId?: string; userName?: string }): Promise<{ id: string; name: string }> {
+  const where = scope === 'OUTLET' ? { outletId: refId, eventId: null, customerGroupId: null } : { eventId: refId, outletId: null, customerGroupId: null }
+  const existing = await db.priceList.findFirst({ where, select: { id: true, name: true } })
+  if (existing) return existing
+  const label = scope === 'OUTLET'
+    ? (await prisma.outlet.findUnique({ where: { id: refId }, select: { name: true } }))?.name
+    : (await db.event.findUnique({ where: { id: refId }, select: { name: true } }))?.name
+  const name = `${scope === 'OUTLET' ? 'Outlet' : 'Event'} Price — ${label || refId}`
+  const created = await db.priceList.create({
+    data: { name, status: 'ACTIVE', currency: 'TZS', createdById: actor?.userId, createdByName: actor?.userName, ...where },
+    select: { id: true, name: true },
+  })
+  return created
+}
+
+/**
  * Ensure a Default price list exists and (optionally) backfill its items from
  * each active Product's legacy sellingPrice. Idempotent. Used by the safe phased
  * cutover so the Default tier becomes editable in the UI.

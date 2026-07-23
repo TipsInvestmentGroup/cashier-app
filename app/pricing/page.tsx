@@ -4,20 +4,22 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { useAuth } from '@/contexts/AuthContext'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Tag } from 'lucide-react'
+import { ProductPricingTab } from '@/components/pricing/ProductPricingTab'
 import { PriceListsTab } from '@/components/pricing/PriceListsTab'
 import { CustomerGroupsTab } from '@/components/pricing/CustomerGroupsTab'
 import { PromotionsTab } from '@/components/pricing/PromotionsTab'
 import { PricingAnalyticsTab } from '@/components/pricing/PricingAnalyticsTab'
 
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
-type Tab = 'lists' | 'groups' | 'promotions' | 'analytics'
+type Tab = 'products' | 'lists' | 'groups' | 'promotions' | 'analytics'
 
 export default function PricingPage() {
   const { user } = useAuth()
   const canView = MGMT.includes(user?.role || '')
-  const [tab, setTab] = useState<Tab>('lists')
+  const [tab, setTab] = useState<Tab>('products')
 
   const tabs: { key: Tab; label: string }[] = [
+    { key: 'products', label: 'Product Pricing' },
     { key: 'lists', label: 'Price Lists' },
     { key: 'groups', label: 'Customer Groups' },
     { key: 'promotions', label: 'Promotions' },
@@ -28,8 +30,8 @@ export default function PricingPage() {
     <AppShell>
       <div className="max-w-6xl mx-auto">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Tag className="w-6 h-6 text-indigo-600" /> Price List Engine</h1>
-          <p className="text-gray-500 text-sm mt-1">One product, many prices. Configurable priority (Event → Outlet → Customer Group → Default), scheduled prices, promotions, and full price history — used across POS, Sales Import, Finance, Reports & BI.</p>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Tag className="w-6 h-6 text-indigo-600" /> Pricing</h1>
+          <p className="text-gray-500 text-sm mt-1">One product, many prices. Set per-outlet and per-event active prices without duplicating products (Product Pricing), or build advanced scoped/scheduled lists and promotions. Configurable priority (Event → Outlet → Customer Group → Default) and full price history — used across POS, Sales Import, Finance, Reports & BI.</p>
         </div>
 
         {!canView ? (
@@ -44,6 +46,7 @@ export default function PricingPage() {
                 </button>
               ))}
             </div>
+            {tab === 'products' && <ProductPricingTab />}
             {tab === 'lists' && <PriceListsTab />}
             {tab === 'groups' && <CustomerGroupsTab />}
             {tab === 'promotions' && <PromotionsTab />}

@@ -106,7 +106,7 @@ export default function ProductsPage() {
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Products</h1>
-            <p className="text-gray-500 text-sm">Catalogue with codes, prices and unit measures</p>
+            <p className="text-gray-500 text-sm">Catalogue with codes, prices and unit measures. Selling price here is the base/default price — for per-outlet or per-event prices, use <a href="/pricing" className="text-indigo-600 hover:underline font-medium">Pricing → Product Pricing</a>.</p>
           </div>
           <div className="flex items-center gap-2">
             {canAdd && (
