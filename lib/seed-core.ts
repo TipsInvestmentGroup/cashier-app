@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { seedStandardCollectionTemplate } from './collection-template-seed'
 import { seedCreditFramework } from './credit-seed'
+import { seedExpenseFramework } from './expense-seed'
 import { seedPayrollFramework } from './payroll-seed'
 import { RECONCILIATION_STAGE_RESOURCES as RSR, WRITE_OFF_RESOURCES as WOR } from './rbac'
 import { classForReason } from './reconciliation-classification'
@@ -207,5 +208,13 @@ export async function seedCore(prisma: any) {
   // behaviour while the module is disabled.
   const payroll = await seedPayrollFramework(prisma)
 
-  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes }
+  // Universal Expense & Disbursement Framework (Phase 1 — config + core
+  // workflow): module config, one "Petty Cash Request" request type, an
+  // ExpenseCategory per existing PettyFunction, and a FundingSource per
+  // existing PettyFund. Idempotent, additive — PettyCash keeps working
+  // unmodified; nothing reads these new rows yet until the engine's own
+  // screens are built.
+  const expense = await seedExpenseFramework(prisma)
+
+  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes, expenseCategories: expense.categories, expenseFundingSources: expense.fundingSources }
 }
