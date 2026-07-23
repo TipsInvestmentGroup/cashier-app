@@ -45,6 +45,17 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
 
   const visible = navItems.filter((n) => n.roles.includes(user?.role || ''))
 
+  // Longest matching prefix wins, so a nested route (e.g. /payroll/components,
+  // a Setup page) lights up only its own section and not a parent that claims a
+  // broader prefix (e.g. Finance's /payroll). Mirrors SectionTabs' resolution.
+  const matchLen = (item: (typeof navItems)[number]) => {
+    const arr = item.match ?? [item.href]
+    let best = -1
+    for (const h of arr) if (pathname === h || pathname.startsWith(h + '/')) best = Math.max(best, h.length)
+    return best
+  }
+  const bestLen = Math.max(-1, ...visible.map(matchLen))
+
   const [pwOpen, setPwOpen] = useState(false)
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' })
   const [pwBusy, setPwBusy] = useState(false)
@@ -91,10 +102,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
               <p className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wider text-indigo-400">{sec}</p>
               <div className="space-y-1">
                 {items.map((item) => {
-                  const m = item.match
-                  const active = m
-                    ? m.some((h) => pathname === h || pathname.startsWith(h + '/'))
-                    : pathname.startsWith(item.href)
+                  const active = bestLen >= 0 && matchLen(item) === bestLen
                   const Icon = item.icon
                   return (
             <Link
