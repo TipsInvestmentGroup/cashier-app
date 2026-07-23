@@ -201,9 +201,14 @@ model Company {
   paymentIntegrationConnectors PaymentIntegrationConnector[]
   writeOffRequests             WriteOffRequest[]
 
-  creditPolicies  CreditPolicy[]
-  creditGroups    CreditGroup[]
-  creditAccounts  CreditAccount[]
+  creditPolicies CreditPolicy[]
+  creditGroups   CreditGroup[]
+  creditAccounts CreditAccount[]
+
+  requestTypes      RequestType[]
+  expenseCategories ExpenseCategory[]
+  fundingSources    FundingSource[]
+  expenseRequests   ExpenseRequest[]
 }
 
 model Outlet {
@@ -374,33 +379,33 @@ model SalesImport {
 /// is built from. Raw uploaded values are preserved alongside the resolved
 /// master-data matches for a full audit trail.
 model SalesImportLine {
-  id                String      @id @default(cuid())
-  importId          String
-  import            SalesImport @relation(fields: [importId], references: [id], onDelete: Cascade)
-  date              DateTime
-  outletId          String?
-  rawStaffName      String
-  staffName         String // resolved canonical staff name (raw if unmatched)
-  staffMatched      Boolean     @default(false)
-  rawProductName    String
-  productId         String?
-  productName       String // resolved product name (raw if unmatched)
-  productMatched    Boolean     @default(false)
-  categoryId        String?
-  categoryName      String?
-  qty               Float       @default(0)
-  amount            Float       @default(0)
-  unitPriceUploaded Float?
-  unitPriceMaster   Float? // expected unit price from the Price List Engine at import time
-  priceListId       String? // which price list supplied the expected price (null = product fallback)
-  priceMismatch     Boolean     @default(false)
-  issues            String? // JSON array of data-quality flags
+  id                   String      @id @default(cuid())
+  importId             String
+  import               SalesImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  date                 DateTime
+  outletId             String?
+  rawStaffName         String
+  staffName            String // resolved canonical staff name (raw if unmatched)
+  staffMatched         Boolean     @default(false)
+  rawProductName       String
+  productId            String?
+  productName          String // resolved product name (raw if unmatched)
+  productMatched       Boolean     @default(false)
+  categoryId           String?
+  categoryName         String?
+  qty                  Float       @default(0)
+  amount               Float       @default(0)
+  unitPriceUploaded    Float?
+  unitPriceMaster      Float? // expected unit price from the Price List Engine at import time
+  priceListId          String? // which price list supplied the expected price (null = product fallback)
+  priceMismatch        Boolean     @default(false)
+  issues               String? // JSON array of data-quality flags
   // When a later import is approved for the same (outlet, day), the prior
   // import's lines for that day are superseded so analytics never double-counts
   // a re-imported day. Superseded lines are excluded from all BI reads.
-  superseded          Boolean   @default(false)
+  superseded           Boolean     @default(false)
   supersededByImportId String?
-  createdAt         DateTime    @default(now())
+  createdAt            DateTime    @default(now())
 
   @@index([importId])
   @@index([date])
@@ -451,14 +456,14 @@ model SalesProductAlias {
 
 /// A pricing segment (e.g. VIP, Corporate, Staff) that prices can target.
 model CustomerGroup {
-  id        String   @id @default(cuid())
-  companyId String?
-  name      String
-  code      String?
-  isActive  Boolean  @default(true)
+  id          String   @id @default(cuid())
+  companyId   String?
+  name        String
+  code        String?
+  isActive    Boolean  @default(true)
   createdById String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   priceLists PriceList[]
   promotions Promotion[]
@@ -577,22 +582,22 @@ model Promotion {
 /// cashier re-checks and FINALIZES. Only FINALIZED reports are authoritative for
 /// reconciliation / finance / reports / BI. `data` is the JSON snapshot at save.
 model DailyReport {
-  id             String    @id @default(cuid())
-  outletId       String
-  outlet         Outlet    @relation(fields: [outletId], references: [id])
-  date           DateTime
-  status         String    @default("DRAFT") // DRAFT | FINALIZED
-  data           String? // JSON snapshot of the computed report at save/finalize
-  notes          String?
-  needsReview    Boolean   @default(false) // underlying sales changed after last save
-  reviewReason   String?
-  savedById      String?
-  savedByName    String?
-  finalizedById  String?
+  id              String    @id @default(cuid())
+  outletId        String
+  outlet          Outlet    @relation(fields: [outletId], references: [id])
+  date            DateTime
+  status          String    @default("DRAFT") // DRAFT | FINALIZED
+  data            String? // JSON snapshot of the computed report at save/finalize
+  notes           String?
+  needsReview     Boolean   @default(false) // underlying sales changed after last save
+  reviewReason    String?
+  savedById       String?
+  savedByName     String?
+  finalizedById   String?
   finalizedByName String?
-  finalizedAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  finalizedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([outletId, date])
   @@index([status])
@@ -964,23 +969,30 @@ model CollectionFieldValue {
 // second parallel approvals model) so /api/collection-approvals and its
 // notifyApprovers push pipeline serve both without duplication.
 model WorkflowApproval {
-  id            String                 @id @default(cuid())
-  stageRecordId String?
-  stageRecord   CollectionStageRecord? @relation(fields: [stageRecordId], references: [id], onDelete: Cascade)
-  transactionId String?
-  transaction   StaffTransaction?      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  requestedById String
-  requestedBy   User                   @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
-  approverRole  String?
-  approverId    String?
-  approver      User?                  @relation("ApprovalApprover", fields: [approverId], references: [id])
-  status        String                 @default("PENDING")
-  comment       String?
-  createdAt     DateTime               @default(now())
-  resolvedAt    DateTime?
+  id               String                 @id @default(cuid())
+  stageRecordId    String?
+  stageRecord      CollectionStageRecord? @relation(fields: [stageRecordId], references: [id], onDelete: Cascade)
+  transactionId    String?
+  transaction      StaffTransaction?      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  // Universal Expense & Disbursement Framework bridge (additive, nullable —
+  // see docs/expense-disbursement-framework-design.md). Reuses this same
+  // approve/reject/comment machinery for ExpenseRequest approvals instead of
+  // forking a parallel approval table.
+  expenseRequestId String?
+  expenseRequest   ExpenseRequest?        @relation(fields: [expenseRequestId], references: [id], onDelete: Cascade)
+  requestedById    String
+  requestedBy      User                   @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
+  approverRole     String?
+  approverId       String?
+  approver         User?                  @relation("ApprovalApprover", fields: [approverId], references: [id])
+  status           String                 @default("PENDING")
+  comment          String?
+  createdAt        DateTime               @default(now())
+  resolvedAt       DateTime?
 
   @@index([stageRecordId])
   @@index([transactionId])
+  @@index([expenseRequestId])
 }
 
 // ─── Collection Mode Engine ─────────────────────────────────────────────────
@@ -1494,12 +1506,21 @@ model PettyCash {
   paidByName String?
   receiptUrl String? // payment receipt (image/pdf data URL or link)
 
+  // Universal Expense & Disbursement Framework bridge (additive, nullable —
+  // see docs/expense-disbursement-framework-design.md). Set only once this
+  // request's flow has been migrated onto an ExpenseRequest RequestType;
+  // null (the default) means this row is still served by the legacy
+  // PettyCash screens, unchanged.
+  expenseRequestId String?
+  expenseRequest   ExpenseRequest? @relation(fields: [expenseRequestId], references: [id])
+
   items PettyCashItem[]
 
   @@index([date])
   @@index([status])
   @@index([paymentStatus])
   @@index([pettyType])
+  @@index([expenseRequestId])
 }
 
 // A management-allocated petty-cash fund operated by an Accountant. Payments
@@ -2012,22 +2033,22 @@ model CashRecon {
 // a day can have several, each with its own reason and (if applicable)
 // staff/customer. CashRecon.excessAmountPaid stores their sum for fast reads.
 model CashReconExcess {
-  id          String    @id @default(cuid())
-  cashReconId String
-  cashRecon   CashRecon @relation(fields: [cashReconId], references: [id], onDelete: Cascade)
-  amount      Float
-  reason      String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | SIGNED_BILL | CANCELLATION | DISCOUNT | COMPLIMENTARY | CUSTOMER_WALK_AWAY | TRANSFER_ERROR | UNASSIGNED
-  category    String    @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS — snapshot of ExcessReason.category at creation time
+  id              String    @id @default(cuid())
+  cashReconId     String
+  cashRecon       CashRecon @relation(fields: [cashReconId], references: [id], onDelete: Cascade)
+  amount          Float
+  reason          String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | SIGNED_BILL | CANCELLATION | DISCOUNT | COMPLIMENTARY | CUSTOMER_WALK_AWAY | TRANSFER_ERROR | UNASSIGNED
+  category        String    @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS — snapshot of ExcessReason.category at creation time
   accountingClass String? // RECEIVABLE | PAYABLE | ADJUSTMENT — snapshot of the accounting class at creation (see lib/reconciliation-classification.ts)
-  notes       String? // optional free-text explanation entered alongside the reason
-  channelCode String? // payment channel auto-inherited from the parent DailyCollection/CashRecon, no re-entry
-  staffId     String? // set when reason = STAFF_TIP
-  staffName   String?
-  personId    String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
-  personName  String?
-  paidAmount  Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount
-  paidAt      DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
-  createdAt   DateTime  @default(now())
+  notes           String? // optional free-text explanation entered alongside the reason
+  channelCode     String? // payment channel auto-inherited from the parent DailyCollection/CashRecon, no re-entry
+  staffId         String? // set when reason = STAFF_TIP
+  staffName       String?
+  personId        String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
+  personName      String?
+  paidAmount      Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount
+  paidAt          DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
+  createdAt       DateTime  @default(now())
 
   // Bill Reference System — plays the "Excess Payment" (EXS) bill type
   // alongside CollectionExcess (see lib/bill-reference.ts).
@@ -2044,22 +2065,22 @@ model CashReconExcess {
 // shape/cardinality so Excess Recon can merge both sources into a single
 // Paid/Balance ledger.
 model CollectionExcess {
-  id           String          @id @default(cuid())
-  collectionId String
-  collection   DailyCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
-  amount       Float
-  reason       String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | SIGNED_BILL | CANCELLATION | DISCOUNT | COMPLIMENTARY | CUSTOMER_WALK_AWAY | TRANSFER_ERROR | UNASSIGNED
-  category     String          @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS — snapshot of ExcessReason.category at creation time
-  accountingClass String?      // RECEIVABLE | PAYABLE | ADJUSTMENT — snapshot of the accounting class at creation (see lib/reconciliation-classification.ts)
-  notes        String? // optional free-text explanation entered alongside the reason
-  channelCode  String? // payment channel auto-inherited from the parent DailyCollection, no re-entry
-  staffId      String? // set when reason = STAFF_TIP
-  staffName    String?
-  personId     String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
-  personName   String?
-  paidAmount   Float           @default(0) // settled via Excess Recon; balance = amount - paidAmount
-  paidAt       DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
-  createdAt    DateTime        @default(now())
+  id              String          @id @default(cuid())
+  collectionId    String
+  collection      DailyCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  amount          Float
+  reason          String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | SIGNED_BILL | CANCELLATION | DISCOUNT | COMPLIMENTARY | CUSTOMER_WALK_AWAY | TRANSFER_ERROR | UNASSIGNED
+  category        String          @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS — snapshot of ExcessReason.category at creation time
+  accountingClass String? // RECEIVABLE | PAYABLE | ADJUSTMENT — snapshot of the accounting class at creation (see lib/reconciliation-classification.ts)
+  notes           String? // optional free-text explanation entered alongside the reason
+  channelCode     String? // payment channel auto-inherited from the parent DailyCollection, no re-entry
+  staffId         String? // set when reason = STAFF_TIP
+  staffName       String?
+  personId        String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
+  personName      String?
+  paidAmount      Float           @default(0) // settled via Excess Recon; balance = amount - paidAmount
+  paidAt          DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
+  createdAt       DateTime        @default(now())
 
   // Bill Reference System — plays the "Excess Payment" (EXS) bill type
   // alongside CashReconExcess (see lib/bill-reference.ts).
@@ -2183,13 +2204,13 @@ model CancellationReasonProduct {
 /// like STAFF_TIP/CUSTOMER_EXCESS) drives the existing auto-SignedBill debt
 /// path unchanged.
 model ExcessReason {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  label     String
-  category  String   @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS (legacy: also drives form placement)
+  id              String   @id @default(cuid())
+  code            String   @unique
+  label           String
+  category        String   @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS (legacy: also drives form placement)
   accountingClass String? // RECEIVABLE | PAYABLE | ADJUSTMENT — accounting treatment, derived from code (see lib/reconciliation-classification.ts); drift-proof
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
 }
 
 // ─── Bill Reference System ───────────────────────────────────────────────────
@@ -2893,6 +2914,7 @@ model Account {
   paymentChannels       PaymentChannel[]
   companyPaymentAccount CompanyPaymentAccount?
   budgets               Budget[]
+  expenseCategories     ExpenseCategory[]
 
   @@unique([companyId, code])
   @@index([companyId, type])
@@ -3143,6 +3165,7 @@ model CompanyPaymentAccount {
   transfersOut    BankTransaction[]       @relation("BankTxnFrom")
   transfersIn     BankTransaction[]       @relation("BankTxnTo")
   reconciliations AccountReconciliation[]
+  fundingSources  FundingSource[]
 
   @@index([companyId, paymentChannelId])
   @@index([outletId])
@@ -3632,22 +3655,22 @@ model WriteOffAuditLog {
 ///   scope:         GLOBAL | COMPANY | OUTLET
 ///   allowOverLimit: BLOCK | WARN | APPROVE
 model CreditModuleConfig {
-  id                      String   @id @default(cuid())
-  scope                   String
+  id                        String   @id @default(cuid())
+  scope                     String
   // Null only for GLOBAL; else a Company.id or Outlet.id depending on scope.
-  scopeId                 String?
-  moduleName              String   @default("Signed Bills") // "House Accounts", "Accounts Receivable", ...
+  scopeId                   String?
+  moduleName                String   @default("Signed Bills") // "House Accounts", "Accounts Receivable", ...
   // JSON map of generic label → tenant label, e.g.
   // {"account":"Person","invoice":"Signed Bill","payment":"Paid Bill","group":"Bill Type"}.
-  terminology             String?
-  enabled                 Boolean  @default(true)
-  defaultCurrency         String   @default("TZS")
-  approvalRequiredDefault Boolean  @default(false)
-  allowPartialPayments    Boolean  @default(true)
-  allowOverLimit          String   @default("WARN")
-  requireAttachmentsDefault Boolean @default(false)
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  terminology               String?
+  enabled                   Boolean  @default(true)
+  defaultCurrency           String   @default("TZS")
+  approvalRequiredDefault   Boolean  @default(false)
+  allowPartialPayments      Boolean  @default(true)
+  allowOverLimit            String   @default("WARN")
+  requireAttachmentsDefault Boolean  @default(false)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   @@unique([scope, scopeId])
 }
@@ -3705,13 +3728,13 @@ model CreditGroup {
   legacyBillTypeCode String?
 
   // Generalizes the hardcoded arrays in lib/bill-types.ts:
-  isCreditBearing Boolean @default(true) // = CREDIT_BILL_TYPES membership (real receivable, not an internal marker like STAFF_LOSS)
+  isCreditBearing  Boolean @default(true) // = CREDIT_BILL_TYPES membership (real receivable, not an internal marker like STAFF_LOSS)
   requiresApproval Boolean @default(false) // = REQUEST_BILL_TYPES (formal request awaiting sign-off before it counts as debt)
 
   // Settlement — "Both (configurable)": allowed methods is a JSON array; the
   // default is picked from it. PAYROLL_DEDUCTION | CASH | BANK | MOBILE_MONEY.
-  settlementMethods       String  @default("[\"CASH\",\"BANK\",\"MOBILE_MONEY\"]")
-  defaultSettlementMethod String  @default("CASH")
+  settlementMethods       String @default("[\"CASH\",\"BANK\",\"MOBILE_MONEY\"]")
+  defaultSettlementMethod String @default("CASH")
 
   // Limits & terms (0 maxCredit = no group-level ceiling; per-account override
   // on CreditAccount still applies). Aging/grace ride the Business Period
@@ -3732,9 +3755,9 @@ model CreditGroup {
   // WorkflowDefinition graph replaces this in a later phase.
   approverRoles String?
 
-  riskRating       String  @default("LOW")
-  priority         Int     @default(0)
-  documentsRequired String? // JSON array of required doc-type labels
+  riskRating              String  @default("LOW")
+  priority                Int     @default(0)
+  documentsRequired       String? // JSON array of required doc-type labels
   // Allowed-scope restrictions kept as JSON id-arrays in Phase 1 (graduate to
   // child tables when the admin UI needs relational queries over them).
   allowedOutletIds        String?
@@ -4010,11 +4033,11 @@ model Employee {
   terminationDate  DateTime?
   status           String    @default("ACTIVE")
 
-  baseCurrency  String  @default("TZS")
+  baseCurrency   String  @default("TZS")
   // Base periodic pay in baseCurrency. The formula engine (Phase 2) reads this
   // as the `base` variable; 0 until set. Not itself a payslip line.
-  baseSalary    Float   @default(0)
-  paymentMethod String  @default("BANK")
+  baseSalary     Float   @default(0)
+  paymentMethod  String  @default("BANK")
   // Opaque payout handles (bank account / mobile-money number). Never widen the
   // confidentiality surface beyond what today's Outlet/User fields already hold.
   bankRef        String?
@@ -4048,22 +4071,22 @@ model Employee {
 /// (arithmetic, comparisons, min/max/round/if/clamp/prorate/…) over named vars.
 ///   returnType: NUMBER | BOOLEAN
 model PayrollFormula {
-  id          String  @id @default(cuid())
-  companyId   String
-  code        String
-  name        String
-  description String?
+  id            String    @id @default(cuid())
+  companyId     String
+  code          String
+  name          String
+  description   String?
   // The safe expression string, e.g. "max(0, taxable * 0.1 - 50000)".
-  expression  String
+  expression    String
   // JSON array of the variable names the expression reads (declared inputs, for
   // dependency ordering + write-time validation), e.g. ["base","taxable"].
-  variables   String?
-  returnType  String    @default("NUMBER")
+  variables     String?
+  returnType    String    @default("NUMBER")
   effectiveFrom DateTime?
   effectiveTo   DateTime?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   components PayComponent[]
 
@@ -4081,29 +4104,29 @@ model PayrollFormula {
 ///   FORMULA:    (uses formulaId)
 /// Soft-deleted (status = INACTIVE) — historical payslips reference it.
 model PayComponent {
-  id            String  @id @default(cuid())
+  id            String          @id @default(cuid())
   companyId     String
   code          String // stable machine key, e.g. "BASIC_SALARY"
   name          String // display, e.g. "Basic Salary"
   description   String?
-  status        String  @default("ACTIVE")
+  status        String          @default("ACTIVE")
   componentType String
   calcMethod    String
   parameters    String?
   formulaId     String?
   formula       PayrollFormula? @relation(fields: [formulaId], references: [id])
 
-  taxable     Boolean @default(false)
-  pensionable Boolean @default(false)
-  frequency   String  @default("PER_RUN")
-  priority    Int     @default(0) // calc-order tiebreak within the dependency order
-  proratable  Boolean @default(false)
-  minLimit    Float?
-  maxLimit    Float?
+  taxable              Boolean @default(false)
+  pensionable          Boolean @default(false)
+  frequency            String  @default("PER_RUN")
+  priority             Int     @default(0) // calc-order tiebreak within the dependency order
+  proratable           Boolean @default(false)
+  minLimit             Float?
+  maxLimit             Float?
   // Per-component rounding; null = follow PayrollModuleConfig.roundingPolicy.
-  roundingRule String?
+  roundingRule         String?
   // → FinanceAccountMapping key for the GL line this component posts (Phase 3).
-  glMappingKey String?
+  glMappingKey         String?
   // JSON: cost-centre split, e.g. {"OUTLET_A":0.6,"OUTLET_B":0.4}.
   costCenterAllocation String?
   requiresApproval     Boolean @default(false)
@@ -4112,8 +4135,8 @@ model PayComponent {
   effectiveTo   DateTime?
   terminology   String?
   attributes    String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   assignments ComponentAssignment[]
 
@@ -4218,23 +4241,23 @@ model PayrollRun {
 /// computed totals as they were at calc time (so a locked payslip is a faithful
 /// historical record even after the employee/components later change).
 model Payslip {
-  id     String     @id @default(cuid())
-  runId  String
-  run    PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  id             String     @id @default(cuid())
+  runId          String
+  run            PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
   employeeId     String
   employeeNumber String?
   categoryId     String?
   payGroupId     String?
   personId       String? // the identity this payslip settles credit against, if linked
 
-  currency        String @default("TZS")
-  gross           Float  @default(0)
-  taxable         Float  @default(0)
-  pensionable     Float  @default(0)
-  totalDeductions Float  @default(0)
-  net             Float  @default(0)
-  employerCost    Float  @default(0)
-  status          String @default("CALCULATED")
+  currency        String   @default("TZS")
+  gross           Float    @default(0)
+  taxable         Float    @default(0)
+  pensionable     Float    @default(0)
+  totalDeductions Float    @default(0)
+  net             Float    @default(0)
+  employerCost    Float    @default(0)
+  status          String   @default("CALCULATED")
   warnings        String? // JSON array captured at calc time
   createdAt       DateTime @default(now())
 
@@ -4257,14 +4280,14 @@ model PayslipLine {
   componentType String
   bucket        String // EARNING | DEDUCTION | EMPLOYER
   amount        Float
-  taxable       Boolean @default(false)
-  pensionable   Boolean @default(false)
+  taxable       Boolean  @default(false)
+  pensionable   Boolean  @default(false)
   glMappingKey  String?
   // Free-text ref back to what a SOURCED line settled (e.g. "SignedBill x3"),
   // for the audit trail. Not an FK (a line can settle several bills).
-  sourceRef String?
-  sortOrder Int     @default(0)
-  createdAt DateTime @default(now())
+  sourceRef     String?
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
 
   @@index([payslipId])
 }
@@ -4304,32 +4327,32 @@ model PayrollAuditLog {
 /// whose effectiveFrom <= target date (and effectiveTo null or >= date).
 ///   ruleType: TAX_BAND (progressive marginal bands) | FLAT_RATE | CAP | THRESHOLD
 model StatutoryRule {
-  id           String  @id @default(cuid())
-  companyId    String
-  code         String // e.g. "PAYE" | "PSSSF_EE" | "PSSSF_ER" | "NHIF" | "WCF" | "SDL"
-  name         String
-  jurisdiction String  @default("TZ")
-  authority    String?
-  ruleType     String
+  id            String    @id @default(cuid())
+  companyId     String
+  code          String // e.g. "PAYE" | "PSSSF_EE" | "PSSSF_ER" | "NHIF" | "WCF" | "SDL"
+  name          String
+  jurisdiction  String    @default("TZ")
+  authority     String?
+  ruleType      String
   // The variable the rule reads from the payslip namespace (taxable | pensionable | gross | base).
-  baseVar      String  @default("taxable")
+  baseVar       String    @default("taxable")
   // Method-specific config as JSON:
   //   TAX_BAND:  {"bands": [[0,0],[270000,0.08],[520000,0.20],...]}  (marginal)
   //   FLAT_RATE: {"rate": 0.10}  (or use employeeRate/employerRate below)
-  parameters   String?
+  parameters    String?
   // Convenience flat rates (used when parameters.rate is absent).
-  employeeRate Float?
-  employerRate Float?
-  ceiling      Float? // cap the base before applying the rate
-  floor        Float? // no charge below this base
+  employeeRate  Float?
+  employerRate  Float?
+  ceiling       Float? // cap the base before applying the rate
+  floor         Float? // no charge below this base
   // Where this line posts (FinanceAccountMapping key, e.g. PAYE_PAYABLE).
-  glMappingKey String?
-  isEmployer   Boolean @default(false) // employer contribution vs employee deduction
-  effectiveFrom DateTime @default(now())
+  glMappingKey  String?
+  isEmployer    Boolean   @default(false) // employer contribution vs employee deduction
+  effectiveFrom DateTime  @default(now())
   effectiveTo   DateTime?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@unique([companyId, code, effectiveFrom])
   @@index([companyId, code])
@@ -4349,18 +4372,18 @@ model StatutoryRule {
 /// `source` records where it came from). @@unique([employeeId, date]) = one row
 /// per day; the latest write wins (upsert).
 model AttendanceRecord {
-  id           String   @id @default(cuid())
-  employeeId   String
-  employee     Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  date         DateTime // date-only (midnight); one row per calendar day
-  source       String   @default("MANUAL")
-  status       String   @default("PRESENT")
-  hoursWorked  Float    @default(0)
-  overtimeHours Float   @default(0)
-  outletId     String?
-  note         String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String   @id @default(cuid())
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date          DateTime // date-only (midnight); one row per calendar day
+  source        String   @default("MANUAL")
+  status        String   @default("PRESENT")
+  hoursWorked   Float    @default(0)
+  overtimeHours Float    @default(0)
+  outletId      String?
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([employeeId, date])
   @@index([employeeId, date])
@@ -4370,20 +4393,20 @@ model AttendanceRecord {
 /// decides the payroll impact: paid leave doesn't reduce pay; unpaid leave
 /// prorates it down. Soft-deleted (status = INACTIVE).
 model LeaveType {
-  id                 String  @id @default(cuid())
-  companyId          String
-  code               String
-  name               String
-  description        String?
-  status             String  @default("ACTIVE")
-  paid               Boolean @default(true)
-  accrualDaysPerMonth Float  @default(0)
-  maxCarryForward    Float?  // cap on accrued balance carried across periods; null = uncapped
-  encashable         Boolean @default(false)
-  requiresApproval   Boolean @default(true)
-  approverRoles      String? // JSON role array; falls back to the default approvers
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  companyId           String
+  code                String
+  name                String
+  description         String?
+  status              String   @default("ACTIVE")
+  paid                Boolean  @default(true)
+  accrualDaysPerMonth Float    @default(0)
+  maxCarryForward     Float? // cap on accrued balance carried across periods; null = uncapped
+  encashable          Boolean  @default(false)
+  requiresApproval    Boolean  @default(true)
+  approverRoles       String? // JSON role array; falls back to the default approvers
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   balances LeaveBalance[]
   requests LeaveRequest[]
@@ -4441,21 +4464,21 @@ model LeaveRequest {
 
 /// One payout batch per posted run. Materialized total + the settlement JE.
 model PaymentBatch {
-  id            String     @id @default(cuid())
-  runId         String
-  run           PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-  companyId     String
-  status        String     @default("PENDING")
-  method        String     @default("BANK") // dominant/mixed method across instructions
-  totalAmount   Float      @default(0)
-  employeeCount Int        @default(0)
+  id             String     @id @default(cuid())
+  runId          String
+  run            PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  companyId      String
+  status         String     @default("PENDING")
+  method         String     @default("BANK") // dominant/mixed method across instructions
+  totalAmount    Float      @default(0)
+  employeeCount  Int        @default(0)
   journalEntryId String? // the settlement entry, set when marked PAID
-  createdById   String?
-  exportedAt    DateTime?
-  paidAt        DateTime?
-  reversedAt    DateTime?
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdById    String?
+  exportedAt     DateTime?
+  paidAt         DateTime?
+  reversedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   instructions PaymentInstruction[]
 
@@ -4475,8 +4498,299 @@ model PaymentInstruction {
   method     String       @default("BANK")
   payeeRef   String? // bank account / mobile-money handle (opaque)
   amount     Float
-  status     String        @default("PENDING")
-  createdAt  DateTime      @default(now())
+  status     String       @default("PENDING")
+  createdAt  DateTime     @default(now())
 
   @@index([batchId])
+}
+
+// ─── Universal Expense & Disbursement Framework (Phase 1 — config + core workflow) ─
+// A configuration & classification layer that turns the app's existing, working
+// PettyCash/PettyFund flow into an industry-agnostic, admin-configurable expense
+// module WITHOUT forking the Finance Platform. Nothing here replaces Account,
+// JournalEntry/JournalLine, FinanceAccountMapping, CompanyPaymentAccount, Budget,
+// AccountReconciliation, or PaymentVerification — those remain the single source
+// of truth for money and GL posting. Instead these models generalize the
+// currently-hardcoded PettyFunction / PettyFund / PettyCash.paymentMethod
+// vocabulary into admin-defined records, so "Petty Cash Request", "Fuel",
+// "M-Pesa" become configuration, not code. See
+// docs/expense-disbursement-framework-design.md.
+//
+// Design decisions (Phase 1 scope, locked 2026-07-23):
+//   • Rollout is side-by-side: PettyCash keeps working unmodified; the bridge FK
+//     (PettyCash.expenseRequestId) is set only once a flow is migrated onto a
+//     RequestType, one at a time.
+//   • FundingSource balance: CASH types materialize currentBalance (same shape
+//     as PettyFund); BANK/MOBILE_MONEY/CARD types store none — every read
+//     computes it live from the wrapped CompanyPaymentAccount's GL balance
+//     (lib/finance-banking.ts companyAccountBalance()), so the GL stays the
+//     single source of truth for anything already backed by a real account.
+//   • Budget scope is company-level only for Phase 1 — the existing Budget
+//     model's outletId is already nullable, so per-outlet budgets are a later
+//     config row, not a later schema change.
+//   • Approval = existing WorkflowApproval (bridge FK expenseRequestId) + role-
+//     based gating via RequestType.approverRoles JSON, mirroring CreditGroup.
+//     approverRoles. A first-class WorkflowDefinition/Step graph is a later
+//     phase, shared with Credit and Payroll once built — not forked now.
+//   • No append-only ledger yet — FundingSource(CASH).currentBalance is a
+//     maintained projection (lib/expense-payments.ts), same trust level as
+//     CreditAccount.currentBalance.
+
+/// Module identity + global switches — what "expense/disbursement" is CALLED
+/// and how it behaves, per scope. Same GLOBAL→COMPANY→OUTLET, narrowest-wins
+/// shape as CreditModuleConfig/CollectionModeConfig (resolved in
+/// lib/expense-config.ts). Zero rows anywhere ⇒ module disabled / today's
+/// PettyCash behavior, unchanged.
+///   scope:           GLOBAL | COMPANY | OUTLET
+///   allowOverBudget:  BLOCK | WARN | APPROVE
+model ExpenseModuleConfig {
+  id                    String   @id @default(cuid())
+  scope                 String
+  scopeId               String? // null only for GLOBAL; else a Company.id or Outlet.id
+  moduleName            String   @default("Expense & Disbursement")
+  terminology           String? // JSON map of generic label → tenant label
+  enabled               Boolean  @default(true)
+  defaultCurrency       String   @default("TZS")
+  requireReceiptDefault Boolean  @default(true)
+  allowMixedPayment     Boolean  @default(true)
+  allowOverBudget       String   @default("WARN")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([scope, scopeId])
+}
+
+/// Admin-defined request type ("Petty Cash Request", "Site Expense Request",
+/// "Activity Funding Request", ...). requiredFields/requiredAttachments/
+/// allowed*Ids kept as JSON in Phase 1 (graduate to child tables when the admin
+/// UI needs relational queries over them) — same trade-off CreditGroup already
+/// made. approverRoles is a JSON array of role strings, e.g.
+/// ["MANAGER","DIRECTOR"]; a first-class WorkflowDefinition graph replaces this
+/// in a later phase. Soft-deleted (isActive) — historical requests reference it.
+///   budgetValidation: NONE | WARN | BLOCK
+model RequestType {
+  id          String  @id @default(cuid())
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id])
+  code        String // stable machine key, e.g. "PETTY_CASH_REQUEST"
+  name        String // display, e.g. "Petty Cash Request"
+  description String?
+  isActive    Boolean @default(true)
+
+  requiredFields          String? // JSON array of field keys
+  requiredAttachments     String? // JSON array of doc-type labels
+  allowedCategoryIds      String? // JSON id-array; empty/null = all categories
+  allowedFundingSourceIds String? // JSON id-array; empty/null = all funding sources
+  budgetValidation        String  @default("WARN")
+  approverRoles           String? // JSON array of role strings, ordered
+  attributes              String? // extensibility escape hatch
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  requests ExpenseRequest[]
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive])
+}
+
+/// Generalizes PettyFunction into an admin-defined expense category, mapped to
+/// a real GL Account so Budget and FinanceAccountMapping work immediately with
+/// no separate expense-specific mapping table. legacyFunctionName bridges to
+/// existing PettyCash.functionName values with no data migration. Soft-deleted
+/// (isActive) — historical requests reference it.
+model ExpenseCategory {
+  id                 String   @id @default(cuid())
+  companyId          String
+  company            Company  @relation(fields: [companyId], references: [id])
+  code               String
+  name               String // e.g. "Fuel", "Marketing"
+  legacyFunctionName String? // bridges to PettyCash.functionName / PettyFunction.name
+  budgetAccountId    String?
+  budgetAccount      Account? @relation(fields: [budgetAccountId], references: [id])
+  spendingLimit      Float    @default(0) // 0 = no category-level ceiling
+  costCenter         String? // free-text tag; not an enforced relation (mirrors PettyCash.department)
+  departmentId       String?
+  eventId            String?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  requests ExpenseRequest[]
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive])
+  @@index([legacyFunctionName])
+}
+
+/// Generalizes PettyFund + gives bank/mobile-money/card a first-class row
+/// (today only a free-text PettyCash.paymentMethod). A CASH source has no GL
+/// account behind it and materializes its own currentBalance (same shape as
+/// PettyFund today). A BANK/MOBILE_MONEY/CARD source wraps a
+/// CompanyPaymentAccount and stores NO materialized balance — every read
+/// computes it live from that account's GL balance (lib/finance-banking.ts
+/// companyAccountBalance()), so the ledger stays the single source of truth.
+/// currentBalance is therefore only meaningful when sourceType = CASH; see
+/// docs/expense-disbursement-framework-design.md Stage 16 decision 2.
+///   sourceType: CASH | BANK | MOBILE_MONEY | CARD | OTHER
+model FundingSource {
+  id                      String                 @id @default(cuid())
+  companyId               String
+  company                 Company                @relation(fields: [companyId], references: [id])
+  code                    String
+  name                    String // e.g. "Petty Cash", "CRDB Bank", "M-Pesa"
+  sourceType              String                 @default("CASH")
+  companyPaymentAccountId String? // set for BANK | MOBILE_MONEY | CARD; null for CASH/OTHER
+  companyPaymentAccount   CompanyPaymentAccount? @relation(fields: [companyPaymentAccountId], references: [id])
+  outletId                String?
+  openingBalance          Float                  @default(0) // CASH only
+  currentBalance          Float                  @default(0) // CASH only — see model doc above
+  dailyLimit              Float                  @default(0) // 0 = no limit
+  responsibleUserId       String? // no relation — mirrors CreditAccount.userId, keeps User untouched
+  currency                String                 @default("TZS")
+  isActive                Boolean                @default(true)
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+
+  payments ExpensePayment[]
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive])
+  @@index([companyPaymentAccountId])
+}
+
+/// Generalizes PettyCash. One request may span many ExpenseItem lines and many
+/// ExpensePayment disbursements (via PaymentAllocation) — fixing PettyCash's
+/// 1:1 request→payment assumption. legacyPettyCashId is intentionally absent:
+/// the bridge lives on PettyCash.expenseRequestId (see that model), so a
+/// request created through this engine never needs a reverse pointer.
+///   status: DRAFT | PENDING_APPROVAL | APPROVED | REJECTED | PARTIALLY_PAID |
+///           PAID | VERIFIED | CLOSED | CANCELLED
+model ExpenseRequest {
+  id            String          @id @default(cuid())
+  companyId     String
+  company       Company         @relation(fields: [companyId], references: [id])
+  requestTypeId String
+  requestType   RequestType     @relation(fields: [requestTypeId], references: [id])
+  categoryId    String
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id])
+  requestedById String // no relation — mirrors CreditAccount.userId
+  amount        Float           @default(0)
+  currency      String          @default("TZS")
+  purpose       String
+  status        String          @default("DRAFT")
+  outletId      String?
+  departmentId  String?
+  eventId       String?
+  dueDate       DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  items              ExpenseItem[]
+  paymentAllocations PaymentAllocation[]
+  verifications      VerificationRecord[]
+  workflowApprovals  WorkflowApproval[]
+  legacyPettyCash    PettyCash[]
+
+  @@index([companyId, status])
+  @@index([requestTypeId])
+  @@index([categoryId])
+  @@index([outletId])
+}
+
+/// Optional line-item breakdown of an ExpenseRequest — identical shape to
+/// PettyCashItem (Detail · Unit · Unit Cost · Total). A request with no items
+/// is a simple single-amount request.
+model ExpenseItem {
+  id               String         @id @default(cuid())
+  expenseRequestId String
+  expenseRequest   ExpenseRequest @relation(fields: [expenseRequestId], references: [id], onDelete: Cascade)
+  detail           String
+  unit             Float          @default(1)
+  unitCost         Float          @default(0)
+  amount           Float          @default(0)
+  createdAt        DateTime       @default(now())
+
+  @@index([expenseRequestId])
+}
+
+/// One disbursement against one FundingSource. Generalizes PettyFundTxn's
+/// PAYMENT type into its own table so a single payment can be split across
+/// PaymentAllocation rows against more than one ExpenseRequest, and a single
+/// request can be paid by more than one ExpensePayment (part cash, part bank).
+/// journalEntryId/verificationId are loose refs (same convention as
+/// SupplierPayment.journalEntryId / JournalEntry.sourceId) — not relations —
+/// since the source table varies and neither JournalEntry nor
+/// PaymentVerification needs to know about this module.
+model ExpensePayment {
+  id              String        @id @default(cuid())
+  fundingSourceId String
+  fundingSource   FundingSource @relation(fields: [fundingSourceId], references: [id])
+  amount          Float
+  paymentMethod   String // CASH | CRDB | STANBIC | MPESA | ... (mirrors PaymentChannel.code)
+  payeeName       String?
+  payeeAccount    String?
+  reference       String? // bank/MoMo txn id, cheque no.
+  paidAt          DateTime      @default(now())
+  paidById        String? // no relation — mirrors CreditAccount.userId
+  journalEntryId  String? // loose ref to JournalEntry.id
+  verificationId  String? // loose ref to PaymentVerification.id, set for digital payments
+  createdAt       DateTime      @default(now())
+
+  allocations PaymentAllocation[]
+
+  @@index([fundingSourceId])
+  @@index([reference])
+}
+
+/// One ExpensePayment → one ExpenseRequest, with amount — the join that makes
+/// partial + mixed-source + installment payment possible. Sum of allocations
+/// for a request, compared to ExpenseRequest.amount, drives the
+/// PARTIALLY_PAID/PAID status transition (lib/expense-payments.ts).
+model PaymentAllocation {
+  id               String         @id @default(cuid())
+  expensePaymentId String
+  expensePayment   ExpensePayment @relation(fields: [expensePaymentId], references: [id], onDelete: Cascade)
+  expenseRequestId String
+  expenseRequest   ExpenseRequest @relation(fields: [expenseRequestId], references: [id], onDelete: Cascade)
+  amount           Float
+  createdAt        DateTime       @default(now())
+
+  @@index([expensePaymentId])
+  @@index([expenseRequestId])
+}
+
+/// One row per verification stage reached for an ExpenseRequest. Payment alone
+/// never advances status past PAID — reaching VERIFIED/CLOSED requires the
+/// stages the request's RequestType marks mandatory.
+///   stage: RECEIPT_UPLOADED | RECEIPT_VERIFIED | GOODS_CONFIRMED | VALIDATED
+model VerificationRecord {
+  id               String         @id @default(cuid())
+  expenseRequestId String
+  expenseRequest   ExpenseRequest @relation(fields: [expenseRequestId], references: [id], onDelete: Cascade)
+  stage            String
+  verifiedById     String? // no relation — mirrors CreditAccount.userId
+  verifiedAt       DateTime       @default(now())
+  note             String?
+  attachmentId     String? // loose ref to Attachment.id
+
+  @@index([expenseRequestId, stage])
+}
+
+/// Generic file/receipt/proof record. entityType+entityId is a loose ref (same
+/// convention as JournalEntry.sourceType/sourceId) rather than a relation per
+/// entity kind, since Phase 1 only needs it for ExpenseRequest/ExpensePayment/
+/// VerificationRecord but the shape should not need a schema change to attach
+/// to a new entity kind later.
+///   docType: RECEIPT | INVOICE | PROOF_OF_PAYMENT | SCREENSHOT | OTHER
+model Attachment {
+  id           String   @id @default(cuid())
+  entityType   String
+  entityId     String
+  url          String
+  docType      String   @default("RECEIPT")
+  uploadedById String? // no relation — mirrors CreditAccount.userId
+  createdAt    DateTime @default(now())
+
+  @@index([entityType, entityId])
 }
