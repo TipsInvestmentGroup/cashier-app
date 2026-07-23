@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, FINANCE_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
+import { useAuth } from '@/contexts/AuthContext'
 import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { formatCurrency } from '@/lib/utils'
 import toast from 'react-hot-toast'
@@ -26,6 +27,18 @@ interface Run {
   journalEntryId: string | null; notes: string | null
   approvedAt: string | null; lockedAt: string | null; postedAt: string | null; reversedAt: string | null
   payslips: Payslip[]
+}
+interface Instruction {
+  id: string; payeeName: string; method: string; payeeRef: string | null; amount: number; status: string
+}
+interface Batch {
+  id: string; status: string; method: string; totalAmount: number; employeeCount: number
+  journalEntryId: string | null; exportedAt: string | null; paidAt: string | null
+  instructions: Instruction[]
+}
+const BATCH_STATUS_COLORS: Record<string, string> = {
+  PENDING: 'bg-amber-50 text-amber-700', EXPORTED: 'bg-blue-50 text-blue-700',
+  PAID: 'bg-green-50 text-green-700', REVERSED: 'bg-red-50 text-red-600',
 }
 
 // What the operator can do next, by status. Each maps to a POST { action }.
@@ -64,9 +77,11 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
 export default function PayRunDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { request } = useApi()
+  const { token } = useAuth()
   const confirm = useConfirm()
   const [run, setRun] = useState<Run | null>(null)
   const [names, setNames] = useState<Record<string, string>>({})
+  const [batch, setBatch] = useState<Batch | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [openSlip, setOpenSlip] = useState<string | null>(null)
@@ -76,16 +91,69 @@ export default function PayRunDetailPage({ params }: { params: Promise<{ id: str
     try {
       // Payslips carry only employeeId; resolve display names from the roster so
       // the table reads as people, not ids (the run API stays name-agnostic).
-      const [d, emp] = await Promise.all([
+      const [d, emp, batchList] = await Promise.all([
         request(`/api/payroll/runs/${id}`),
         request('/api/payroll/employees').catch(() => null),
+        request(`/api/payroll/payment-batches?runId=${id}`).catch(() => null),
       ])
       setRun(d.run)
       if (emp?.employees) setNames(Object.fromEntries(emp.employees.map((e: { id: string; name: string }) => [e.id, e.name])))
+      // A run has at most one live batch; fetch its detail (with instructions).
+      const active = (batchList?.batches || []).find((b: { status: string }) => b.status !== 'REVERSED')
+      if (active) {
+        const bd = await request(`/api/payroll/payment-batches/${active.id}`).catch(() => null)
+        setBatch(bd?.batch ?? null)
+      } else setBatch(null)
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load run') }
     finally { setLoading(false) }
   }, [request, id])
   useEffect(() => { load() }, [load])
+
+  const createBatch = async () => {
+    setBusy('batch')
+    try {
+      await request('/api/payroll/payment-batches', { method: 'POST', body: JSON.stringify({ runId: id }) })
+      toast.success('Payment batch created')
+      load()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not create batch') }
+    finally { setBusy(null) }
+  }
+
+  const downloadCsv = async () => {
+    if (!batch) return
+    setBusy('csv')
+    try {
+      // The CSV endpoint needs the auth header and returns a file (not JSON), so
+      // fetch it manually and blob-download rather than going through useApi.
+      const res = await fetch(`/api/payroll/payment-batches/${batch.id}?format=csv`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `payroll-${run?.periodKey || id}.csv`
+      a.click(); URL.revokeObjectURL(url)
+      toast.success('Payout file exported')
+      load() // status may move PENDING → EXPORTED
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not export') }
+    finally { setBusy(null) }
+  }
+
+  const markPaid = async () => {
+    if (!batch) return
+    const ok = await confirm({
+      title: 'Mark batch as paid',
+      message: `Confirm that ${formatCurrency(batch.totalAmount)} has been paid to ${batch.employeeCount} employee(s). This posts the settlement entry (clearing net-pay payable) and marks the run PAID.`,
+      confirmLabel: 'Mark as paid',
+    })
+    if (!ok) return
+    setBusy('pay')
+    try {
+      await request(`/api/payroll/payment-batches/${batch.id}`, { method: 'POST', body: JSON.stringify({ action: 'pay' }) })
+      toast.success('Batch marked paid — run settled')
+      load()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not mark paid') }
+    finally { setBusy(null) }
+  }
 
   const runAction = async (a: ActionDef) => {
     let reason: string | undefined
@@ -159,6 +227,68 @@ export default function PayRunDetailPage({ params }: { params: Promise<{ id: str
                 </div>
               ))}
             </div>
+
+            {/* Payout — appears once the run is POSTED (net-pay payable sits on the
+                ledger) or a batch already exists. Completes the run → payout flow. */}
+            {(run.status === 'POSTED' || run.status === 'PAID' || batch) && (
+              <Card className="!p-0 overflow-hidden">
+                <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3">
+                    <h2 className="font-semibold text-gray-800">Payout</h2>
+                    {batch && <span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${BATCH_STATUS_COLORS[batch.status] || 'bg-gray-100 text-gray-500'}`}>{batch.status}</span>}
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    {!batch && run.status === 'POSTED' && (
+                      <button onClick={createBatch} disabled={!!busy} className="px-4 py-2 text-sm font-semibold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">
+                        {busy === 'batch' ? 'Creating…' : 'Create payment batch'}
+                      </button>
+                    )}
+                    {batch && (
+                      <button onClick={downloadCsv} disabled={!!busy} className="px-4 py-2 text-sm font-semibold rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-40">
+                        {busy === 'csv' ? 'Exporting…' : '⬇ Download payout CSV'}
+                      </button>
+                    )}
+                    {batch && ['PENDING', 'EXPORTED'].includes(batch.status) && (
+                      <button onClick={markPaid} disabled={!!busy} className="px-4 py-2 text-sm font-semibold rounded-xl bg-green-600 text-white hover:bg-green-700 disabled:opacity-40">
+                        {busy === 'pay' ? 'Settling…' : 'Mark as paid'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {!batch ? (
+                  <div className="p-5 text-sm text-gray-500">This run is posted. Create a payment batch to generate payout instructions per employee, export a bank/mobile-money file, then mark it paid to settle the net-pay liability.</div>
+                ) : (
+                  <>
+                    <div className="px-5 py-3 flex flex-wrap gap-x-8 gap-y-1 text-sm border-b border-gray-100 bg-gray-50/50">
+                      <span className="text-gray-500">Total payout <span className="font-semibold text-gray-900">{formatCurrency(batch.totalAmount)}</span></span>
+                      <span className="text-gray-500">Payees <span className="font-semibold text-gray-900">{batch.employeeCount}</span></span>
+                      <span className="text-gray-500">Method <span className="font-semibold text-gray-900">{batch.method}</span></span>
+                      {batch.journalEntryId && <Link href="/finance/ledger" className="text-indigo-600 hover:text-indigo-800">settlement posted</Link>}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50"><tr className="text-left text-xs text-gray-400">
+                          <th className="px-5 py-2">Payee</th><th className="px-2">Method</th><th className="px-2">Reference</th>
+                          <th className="px-2 text-right">Amount</th><th className="px-5 text-right">Status</th>
+                        </tr></thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {batch.instructions.map((i) => (
+                            <tr key={i.id}>
+                              <td className="px-5 py-2.5 font-medium text-gray-800">{i.payeeName}</td>
+                              <td className="px-2 text-gray-500">{i.method.replace('_', ' ').toLowerCase()}</td>
+                              <td className="px-2 text-gray-400">{i.payeeRef || <span className="text-amber-500">no ref</span>}</td>
+                              <td className="px-2 text-right font-semibold text-gray-900">{formatCurrency(i.amount)}</td>
+                              <td className="px-5 text-right"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${BATCH_STATUS_COLORS[i.status] || 'bg-gray-100 text-gray-500'}`}>{i.status}</span></td>
+                            </tr>
+                          ))}
+                          {!batch.instructions.length && <tr><td colSpan={5} className="px-5 py-8 text-center text-gray-400">No payable instructions (every net was zero or below).</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </Card>
+            )}
 
             {/* Payslips */}
             <Card className="!p-0 overflow-hidden">
