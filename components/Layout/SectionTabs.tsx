@@ -68,6 +68,11 @@ export const PETTY_TABS: Tab[] = [
   { href: '/petty-cash', label: 'Petty Cash', icon: Wallet, roles: CASHIER_ROLES },
   { href: '/approvals', label: 'Approval Requests', icon: ClipboardCheck, roles: CASHIER_ROLES },
   { href: '/petty-payments', label: 'Payments', icon: CreditCard, roles: CASHIER_ROLES },
+  // Universal Expense & Disbursement Framework (Phase 1) — a new, separate
+  // engine alongside the legacy Petty Cash flow above (side-by-side rollout,
+  // see docs/expense-disbursement-framework-design.md decision 1). Lives in
+  // this same section since it generalizes exactly what Petty Cash does.
+  { href: '/expense-requests', label: 'Expense Requests', icon: Receipt, roles: CASHIER_ROLES },
 ]
 
 export const FINANCE_TABS: Tab[] = [

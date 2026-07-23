@@ -15,7 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const request = await prisma.expenseRequest.findUnique({
     where: { id },
     include: {
-      requestType: { select: { id: true, name: true, approverRoles: true } },
+      requestType: { select: { id: true, name: true, approverRoles: true, requiredVerificationStages: true, requiredAttachments: true } },
       category: { select: { id: true, name: true } },
       items: true,
       paymentAllocations: { include: { expensePayment: true } },

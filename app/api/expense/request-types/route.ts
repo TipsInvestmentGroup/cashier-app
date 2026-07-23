@@ -24,13 +24,15 @@ function normalizeVerificationStages(value: unknown): string | null {
   return list.length ? JSON.stringify(list) : null
 }
 
-/** GET — list request types (ADMIN-only; Expense Settings). */
+/** GET — list request types. Any authenticated user (the New Expense Request
+ *  form needs this to render); non-ADMIN only sees active ones — inactive
+ *  rows are Expense Settings' concern. */
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const types = await prisma.requestType.findMany({
+    where: user.role === 'ADMIN' ? {} : { isActive: true },
     orderBy: [{ name: 'asc' }],
     include: { _count: { select: { requests: true } } },
   })

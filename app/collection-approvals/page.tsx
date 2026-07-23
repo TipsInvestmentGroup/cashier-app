@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
@@ -25,6 +26,18 @@ interface Approval {
     staff: { name: string }
     session: { outlet: { name: string } }
   } | null
+  // Universal Expense & Disbursement Framework bridge (M4/M6) — set for
+  // expense-request approvals. Deciding still goes through this same shared
+  // endpoint (see app/api/collection-approvals/[id]/route.ts); the link
+  // below just sends the user to the request's own detail page for context.
+  expenseRequest: {
+    id: string
+    purpose: string
+    amount: number
+    currency: string
+    requestType: { name: string }
+    category: { name: string }
+  } | null
 }
 
 export default function CollectionApprovalsPage() {
@@ -35,7 +48,9 @@ export default function CollectionApprovalsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    try { setItems((await request('/api/collection-approvals')) || []) } finally { setLoading(false) }
+    try { setItems((await request('/api/collection-approvals')) || []) }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not load approvals') }
+    finally { setLoading(false) }
   }, [request])
 
   useEffect(() => { load() }, [load])
@@ -78,6 +93,13 @@ export default function CollectionApprovalsPage() {
                         <>
                           <p className="text-sm font-semibold text-gray-800">{a.stageRecord.session.template.name} · {a.stageRecord.stage.label}</p>
                           <p className="text-xs text-gray-400">{a.stageRecord.session.outlet.name} · {a.stageRecord.staffName || '—'} · requested by {a.requestedBy.name}</p>
+                        </>
+                      ) : a.expenseRequest ? (
+                        <>
+                          <p className="text-sm font-semibold text-gray-800">
+                            <Link href={`/expense-requests/${a.expenseRequest.id}`} className="hover:text-indigo-600">{a.expenseRequest.requestType.name}</Link> · {formatCurrency(a.expenseRequest.amount)}
+                          </p>
+                          <p className="text-xs text-gray-400">{a.expenseRequest.category.name} · {a.expenseRequest.purpose} · requested by {a.requestedBy.name}</p>
                         </>
                       ) : null}
                     </div>

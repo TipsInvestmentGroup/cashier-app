@@ -3,13 +3,14 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
 
-/** GET — list expense categories (ADMIN-only; Expense Settings). */
+/** GET — list expense categories. Any authenticated user (the New Expense
+ *  Request form needs this to render); non-ADMIN only sees active ones. */
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const categories = await prisma.expenseCategory.findMany({
+    where: user.role === 'ADMIN' ? {} : { isActive: true },
     orderBy: [{ name: 'asc' }],
     include: { budgetAccount: { select: { id: true, code: true, name: true } }, _count: { select: { requests: true } } },
   })

@@ -4,13 +4,22 @@ import { getAuthUser } from '@/lib/auth'
 import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { FUNDING_SOURCE_TYPES, type FundingSourceType } from '@/lib/expense-config'
 
-/** GET — list funding sources (ADMIN-only; Expense Settings). */
+// Same audience as PETTY_TABS/the Expense Requests screens — everyone who
+// can reach the Pay action or just wants visibility, but not WAITER. This
+// embeds CompanyPaymentAccount.accountName/bankName, so it must not be wider
+// than lib/finance-access.ts's canViewFinance() + the disbursers who aren't
+// finance roles (CASHIER) — never "any authenticated user".
+const VIEWER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
+
+/** GET — list funding sources (the Pay action needs this to render).
+ *  Non-ADMIN only sees active ones. */
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!VIEWER_ROLES.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const sources = await prisma.fundingSource.findMany({
+    where: user.role === 'ADMIN' ? {} : { isActive: true },
     orderBy: [{ name: 'asc' }],
     include: { companyPaymentAccount: { select: { id: true, accountName: true, bankName: true } }, _count: { select: { payments: true } } },
   })
