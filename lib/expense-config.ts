@@ -26,6 +26,15 @@ export const EXPENSE_REQUEST_STATUSES = [
 ] as const
 export type ExpenseRequestStatus = (typeof EXPENSE_REQUEST_STATUSES)[number]
 
+export const VERIFICATION_STAGES = ['RECEIPT_UPLOADED', 'RECEIPT_VERIFIED', 'GOODS_CONFIRMED', 'VALIDATED'] as const
+export type VerificationStage = (typeof VERIFICATION_STAGES)[number]
+
+export const ATTACHMENT_DOC_TYPES = ['RECEIPT', 'INVOICE', 'PROOF_OF_PAYMENT', 'SCREENSHOT', 'OTHER'] as const
+export type AttachmentDocType = (typeof ATTACHMENT_DOC_TYPES)[number]
+
+export const ATTACHMENT_ENTITY_TYPES = ['ExpenseRequest', 'ExpensePayment', 'VerificationRecord'] as const
+export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number]
+
 export interface ExpenseTerminology {
   module: string
   requestType: string

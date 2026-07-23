@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { BUDGET_VALIDATION_MODES } from '@/lib/expense-config'
+import { BUDGET_VALIDATION_MODES, VERIFICATION_STAGES } from '@/lib/expense-config'
 
 function normalizeJsonArray(value: unknown): string | null {
   if (value === undefined || value === null) return null
   const list = Array.isArray(value) ? value.map(String).filter(Boolean) : []
+  return list.length ? JSON.stringify(list) : null
+}
+
+function normalizeVerificationStages(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  const list = Array.isArray(value) ? value.map(String) : []
+  for (const s of list) {
+    if (!(VERIFICATION_STAGES as readonly string[]).includes(s)) throw new Error(`Unknown verification stage: ${s}`)
+  }
   return list.length ? JSON.stringify(list) : null
 }
 
@@ -40,6 +49,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.allowedCategoryIds !== undefined) data.allowedCategoryIds = normalizeJsonArray(body.allowedCategoryIds)
   if (body.allowedFundingSourceIds !== undefined) data.allowedFundingSourceIds = normalizeJsonArray(body.allowedFundingSourceIds)
   if (body.approverRoles !== undefined) data.approverRoles = normalizeJsonArray(body.approverRoles)
+  if (body.requiredVerificationStages !== undefined) {
+    try {
+      data.requiredVerificationStages = normalizeVerificationStages(body.requiredVerificationStages)
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid requiredVerificationStages' }, { status: 400 })
+    }
+  }
   if (body.attributes !== undefined) data.attributes = body.attributes ? JSON.stringify(body.attributes) : null
 
   const requestType = await prisma.requestType.update({ where: { id }, data })

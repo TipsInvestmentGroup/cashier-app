@@ -2,15 +2,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
-import { BUDGET_VALIDATION_MODES } from '@/lib/expense-config'
+import { BUDGET_VALIDATION_MODES, VERIFICATION_STAGES } from '@/lib/expense-config'
 
 // Normalizes an optional JSON string-array field (requiredFields,
-// requiredAttachments, allowed*Ids, approverRoles). null/undefined/empty
-// array all mean "no restriction" and are stored as null, not "[]", so
-// resolvers don't have to special-case an empty-but-present array.
+// requiredAttachments, allowed*Ids, approverRoles, requiredVerificationStages).
+// null/undefined/empty array all mean "no restriction" and are stored as
+// null, not "[]", so resolvers don't have to special-case an empty-but-present
+// array.
 function normalizeJsonArray(value: unknown): string | null {
   if (value === undefined || value === null) return null
   const list = Array.isArray(value) ? value.map(String).filter(Boolean) : []
+  return list.length ? JSON.stringify(list) : null
+}
+
+function normalizeVerificationStages(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  const list = Array.isArray(value) ? value.map(String) : []
+  for (const s of list) {
+    if (!(VERIFICATION_STAGES as readonly string[]).includes(s)) throw new Error(`Unknown verification stage: ${s}`)
+  }
   return list.length ? JSON.stringify(list) : null
 }
 
@@ -50,6 +60,13 @@ export async function POST(req: NextRequest) {
   const dupe = await prisma.requestType.findUnique({ where: { companyId_code: { companyId, code } } })
   if (dupe) return NextResponse.json({ error: `A request type with code ${code} already exists` }, { status: 409 })
 
+  let requiredVerificationStages: string | null
+  try {
+    requiredVerificationStages = normalizeVerificationStages(body.requiredVerificationStages)
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Invalid requiredVerificationStages' }, { status: 400 })
+  }
+
   const requestType = await prisma.requestType.create({
     data: {
       companyId,
@@ -63,6 +80,7 @@ export async function POST(req: NextRequest) {
       allowedFundingSourceIds: normalizeJsonArray(body.allowedFundingSourceIds),
       budgetValidation,
       approverRoles: normalizeJsonArray(body.approverRoles),
+      requiredVerificationStages,
       attributes: body.attributes ? JSON.stringify(body.attributes) : null,
     },
   })

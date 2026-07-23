@@ -4577,13 +4577,19 @@ model RequestType {
   description String?
   isActive    Boolean @default(true)
 
-  requiredFields          String? // JSON array of field keys
-  requiredAttachments     String? // JSON array of doc-type labels
-  allowedCategoryIds      String? // JSON id-array; empty/null = all categories
-  allowedFundingSourceIds String? // JSON id-array; empty/null = all funding sources
-  budgetValidation        String  @default("WARN")
-  approverRoles           String? // JSON array of role strings, ordered
-  attributes              String? // extensibility escape hatch
+  requiredFields             String? // JSON array of field keys
+  requiredAttachments        String? // JSON array of doc-type labels
+  allowedCategoryIds         String? // JSON id-array; empty/null = all categories
+  allowedFundingSourceIds    String? // JSON id-array; empty/null = all funding sources
+  budgetValidation           String  @default("WARN")
+  approverRoles              String? // JSON array of role strings, ordered
+  // M5 (verification workflow): JSON array of VerificationRecord.stage values
+  // this request type requires before VALIDATED can advance PAID → VERIFIED.
+  // null/empty = no stages required — VALIDATED alone is enough (see
+  // lib/expense-verification.ts). RECEIPT_UPLOADED | RECEIPT_VERIFIED |
+  // GOODS_CONFIRMED | VALIDATED.
+  requiredVerificationStages String?
+  attributes                 String? // extensibility escape hatch
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
