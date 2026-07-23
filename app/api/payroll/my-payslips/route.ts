@@ -13,7 +13,10 @@ export async function GET(req: NextRequest) {
   if (!employee) return NextResponse.json({ payslips: [] })
 
   const payslips = await prisma.payslip.findMany({
-    where: { employeeId: employee.id, status: { in: ['LOCKED', 'PAID'] } },
+    // Finalized payslips only, and never those from a run that was reversed —
+    // reversing a run leaves the payslip rows LOCKED, so filter on run.status
+    // here or a cancelled run would still surface to the employee.
+    where: { employeeId: employee.id, status: { in: ['LOCKED', 'PAID'] }, run: { status: { notIn: ['REVERSED'] } } },
     orderBy: { createdAt: 'desc' },
     take: 36,
     include: { lines: { orderBy: { sortOrder: 'asc' } }, run: { select: { periodKey: true, paymentDate: true } } },

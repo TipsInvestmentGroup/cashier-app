@@ -9,13 +9,13 @@ import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
 import { VALID_ROLES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
-import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, Tag, type LucideIcon } from 'lucide-react'
+import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, Tag, Banknote, type LucideIcon } from 'lucide-react'
 
 const ALL = VALID_ROLES
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
-const SECTIONS = ['MyPos', 'Daily', 'Targets', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
+const SECTIONS = ['MyPos', 'Daily', 'Targets', 'My Pay', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
 
 const navItems: { href: string; icon: LucideIcon; label: string; section: string; roles: string[]; match?: string[] }[] = [
   { href: '/mypos', icon: UtensilsCrossed, label: 'MyPos', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'], match: ['/mypos', '/pos', '/schedule', '/events'] },
@@ -23,6 +23,8 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
   { href: '/dashboard', icon: LayoutDashboard, label: 'Daily', section: 'Daily', roles: CASHIER_ROLES, match: ['/dashboard', '/collections', '/daily-report', '/excess-loss', '/excess-recon', '/business-day-unlock-requests'] },
 
   { href: '/targets', icon: Target, label: 'Targets', section: 'Targets', roles: ALL, match: ['/targets'] },
+
+  { href: '/my-payslips', icon: Banknote, label: 'My Payslips', section: 'My Pay', roles: ALL, match: ['/my-payslips'] },
 
   { href: '/signed-bills', icon: Receipt, label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/admin-director-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 
