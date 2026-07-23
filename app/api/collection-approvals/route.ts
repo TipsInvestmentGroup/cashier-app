@@ -30,6 +30,12 @@ export async function GET(req: NextRequest) {
           session: { include: { outlet: { select: { name: true } } } },
         },
       },
+      // Universal Expense & Disbursement Framework bridge (M4) — surfaces
+      // expense-request approvals in this same shared inbox, no separate
+      // screen needed.
+      expenseRequest: {
+        select: { id: true, purpose: true, amount: true, currency: true, requestType: { select: { name: true } }, category: { select: { name: true } } },
+      },
     },
     orderBy: { createdAt: 'asc' },
   })

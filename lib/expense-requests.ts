@@ -9,6 +9,7 @@ import type { Db } from '@/lib/ledger'
 import { roundMoney } from '@/lib/utils'
 import { computeActual } from '@/lib/finance-budget'
 import type { BudgetValidationMode, ExpenseRequestStatus } from '@/lib/expense-config'
+import { openNextApprovalStep, cancelPendingExpenseApproval } from '@/lib/expense-workflow'
 
 function parseRoleList(raw: string | null | undefined): string[] {
   if (!raw) return []
@@ -133,7 +134,8 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
 
 /**
  * DRAFT → PENDING_APPROVAL when the request type has approver roles
- * configured, else straight to APPROVED (mirrors CreditGroup's
+ * configured (opening the first WorkflowApproval level via
+ * lib/expense-workflow.ts), else straight to APPROVED (mirrors CreditGroup's
  * requiresApproval / approvalRequiredDefault behavior: no approvers
  * configured ⇒ nothing to wait for).
  */
@@ -145,28 +147,19 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
   const roles = parseRoleList(request.requestType.approverRoles)
   const status: ExpenseRequestStatus = roles.length ? 'PENDING_APPROVAL' : 'APPROVED'
   await db.expenseRequest.update({ where: { id: requestId }, data: { status } })
+  if (status === 'PENDING_APPROVAL') await openNextApprovalStep(db, requestId)
   return { status }
 }
 
-/**
- * PENDING_APPROVAL → APPROVED | REJECTED. Phase 1 (M3): a direct status
- * transition — the caller (API route) checks the acting user's role against
- * RequestType.approverRoles before calling this. M4 replaces the *routing*
- * (multi-step, materialized WorkflowApproval rows visible in the shared
- * approvals inbox) without changing this function's contract.
- */
-export async function decideExpenseRequest(db: Db, requestId: string, opts: { approve: boolean }): Promise<{ status: ExpenseRequestStatus }> {
-  const request = await db.expenseRequest.findUnique({ where: { id: requestId } })
-  if (!request) throw new Error('Expense request not found')
-  if (request.status !== 'PENDING_APPROVAL') throw new Error(`Cannot decide a request in status ${request.status}`)
-
-  const status: ExpenseRequestStatus = opts.approve ? 'APPROVED' : 'REJECTED'
-  await db.expenseRequest.update({ where: { id: requestId }, data: { status } })
-  return { status }
-}
+// decideExpenseRequest (M3's direct status flip) is superseded by
+// lib/expense-workflow.ts's decideExpenseRequestViaWorkflow, which resolves
+// the actual WorkflowApproval row so a decision never leaves a dangling
+// entry in the shared approvals inbox. Removed rather than kept as a second,
+// unsafe way to reach the same transition.
 
 /** DRAFT | PENDING_APPROVAL → CANCELLED. Once a request has any payment
- *  allocation it can no longer be cancelled — reverse the payment instead. */
+ *  allocation it can no longer be cancelled — reverse the payment instead.
+ *  Also rejects any dangling PENDING WorkflowApproval row for this request. */
 export async function cancelExpenseRequest(db: Db, requestId: string): Promise<{ status: ExpenseRequestStatus }> {
   const request = await db.expenseRequest.findUnique({ where: { id: requestId }, include: { _count: { select: { paymentAllocations: true } } } })
   if (!request) throw new Error('Expense request not found')
@@ -174,6 +167,7 @@ export async function cancelExpenseRequest(db: Db, requestId: string): Promise<{
   if (request.status !== 'DRAFT' && request.status !== 'PENDING_APPROVAL') throw new Error(`Cannot cancel a request in status ${request.status}`)
 
   await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'CANCELLED' } })
+  await cancelPendingExpenseApproval(db, requestId)
   return { status: 'CANCELLED' }
 }
 
