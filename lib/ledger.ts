@@ -12,7 +12,7 @@ import type { PrismaClient } from '@prisma/client'
 export const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'] as const
 export type AccountType = (typeof ACCOUNT_TYPES)[number]
 
-export const SOURCE_MODULES = ['PROCUREMENT', 'INVENTORY', 'SALES', 'COLLECTIONS', 'PAYROLL', 'MANUAL'] as const
+export const SOURCE_MODULES = ['PROCUREMENT', 'INVENTORY', 'SALES', 'COLLECTIONS', 'PAYROLL', 'EXPENSE', 'MANUAL'] as const
 export type SourceModule = (typeof SOURCE_MODULES)[number]
 
 // A plain Prisma client or an in-flight $transaction callback client — every
