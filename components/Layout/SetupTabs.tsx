@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, Workflow, GitBranch, CalendarClock, Landmark, type LucideIcon } from 'lucide-react'
+import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, Workflow, GitBranch, CalendarClock, Landmark, Wallet, Contact, type LucideIcon } from 'lucide-react'
 
 // The Setup groups, in the order they appear. Role-gated per group.
 export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles: string[] }[] = [
@@ -24,6 +24,8 @@ export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles:
   { href: '/collection-templates', label: 'Collection Templates', icon: Workflow, roles: ['ADMIN'] },
   { href: '/collection-mode-settings', label: 'Collection Mode', icon: GitBranch, roles: ['ADMIN'] },
   { href: '/credit-settings', label: 'Credit Settings', icon: Landmark, roles: ['ADMIN'] },
+  { href: '/payroll/settings', label: 'Payroll Settings', icon: Wallet, roles: ['ADMIN'] },
+  { href: '/payroll/employees', label: 'Employees', icon: Contact, roles: ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'] },
 ]
 
 /** Horizontal tab bar shown at the top of every Setup page. */
