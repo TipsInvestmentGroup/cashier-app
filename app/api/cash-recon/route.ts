@@ -8,6 +8,7 @@ import { isValidExcessReasonCode } from '@/lib/excess-reasons-db'
 import { classForReason } from '@/lib/reconciliation-classification'
 import { generateBillReference } from '@/lib/bill-reference'
 import { syncFromCashRecon } from '@/lib/payment-verification'
+import { autoSettleExcessPayment } from '@/lib/excess-settlement'
 import { postJournalEntry } from '@/lib/ledger'
 import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
@@ -157,14 +158,23 @@ export async function POST(req: NextRequest) {
     const priorItems = existing ? await tx.cashReconExcess.findMany({ where: { cashReconId: saved.id } }) : []
     const incomingIds = new Set(excessItems.filter((it) => it.id).map((it) => it.id as string))
     const toRemove = priorItems.filter((p) => !incomingIds.has(p.id))
-    const blockedRemoval = toRemove.find((p) => p.paidAmount > 0)
+    const blockedRemoval = toRemove.find((p) => p.paidAmount > 0 || p.settledAsSourceAmount > 0)
     if (blockedRemoval) {
-      throw new Error(`Cannot remove an excess item that already has ${blockedRemoval.paidAmount} settled — clear its payments in Excess Recon first`)
+      const settled = blockedRemoval.paidAmount + blockedRemoval.settledAsSourceAmount
+      throw new Error(`Cannot remove an excess item that already has ${settled} settled — clear its payments in Excess Recon first`)
     }
     if (toRemove.length > 0) {
       await tx.cashReconExcess.deleteMany({ where: { id: { in: toRemove.map((p) => p.id) } } })
     }
     for (const it of excessItems) {
+      const prior = it.id ? priorItems.find((p) => p.id === it.id) : undefined
+      // Auto-settlement already redirected part of this row's own amount to
+      // pay down someone else's balance — the row can't be edited down below
+      // that without unwinding those settlements first (same guard style as
+      // the paidAmount protection above/on the single-item edit route).
+      if (prior && it.amount < prior.settledAsSourceAmount) {
+        throw new Error(`Cannot reduce this excess amount below the ${prior.settledAsSourceAmount} already auto-settled against outstanding balances`)
+      }
       const fields = {
         amount: it.amount,
         reason: it.reason,
@@ -180,8 +190,10 @@ export async function POST(req: NextRequest) {
         personId: it.personId,
         personName: personName(it.personId),
       }
-      if (it.id && priorItems.some((p) => p.id === it.id)) {
-        await tx.cashReconExcess.update({ where: { id: it.id }, data: fields })
+      let rowId: string
+      if (prior) {
+        await tx.cashReconExcess.update({ where: { id: it.id as string }, data: fields })
+        rowId = it.id as string
       } else {
         const recordId = crypto.randomUUID()
         const ref = await generateBillReference(tx, {
@@ -193,6 +205,27 @@ export async function POST(req: NextRequest) {
             internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
           },
         })
+        rowId = recordId
+      }
+
+      // Auto-settlement engine (generic across every PAYABLE_EXCESS reason):
+      // this row's cash already left the till, so before it stands as its own
+      // new pending excess, apply only the newly-added amount (never re-run on
+      // an unchanged/decreased save) against outstanding same-reason
+      // CollectionExcess balances, oldest first.
+      const priorAmount = prior?.amount || 0
+      const deltaForSettlement = roundMoney(it.amount - priorAmount)
+      if (deltaForSettlement > 0) {
+        const result = await autoSettleExcessPayment(tx, {
+          reason: it.reason, amount: deltaForSettlement, staffId: it.staffId, personId: it.personId,
+          outletId: usedOutletId, sourceCashReconExcessId: rowId, userId: user.userId,
+        })
+        if (result.allocated > 0) {
+          await tx.cashReconExcess.update({
+            where: { id: rowId },
+            data: { settledAsSourceAmount: roundMoney((prior?.settledAsSourceAmount || 0) + result.allocated) },
+          })
+        }
       }
     }
 
@@ -203,16 +236,22 @@ export async function POST(req: NextRequest) {
     // Posted idempotently as a DELTA — the recon is re-saved repeatedly as the
     // day closes, so we true-up the net Sales-Revenue posting to the current
     // excess total instead of reversing/re-posting each time (delta 0 = no-op).
+    // The basis nets out whatever the auto-settlement engine has redirected to
+    // pay down outstanding CollectionExcess balances (that portion posts its
+    // own Dr Excess-Payable / Cr Cash inside autoSettleExcessPayment) — only
+    // the unmatched remainder is a genuine Sales-Revenue reversal.
     const outlet = usedOutletId ? await tx.outlet.findUnique({ where: { id: usedOutletId }, select: { companyId: true } }) : null
     const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
     if (companyId) {
+      const freshItems = await tx.cashReconExcess.findMany({ where: { cashReconId: saved.id } })
+      const excessNetOfAutoSettlement = roundMoney(freshItems.reduce((s, it) => s + roundMoney(it.amount - it.settledAsSourceAmount), 0))
       const salesRevenueAccountId = await resolveAccountId(tx, { companyId, key: 'SALES_REVENUE' })
       const priorLines = await tx.journalLine.findMany({
         where: { accountId: salesRevenueAccountId, journalEntry: { sourceType: 'CashReconExcessPayout', sourceId: saved.id } },
         select: { debit: true, credit: true },
       })
       const postedNet = roundMoney(priorLines.reduce((s, l) => s + (l.debit || 0) - (l.credit || 0), 0))
-      const delta = roundMoney(excess - postedNet)
+      const delta = roundMoney(excessNetOfAutoSettlement - postedNet)
       if (delta !== 0) {
         const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: 'CASH', outletId: usedOutletId })
         await postJournalEntry(tx, {

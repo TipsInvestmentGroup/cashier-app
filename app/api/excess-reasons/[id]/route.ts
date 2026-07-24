@@ -25,6 +25,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const data: any = {}
   if (body.label !== undefined) data.label = String(body.label).trim()
   if (body.isActive !== undefined) data.isActive = !!body.isActive
+  if (body.allocationStrategy !== undefined) {
+    if (!['FIFO', 'LIFO'].includes(body.allocationStrategy)) {
+      return NextResponse.json({ error: 'allocationStrategy must be FIFO or LIFO' }, { status: 400 })
+    }
+    data.allocationStrategy = body.allocationStrategy
+  }
   if (body.category !== undefined && ['PAYABLE_EXCESS', 'NON_PAYABLE', 'STAFF_LOSS'].includes(body.category)) {
     const existing = await prisma.excessReason.findUnique({ where: { id } })
     if (existing && RESERVED_REASON_CODES.includes(existing.code)) {

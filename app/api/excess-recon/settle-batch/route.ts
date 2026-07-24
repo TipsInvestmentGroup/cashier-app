@@ -89,6 +89,12 @@ export async function POST(req: NextRequest) {
           })
         }
       }
+      await tx.excessSettlement.create({
+        data: {
+          reason: row.reason, method: 'MANUAL', sourceType: 'MANUAL_PAYMENT', sourceId: null,
+          targetType: source, targetId: id, amount: pay, outletId: null, createdById: user.userId,
+        },
+      })
       applied.push({ id, source, amount: pay, newPaid, balance: roundMoney(row.amount - newPaid) })
       rem = roundMoney(rem - pay)
     }

@@ -69,7 +69,12 @@ export async function GET(req: NextRequest) {
 
   const rows: ExcessReconRow[] = (await Promise.all([
     ...cashItems.map(async (it) => {
-      const balance = Math.max(0, it.amount - it.paidAmount)
+      // The auto-settlement engine (lib/excess-settlement.ts) redirects part of
+      // a cash-recon row's own amount to pay down older CollectionExcess
+      // balances instead of leaving it as its own pending excess — fold that
+      // into paid/balance here so the ledger reflects it without a separate column.
+      const paid = it.paidAmount + it.settledAsSourceAmount
+      const balance = Math.max(0, it.amount - paid)
       return {
         id: it.id, source: 'CASH_RECON' as const,
         date: it.cashRecon.date.toISOString(),
@@ -78,7 +83,7 @@ export async function GET(req: NextRequest) {
         staffId: it.staffId, personId: it.personId,
         excess: it.amount, reason: it.reason, reasonLabel: await excessReasonLabelDb(it.reason),
         category: it.category, channelCode: it.channelCode, notes: it.notes,
-        paid: it.paidAmount, paidAt: it.paidAt ? it.paidAt.toISOString() : null, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
+        paid, paidAt: it.paidAt ? it.paidAt.toISOString() : null, balance, status: (balance <= 0 ? 'SETTLED' : 'PENDING') as 'SETTLED' | 'PENDING',
       }
     }),
     ...collectionItems.map(async (it) => {

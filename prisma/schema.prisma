@@ -2046,8 +2046,9 @@ model CashReconExcess {
   staffName       String?
   personId        String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
   personName      String?
-  paidAmount      Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount
+  paidAmount      Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount. Always 0 here — D10 blocks settling a CASH_RECON row directly (already disbursed at recon time)
   paidAt          DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
+  settledAsSourceAmount Float @default(0) // portion of THIS row's own amount that the auto-settlement engine (lib/excess-settlement.ts) has redirected to pay down older outstanding CollectionExcess rows of the same reason, instead of standing as its own new balance. Excess Recon's displayed paid/balance for this row folds this in (paid = paidAmount + settledAsSourceAmount).
   createdAt       DateTime  @default(now())
 
   // Bill Reference System — plays the "Excess Payment" (EXS) bill type
@@ -2204,13 +2205,14 @@ model CancellationReasonProduct {
 /// like STAFF_TIP/CUSTOMER_EXCESS) drives the existing auto-SignedBill debt
 /// path unchanged.
 model ExcessReason {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  label           String
-  category        String   @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS (legacy: also drives form placement)
-  accountingClass String? // RECEIVABLE | PAYABLE | ADJUSTMENT — accounting treatment, derived from code (see lib/reconciliation-classification.ts); drift-proof
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
+  id                 String   @id @default(cuid())
+  code               String   @unique
+  label              String
+  category           String   @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS (legacy: also drives form placement)
+  accountingClass    String? // RECEIVABLE | PAYABLE | ADJUSTMENT — accounting treatment, derived from code (see lib/reconciliation-classification.ts); drift-proof
+  allocationStrategy String   @default("FIFO") // FIFO | LIFO — order the auto-settlement engine (lib/excess-settlement.ts) applies a Cash Recon payment against this reason's outstanding CollectionExcess balances
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
 }
 
 // ─── Bill Reference System ───────────────────────────────────────────────────
@@ -2346,6 +2348,31 @@ model ExcessRefund {
   @@index([date])
   @@index([outletId])
   @@index([personId])
+}
+
+/// Granular settlement ledger for the Excess Recon auto-settlement engine
+/// (lib/excess-settlement.ts) and the existing manual Pay/batch-pay routes —
+/// one row per allocation of money against a specific outstanding excess row,
+/// independent of the free-text AuditLog. sourceType/sourceId identify what
+/// funded the allocation (a CashReconExcess payment row, or a manual payment
+/// with no backing record); targetType/targetId identify the CollectionExcess
+/// (or, for manual settlements only, CashReconExcess) row that got settled.
+model ExcessSettlement {
+  id          String   @id @default(cuid())
+  reason      String
+  method      String   @default("AUTO_FIFO") // AUTO_FIFO | AUTO_LIFO | MANUAL
+  sourceType  String // CASH_RECON_PAYMENT | MANUAL_PAYMENT
+  sourceId    String? // CashReconExcess.id that funded this allocation (null for a manual lump-sum payment with no backing row)
+  targetType  String // CASH_RECON | COLLECTION — which ledger the settled row belongs to
+  targetId    String // the CashReconExcess/CollectionExcess id that was settled
+  amount      Float
+  outletId    String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([reason])
 }
 
 model AuditLog {

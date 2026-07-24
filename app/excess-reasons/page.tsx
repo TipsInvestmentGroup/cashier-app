@@ -5,7 +5,7 @@ import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import toast from 'react-hot-toast'
 
-interface Reason { id: string; code: string; label: string; category: string; isActive: boolean }
+interface Reason { id: string; code: string; label: string; category: string; isActive: boolean; allocationStrategy: string }
 
 const PROTECTED_CODES = ['STAFF_TIP', 'CUSTOMER_EXCESS', 'STAFF_LOSS']
 const CATEGORY_OPTS: { value: string; label: string }[] = [
@@ -55,6 +55,10 @@ export default function ExcessReasonsPage() {
   const changeCategory = async (r: Reason, category: string) => {
     try { await request(`/api/excess-reasons/${r.id}`, { method: 'PUT', body: JSON.stringify({ category }) }); toast.success('Category updated'); load() }
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not update category') }
+  }
+  const changeAllocationStrategy = async (r: Reason, allocationStrategy: string) => {
+    try { await request(`/api/excess-reasons/${r.id}`, { method: 'PUT', body: JSON.stringify({ allocationStrategy }) }); toast.success('Settlement order updated'); load() }
+    catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not update settlement order') }
   }
   const toggle = async (r: Reason) => {
     try { await request(`/api/excess-reasons/${r.id}`, { method: 'PUT', body: JSON.stringify({ isActive: !r.isActive }) }); load() }
@@ -116,6 +120,18 @@ export default function ExcessReasonsPage() {
                         </select>
                       ) : (
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${CATEGORY_BADGE[r.category] || 'bg-gray-100 text-gray-600'}`}>{categoryLabel(r.category)}</span>
+                      )}
+                      {r.category === 'PAYABLE_EXCESS' && (
+                        canManage ? (
+                          <select value={r.allocationStrategy} onChange={(e) => changeAllocationStrategy(r, e.target.value)}
+                            title="Order the auto-settlement engine applies a Cash Recon payment against this reason's outstanding balances"
+                            className="px-2 py-1 rounded-lg text-xs font-bold border-0 bg-blue-50 text-blue-700">
+                            <option value="FIFO">Oldest first (FIFO)</option>
+                            <option value="LIFO">Newest first (LIFO)</option>
+                          </select>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700">{r.allocationStrategy === 'LIFO' ? 'Newest first' : 'Oldest first'}</span>
+                        )
                       )}
                       {canManage && (
                         <div className="flex gap-1.5 ml-2">

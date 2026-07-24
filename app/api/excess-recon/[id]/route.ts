@@ -46,6 +46,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const txModel = (source === 'CASH_RECON' ? tx.cashReconExcess : tx.collectionExcess) as any
       const upd = await txModel.update({ where: { id }, data: { paidAmount: 0, paidAt: null } })
+      // Auto-settlement may have funded this row from one or more Cash Recon
+      // payments (lib/excess-settlement.ts) — unwind their settledAsSourceAmount
+      // too, or those source rows would keep showing as paid for money that no
+      // longer settles anything.
+      if (source === 'COLLECTION') {
+        const funding = await tx.excessSettlement.findMany({
+          where: { targetType: 'COLLECTION', targetId: id, sourceType: 'CASH_RECON_PAYMENT' },
+        })
+        for (const f of funding) {
+          const cre = await tx.cashReconExcess.findUnique({ where: { id: f.sourceId as string } })
+          if (cre) {
+            await tx.cashReconExcess.update({ where: { id: cre.id }, data: { settledAsSourceAmount: roundMoney(Math.max(0, cre.settledAsSourceAmount - f.amount)) } })
+          }
+        }
+        if (funding.length > 0) {
+          await tx.excessSettlement.deleteMany({ where: { id: { in: funding.map((f) => f.id) } } })
+        }
+      }
       if (reverseGl) {
         const coll = await tx.collectionExcess.findUnique({ where: { id }, include: { collection: { include: { outlet: true } } } })
         const outletId = coll?.collection.outletId
@@ -123,6 +141,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         })
       }
     }
+    await tx.excessSettlement.create({
+      data: {
+        reason: existing.reason, method: 'MANUAL', sourceType: 'MANUAL_PAYMENT', sourceId: null,
+        targetType: 'COLLECTION', targetId: id, amount, outletId: null, createdById: user.userId,
+      },
+    })
     await tx.auditLog.create({
       data: {
         userId: user.userId, action: 'UPDATE',
