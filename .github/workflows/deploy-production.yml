@@ -30,16 +30,25 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+      # NODE_ENV must NOT be set here (or at job level) — npm ci honors
+      # NODE_ENV=production by omitting devDependencies, which would drop
+      # `tsx` (a devDependency) and break every npx tsx step below. Set it
+      # per-step instead, only where validate-config.ts/the app actually
+      # need it.
       - run: npm ci
 
       - name: Validate configuration
         run: npx tsx scripts/validate-config.ts --env=production
+        env:
+          NODE_ENV: production
 
       - name: Apply pending migrations
         run: |
           node scripts/prepare-db.mjs
           npx prisma generate
           npx prisma migrate deploy
+        env:
+          NODE_ENV: production
 
       - name: Deploy to Vercel (Production)
         run: |
@@ -48,6 +57,7 @@ jobs:
           vercel build --prod --token="$VERCEL_TOKEN"
           vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
         env:
+          NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
       - name: Post-deploy smoke check (read-only — runs against live business data)
