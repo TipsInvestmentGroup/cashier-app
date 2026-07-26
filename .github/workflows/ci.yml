@@ -9,6 +9,19 @@ on:
 jobs:
   build-lint-typecheck:
     runs-on: ubuntu-latest
+    env:
+      # This job only builds/typechecks (SQLite, no real DB touched) — these
+      # are dummy values so `next build`'s production-mode page-data
+      # collection doesn't trip lib/auth.ts's real-secret guard. Never use
+      # these for an actual deploy; staging/production set real per-env
+      # secrets (see deploy-staging.yml / deploy-production.yml).
+      NODE_ENV: production
+      JWT_SECRET: ci-build-only-not-a-real-secret
+      DATABASE_URL: file:./dev.db
+      NEXT_PUBLIC_OWNER_EMAIL: ci@example.com
+      CRON_SECRET: ci-build-only-cron-secret-value
+      SMTP_HOST: localhost
+      SMTP_FROM: ci@example.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
