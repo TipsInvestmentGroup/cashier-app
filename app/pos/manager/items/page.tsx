@@ -5,7 +5,6 @@ import { SectionTabs, MYPOS_TABS } from '@/components/Layout/SectionTabs'
 import { useAuth } from '@/contexts/AuthContext'
 
 interface Product { id: string; name: string; code: string; category: string | null; sellingPrice: number; blocked: boolean }
-interface BlockedItem { id: string; productId: string; reason: string | null; product: Product }
 
 export default function ItemBlockerPage() {
   const { user, token } = useAuth()

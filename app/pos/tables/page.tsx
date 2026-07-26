@@ -193,7 +193,7 @@ function TableFloor() {
 
   const counts = useMemo(() => {
     const c = { free: 0, mine: 0, ready: 0, other: 0 }
-    tables.forEach(t => { c[getStatus(t)]++ }) // eslint-disable-line react-hooks/exhaustive-deps
+    tables.forEach(t => { c[getStatus(t)]++ })
     return c
   }, [tables, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 

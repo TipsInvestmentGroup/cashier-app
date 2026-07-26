@@ -12,11 +12,16 @@ import { formatDate } from '@/lib/utils'
 import { generateWarningLetters, type FlaggedItem } from '@/lib/warning-letter-pdf'
 import { generateRewardLetters } from '@/lib/reward-letter-pdf'
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns'
-import { Target, Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2, Lock, Unlock } from 'lucide-react'
+import { Wallet, Cigarette, UtensilsCrossed, Building2, User, Crown, Trash2, Lock, Unlock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-const deptIcon = (d: string) => { const k = targetDeptKey(d); return k === 'shisha' ? Cigarette : k === 'food' ? UtensilsCrossed : Wallet }
-const scopeIcon = (s: string) => (s === 'Per Outlet' ? Building2 : s === 'Per Manager' ? Crown : User)
+function deptIconEl(d: string, className: string) {
+  const k = targetDeptKey(d)
+  return k === 'shisha' ? <Cigarette className={className} /> : k === 'food' ? <UtensilsCrossed className={className} /> : <Wallet className={className} />
+}
+function scopeIconEl(s: string, className: string) {
+  return s === 'Per Outlet' ? <Building2 className={className} /> : s === 'Per Manager' ? <Crown className={className} /> : <User className={className} />
+}
 const deptKey = targetDeptKey
 
 interface OutletRow { id: string; name: string }
@@ -581,11 +586,10 @@ function statusOf(actual: number, levels: { rewardFrom: number; letterBelow: num
 function ProgressCard({ t, actual, levels }: { t: TargetDef; actual: number; levels: { target: number; rewardFrom: number; letterBelow: number } }) {
   const pct = levels.target > 0 ? Math.min(100, Math.round((actual / levels.target) * 100)) : 0
   const st = statusOf(actual, levels)
-  const ScopeIcon = scopeIcon(t.scope)
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
       <div className="flex items-center justify-between mb-1">
-        <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700"><ScopeIcon className="w-4 h-4" /> {t.department} · {t.scope}</span>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">{scopeIconEl(t.scope, 'w-4 h-4')} {t.department} · {t.scope}</span>
         <Badge tone={st.tone}>{st.label}</Badge>
       </div>
       <div className="flex items-end justify-between">
@@ -598,11 +602,10 @@ function ProgressCard({ t, actual, levels }: { t: TargetDef; actual: number; lev
 }
 
 function StaffTable({ t, levels, rows }: { t: TargetDef; levels: { target: number; rewardFrom: number; letterBelow: number }; rows: { name: string; actual: number; prev: number; rank: number }[] }) {
-  const DeptIcon = deptIcon(t.department)
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-        <span className="flex items-center gap-1.5 font-semibold text-gray-800 text-sm"><DeptIcon className="w-4 h-4 text-gray-400" /> {t.department} — per staff</span>
+        <span className="flex items-center gap-1.5 font-semibold text-gray-800 text-sm">{deptIconEl(t.department, 'w-4 h-4 text-gray-400')} {t.department} — per staff</span>
         <span className="text-xs text-gray-400">Target {fmtTarget(levels.target, t.unit, t.unitLabel)}</span>
       </div>
       {rows.length === 0 ? (
@@ -644,16 +647,14 @@ function StaffTable({ t, levels, rows }: { t: TargetDef; levels: { target: numbe
 
 function TargetCard({ t, period, daysInMonth }: { t: TargetDef; period: 'weekly' | 'monthly'; daysInMonth: number }) {
   const { target, letterBelow, rewardFrom } = targetLevels(t, period, daysInMonth)
-  const DeptIcon = deptIcon(t.department)
-  const ScopeIcon = scopeIcon(t.scope)
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
       <div className="flex items-start justify-between gap-2 mb-2">
         <div>
           <Badge tone={t.department === 'Shisha Sales' ? 'purple' : t.department === 'Food Sales' ? 'amber' : 'indigo'}>{t.department}</Badge>
-          <div className="flex items-center gap-1.5 mt-1.5 text-gray-600 text-xs font-medium"><ScopeIcon className="w-3.5 h-3.5" /> {t.scope}</div>
+          <div className="flex items-center gap-1.5 mt-1.5 text-gray-600 text-xs font-medium">{scopeIconEl(t.scope, 'w-3.5 h-3.5')} {t.scope}</div>
         </div>
-        <span className="w-8 h-8 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center flex-shrink-0"><DeptIcon className="w-4 h-4" /></span>
+        <span className="w-8 h-8 rounded-lg bg-gray-50 text-gray-500 flex items-center justify-center flex-shrink-0">{deptIconEl(t.department, 'w-4 h-4')}</span>
       </div>
       <p className="text-[11px] text-gray-400">{period === 'weekly' ? 'Weekly' : 'Monthly'} target</p>
       <p className="text-xl font-bold text-indigo-700 tracking-tight leading-tight">{fmtTarget(target, t.unit, t.unitLabel)}</p>

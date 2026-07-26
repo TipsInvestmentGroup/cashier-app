@@ -124,7 +124,6 @@ export default function CollectionsPage() {
   const [closeWizard, setCloseWizard] = useState(false) // guided close-day flow
   const [wizardStep, setWizardStep] = useState(0)
   const [dayStatus, setDayStatus] = useState({ cashDone: false, digitalDone: false, templateDone: false })
-  const [statusLoading, setStatusLoading] = useState(false)
 
   const [form, setForm] = useState({
     cash: '', channelAmounts: {} as Record<string, string>, notes: '', staffName: '', systemSales: '',
@@ -146,7 +145,6 @@ export default function CollectionsPage() {
   }, [form.outletId, user?.outlet?.id])
   useEffect(() => {
     if (!editingId && !dateTouchedRef.current) setForm((f) => ({ ...f, date: businessToday }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessToday, editingId])
   const channelAmountsNum = Object.fromEntries(Object.entries(form.channelAmounts).map(([k, v]) => [k, Number(v) || 0]))
   const getAmountBox = (code: string) => code === 'CASH' ? form.cash : (form.channelAmounts[code] || '')
@@ -201,7 +199,7 @@ export default function CollectionsPage() {
     setPersonNames(all.map((p) => p.name).sort((a, b) => a.localeCompare(b)))
     if (outs.length && !form.outletId) setForm((f) => ({ ...f, outletId: outs[0].id }))
     setLoading(false)
-  }, [request])
+  }, [request, form.outletId])
 
   useEffect(() => { load() }, [load])
 
@@ -476,17 +474,14 @@ export default function CollectionsPage() {
   // Live readiness — is Cash Recon + Digital Recon done for the target day?
   const loadDayStatus = async () => {
     if (targetOutletIds.length === 0) { setDayStatus({ cashDone: false, digitalDone: false, templateDone: false }); return }
-    setStatusLoading(true)
-    try {
-      const results = await Promise.all(targetOutletIds.map((oid) =>
-        request(`/api/collections/day-status?date=${targetDayStr}&outletId=${oid}`).catch(() => null)))
-      const ok = results.filter(Boolean) as { cashReconDone: boolean; digitalReconDone: boolean; templateSessionsOpen: boolean }[]
-      setDayStatus({
-        cashDone: ok.length > 0 && ok.every((r) => r.cashReconDone),
-        digitalDone: ok.length > 0 && ok.every((r) => r.digitalReconDone),
-        templateDone: ok.length > 0 && ok.every((r) => !r.templateSessionsOpen),
-      })
-    } finally { setStatusLoading(false) }
+    const results = await Promise.all(targetOutletIds.map((oid) =>
+      request(`/api/collections/day-status?date=${targetDayStr}&outletId=${oid}`).catch(() => null)))
+    const ok = results.filter(Boolean) as { cashReconDone: boolean; digitalReconDone: boolean; templateSessionsOpen: boolean }[]
+    setDayStatus({
+      cashDone: ok.length > 0 && ok.every((r) => r.cashReconDone),
+      digitalDone: ok.length > 0 && ok.every((r) => r.digitalReconDone),
+      templateDone: ok.length > 0 && ok.every((r) => !r.templateSessionsOpen),
+    })
   }
 
   // Refresh status when the wizard opens and whenever the cashier returns to this tab.

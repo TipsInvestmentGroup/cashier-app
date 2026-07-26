@@ -2,10 +2,9 @@ import { PrismaClient } from '@prisma/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import 'dotenv/config'
 
-const prisma = new PrismaClient({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  adapter: new PrismaBetterSqlite3({ url: process.env.DATABASE_URL || 'file:./dev.db' }),
-} as any)
+const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL || 'file:./dev.db' })
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const prisma = new PrismaClient({ adapter } as any)
 
 const PLACEHOLDERS = ['Dr. James Director', 'Mr. Bob Admin']
 

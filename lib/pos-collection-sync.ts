@@ -12,6 +12,7 @@ export interface PosSyncResult {
 }
 
 /** Not implemented — no POS integration exists yet. Always returns empty. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function fetchPosTotals(_stageId: string, _date: Date): Promise<PosSyncResult[]> {
   return []
 }

@@ -78,8 +78,8 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-indigo-900 to-indigo-800 text-white w-64">
       <div className="p-6 border-b border-indigo-700">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <div className="w-12 h-12 rounded-xl bg-black flex items-center justify-center mb-2 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element -- logoUrl is admin-configured/arbitrary, next/image requires static or remote-pattern config */}
           <img src={config.logoUrl} alt={config.companyName} className="w-full h-full object-contain p-1" />
         </div>
         <h1 className="text-lg font-bold leading-tight">{config.appName}</h1>

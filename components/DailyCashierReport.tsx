@@ -8,22 +8,54 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
-interface Row {
-  staffName: string; outletName: string; systemSales: number
-  cash: number; crdb: number; stanbic: number; mpesa: number; total: number
-  signed: Record<string, number>; paid: Record<string, number>; netCollection: number
+
+// Row/totals shape varies by `groupBy` (staff/outlet share one shape; customer
+// and admin/director each have their own) — modelled as one permissive shape
+// rather than a discriminated union, since call sites branch on `groupBy`
+// (not a `kind` field) to know which fields are populated.
+// `paid` is a per-channel Record (with a `total`) for staff/outlet rows, but a
+// plain number for customer rows — narrowed via `paidBreakdown`/`paidAmount`
+// helpers below rather than a single static type.
+type PaidBreakdown = Record<string, number> & { total?: number }
+interface ReportRow {
+  name?: string; staffName?: string; outletName?: string
+  systemSales?: number; cash?: number; crdb?: number; stanbic?: number; mpesa?: number; total?: number
+  signed?: PaidBreakdown; paid?: PaidBreakdown | number
+  netCollection?: number
+  debt?: number; unpaid?: number
+  spent?: number; creditLimit?: number; deduction?: number
 }
-interface ReportResp {
-  from: string; to: string; rows: Row[]
-  totals: { systemSales: number; cash: number; crdb: number; stanbic: number; mpesa: number; total: number; signedTotal: number; paidTotal: number; netCollection: number }
+const paidBreakdown = (r: ReportRow): PaidBreakdown => (typeof r.paid === 'object' && r.paid ? r.paid : {})
+const paidAmount = (r: ReportRow): number => (typeof r.paid === 'number' ? r.paid : r.paid?.total ?? 0)
+interface ReportTotals {
+  systemSales?: number; cash?: number; crdb?: number; stanbic?: number; mpesa?: number; total?: number
+  signedTotal?: number; paidTotal?: number; netCollection?: number
+  debt?: number; paid?: number; unpaid?: number
+  spent?: number; creditLimit?: number; deduction?: number
+}
+interface ReportData {
+  from: string; to: string; rows: ReportRow[]; totals: ReportTotals
   signedKeys: string[]; paidKeys: string[]
 }
+
+// Per-staff/customer/admin/director day-by-day breakdown shown in the detail modal.
+interface DetailRow {
+  date: string; serviceStaff?: string
+  debt?: number; paid?: number; outstanding?: number
+  spent?: number; creditLimit?: number; exceeded?: number
+  system?: number; collection?: number; signed?: number; difference?: number; net?: number
+}
+interface DetailTotals {
+  debt?: number; paid?: number; outstanding?: number
+  spent?: number; creditLimit?: number; exceeded?: number
+  system?: number; collection?: number; signed?: number; difference?: number; net?: number
+}
+interface DetailData { kind?: string; rows: DetailRow[]; totals: DetailTotals }
 
 const SIGNED_LABELS: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', TIPS: 'Tips', DJ: 'DJ', STAFF_LOSS: 'Staff Loss' }
 const PAID_LABELS: Record<string, string> = { ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', STAFF_LOSS: 'Staff Loss', OTHER: 'Other' }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; request: (url: string, opts?: any) => Promise<any> }) {
+export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; request: (url: string, opts?: RequestInit) => Promise<unknown> }) {
   const [range, setRange] = useState<RangeKey>('today')
   const [customFrom, setCustomFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [customTo, setCustomTo] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -33,11 +65,9 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const [search, setSearch] = useState('')
   // Detail modal
   const [detailKey, setDetailKey] = useState<string | null>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [detail, setDetail] = useState<{ kind?: string; rows: any[]; totals: any } | null>(null)
+  const [detail, setDetail] = useState<DetailData | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [data, setData] = useState<any>(null)
+  const [data, setData] = useState<ReportData | null>(null)
   const [loading, setLoading] = useState(false)
 
   const interval = getRangeInterval(range, customFrom, customTo)
@@ -49,7 +79,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
     try {
       const params = new URLSearchParams({ from, to, groupBy })
       if (outletId) params.set('outletId', outletId)
-      setData(await request(`/api/reports/daily-cashier?${params}`))
+      setData((await request(`/api/reports/daily-cashier?${params}`)) as ReportData)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error loading report')
     } finally {
@@ -62,15 +92,14 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
   const signedKeys: string[] = data?.signedKeys || []
   const paidKeys: string[] = (data?.paidKeys || []).filter((k: string) => k !== 'OTHER')
   const q = search.trim().toLowerCase()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const visibleRows = (data?.rows || []).filter((r: any) => !q || String(r.staffName ?? r.name ?? '').toLowerCase().includes(q))
+  const visibleRows = (data?.rows || []).filter((r) => !q || String(r.staffName ?? r.name ?? '').toLowerCase().includes(q))
 
   const openDetail = async (key: string) => {
     setDetailKey(key); setDetail(null); setDetailLoading(true)
     try {
       const params = new URLSearchParams({ from, to, groupBy, key })
       if (outletId) params.set('outletId', outletId)
-      setDetail(await request(`/api/reports/daily-cashier/detail?${params}`))
+      setDetail((await request(`/api/reports/daily-cashier/detail?${params}`)) as DetailData)
     } catch {
       toast.error('Could not load details')
     } finally {
@@ -85,13 +114,13 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
     let body: (string | number)[][]
     if (k === 'customer') {
       header = ['Date', 'Debt', 'Paid', 'Outstanding', 'Service Staff']
-      body = detail.rows.map((r: any) => [r.date, r.debt, r.paid, r.outstanding, r.serviceStaff])
+      body = detail.rows.map((r) => [r.date, r.debt ?? 0, r.paid ?? 0, r.outstanding ?? 0, r.serviceStaff ?? ''])
     } else if (k === 'admin' || k === 'director') {
       header = ['Date', 'Signed Amount', 'Credit Limit', 'Exceeded', 'Service Staff']
-      body = detail.rows.map((r: any) => [r.date, r.spent, r.creditLimit, r.exceeded, r.serviceStaff])
+      body = detail.rows.map((r) => [r.date, r.spent ?? 0, r.creditLimit ?? 0, r.exceeded ?? 0, r.serviceStaff ?? ''])
     } else {
       header = ['Date', 'System', 'Collection', 'Signed', 'Paid', 'Shortage', 'Net']
-      body = detail.rows.map((r: any) => [r.date, r.system, r.collection, r.signed, r.paid, r.difference, r.net])
+      body = detail.rows.map((r) => [r.date, r.system ?? 0, r.collection ?? 0, r.signed ?? 0, r.paid ?? 0, r.difference ?? 0, r.net ?? 0])
     }
     const csv = [header, ...body].map((row) => row.map((v) => `"${v}"`).join(',')).join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
@@ -106,24 +135,26 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
 
   // Shared header + numeric body for all export formats
   const buildTable = () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rows: any[] = data?.rows || []
+    const rows: ReportRow[] = data?.rows || []
     if (groupBy === 'customer') {
-      return { header: ['Customer', 'Debt', 'Paid', 'Unpaid Balance'], body: rows.map((r) => [r.name, r.debt, r.paid, r.unpaid] as (string | number)[]) }
+      return { header: ['Customer', 'Debt', 'Paid', 'Unpaid Balance'], body: rows.map((r) => [r.name ?? '', r.debt ?? 0, paidAmount(r), r.unpaid ?? 0] as (string | number)[]) }
     }
     if (peopleGroup) { // admin / director
-      return { header: [labelHeader, 'Amount Spent', 'Credit Limit', 'Deduction'], body: rows.map((r) => [r.name, r.spent, r.creditLimit, r.deduction] as (string | number)[]) }
+      return { header: [labelHeader, 'Amount Spent', 'Credit Limit', 'Deduction'], body: rows.map((r) => [r.name ?? '', r.spent ?? 0, r.creditLimit ?? 0, r.deduction ?? 0] as (string | number)[]) }
     }
     const header = [
       labelHeader, 'System Sales', 'Cash', 'CRDB', 'Stanbic', 'M-PESA', 'Collection',
       ...signedKeys.map((k) => `Signed ${SIGNED_LABELS[k]}`), 'Signed Total',
       ...paidKeys.map((k) => `Paid ${PAID_LABELS[k]}`), 'Paid Total', 'Net Collection',
     ]
-    const body = rows.map((r) => [
-      r.staffName, r.systemSales, r.cash, r.crdb, r.stanbic, r.mpesa, r.total,
-      ...signedKeys.map((k) => r.signed[k] || 0), r.signed.total,
-      ...paidKeys.map((k) => r.paid[k] || 0), r.paid.total, r.netCollection,
-    ] as (string | number)[])
+    const body = rows.map((r) => {
+      const paid = paidBreakdown(r)
+      return [
+        r.staffName ?? '', r.systemSales ?? 0, r.cash ?? 0, r.crdb ?? 0, r.stanbic ?? 0, r.mpesa ?? 0, r.total ?? 0,
+        ...signedKeys.map((k) => r.signed?.[k] || 0), r.signed?.total ?? 0,
+        ...paidKeys.map((k) => paid[k] || 0), paid.total ?? 0, r.netCollection ?? 0,
+      ] as (string | number)[]
+    })
     return { header, body }
   }
 
@@ -263,7 +294,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
             <h3 className="font-semibold text-gray-800 mb-4">Net Collection by Outlet</h3>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={data.rows.map((r: any) => ({ name: r.staffName, Net: r.netCollection }))}>
+              <BarChart data={data.rows.map((r) => ({ name: r.staffName, Net: r.netCollection }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
@@ -275,7 +306,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
             <h3 className="font-semibold text-gray-800 mb-4">System Sales vs Collection by Outlet</h3>
             <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={data.rows.map((r: any) => ({ name: r.staffName, System: r.systemSales, Collection: r.total }))}>
+              <BarChart data={data.rows.map((r) => ({ name: r.staffName, System: r.systemSales, Collection: r.total }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
@@ -320,28 +351,25 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                   </tr>
                 )}
               </thead>
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               <tbody className="divide-y divide-gray-50">
                 {visibleRows.length === 0 && (
                   <tr><td colSpan={4} className="text-center py-8 text-gray-400">No match for “{search}”.</td></tr>
                 )}
                 {groupBy === 'customer'
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  ? visibleRows.map((r: any, i: number) => (
-                    <tr key={i} className={`hover:bg-gray-50 ${r.unpaid > 0 ? 'bg-red-50/40' : ''}`}>
-                      <td className="px-4 py-3"><button onClick={() => openDetail(r.name)} className="font-medium text-indigo-700 hover:underline text-left">{r.name}</button></td>
+                  ? visibleRows.map((r, i: number) => (
+                    <tr key={i} className={`hover:bg-gray-50 ${(r.unpaid ?? 0) > 0 ? 'bg-red-50/40' : ''}`}>
+                      <td className="px-4 py-3"><button onClick={() => openDetail(r.name ?? '')} className="font-medium text-indigo-700 hover:underline text-left">{r.name}</button></td>
                       <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.debt)}</td>
-                      <td className="px-4 py-3 text-right text-green-700">{formatCurrency(r.paid)}</td>
-                      <td className={`px-4 py-3 text-right font-bold ${r.unpaid > 0 ? 'text-red-600' : 'text-gray-500'}`}>{formatCurrency(r.unpaid)}</td>
+                      <td className="px-4 py-3 text-right text-green-700">{formatCurrency(paidAmount(r))}</td>
+                      <td className={`px-4 py-3 text-right font-bold ${(r.unpaid ?? 0) > 0 ? 'text-red-600' : 'text-gray-500'}`}>{formatCurrency(r.unpaid)}</td>
                     </tr>
                   ))
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  : visibleRows.map((r: any, i: number) => (
-                    <tr key={i} className={`hover:bg-gray-50 ${r.deduction > 0 ? 'bg-red-50/40' : ''}`}>
-                      <td className="px-4 py-3"><button onClick={() => openDetail(r.name)} className="font-medium text-indigo-700 hover:underline text-left">{r.name}</button></td>
+                  : visibleRows.map((r, i: number) => (
+                    <tr key={i} className={`hover:bg-gray-50 ${(r.deduction ?? 0) > 0 ? 'bg-red-50/40' : ''}`}>
+                      <td className="px-4 py-3"><button onClick={() => openDetail(r.name ?? '')} className="font-medium text-indigo-700 hover:underline text-left">{r.name}</button></td>
                       <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.spent)}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{formatCurrency(r.creditLimit)}</td>
-                      <td className={`px-4 py-3 text-right font-bold ${r.deduction > 0 ? 'text-red-600' : 'text-gray-400'}`}>{r.deduction > 0 ? formatCurrency(r.deduction) : '-'}</td>
+                      <td className={`px-4 py-3 text-right font-bold ${(r.deduction ?? 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>{(r.deduction ?? 0) > 0 ? formatCurrency(r.deduction) : '-'}</td>
                     </tr>
                   ))}
               </tbody>
@@ -388,10 +416,12 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                 {visibleRows.length === 0 && (
                   <tr><td colSpan={9 + signedKeys.length + paidKeys.length} className="text-center py-8 text-gray-400">No match for “{search}”.</td></tr>
                 )}
-                {visibleRows.map((r: any, i: number) => (
+                {visibleRows.map((r, i: number) => {
+                  const paid = paidBreakdown(r)
+                  return (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className={td}>
-                      <button onClick={() => openDetail(r.staffName)}
+                      <button onClick={() => openDetail(r.staffName ?? '')}
                         className="font-medium text-indigo-700 hover:underline text-left">{r.staffName}</button>
                     </td>
                     <td className={td}>{formatCurrency(r.systemSales)}</td>
@@ -400,13 +430,14 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                     <td className={`${td} text-purple-700`}>{formatCurrency(r.stanbic)}</td>
                     <td className={`${td} text-yellow-700`}>{formatCurrency(r.mpesa)}</td>
                     <td className={`${td} font-bold`}>{formatCurrency(r.total)}</td>
-                    {signedKeys.map((k) => <td key={k} className={td}>{r.signed[k] ? formatCurrency(r.signed[k]) : '-'}</td>)}
-                    <td className={`${td} font-semibold text-amber-700`}>{formatCurrency(r.signed.total)}</td>
-                    {paidKeys.map((k) => <td key={k} className={td}>{r.paid[k] ? formatCurrency(r.paid[k]) : '-'}</td>)}
-                    <td className={`${td} font-semibold text-green-700`}>{formatCurrency(r.paid.total)}</td>
+                    {signedKeys.map((k) => <td key={k} className={td}>{r.signed?.[k] ? formatCurrency(r.signed[k]) : '-'}</td>)}
+                    <td className={`${td} font-semibold text-amber-700`}>{formatCurrency(r.signed?.total)}</td>
+                    {paidKeys.map((k) => <td key={k} className={td}>{paid[k] ? formatCurrency(paid[k]) : '-'}</td>)}
+                    <td className={`${td} font-semibold text-green-700`}>{formatCurrency(paid.total)}</td>
                     <td className={`${td} font-bold text-indigo-700`}>{formatCurrency(r.netCollection)}</td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
               <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900">
                 <tr>
@@ -464,12 +495,12 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {detail.rows.map((r: any, i: number) => (
-                      <tr key={i} className={r.outstanding > 0 ? 'bg-red-50/50' : ''}>
+                    {detail.rows.map((r, i: number) => (
+                      <tr key={i} className={(r.outstanding ?? 0) > 0 ? 'bg-red-50/50' : ''}>
                         <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
                         <td className="px-2 py-2 text-right text-gray-700">{formatCurrency(r.debt)}</td>
                         <td className="px-2 py-2 text-right text-green-700">{formatCurrency(r.paid)}</td>
-                        <td className={`px-2 py-2 text-right font-bold ${r.outstanding > 0 ? 'text-red-600' : 'text-gray-500'}`}>{formatCurrency(r.outstanding)}</td>
+                        <td className={`px-2 py-2 text-right font-bold ${(r.outstanding ?? 0) > 0 ? 'text-red-600' : 'text-gray-500'}`}>{formatCurrency(r.outstanding)}</td>
                         <td className="px-2 py-2 text-gray-500">{r.serviceStaff || '-'}</td>
                       </tr>
                     ))}
@@ -496,12 +527,12 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {detail.rows.map((r: any, i: number) => (
-                      <tr key={i} className={r.exceeded > 0 ? 'bg-red-50/50' : ''}>
+                    {detail.rows.map((r, i: number) => (
+                      <tr key={i} className={(r.exceeded ?? 0) > 0 ? 'bg-red-50/50' : ''}>
                         <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
                         <td className="px-2 py-2 text-right font-semibold text-gray-900">{formatCurrency(r.spent)}</td>
                         <td className="px-2 py-2 text-right text-gray-500">{formatCurrency(r.creditLimit)}</td>
-                        <td className={`px-2 py-2 text-right font-bold ${r.exceeded > 0 ? 'text-red-600' : 'text-gray-400'}`}>{r.exceeded > 0 ? formatCurrency(r.exceeded) : '-'}</td>
+                        <td className={`px-2 py-2 text-right font-bold ${(r.exceeded ?? 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>{(r.exceeded ?? 0) > 0 ? formatCurrency(r.exceeded) : '-'}</td>
                         <td className="px-2 py-2 text-gray-500">{r.serviceStaff || '-'}</td>
                       </tr>
                     ))}
@@ -530,15 +561,15 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {detail.rows.map((r: any, i: number) => (
-                      <tr key={i} className={r.difference > 0 ? 'bg-red-50/50' : ''}>
+                    {detail.rows.map((r, i: number) => (
+                      <tr key={i} className={(r.difference ?? 0) > 0 ? 'bg-red-50/50' : ''}>
                         <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
                         <td className="px-2 py-2 text-right text-gray-600">{formatCurrency(r.system)}</td>
                         <td className="px-2 py-2 text-right font-semibold text-gray-900">{formatCurrency(r.collection)}</td>
                         <td className="px-2 py-2 text-right text-amber-700">{r.signed ? formatCurrency(r.signed) : '-'}</td>
                         <td className="px-2 py-2 text-right text-green-700">{r.paid ? formatCurrency(r.paid) : '-'}</td>
-                        <td className={`px-2 py-2 text-right font-semibold ${r.difference > 0 ? 'text-red-600' : r.difference < 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                          {r.difference === 0 ? '-' : formatCurrency(Math.abs(r.difference))}
+                        <td className={`px-2 py-2 text-right font-semibold ${(r.difference ?? 0) > 0 ? 'text-red-600' : (r.difference ?? 0) < 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                          {!r.difference ? '-' : formatCurrency(Math.abs(r.difference))}
                         </td>
                         <td className="px-2 py-2 text-right font-bold text-indigo-700">{formatCurrency(r.net)}</td>
                       </tr>
@@ -551,7 +582,7 @@ export function DailyCashierReport({ outlets, request }: { outlets: Outlet[]; re
                       <td className="px-2 py-2 text-right">{formatCurrency(detail.totals.collection)}</td>
                       <td className="px-2 py-2 text-right text-amber-700">{formatCurrency(detail.totals.signed)}</td>
                       <td className="px-2 py-2 text-right text-green-700">{formatCurrency(detail.totals.paid)}</td>
-                      <td className={`px-2 py-2 text-right ${detail.totals.difference > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(detail.totals.difference))}</td>
+                      <td className={`px-2 py-2 text-right ${(detail.totals.difference ?? 0) > 0 ? 'text-red-700' : 'text-green-700'}`}>{formatCurrency(Math.abs(detail.totals.difference ?? 0))}</td>
                       <td className="px-2 py-2 text-right text-indigo-700">{formatCurrency(detail.totals.net)}</td>
                     </tr>
                   </tfoot>
