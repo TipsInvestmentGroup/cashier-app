@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, staging, main]
+  push:
+    branches: [develop, staging, main]
+
+jobs:
+  build-lint-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      # Non-blocking for now: the existing codebase has ~227 pre-existing
+      # lint errors that predate this pipeline (lint was never enforced
+      # before). Flip to blocking once that backlog is cleared — see
+      # docs/GO-LIVE-RUNBOOK.md. New code should still be written lint-clean.
+      - run: npm run lint
+        continue-on-error: true
+      - run: npm run typecheck
+      - name: Prepare DB (defaults to SQLite — no DATABASE_URL needed for a build-only check)
+        run: node scripts/prepare-db.mjs
+      - run: npx prisma generate
+      - run: npm run build
+
+  config-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx tsx scripts/validate-config.ts --env=ci

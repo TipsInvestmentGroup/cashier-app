@@ -34,13 +34,40 @@ Neon keeps continuous history; enable/confirm it:
 3. Verify Products, Categories, Payment Channels, Departments.
 
 ## 5. Deploy procedure
-1. GitHub Desktop → review changed files (**include `public/tips-logo.png`**) → Commit → **Push origin**.
-2. Vercel auto‑builds (`vercel-build` runs `prisma db push` → applies new tables/columns) → wait for ● **Ready**.
-3. Smoke test: log in, open Dashboard, record a test collection, delete it.
+
+**Current pipeline (see `docs/MIGRATIONS.md` for the migration-history
+baseline this supersedes once run):**
+
+1. Branch flow: `feature/*` → PR into `develop` → PR into `staging` → PR into
+   `main`. Every PR runs `.github/workflows/ci.yml` (lint, typecheck, build,
+   config validation).
+2. Push/merge to `staging` → `.github/workflows/deploy-staging.yml` runs
+   migrations against the staging Neon DB, deploys to Vercel's Preview
+   environment, posts the preview URL as a commit comment, then runs
+   `npm run smoke` against it.
+3. Merge `staging` → `main` → `.github/workflows/deploy-production.yml` pauses
+   for a required reviewer's approval (GitHub Environment `production`), then
+   runs migrations + deploys to Vercel Production + a read-only smoke check.
+4. Manual smoke test regardless: log in, open Dashboard, record a test
+   collection, delete it.
+
+Until the Postgres migration baseline (`docs/MIGRATIONS.md`) has been run,
+production continues to build via `vercel-build`
+(`prisma db push --accept-data-loss`) rather than `prisma migrate deploy`.
+
+**Known gap:** `npm run lint` runs in CI but is currently non-blocking
+(`continue-on-error: true` in `.github/workflows/ci.yml`) because the
+codebase has ~227 pre-existing lint errors that predate this pipeline (lint
+was never enforced before this work). Fix that backlog, then remove
+`continue-on-error` so lint becomes a real gate. New code added going forward
+should still be written lint-clean regardless.
 
 ## 6. Rollback
 - **Bad deploy:** Vercel → Deployments → previous green build → **Promote to Production** (instant).
 - **Bad data:** Neon → restore a branch to a time before the issue (§2), then repoint `DATABASE_URL` or copy data back. Practice this once before go‑live.
+- **Bad migration specifically:** see `docs/MIGRATIONS.md` — forward-fix with
+  a new migration, never edit/delete an applied one; combine with the Neon
+  branch-restore step above if data was affected.
 
 ## 7. Routine ops
 - **Monthly:** payroll email auto‑sends (cron `0 5 1 * *`, 08:00 EAT). Confirm directors received it.
