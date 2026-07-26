@@ -14,6 +14,16 @@ import toast from 'react-hot-toast'
  * used to be hard-coded — the defaults shown are exactly the old values, so
  * saving without changes is a no-op.
  */
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+      {children}
+      {hint && <p className="text-[11px] text-gray-400 mt-1">{hint}</p>}
+    </div>
+  )
+}
+
 export default function CompanyPreferencesPage() {
   const { request } = useApi()
   const { user } = useAuth()
@@ -76,13 +86,6 @@ export default function CompanyPreferencesPage() {
     } finally { setSaving(false) }
   }
 
-  const Field = ({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) => (
-    <div>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-      {children}
-      {hint && <p className="text-[11px] text-gray-400 mt-1">{hint}</p>}
-    </div>
-  )
   const inputCls = 'w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm'
 
   return (

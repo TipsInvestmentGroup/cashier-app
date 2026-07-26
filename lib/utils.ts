@@ -30,13 +30,13 @@ export function getClientCompanyConfig(): CompanyConfig { return clientConfig }
 export function getCurrencyCode() { return clientConfig.currencyCode }
 export function getCurrencyLabel() { return clientConfig.currencyLabel }
 
-export function formatCurrency(amount: number): string {
+export function formatCurrency(amount: number | null | undefined): string {
   return new Intl.NumberFormat(clientConfig.currencyLocale, {
     style: 'currency',
     currency: clientConfig.currencyCode,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(amount)
+  }).format(amount ?? 0)
 }
 
 /** "TSh 1,234" — the label-prefixed style used in PDFs and target cards. */

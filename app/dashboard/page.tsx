@@ -128,13 +128,6 @@ export default function DashboardPage() {
     ...data.outletPerformance.map((o) => ({ Metric: `Outlet — ${o.name} (outstanding)`, Amount: o.outstanding })),
   ]
 
-  const todayBreakdown = [
-    { name: 'Cash', value: data.today.cash },
-    { name: 'CRDB', value: data.today.crdb },
-    { name: 'Stanbic', value: data.today.stanbic },
-    { name: 'M-PESA', value: data.today.mpesa },
-  ].filter((x) => x.value > 0)
-
   return (
     <AppShell>
       <SectionTabs tabs={DAILY_TABS} />

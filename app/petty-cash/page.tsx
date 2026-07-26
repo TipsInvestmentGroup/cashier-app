@@ -117,7 +117,7 @@ function PettyCashPage() {
       notes: res.existing?.notes || f.notes,
       verifiedAmount: res.existing?.verifiedAmount != null ? String(res.existing.verifiedAmount) : f.verifiedAmount,
     }))
-  }, [request])
+  }, [request, setReconForm])
 
   const openRecon = () => {
     const oid = isCashier ? (outlets[0]?.id || '') : ''
@@ -183,19 +183,19 @@ function PettyCashPage() {
     const rows = res.rows || []
     setBankRows(rows.map((r: { code: string; label: string; reported: number }) => ({ code: r.code, label: r.label, reported: r.reported })))
     setBankCanVerify(!!res.canVerify)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const entries: Record<string, any> = {}
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const r of rows as any[]) entries[r.code] = {
-      opening: r.openingBalance != null ? String(r.openingBalance) : '',
-      closing: r.closingBalance != null ? String(r.closingBalance) : '',
-      verified: r.verifiedAmount != null ? String(r.verifiedAmount) : '',
-      verifiedOpening: r.verifiedOpening != null ? String(r.verifiedOpening) : '',
-      verifiedClosing: r.verifiedClosing != null ? String(r.verifiedClosing) : '',
-      reason: r.reason || '',
+    const entries: Record<string, { opening: string; closing: string; verified: string; verifiedOpening: string; verifiedClosing: string; reason: string }> = {}
+    for (const r of rows as { code: string; openingBalance: number | null; closingBalance: number | null; verifiedAmount: number | null; verifiedOpening: number | null; verifiedClosing: number | null; reason: string | null }[]) {
+      entries[r.code] = {
+        opening: r.openingBalance != null ? String(r.openingBalance) : '',
+        closing: r.closingBalance != null ? String(r.closingBalance) : '',
+        verified: r.verifiedAmount != null ? String(r.verifiedAmount) : '',
+        verifiedOpening: r.verifiedOpening != null ? String(r.verifiedOpening) : '',
+        verifiedClosing: r.verifiedClosing != null ? String(r.verifiedClosing) : '',
+        reason: r.reason || '',
+      }
     }
     setBankEntries(entries)
-  }, [request])
+  }, [request, setBankEntries])
 
   const openBank = () => {
     const oid = isCashier ? (outlets[0]?.id || '') : ''

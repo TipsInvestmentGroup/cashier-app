@@ -340,6 +340,7 @@ function CounterView() {
 
   const timeAgo = (dateStr: string | null) => {
     if (!dateStr) return ''
+    // eslint-disable-next-line react-hooks/purity -- elapsed-time display reads Date.now(); recalculated on every list refresh, no live ticker needed
     const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000)
     if (diff < 1) return 'Sasa hivi'
     return `Min ${diff} iliyopita`

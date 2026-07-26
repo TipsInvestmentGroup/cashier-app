@@ -159,7 +159,7 @@ export function StageExcelImportRenderer({ stage, onSubmit }: Props) {
                       <span className="font-medium text-gray-700">{staffOptions.find((s) => s.id === r.staffId)?.name || r.staffName}</span>
                     ) : (
                       <select value="" onChange={(e) => applyStaff(i, e.target.value)} className="px-2 py-1 border border-amber-300 rounded-lg text-xs bg-amber-50">
-                        <option value="">"{r.staffName}" — select match</option>
+                        <option value="">&quot;{r.staffName}&quot; — select match</option>
                         {staffOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </select>
                     )}

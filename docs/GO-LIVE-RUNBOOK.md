@@ -55,12 +55,12 @@ Until the Postgres migration baseline (`docs/MIGRATIONS.md`) has been run,
 production continues to build via `vercel-build`
 (`prisma db push --accept-data-loss`) rather than `prisma migrate deploy`.
 
-**Known gap:** `npm run lint` runs in CI but is currently non-blocking
-(`continue-on-error: true` in `.github/workflows/ci.yml`) because the
-codebase has ~227 pre-existing lint errors that predate this pipeline (lint
-was never enforced before this work). Fix that backlog, then remove
-`continue-on-error` so lint becomes a real gate. New code added going forward
-should still be written lint-clean regardless.
+`npm run lint` is a blocking CI gate. One rule is intentionally downgraded to
+`warn` in `eslint.config.mjs`: `react-hooks/set-state-in-effect` flags the
+fetch-on-mount pattern (`useEffect(() => { load() }, [load])`) used in ~165
+places across this codebase for data loading. Rewriting all of those onto a
+different data-fetching approach is a real refactor, not a mechanical lint
+fix, so it's tracked as separate follow-up work rather than blocking CI.
 
 ## 6. Rollback
 - **Bad deploy:** Vercel → Deployments → previous green build → **Promote to Production** (instant).

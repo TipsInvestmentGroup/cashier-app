@@ -222,7 +222,7 @@ function ItemsModal({ list, onClose, onChanged }: { list: ListRow; onClose: () =
       const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
       const aoa: unknown[][] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })
       const header = (aoa[0] || []).map((c) => String(c).toLowerCase())
-      const ci = header.findIndex((h) => h.includes('code')), ni = header.findIndex((h) => h.includes('product') || h.includes('name')), pi = header.findIndex((h) => h.includes('price'))
+      const ci = header.findIndex((h) => h.includes('code')), pi = header.findIndex((h) => h.includes('price'))
       if (pi < 0) return toast.error('Need a "Price" column.')
       const rows = aoa.slice(1).map((r) => ({ code: ci >= 0 ? String(r[ci] || '') : '', sellingPrice: Number(String(r[pi] ?? '').replace(/[, ]/g, '')) || 0 })).filter((r) => r.code)
       if (!rows.length) return toast.error('No rows with a product code found.')
