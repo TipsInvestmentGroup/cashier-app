@@ -1,0 +1,58 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  approval-gated-deploy:
+    runs-on: ubuntu-latest
+    # Requesting the "production" Environment is what pauses this job for a
+    # required reviewer's approval (configured in GitHub Settings ->
+    # Environments -> production -> Deployment protection rules). This is
+    # the "never deploy directly to production" gate.
+    environment: production
+    env:
+      DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ${{ secrets.PROD_DATABASE_URL_UNPOOLED }}
+      JWT_SECRET: ${{ secrets.PROD_JWT_SECRET }}
+      CRON_SECRET: ${{ secrets.PROD_CRON_SECRET }}
+      NEXT_PUBLIC_OWNER_EMAIL: ${{ secrets.PROD_OWNER_EMAIL }}
+      SMTP_HOST: ${{ secrets.PROD_SMTP_HOST }}
+      SMTP_FROM: ${{ secrets.PROD_SMTP_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+
+      - name: Validate configuration
+        run: npx tsx scripts/validate-config.ts --env=production
+
+      - name: Apply pending migrations
+        run: |
+          node scripts/prepare-db.mjs
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Deploy to Vercel (Production)
+        run: |
+          npm i -g vercel
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      - name: Post-deploy smoke check (read-only — runs against live business data)
+        run: npx tsx scripts/smoke/run-all.ts --readonly
+        env:
+          SMOKE_BASE_URL: ${{ secrets.PROD_APP_URL }}
+          SMOKE_ADMIN_EMAIL: ${{ secrets.PROD_SMOKE_READONLY_EMAIL }}
+          SMOKE_ADMIN_PASSWORD: ${{ secrets.PROD_SMOKE_READONLY_PASSWORD }}

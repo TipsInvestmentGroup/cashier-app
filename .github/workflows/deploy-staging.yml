@@ -1,0 +1,78 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch: {}
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  migrate-and-deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ${{ secrets.STAGING_DATABASE_URL_UNPOOLED }}
+      JWT_SECRET: ${{ secrets.STAGING_JWT_SECRET }}
+      CRON_SECRET: ${{ secrets.STAGING_CRON_SECRET }}
+      NEXT_PUBLIC_OWNER_EMAIL: ${{ secrets.STAGING_OWNER_EMAIL }}
+      SMTP_HOST: ${{ secrets.STAGING_SMTP_HOST }}
+      SMTP_FROM: ${{ secrets.STAGING_SMTP_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+
+      - name: Validate configuration
+        run: npx tsx scripts/validate-config.ts --env=staging
+
+      - name: Apply pending migrations
+        run: |
+          node scripts/prepare-db.mjs
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Deploy to Vercel (Preview)
+        id: deploy
+        run: |
+          npm i -g vercel
+          vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          vercel build --token="$VERCEL_TOKEN"
+          url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      - name: Comment preview URL on commit
+        if: github.event_name == 'push'
+        run: |
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+            -f body="Staging preview deployed: ${{ steps.deploy.outputs.url }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  smoke-test:
+    needs: migrate-and-deploy
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run smoke suite against the deployed staging URL
+        run: npx tsx scripts/smoke/run-all.ts
+        env:
+          SMOKE_BASE_URL: ${{ needs.migrate-and-deploy.outputs.url }}
+          SMOKE_ADMIN_EMAIL: ${{ secrets.STAGING_SMOKE_EMAIL }}
+          SMOKE_ADMIN_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
