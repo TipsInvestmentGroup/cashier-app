@@ -4,12 +4,11 @@ import { useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, BILLS_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
-import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { SearchBox } from '@/components/SearchBox'
 import { DateRangeFilter } from '@/components/DateRangeFilter'
 import { ExportBar } from '@/components/ExportBar'
-import { RangeKey, RANGE_OPTIONS, inRange } from '@/lib/dateRange'
+import { RangeKey, inRange } from '@/lib/dateRange'
 import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
@@ -32,7 +31,6 @@ const STATUS_STYLE: Record<string, string> = {
 
 function CancellationsPage() {
   const { request } = useApi()
-  const { user } = useAuth()
   const searchParams = useSearchParams()
   const [items, setItems] = useState<Cancellation[]>([])
   const [loading, setLoading] = useState(true)

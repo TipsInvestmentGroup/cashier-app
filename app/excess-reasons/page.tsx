@@ -76,7 +76,7 @@ export default function ExcessReasonsPage() {
       <div className="space-y-6 max-w-2xl">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Difference Reasons</h1>
-          <p className="text-gray-500 text-sm">Reasons offered on the Collection form's Difference Reason picker and Excess Recon. Category decides the workflow: Payable Excess creates a record settled via Excess Payment; Non-Payable is audit-only; Staff Loss drives the payroll-deduction debt path.</p>
+          <p className="text-gray-500 text-sm">Reasons offered on the Collection form&apos;s Difference Reason picker and Excess Recon. Category decides the workflow: Payable Excess creates a record settled via Excess Payment; Non-Payable is audit-only; Staff Loss drives the payroll-deduction debt path.</p>
         </div>
 
         {!canManage && (

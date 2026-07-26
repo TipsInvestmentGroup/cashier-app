@@ -121,8 +121,8 @@ export default function CollectionSessionDetailPage() {
               <StageExcelImportRenderer stage={activeStage} onSubmit={(rows) => submitGrid(activeStage.id, rows)} />
             ) : activeStage.entryMode === 'POS_SYNC' ? (
               <div className="bg-white rounded-2xl border border-gray-100 p-6 text-center">
-                <p className="text-sm font-semibold text-gray-700">POS Auto Sync isn't connected yet</p>
-                <p className="text-xs text-gray-400 mt-1">This stage is configured to pull its values from a POS system automatically, but no POS integration exists to connect to. Switch this stage's entry mode in the Template Designer to collect it manually in the meantime.</p>
+                <p className="text-sm font-semibold text-gray-700">POS Auto Sync isn&apos;t connected yet</p>
+                <p className="text-xs text-gray-400 mt-1">This stage is configured to pull its values from a POS system automatically, but no POS integration exists to connect to. Switch this stage&apos;s entry mode in the Template Designer to collect it manually in the meantime.</p>
               </div>
             ) : (
               <StageRenderer stage={activeStage} onSubmit={(payload) => submitStage(activeStage.id, payload)} />

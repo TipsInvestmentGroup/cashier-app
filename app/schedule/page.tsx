@@ -70,7 +70,8 @@ export default function SchedulePage() {
       // A WAITER only ever works one outlet — the backend now enforces this
       // regardless (see readOutletScope), so default (and lock, below) the
       // picker to their own outlet rather than an arbitrary first result.
-      const own = user?.outlet?.id ? os.find((o) => o.id === user.outlet!.id) : null
+      const ownOutletId = user?.outlet?.id
+      const own = ownOutletId ? os.find((o) => o.id === ownOutletId) : null
       const first = own || os.find((o) => !o.isEventsOnly)
       if (first) setOutletId((cur) => cur || first.id)
     }).catch(() => {})

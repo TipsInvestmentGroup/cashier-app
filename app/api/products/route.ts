@@ -12,7 +12,6 @@ async function generateCode(name: string): Promise<string> {
   const base = (String(name).replace(/[^a-zA-Z0-9]/g, '').slice(0, 3) || 'PRD').toUpperCase().padEnd(3, 'X')
   let n = (await prisma.product.count({ where: { code: { startsWith: `${base}-` } } })) + 1
   // ensure uniqueness even if codes were deleted/reused
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const code = `${base}-${String(n).padStart(3, '0')}`
     const exists = await prisma.product.findUnique({ where: { code } })
