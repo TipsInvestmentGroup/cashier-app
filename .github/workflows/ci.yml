@@ -16,16 +16,19 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      - name: Prepare DB (defaults to SQLite — no DATABASE_URL needed for a build-only check)
+        run: node scripts/prepare-db.mjs
+      - run: npx prisma generate
       # Non-blocking for now: the existing codebase has ~227 pre-existing
       # lint errors that predate this pipeline (lint was never enforced
       # before). Flip to blocking once that backlog is cleared — see
       # docs/GO-LIVE-RUNBOOK.md. New code should still be written lint-clean.
       - run: npm run lint
         continue-on-error: true
+      # Must run after `prisma generate` — the generated client's types
+      # (PrismaClient, model types) don't exist until then, which otherwise
+      # cascades into unrelated "implicit any" errors across the codebase.
       - run: npm run typecheck
-      - name: Prepare DB (defaults to SQLite — no DATABASE_URL needed for a build-only check)
-        run: node scripts/prepare-db.mjs
-      - run: npx prisma generate
       - run: npm run build
 
   config-validate:
