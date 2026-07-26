@@ -9,25 +9,15 @@ on:
 jobs:
   build-lint-typecheck:
     runs-on: ubuntu-latest
-    env:
-      # This job only builds/typechecks (SQLite, no real DB touched) — these
-      # are dummy values so `next build`'s production-mode page-data
-      # collection doesn't trip lib/auth.ts's real-secret guard. Never use
-      # these for an actual deploy; staging/production set real per-env
-      # secrets (see deploy-staging.yml / deploy-production.yml).
-      NODE_ENV: production
-      JWT_SECRET: ci-build-only-not-a-real-secret
-      DATABASE_URL: file:./dev.db
-      NEXT_PUBLIC_OWNER_EMAIL: ci@example.com
-      CRON_SECRET: ci-build-only-cron-secret-value
-      SMTP_HOST: localhost
-      SMTP_FROM: ci@example.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
+      # NODE_ENV must NOT be set here (or at job level) — npm ci honors
+      # NODE_ENV=production by omitting devDependencies, which silently
+      # drops @types/* packages typecheck needs and breaks this exact step.
       - run: npm ci
       - name: Prepare DB (defaults to SQLite — no DATABASE_URL needed for a build-only check)
         run: node scripts/prepare-db.mjs
@@ -42,7 +32,22 @@ jobs:
       # (PrismaClient, model types) don't exist until then, which otherwise
       # cascades into unrelated "implicit any" errors across the codebase.
       - run: npm run typecheck
-      - run: npm run build
+      # Dummy secrets, scoped to only this step — this job builds against
+      # SQLite and touches no real database; next build's production-mode
+      # page-data collection needs *something* set to satisfy lib/auth.ts's
+      # real-secret guard. Never reuse these values for an actual deploy —
+      # staging/production set real per-environment secrets in
+      # deploy-staging.yml / deploy-production.yml.
+      - name: Build
+        run: npm run build
+        env:
+          NODE_ENV: production
+          JWT_SECRET: ci-build-only-not-a-real-secret
+          DATABASE_URL: file:./dev.db
+          NEXT_PUBLIC_OWNER_EMAIL: ci@example.com
+          CRON_SECRET: ci-build-only-cron-secret-value
+          SMTP_HOST: localhost
+          SMTP_FROM: ci@example.com
 
   config-validate:
     runs-on: ubuntu-latest
