@@ -90,3 +90,9 @@ jobs:
           SMOKE_BASE_URL: ${{ needs.migrate-and-deploy.outputs.url }}
           SMOKE_ADMIN_EMAIL: ${{ secrets.STAGING_SMOKE_EMAIL }}
           SMOKE_ADMIN_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
+          # Preview deployments sit behind Vercel's own SSO wall
+          # (Deployment Protection) — this is Vercel's documented bypass
+          # secret for automated checks. Generate it in Vercel: Project ->
+          # Settings -> Deployment Protection -> Protection Bypass for
+          # Automation, then add it here as a repo/environment secret.
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}

@@ -21,7 +21,7 @@ async function main() {
     process.exit(1)
   }
 
-  const client = makeClient(baseUrl)
+  const client = makeClient(baseUrl, process.env.VERCEL_AUTOMATION_BYPASS_SECRET)
   const user = await login(client, email, password)
   console.log(`[smoke] logged in as ${user.email} (${user.role}) against ${baseUrl}${readonly ? ' [readonly]' : ''}`)
 

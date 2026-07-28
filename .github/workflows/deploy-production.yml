@@ -68,3 +68,6 @@ jobs:
           SMOKE_BASE_URL: ${{ secrets.PROD_APP_URL }}
           SMOKE_ADMIN_EMAIL: ${{ secrets.PROD_SMOKE_READONLY_EMAIL }}
           SMOKE_ADMIN_PASSWORD: ${{ secrets.PROD_SMOKE_READONLY_PASSWORD }}
+          # No-op if production isn't behind Deployment Protection — see the
+          # matching comment in deploy-staging.yml.
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
