@@ -13,6 +13,12 @@ jobs:
   migrate-and-deploy:
     runs-on: ubuntu-latest
     environment: staging
+    # GITHUB_TOKEN defaults to read-only in this repo — the "Comment preview
+    # URL on commit" step needs write access to post a commit comment, and
+    # without this it 403s and fails the whole job (blocking smoke-test,
+    # which needs this job's output, even though the deploy itself succeeded).
+    permissions:
+      contents: write
     outputs:
       url: ${{ steps.deploy.outputs.url }}
     env:
