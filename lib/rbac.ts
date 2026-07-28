@@ -69,6 +69,19 @@ export const WRITE_OFF_RESOURCES = {
 
 export type WriteOffResource = (typeof WRITE_OFF_RESOURCES)[keyof typeof WRITE_OFF_RESOURCES]
 
+// User Management access — who may add/edit/delete system users. Boolean-only
+// resources, same convention as the groups above: owner always passes, then
+// per-user UserPermission override, then RolePermission role default, then deny.
+export const MANAGE_USERS_RESOURCES = {
+  ADD_USER: 'ADD_USER',
+  EDIT_USER: 'EDIT_USER',
+  DELETE_USER: 'DELETE_USER',
+} as const
+
+export type ManageUsersResource = (typeof MANAGE_USERS_RESOURCES)[keyof typeof MANAGE_USERS_RESOURCES]
+
+export type BooleanResource = BusinessDayResource | ReconciliationStageResource | WriteOffResource | ManageUsersResource
+
 const ACTION_FIELD: Record<Action, 'canAdd' | 'canEdit' | 'canDelete' | 'canSettle' | 'canUnsettle'> = {
   add: 'canAdd', edit: 'canEdit', delete: 'canDelete', settle: 'canSettle', unsettle: 'canUnsettle',
 }
@@ -83,7 +96,7 @@ export async function hasPermission(email: string | undefined, userId: string | 
 }
 
 /** All grants for a resource, owner-only endpoint. */
-export async function listPermissions(resource: Resource) {
+export async function listPermissions(resource: Resource | BooleanResource) {
   return prisma.userPermission.findMany({
     where: { resource },
     include: { user: { select: { id: true, name: true, email: true } } },
@@ -91,7 +104,7 @@ export async function listPermissions(resource: Resource) {
 }
 
 /** Owner sets/changes a user's grant for a resource. */
-export async function setPermission(resource: Resource, userId: string, grants: { canAdd?: boolean; canEdit?: boolean; canDelete?: boolean; canSettle?: boolean; canUnsettle?: boolean }) {
+export async function setPermission(resource: Resource | BooleanResource, userId: string, grants: { canAdd?: boolean; canEdit?: boolean; canDelete?: boolean; canSettle?: boolean; canUnsettle?: boolean }) {
   return prisma.userPermission.upsert({
     where: { userId_resource: { userId, resource } },
     update: grants,
@@ -128,7 +141,7 @@ export async function myPermissions(email: string | undefined, userId: string) {
  */
 export async function resolveResourcePermission(
   user: { email?: string; userId: string; role: string },
-  resource: BusinessDayResource | ReconciliationStageResource | WriteOffResource
+  resource: BooleanResource
 ): Promise<boolean> {
   if (isOwner(user.email)) return true
   const userRow = await prisma.userPermission.findUnique({ where: { userId_resource: { userId: user.userId, resource } } })
@@ -137,13 +150,37 @@ export async function resolveResourcePermission(
   return !!roleRow?.allowed
 }
 
+// The pre-Manage-Access behaviour: ADMIN/DIRECTOR could already create
+// users, and only the owner could edit or delete them. Used as the fallback
+// below so nobody loses access the moment this became configurable — it
+// only takes effect until an owner sets an explicit RolePermission row.
+const MANAGE_USERS_LEGACY_DEFAULT: Record<ManageUsersResource, string[]> = {
+  ADD_USER: ['ADMIN', 'DIRECTOR'],
+  EDIT_USER: [],
+  DELETE_USER: [],
+}
+
+/** Same resolution as resolveResourcePermission, but falls back to the
+ * legacy default above for a role with no explicit RolePermission row yet. */
+export async function resolveManageUsersPermission(
+  user: { email?: string; userId: string; role: string },
+  resource: ManageUsersResource
+): Promise<boolean> {
+  if (isOwner(user.email)) return true
+  const userRow = await prisma.userPermission.findUnique({ where: { userId_resource: { userId: user.userId, resource } } })
+  if (userRow) return !!userRow.canAdd
+  const roleRow = await prisma.rolePermission.findUnique({ where: { role_resource: { role: user.role, resource } } })
+  if (roleRow) return roleRow.allowed
+  return MANAGE_USERS_LEGACY_DEFAULT[resource].includes(user.role)
+}
+
 /** All role defaults for a resource, owner-only endpoint. */
-export async function listRolePermissions(resource: BusinessDayResource | ReconciliationStageResource | WriteOffResource) {
+export async function listRolePermissions(resource: BooleanResource) {
   return prisma.rolePermission.findMany({ where: { resource }, orderBy: { role: 'asc' } })
 }
 
 /** Owner sets/changes a role's default for a resource. */
-export async function setRolePermission(role: string, resource: BusinessDayResource | ReconciliationStageResource | WriteOffResource, allowed: boolean) {
+export async function setRolePermission(role: string, resource: BooleanResource, allowed: boolean) {
   return prisma.rolePermission.upsert({
     where: { role_resource: { role, resource } },
     update: { allowed },
