@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
       requestType: { select: { id: true, name: true } },
       category: { select: { id: true, name: true } },
       items: true,
+      fieldValues: true,
       _count: { select: { paymentAllocations: true } },
     },
   })
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
         detail: String(it.detail), unit: it.unit !== undefined ? Number(it.unit) : undefined,
         unitCost: it.unitCost !== undefined ? Number(it.unitCost) : undefined, amount: Number(it.amount),
       })) : undefined,
+      fieldValues: body.fieldValues && typeof body.fieldValues === 'object' ? body.fieldValues : undefined,
     })
     await prisma.auditLog.create({
       data: { userId: user.userId, action: 'CREATE', entity: 'ExpenseRequest', entityId: result.id, details: `Created expense request: ${body.purpose}` },
