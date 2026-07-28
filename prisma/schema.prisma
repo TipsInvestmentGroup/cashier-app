@@ -2033,23 +2033,23 @@ model CashRecon {
 // a day can have several, each with its own reason and (if applicable)
 // staff/customer. CashRecon.excessAmountPaid stores their sum for fast reads.
 model CashReconExcess {
-  id              String    @id @default(cuid())
-  cashReconId     String
-  cashRecon       CashRecon @relation(fields: [cashReconId], references: [id], onDelete: Cascade)
-  amount          Float
-  reason          String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | SIGNED_BILL | CANCELLATION | DISCOUNT | COMPLIMENTARY | CUSTOMER_WALK_AWAY | TRANSFER_ERROR | UNASSIGNED
-  category        String    @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS — snapshot of ExcessReason.category at creation time
-  accountingClass String? // RECEIVABLE | PAYABLE | ADJUSTMENT — snapshot of the accounting class at creation (see lib/reconciliation-classification.ts)
-  notes           String? // optional free-text explanation entered alongside the reason
-  channelCode     String? // payment channel auto-inherited from the parent DailyCollection/CashRecon, no re-entry
-  staffId         String? // set when reason = STAFF_TIP
-  staffName       String?
-  personId        String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
-  personName      String?
-  paidAmount      Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount. Always 0 here — D10 blocks settling a CASH_RECON row directly (already disbursed at recon time)
-  paidAt          DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
-  settledAsSourceAmount Float @default(0) // portion of THIS row's own amount that the auto-settlement engine (lib/excess-settlement.ts) has redirected to pay down older outstanding CollectionExcess rows of the same reason, instead of standing as its own new balance. Excess Recon's displayed paid/balance for this row folds this in (paid = paidAmount + settledAsSourceAmount).
-  createdAt       DateTime  @default(now())
+  id                    String    @id @default(cuid())
+  cashReconId           String
+  cashRecon             CashRecon @relation(fields: [cashReconId], references: [id], onDelete: Cascade)
+  amount                Float
+  reason                String // KITCHEN_SALES | STAFF_TIP | CUSTOMER_EXCESS | OTHERS | SIGNED_BILL | CANCELLATION | DISCOUNT | COMPLIMENTARY | CUSTOMER_WALK_AWAY | TRANSFER_ERROR | UNASSIGNED
+  category              String    @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS — snapshot of ExcessReason.category at creation time
+  accountingClass       String? // RECEIVABLE | PAYABLE | ADJUSTMENT — snapshot of the accounting class at creation (see lib/reconciliation-classification.ts)
+  notes                 String? // optional free-text explanation entered alongside the reason
+  channelCode           String? // payment channel auto-inherited from the parent DailyCollection/CashRecon, no re-entry
+  staffId               String? // set when reason = STAFF_TIP
+  staffName             String?
+  personId              String? // set when reason = CUSTOMER_EXCESS (Person, type=CUSTOMER)
+  personName            String?
+  paidAmount            Float     @default(0) // settled via Excess Recon; balance = amount - paidAmount. Always 0 here — D10 blocks settling a CASH_RECON row directly (already disbursed at recon time)
+  paidAt                DateTime? // when the most recent payment was recorded (Excess Payment §5's "Paid Date")
+  settledAsSourceAmount Float     @default(0) // portion of THIS row's own amount that the auto-settlement engine (lib/excess-settlement.ts) has redirected to pay down older outstanding CollectionExcess rows of the same reason, instead of standing as its own new balance. Excess Recon's displayed paid/balance for this row folds this in (paid = paidAmount + settledAsSourceAmount).
+  createdAt             DateTime  @default(now())
 
   // Bill Reference System — plays the "Excess Payment" (EXS) bill type
   // alongside CollectionExcess (see lib/bill-reference.ts).
@@ -4622,6 +4622,7 @@ model RequestType {
   updatedAt DateTime @updatedAt
 
   requests ExpenseRequest[]
+  fields   RequestTypeField[]
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -4665,7 +4666,12 @@ model ExpenseCategory {
 /// companyAccountBalance()), so the ledger stays the single source of truth.
 /// currentBalance is therefore only meaningful when sourceType = CASH; see
 /// docs/expense-disbursement-framework-design.md Stage 16 decision 2.
-///   sourceType: CASH | BANK | MOBILE_MONEY | CARD | OTHER
+/// CASHIER_DRAWER is a further sourceType: a cashier's own till, whose balance
+/// is never materialized either — it is always computed live from that
+/// cashier's current cash-recon position (lib/expense-ledger.ts
+/// getFundingSourceBalance(), reusing app/api/cash-recon/route.ts's formula),
+/// so scenario A ("cashier as custodian") needs no manual opening balance.
+///   sourceType: CASH | BANK | MOBILE_MONEY | CARD | CASHIER_DRAWER | OTHER
 model FundingSource {
   id                      String                 @id @default(cuid())
   companyId               String
@@ -4685,11 +4691,49 @@ model FundingSource {
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
 
-  payments ExpensePayment[]
+  payments   ExpensePayment[]
+  txns       FundingSourceTxn[]
+  custodians FundingSourceCustodian[]
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
   @@index([companyPaymentAccountId])
+}
+
+/// The Petty Cash Ledger — one signed-amount row per balance-affecting event on
+/// a CASH/CASHIER_DRAWER FundingSource, mirroring PettyFundTxn's shape (which
+/// this graduates from a materialized-only balance, per Stage 16's documented
+/// "ledger is the scale-out path" deferral). expensePaymentId links PAYMENT
+/// rows back to the disbursement that created them; it is a loose ref (no FK)
+/// since not every txn type has one.
+///   type: OPEN | REPLENISH | PAYMENT | ADJUST
+model FundingSourceTxn {
+  id               String        @id @default(cuid())
+  fundingSourceId  String
+  fundingSource    FundingSource @relation(fields: [fundingSourceId], references: [id])
+  type             String
+  amount           Float // signed: + for OPEN/REPLENISH, - for PAYMENT/negative ADJUST
+  reference        String?
+  note             String?
+  expensePaymentId String?
+  createdById      String?
+  createdByName    String?
+  createdAt        DateTime      @default(now())
+
+  @@index([fundingSourceId, createdAt])
+}
+
+/// Admin-assigned Petty Cash / Digital Payment custodians — a many-to-many
+/// so a FundingSource can have more than one responsible user, generalizing
+/// the single optional FundingSource.responsibleUserId field.
+model FundingSourceCustodian {
+  id              String        @id @default(cuid())
+  fundingSourceId String
+  fundingSource   FundingSource @relation(fields: [fundingSourceId], references: [id])
+  userId          String // no relation — mirrors CreditAccount.userId
+  createdAt       DateTime      @default(now())
+
+  @@unique([fundingSourceId, userId])
 }
 
 /// Generalizes PettyCash. One request may span many ExpenseItem lines and many
@@ -4724,6 +4768,7 @@ model ExpenseRequest {
   verifications      VerificationRecord[]
   workflowApprovals  WorkflowApproval[]
   legacyPettyCash    PettyCash[]
+  fieldValues        ExpenseRequestFieldValue[]
 
   @@index([companyId, status])
   @@index([requestTypeId])
@@ -4826,4 +4871,45 @@ model Attachment {
   createdAt    DateTime @default(now())
 
   @@index([entityType, entityId])
+}
+
+/// Admin-defined custom field for a RequestType — graduates the Phase 1
+/// requiredFields JSON escape hatch to a real child table (the trade-off the
+/// design doc explicitly flagged: "graduate to child tables when the admin UI
+/// needs relational queries over them"). Powers the Digital Expense Request
+/// form: isSystem=true rows are the seeded defaults (Date, Payee Name,
+/// Account/Wallet Number, Phone Number, Payment Reason) which admins can
+/// relabel/reorder/require but not delete; admins can freely add further
+/// isSystem=false fields on top, with zero code changes.
+///   fieldType: TEXT | NUMBER | DATE | PHONE | TEXTAREA | SELECT
+model RequestTypeField {
+  id            String      @id @default(cuid())
+  requestTypeId String
+  requestType   RequestType @relation(fields: [requestTypeId], references: [id])
+  fieldKey      String // stable machine key, e.g. "payeeAccount"
+  label         String
+  fieldType     String      @default("TEXT")
+  required      Boolean     @default(false)
+  options       String? // JSON array of option strings, SELECT only
+  sortOrder     Int         @default(0)
+  isSystem      Boolean     @default(false)
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+
+  @@unique([requestTypeId, fieldKey])
+  @@index([requestTypeId, isActive])
+}
+
+/// The data for RequestTypeField-defined custom fields on one ExpenseRequest.
+/// Values are always strings (dates/numbers/phones stored as their text
+/// representation) — same "typed columns for the 80%, generic rows for the
+/// long tail" trade-off as CollectionFieldValue.
+model ExpenseRequestFieldValue {
+  id               String         @id @default(cuid())
+  expenseRequestId String
+  expenseRequest   ExpenseRequest @relation(fields: [expenseRequestId], references: [id], onDelete: Cascade)
+  fieldKey         String
+  value            String
+
+  @@unique([expenseRequestId, fieldKey])
 }

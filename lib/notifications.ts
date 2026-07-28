@@ -20,6 +20,14 @@ export type NotificationType =
   | 'WRITE_OFF_REJECTED'
   // Daily Report draft lifecycle
   | 'DAILY_REPORT_REVIEW'
+  // Expense & Disbursement Framework workflow notifications
+  | 'EXPENSE_REQUEST_SUBMITTED'
+  | 'EXPENSE_REQUEST_APPROVAL_NEEDED'
+  | 'EXPENSE_REQUEST_APPROVED'
+  | 'EXPENSE_REQUEST_REJECTED'
+  | 'EXPENSE_REQUEST_READY_FOR_PAYMENT'
+  | 'EXPENSE_REQUEST_PARTIALLY_PAID'
+  | 'EXPENSE_REQUEST_PAID'
 
 export async function createNotification(input: {
   userId: string
@@ -133,4 +141,33 @@ export async function notifyResourceHoldersMultiChannel(
   } catch (err) {
     console.error('notifyResourceHoldersMultiChannel: email send failed', err)
   }
+}
+
+/**
+ * Fan out one notification to every active user holding a literal `User.role`
+ * string (e.g. "MANAGER") for the given outlet — the Expense & Disbursement
+ * Framework's RequestType.approverRoles is a JSON array of role strings, not
+ * a RolePermission resource, so it needs this simpler sibling to
+ * notifyResourceHolders. Same single-outlet-role scoping convention: cross-
+ * outlet management roles always qualify, CASHIER/WAITER only for their own
+ * outlet.
+ */
+export async function notifyUsersByRole(
+  role: string,
+  outletId: string | null,
+  input: Omit<Parameters<typeof createNotification>[0], 'userId'>
+) {
+  const users = await prisma.user.findMany({ where: { role, isActive: true }, select: { id: true, role: true, outletId: true } })
+  const targets = users.filter((u) => !isSingleOutletRole(u.role) || !outletId || u.outletId === outletId)
+  if (!targets.length) return
+  await prisma.notification.createMany({
+    data: targets.map((u) => ({
+      userId: u.id,
+      type: input.type,
+      title: input.title,
+      message: input.message,
+      entityType: input.entityType ?? null,
+      entityId: input.entityId ?? null,
+    })),
+  })
 }

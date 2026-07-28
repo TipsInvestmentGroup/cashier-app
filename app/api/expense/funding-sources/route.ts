@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { FUNDING_SOURCE_TYPES, type FundingSourceType } from '@/lib/expense-config'
+import { getFundingSourceBalance } from '@/lib/expense-ledger'
 
 // Same audience as PETTY_TABS/the Expense Requests screens — everyone who
 // can reach the Pay action or just wants visibility, but not WAITER. This
@@ -23,7 +24,13 @@ export async function GET(req: NextRequest) {
     orderBy: [{ name: 'asc' }],
     include: { companyPaymentAccount: { select: { id: true, accountName: true, bankName: true } }, _count: { select: { payments: true } } },
   })
-  return NextResponse.json(sources)
+  // CASHIER_DRAWER's balance always follows the assigned cashier's daily cash
+  // position (Petty Cash Custodian scenario A) — resolve it for display since
+  // currentBalance is never materialized for this type.
+  const withLiveBalance = await Promise.all(sources.map(async (s) => (
+    s.sourceType === 'CASHIER_DRAWER' ? { ...s, liveBalance: await getFundingSourceBalance(prisma, s) } : s
+  )))
+  return NextResponse.json(withLiveBalance)
 }
 
 /**
@@ -51,6 +58,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `sourceType must be one of ${FUNDING_SOURCE_TYPES.join(', ')}` }, { status: 400 })
   }
   const isAccountBacked = sourceType === 'BANK' || sourceType === 'MOBILE_MONEY' || sourceType === 'CARD'
+  // CASHIER_DRAWER never materializes a balance either — it always reads live
+  // from the assigned cashier's cash-recon position (Petty Cash Custodian
+  // scenario A: no manual opening balance required).
+  const isLiveBalance = isAccountBacked || sourceType === 'CASHIER_DRAWER'
 
   let companyPaymentAccountId: string | null = null
   if (isAccountBacked) {
@@ -66,7 +77,7 @@ export async function POST(req: NextRequest) {
   const dupe = await prisma.fundingSource.findUnique({ where: { companyId_code: { companyId, code } } })
   if (dupe) return NextResponse.json({ error: `A funding source with code ${code} already exists` }, { status: 409 })
 
-  const openingBalance = !isAccountBacked && Number(body.openingBalance) > 0 ? Number(body.openingBalance) : 0
+  const openingBalance = !isLiveBalance && Number(body.openingBalance) > 0 ? Number(body.openingBalance) : 0
 
   const source = await prisma.fundingSource.create({
     data: {
@@ -77,13 +88,18 @@ export async function POST(req: NextRequest) {
       companyPaymentAccountId,
       outletId: body.outletId ? String(body.outletId) : null,
       openingBalance,
-      currentBalance: isAccountBacked ? 0 : openingBalance,
+      currentBalance: isLiveBalance ? 0 : openingBalance,
       dailyLimit: Number(body.dailyLimit) > 0 ? Number(body.dailyLimit) : 0,
       responsibleUserId: body.responsibleUserId ? String(body.responsibleUserId) : null,
       currency: body.currency ? String(body.currency) : 'TZS',
       isActive: true,
     },
   })
+  if (sourceType === 'CASH' && openingBalance > 0) {
+    await prisma.fundingSourceTxn.create({
+      data: { fundingSourceId: source.id, type: 'OPEN', amount: openingBalance, note: 'Opening balance', createdById: user.userId, createdByName: user.name },
+    })
+  }
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'CREATE', entity: 'FundingSource', entityId: source.id, details: `Created funding source ${name} (${code})` },
   })
