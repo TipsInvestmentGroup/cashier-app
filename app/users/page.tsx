@@ -39,17 +39,22 @@ export default function UsersPage() {
 
   const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && (user?.email || '').toLowerCase() === OWNER_EMAIL
+  const [access, setAccess] = useState({ canAdd: false, canEdit: false, canDelete: false })
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [u, o, pos] = await Promise.all([request('/api/users'), request('/api/outlets'), request('/api/floor-positions').catch(() => null)])
+    const [u, o, pos, acc] = await Promise.all([
+      request('/api/users'), request('/api/outlets'), request('/api/floor-positions').catch(() => null),
+      request('/api/manage-users-access/me').catch(() => null),
+    ])
     setUsers(u); setOutlets(o); if (Array.isArray(pos) && pos.length) setPositions(pos)
+    if (acc) setAccess(acc)
     setLoading(false)
   }, [request])
 
   useEffect(() => { load() }, [load])
 
-  if (!['ADMIN', 'DIRECTOR'].includes(user?.role || '') && !isOwner) return (
+  if (!['ADMIN', 'MANAGER', 'DIRECTOR'].includes(user?.role || '') && !isOwner) return (
     <AppShell>
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -108,7 +113,7 @@ export default function UsersPage() {
             <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
             <p className="text-gray-500 text-sm">Create and manage system users</p>
           </div>
-          <Button onClick={newUser} size="lg"><span>+</span> New User</Button>
+          {access.canAdd && <Button onClick={newUser} size="lg"><span>+</span> New User</Button>}
         </div>
 
         {showForm && (
@@ -236,7 +241,7 @@ export default function UsersPage() {
                     <th className="px-5 py-3 font-semibold">Outlet</th>
                     <th className="px-5 py-3 font-semibold">Status</th>
                     <th className="px-5 py-3 font-semibold">Created</th>
-                    {isOwner && <th className="px-5 py-3 font-semibold text-right">Actions</th>}
+                    {(access.canEdit || access.canDelete) && <th className="px-5 py-3 font-semibold text-right">Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -272,10 +277,10 @@ export default function UsersPage() {
                         </span>
                       </td>
                       <td className="px-5 py-4 text-gray-500">{formatDate(u.createdAt)}</td>
-                      {isOwner && (
+                      {(access.canEdit || access.canDelete) && (
                         <td className="px-5 py-4 text-right whitespace-nowrap">
-                          <button onClick={() => startEdit(u)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>
-                          <button onClick={() => deleteUser(u)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>
+                          {access.canEdit && <button onClick={() => startEdit(u)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 mr-1">Edit</button>}
+                          {access.canDelete && <button onClick={() => deleteUser(u)} className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-50 text-red-700 hover:bg-red-100">Delete</button>}
                         </td>
                       )}
                     </tr>

@@ -2,19 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, hashPassword } from '@/lib/auth'
 import { VALID_ROLES } from '@/lib/shared-constants'
+import { resolveManageUsersPermission, MANAGE_USERS_RESOURCES } from '@/lib/rbac'
 
-const OWNER_EMAIL = process.env.NEXT_PUBLIC_OWNER_EMAIL || ''
 const PIN_RE = /^\d{4}$/
 
-function isOwner(email?: string) {
-  return !!OWNER_EMAIL && !!email && email.toLowerCase() === OWNER_EMAIL.toLowerCase()
-}
-
-/** Edit a user — system owner only. */
+/** Edit a user — gated by the Manage Access "Edit users" grant (owner always passes). */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!isOwner(user.email)) return NextResponse.json({ error: 'Only the system owner can edit users' }, { status: 403 })
+  if (!(await resolveManageUsersPermission(user, MANAGE_USERS_RESOURCES.EDIT_USER))) return NextResponse.json({ error: 'You do not have permission to edit users' }, { status: 403 })
 
   const { id } = await params
   const body = await req.json()
@@ -50,11 +46,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 }
 
-/** Delete a user — system owner only. Blocks if the user has linked records. */
+/** Delete a user — gated by the Manage Access "Delete users" grant (owner always passes). Blocks if the user has linked records. */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!isOwner(user.email)) return NextResponse.json({ error: 'Only the system owner can delete users' }, { status: 403 })
+  if (!(await resolveManageUsersPermission(user, MANAGE_USERS_RESOURCES.DELETE_USER))) return NextResponse.json({ error: 'You do not have permission to delete users' }, { status: 403 })
 
   const { id } = await params
   if (id === user.userId) return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 400 })
