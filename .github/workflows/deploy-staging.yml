@@ -71,6 +71,25 @@ jobs:
           NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
+      # Idempotent (create-only-if-absent) — safe to run on every deploy, not
+      # just the first one. Previously a manual step (open the URL in a
+      # browser); automated here so newly-added RolePermission/seed defaults
+      # (e.g. the Reconciliation Workflow Engine's role grants) get backfilled
+      # onto staging without anyone remembering to re-run it by hand.
+      - name: Seed database
+        run: |
+          response=$(curl -s -w "\n%{http_code}" "${{ steps.deploy.outputs.url }}/api/admin/seed?secret=$CRON_SECRET" \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET")
+          status="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          echo "$body"
+          if [ "$status" -ge 400 ]; then
+            echo "Seed request failed with status $status"
+            exit 1
+          fi
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
       - name: Comment preview URL on commit
         if: github.event_name == 'push'
         run: |
