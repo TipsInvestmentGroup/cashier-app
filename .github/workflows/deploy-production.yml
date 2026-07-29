@@ -59,7 +59,20 @@ jobs:
           npm i -g vercel@58.1.0
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           vercel build --prod --token="$VERCEL_TOKEN"
-          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+
+          # See the matching retry loop + comment in deploy-staging.yml —
+          # the upload step has been reproducibly flaky independent of CLI
+          # version; `--prebuilt` re-uploads from .vercel/output without
+          # rebuilding, so retrying just this command is safe and cheap.
+          for attempt in 1 2 3; do
+            if vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"; then
+              exit 0
+            fi
+            echo "vercel deploy attempt $attempt failed, retrying in 15s..."
+            sleep 15
+          done
+          echo "vercel deploy failed after 3 attempts"
+          exit 1
         env:
           NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
