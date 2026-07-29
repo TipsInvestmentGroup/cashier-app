@@ -69,8 +69,22 @@ jobs:
           npm i -g vercel@58.1.0
           vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
           vercel build --token="$VERCEL_TOKEN"
-          url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+          # The upload step itself has been reproducibly flaky (2026-07-29:
+          # "Upload aborted" 6/6 times in a row across two CLI versions, plus
+          # an unrelated npm-install ECONNRESET the same day) — retry the
+          # already-built artifact a few times before giving up, since
+          # `--prebuilt` re-uploads from .vercel/output without rebuilding.
+          for attempt in 1 2 3; do
+            if url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN"); then
+              echo "url=$url" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "vercel deploy attempt $attempt failed, retrying in 15s..."
+            sleep 15
+          done
+          echo "vercel deploy failed after 3 attempts"
+          exit 1
         env:
           NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
