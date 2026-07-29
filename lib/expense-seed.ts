@@ -13,6 +13,18 @@
 
 const PETTY_CASH_REQUEST_TYPE_CODE = 'PETTY_CASH_REQUEST'
 const DEFAULT_CASH_SOURCE_CODE = 'PETTY_CASH'
+const DIGITAL_EXPENSE_REQUEST_TYPE_CODE = 'DIGITAL_EXPENSE_REQUEST'
+
+// The Digital Expense Form's default fields (system — admins may relabel/
+// reorder/require but not delete; they can add further custom fields on top
+// via Expense Settings, with zero code changes).
+const DIGITAL_EXPENSE_FIELDS = [
+  { fieldKey: 'date', label: 'Date', fieldType: 'DATE', required: true, sortOrder: 0 },
+  { fieldKey: 'payeeName', label: 'Payee Name', fieldType: 'TEXT', required: true, sortOrder: 1 },
+  { fieldKey: 'accountOrWalletNumber', label: 'Account/Wallet Number', fieldType: 'TEXT', required: true, sortOrder: 2 },
+  { fieldKey: 'phoneNumber', label: 'Phone Number', fieldType: 'PHONE', required: false, sortOrder: 3 },
+  { fieldKey: 'paymentReason', label: 'Payment Reason', fieldType: 'TEXTAREA', required: true, sortOrder: 4 },
+] as const
 
 /**
  * Idempotent. Seeds the expense module config, the "Petty Cash Request"
@@ -122,6 +134,36 @@ export async function seedExpenseFramework(prisma: any): Promise<{ categories: n
       approverRoles: JSON.stringify(['MANAGER']),
     },
   })
+
+  // ── Digital Expense Request — a second, independent request type restricted
+  // to digital (BANK/MOBILE_MONEY/CARD) funding sources, with its 5 default
+  // custom fields. create-only: never clobber admin edits made in Expense
+  // Settings on a re-run. ──
+  const digitalSources = await prisma.fundingSource.findMany({
+    where: { companyId: company.id, sourceType: { in: ['BANK', 'MOBILE_MONEY', 'CARD'] }, isActive: true },
+    select: { id: true },
+  })
+  const digitalExpenseType = await prisma.requestType.upsert({
+    where: { companyId_code: { companyId: company.id, code: DIGITAL_EXPENSE_REQUEST_TYPE_CODE } },
+    update: {},
+    create: {
+      companyId: company.id,
+      code: DIGITAL_EXPENSE_REQUEST_TYPE_CODE,
+      name: 'Digital Expense Request',
+      description: 'A simple form for expenses paid electronically (bank/mobile money/card) — independent of the Petty Cash form, same approve/pay/verify workflow underneath.',
+      isActive: true,
+      allowedFundingSourceIds: digitalSources.length ? JSON.stringify(digitalSources.map((s: { id: string }) => s.id)) : null,
+      budgetValidation: 'NONE',
+      approverRoles: JSON.stringify(['MANAGER']),
+    },
+  })
+  for (const f of DIGITAL_EXPENSE_FIELDS) {
+    await prisma.requestTypeField.upsert({
+      where: { requestTypeId_fieldKey: { requestTypeId: digitalExpenseType.id, fieldKey: f.fieldKey } },
+      update: {},
+      create: { requestTypeId: digitalExpenseType.id, fieldKey: f.fieldKey, label: f.label, fieldType: f.fieldType, required: f.required, sortOrder: f.sortOrder, isSystem: true },
+    })
+  }
 
   return { categories: categoriesCreated, fundingSources: fundingSourcesCreated }
 }

@@ -275,7 +275,8 @@ export default function SalesImportPage() {
   const summary = useMemo(() => {
     const s = { rows: lines.length, staff: new Set<string>(), products: new Set<string>(), unmatchedStaff: 0, unmatchedProducts: 0, priceMismatch: 0, dupes: 0, missing: 0, lowConf: 0, qty: 0, amount: 0 }
     for (const l of lines) {
-      l.staffName && s.staff.add(l.staffName.toLowerCase()); l.productName && s.products.add(l.productName.toLowerCase())
+      if (l.staffName) s.staff.add(l.staffName.toLowerCase())
+      if (l.productName) s.products.add(l.productName.toLowerCase())
       s.qty += l.qty; s.amount += l.amount
       if (l.issues.includes('UNKNOWN_STAFF') || l.issues.includes('MISSING_STAFF')) s.unmatchedStaff++
       if (l.issues.includes('UNKNOWN_PRODUCT')) s.unmatchedProducts++

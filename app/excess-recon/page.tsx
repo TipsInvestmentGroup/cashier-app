@@ -260,7 +260,7 @@ export default function ExcessReconPage() {
   // Shared table renderer — Excess Reconciliation §7-9's columns, grouped by
   // reason instead of one mixed table. Actions (Pay/Unsettle/Edit/Delete)
   // only ever appear here — the tracking-only sections below have none.
-  const PayableTable = ({ title, icon, sectionRows, showCustomer }: { title: string; icon: string; sectionRows: Row[]; showCustomer?: boolean }) => (
+  const renderPayableTable = ({ title, icon, sectionRows, showCustomer }: { title: string; icon: string; sectionRows: Row[]; showCustomer?: boolean }) => (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <h2 className="font-bold text-gray-900">{icon} {title}</h2>
@@ -424,10 +424,10 @@ export default function ExcessReconPage() {
 
         {!loading && (
           <div className="space-y-5">
-            <PayableTable title="Kitchen Sales" icon="🍽️" sectionRows={kitchenRows} />
-            <PayableTable title="Customer Excess" icon="🧾" sectionRows={customerExcessRows} showCustomer />
-            <PayableTable title="Staff Tips" icon="💰" sectionRows={staffTipRows} />
-            {otherPayableRows.length > 0 && <PayableTable title="Other / Needs Reason" icon="❓" sectionRows={otherPayableRows} />}
+            {renderPayableTable({ title: 'Kitchen Sales', icon: '🍽️', sectionRows: kitchenRows })}
+            {renderPayableTable({ title: 'Customer Excess', icon: '🧾', sectionRows: customerExcessRows, showCustomer: true })}
+            {renderPayableTable({ title: 'Staff Tips', icon: '💰', sectionRows: staffTipRows })}
+            {otherPayableRows.length > 0 && renderPayableTable({ title: 'Other / Needs Reason', icon: '❓', sectionRows: otherPayableRows })}
 
             {/* Signed Bills — tracking only, no Pay action (settled by the customer directly) */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

@@ -10,6 +10,7 @@ import { roundMoney } from '@/lib/utils'
 import { computeActual } from '@/lib/finance-budget'
 import type { BudgetValidationMode, ExpenseRequestStatus } from '@/lib/expense-config'
 import { openNextApprovalStep, cancelPendingExpenseApproval } from '@/lib/expense-workflow'
+import { createNotification } from '@/lib/notifications'
 
 function parseRoleList(raw: string | null | undefined): string[] {
   if (!raw) return []
@@ -51,6 +52,7 @@ export interface CreateExpenseRequestInput {
   eventId?: string | null
   dueDate?: Date | null
   items?: ExpenseItemInput[]
+  fieldValues?: Record<string, string>
 }
 
 export interface CreateExpenseRequestResult {
@@ -111,6 +113,20 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
     }
   }
 
+  // Custom fields (RequestTypeField/ExpenseRequestFieldValue) — validate every
+  // required field for this request type has a non-empty value before create,
+  // same "zero config = simplest behavior" principle as everywhere else in
+  // this framework: a request type with no fields defined skips this entirely.
+  const fields = await db.requestTypeField.findMany({ where: { requestTypeId: requestType.id, isActive: true } })
+  const fieldValues = input.fieldValues || {}
+  const missingFields = fields.filter((f) => f.required && !String(fieldValues[f.fieldKey] ?? '').trim())
+  if (missingFields.length) {
+    throw new Error(`Missing required field(s): ${missingFields.map((f) => f.label).join(', ')}`)
+  }
+  const fieldValueRows = fields
+    .filter((f) => String(fieldValues[f.fieldKey] ?? '').trim())
+    .map((f) => ({ fieldKey: f.fieldKey, value: String(fieldValues[f.fieldKey]).trim() }))
+
   const request = await db.expenseRequest.create({
     data: {
       companyId: input.companyId,
@@ -126,6 +142,7 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
       eventId: input.eventId || null,
       dueDate: input.dueDate || null,
       items: items.length ? { create: items.map((it) => ({ detail: it.detail, unit: it.unit ?? 1, unitCost: it.unitCost ?? 0, amount: roundMoney(it.amount) })) } : undefined,
+      fieldValues: fieldValueRows.length ? { create: fieldValueRows } : undefined,
     },
   })
 
@@ -148,6 +165,15 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
   const status: ExpenseRequestStatus = roles.length ? 'PENDING_APPROVAL' : 'APPROVED'
   await db.expenseRequest.update({ where: { id: requestId }, data: { status } })
   if (status === 'PENDING_APPROVAL') await openNextApprovalStep(db, requestId)
+
+  await createNotification({
+    userId: request.requestedById,
+    type: 'EXPENSE_REQUEST_SUBMITTED',
+    title: `${request.requestType.name} submitted`,
+    message: `Your request "${request.purpose}" for ${request.amount} ${request.currency} has been submitted${status === 'PENDING_APPROVAL' ? ' and is awaiting approval' : ' and auto-approved'}.`,
+    entityType: 'ExpenseRequest', entityId: request.id,
+  }).catch(() => {})
+
   return { status }
 }
 

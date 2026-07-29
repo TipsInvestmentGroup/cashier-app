@@ -99,7 +99,7 @@ export default function SignedBillsPage() {
     setPerms({ canEdit: !!me?.SIGNED_BILLS?.canEdit, canDelete: !!me?.SIGNED_BILLS?.canDelete })
     if (o.length && !form.outletId) setForm((f) => ({ ...f, outletId: user?.outlet?.id || o[0].id }))
     setLoading(false)
-  }, [request, user])
+  }, [request, user, form.outletId])
 
   useEffect(() => { load() }, [load])
 

@@ -114,7 +114,7 @@ export default function PosTablesPage() {
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Tables</h1>
-            <p className="text-gray-500 text-sm">Manage the Floor Map's tables per outlet</p>
+            <p className="text-gray-500 text-sm">Manage the Floor Map&apos;s tables per outlet</p>
           </div>
           <div className="flex items-center gap-3">
             <select value={outletId} onChange={(e) => setOutletId(e.target.value)}

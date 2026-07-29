@@ -19,6 +19,8 @@ import { postJournalEntry } from '@/lib/ledger'
 import { roundMoney } from '@/lib/utils'
 import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
 import { recalcExpenseRequestPaymentStatus } from '@/lib/expense-requests'
+import { getFundingSourceBalance } from '@/lib/expense-ledger'
+import { createNotification } from '@/lib/notifications'
 
 function parseIdList(raw: string | null | undefined): string[] | null {
   if (!raw) return null
@@ -119,8 +121,14 @@ export async function createExpensePayment(input: CreateExpensePaymentInput): Pr
     if (totalDr !== amount) throw new Error(`Allocations (${totalDr}) must add up to the payment amount (${amount})`)
 
     // Balance + daily-limit checks BEFORE posting, inside the transaction.
-    if (fundingSource.sourceType === 'CASH' && amount > fundingSource.currentBalance + 0.001) {
-      throw new Error(`Insufficient balance in ${fundingSource.name}: ${fundingSource.currentBalance} available, ${amount} requested`)
+    // CASHIER_DRAWER reads its balance live (the assigned cashier's current
+    // cash-recon position, Petty Cash Custodian scenario A) rather than a
+    // materialized figure, same live-read treatment as BANK/MOBILE_MONEY/CARD.
+    if (fundingSource.sourceType === 'CASH' || fundingSource.sourceType === 'CASHIER_DRAWER') {
+      const available = await getFundingSourceBalance(tx, fundingSource)
+      if (amount > available + 0.001) {
+        throw new Error(`Insufficient balance in ${fundingSource.name}: ${available} available, ${amount} requested`)
+      }
     }
     if (fundingSource.dailyLimit > 0) {
       const dayStart = new Date(paidAt); dayStart.setUTCHours(0, 0, 0, 0)
@@ -167,12 +175,38 @@ export async function createExpensePayment(input: CreateExpensePaymentInput): Pr
     if (fundingSource.sourceType === 'CASH') {
       await tx.fundingSource.update({ where: { id: fundingSource.id }, data: { currentBalance: roundMoney(fundingSource.currentBalance - amount) } })
     }
+    // Every CASH/CASHIER_DRAWER payment gets a Petty Cash Ledger row — CASH
+    // also updates its materialized currentBalance above; CASHIER_DRAWER's
+    // balance is always read live, so this row is purely the audit trail.
+    if (fundingSource.sourceType === 'CASH' || fundingSource.sourceType === 'CASHIER_DRAWER') {
+      await tx.fundingSourceTxn.create({
+        data: { fundingSourceId: fundingSource.id, type: 'PAYMENT', amount: -amount, reference: input.reference || null, expensePaymentId: payment.id, createdById: input.paidById },
+      })
+    }
 
     const requestStatuses: Record<string, string> = {}
     for (const requestId of new Set(input.allocations.map((a) => a.expenseRequestId))) {
       requestStatuses[requestId] = await recalcExpenseRequestPaymentStatus(tx, requestId)
     }
 
-    return { id: payment.id, journalEntryId, amount, requestStatuses }
+    return { id: payment.id, journalEntryId, amount, requestStatuses, requests }
   })
+    .then(async (result) => {
+      // Requester notification: "Partially Paid" / "Fully Paid" — the last two
+      // of the request's spec'd lifecycle events (Submitted/Approved/Rejected
+      // notify elsewhere in lib/expense-requests.ts / lib/expense-workflow.ts).
+      await Promise.all(Object.entries(result.requestStatuses).map(async ([requestId, status]) => {
+        if (status !== 'PARTIALLY_PAID' && status !== 'PAID') return
+        const req = result.requests.find((r) => r.id === requestId)
+        if (!req) return
+        await createNotification({
+          userId: req.requestedById,
+          type: status === 'PAID' ? 'EXPENSE_REQUEST_PAID' : 'EXPENSE_REQUEST_PARTIALLY_PAID',
+          title: status === 'PAID' ? `${req.requestType.name} paid` : `${req.requestType.name} partially paid`,
+          message: `"${req.purpose}" for ${req.amount} ${req.currency} has been ${status === 'PAID' ? 'fully paid' : 'partially paid'}.`,
+          entityType: 'ExpenseRequest', entityId: requestId,
+        }).catch(() => {})
+      }))
+      return { id: result.id, journalEntryId: result.journalEntryId, amount: result.amount, requestStatuses: result.requestStatuses }
+    })
 }

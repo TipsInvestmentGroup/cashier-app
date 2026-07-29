@@ -7,7 +7,7 @@ import { CashReconReport } from '@/components/CashReconReport'
 import { BankReconReport } from '@/components/BankReconReport'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 
 interface ReportData {
@@ -104,7 +104,7 @@ export default function ReportsPage() {
     toast.success('PDF exported!')
   }
 
-  const ExportBtns = ({ rows, filename, title }: { rows: Record<string, unknown>[]; filename: string; title: string }) => (
+  const renderExportBtns = ({ rows, filename, title }: { rows: Record<string, unknown>[]; filename: string; title: string }) => (
     <div className="flex gap-2">
       <button onClick={() => exportCSV(rows, filename)} className="px-3 py-2 bg-gray-100 text-gray-700 text-sm rounded-xl hover:bg-gray-200 transition">📄 CSV</button>
       <button onClick={() => exportExcel(rows, filename)} className="px-3 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700 transition">📊 Excel</button>
@@ -254,7 +254,7 @@ export default function ReportsPage() {
                 {activeTab === 'collections' && (
                   <div>
                     <div className="flex justify-end mb-3">
-                      <ExportBtns rows={data.collections.map((c) => ({ Date: formatDate(c.date), Outlet: c.outlet.name, Cash: c.cash, CRDB: c.crdb, Stanbic: c.stanbic, MPESA: c.mpesa, Total: c.total }))} filename="collections" title="Collections Report" />
+                      {renderExportBtns({ rows: data.collections.map((c) => ({ Date: formatDate(c.date), Outlet: c.outlet.name, Cash: c.cash, CRDB: c.crdb, Stanbic: c.stanbic, MPESA: c.mpesa, Total: c.total })), filename: 'collections', title: 'Collections Report' })}
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
@@ -321,7 +321,7 @@ export default function ReportsPage() {
                 {activeTab === 'signed' && (
                   <div>
                     <div className="flex justify-end mb-3">
-                      <ExportBtns rows={data.signedBills.map((b) => ({ Date: formatDate(b.date), Voucher: b.voucherNumber, Reference: b.displayReference || b.voucherNumber || '', Type: b.billType, Person: b.personName, Amount: b.amount, Status: b.status, Outlet: b.outlet.name }))} filename="signed-bills" title="Signed Bills Report" />
+                      {renderExportBtns({ rows: data.signedBills.map((b) => ({ Date: formatDate(b.date), Voucher: b.voucherNumber, Reference: b.displayReference || b.voucherNumber || '', Type: b.billType, Person: b.personName, Amount: b.amount, Status: b.status, Outlet: b.outlet.name })), filename: 'signed-bills', title: 'Signed Bills Report' })}
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
@@ -358,7 +358,7 @@ export default function ReportsPage() {
                 {activeTab === 'paid' && (
                   <div>
                     <div className="flex justify-end mb-3">
-                      <ExportBtns rows={data.paidBills.map((p) => ({ Date: formatDate(p.date), Payer: p.payerName, Amount: p.amountPaid, Method: p.paymentMethod, Outlet: p.outlet.name }))} filename="paid-bills" title="Paid Bills Report" />
+                      {renderExportBtns({ rows: data.paidBills.map((p) => ({ Date: formatDate(p.date), Payer: p.payerName, Amount: p.amountPaid, Method: p.paymentMethod, Outlet: p.outlet.name })), filename: 'paid-bills', title: 'Paid Bills Report' })}
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
@@ -392,7 +392,7 @@ export default function ReportsPage() {
                   <div>
                     <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                       <p className="text-sm text-gray-500">Total cancelled: <strong className="text-rose-700">{formatCurrency(data.summary.totalCancelled)}</strong> · {data.cancellations.length} entries</p>
-                      <ExportBtns rows={data.cancellations.map((c) => ({ Date: formatDate(c.date), Staff: c.collection?.staffName || '', Outlet: c.collection?.outlet?.name || '', Reason: c.reason, Product: c.productName, 'Selling Price': c.sellingPrice, Qty: c.quantity, Amount: c.amount }))} filename="cancellations" title="Cancellations Report" />
+                      {renderExportBtns({ rows: data.cancellations.map((c) => ({ Date: formatDate(c.date), Staff: c.collection?.staffName || '', Outlet: c.collection?.outlet?.name || '', Reason: c.reason, Product: c.productName, 'Selling Price': c.sellingPrice, Qty: c.quantity, Amount: c.amount })), filename: 'cancellations', title: 'Cancellations Report' })}
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
@@ -432,7 +432,7 @@ export default function ReportsPage() {
                   <div>
                     <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                       <p className="text-sm text-gray-500">{data.products.length} products in catalogue</p>
-                      <ExportBtns rows={data.products.map((p) => ({ Code: p.code, Product: p.name, Unit: p.unitMeasure, 'Buying Price': p.buyingPrice, 'Selling Price': p.sellingPrice, Status: p.isActive ? 'Active' : 'Disabled' }))} filename="products" title="Products Report" />
+                      {renderExportBtns({ rows: data.products.map((p) => ({ Code: p.code, Product: p.name, Unit: p.unitMeasure, 'Buying Price': p.buyingPrice, 'Selling Price': p.sellingPrice, Status: p.isActive ? 'Active' : 'Disabled' })), filename: 'products', title: 'Products Report' })}
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">

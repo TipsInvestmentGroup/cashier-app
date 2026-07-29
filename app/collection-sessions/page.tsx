@@ -56,7 +56,7 @@ export default function CollectionSessionsLauncherPage() {
   const businessToday = format(resolveBusinessDateLocal(new Date(), calendarStartTime), 'yyyy-MM-dd')
   const isBeforeCutover = businessToday !== format(new Date(), 'yyyy-MM-dd')
   const [sessionDate, setSessionDate] = useState(businessToday)
-  useEffect(() => { setSessionDate(businessToday) }, [businessToday]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setSessionDate(businessToday) }, [businessToday])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -94,7 +94,7 @@ export default function CollectionSessionsLauncherPage() {
       <div className="max-w-lg space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Collection Sessions</h1>
-          <p className="text-gray-500 text-sm">Run today's collection using a custom template.</p>
+          <p className="text-gray-500 text-sm">Run today&apos;s collection using a custom template.</p>
         </div>
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
           {loading ? <div className="py-6 text-center text-gray-400">Loading…</div> : templates.length === 0 ? (
@@ -134,7 +134,7 @@ export default function CollectionSessionsLauncherPage() {
 
         {todaySessions.length > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <h2 className="text-sm font-bold text-gray-700 mb-3">Today's Sessions</h2>
+            <h2 className="text-sm font-bold text-gray-700 mb-3">Today&apos;s Sessions</h2>
             <div className="space-y-3">
               {todaySessions.map((s) => {
                 const stages = s.template.stages

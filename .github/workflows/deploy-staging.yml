@@ -1,0 +1,152 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch: {}
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  migrate-and-deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    # GITHUB_TOKEN defaults to read-only in this repo — the "Comment preview
+    # URL on commit" step needs write access to post a commit comment, and
+    # without this it 403s and fails the whole job (blocking smoke-test,
+    # which needs this job's output, even though the deploy itself succeeded).
+    permissions:
+      contents: write
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ${{ secrets.STAGING_DATABASE_URL_UNPOOLED }}
+      JWT_SECRET: ${{ secrets.STAGING_JWT_SECRET }}
+      CRON_SECRET: ${{ secrets.STAGING_CRON_SECRET }}
+      NEXT_PUBLIC_OWNER_EMAIL: ${{ secrets.STAGING_OWNER_EMAIL }}
+      SMTP_HOST: ${{ secrets.STAGING_SMTP_HOST }}
+      SMTP_FROM: ${{ secrets.STAGING_SMTP_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      # NODE_ENV must NOT be set here (or at job level) — npm ci honors
+      # NODE_ENV=production by omitting devDependencies, which would drop
+      # `tsx` (a devDependency) and break every npx tsx step below. Set it
+      # per-step instead, only where validate-config.ts/the app actually
+      # need it.
+      - run: npm ci
+
+      - name: Validate configuration
+        run: npx tsx scripts/validate-config.ts --env=staging
+        env:
+          NODE_ENV: production
+
+      - name: Apply pending migrations
+        run: |
+          node scripts/prepare-db.mjs
+          npx prisma generate
+          npx prisma migrate deploy
+        env:
+          NODE_ENV: production
+
+      - name: Deploy to Vercel (Preview)
+        id: deploy
+        run: |
+          # Pinned rather than @latest — 57.0.0 (released 2 days before the
+          # prior pin) reproducibly failed `vercel deploy --prebuilt` uploads
+          # with "Upload aborted" 3/3 times in this workflow; 56.5.0 was the
+          # last version before it. 56.5.0 has now started failing the same
+          # way (4/4 times, 2026-07-29) — bumping to 58.1.0 (latest stable as
+          # of this pin) since the fault clearly isn't specific to one old
+          # version. Bump deliberately, not automatically, and re-verify
+          # against this exact "Upload aborted" failure mode if it recurs.
+          npm i -g vercel@58.1.0
+          vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+          vercel build --token="$VERCEL_TOKEN"
+
+          # `vercel deploy`'s own exit code is unreliable: on 2026-07-29 it
+          # reported "Upload aborted" and exited non-zero on every attempt
+          # (including 3 back-to-back retries with a 15s backoff), yet
+          # `vercel inspect`/the dashboard showed every one of those
+          # deployments actually reached READY — the CLI process loses the
+          # final confirmation response over the network after the upload
+          # was already accepted, and misreports success as failure. So:
+          # run it once, ignore its exit code, then verify the ACTUAL state
+          # of the deployment tied to this exact commit instead of trusting
+          # the command's own report.
+          vercel deploy --prebuilt --token="$VERCEL_TOKEN" || true
+
+          for attempt in 1 2 3 4 5; do
+            result=$(vercel ls cashier-app --format json --meta githubCommitSha="$GITHUB_SHA" --token="$VERCEL_TOKEN" 2>/dev/null)
+            state=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].state)}catch{console.log('')}")
+            if [ "$state" = "READY" ]; then
+              url=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].url)}catch{console.log('')}")
+              echo "url=https://$url" >> "$GITHUB_OUTPUT"
+              echo "Deployment for $GITHUB_SHA confirmed READY: https://$url"
+              exit 0
+            fi
+            echo "Deployment for $GITHUB_SHA not READY yet (state=${state:-none}), checking again in 15s... ($attempt/5)"
+            sleep 15
+          done
+          echo "Deployment for $GITHUB_SHA never reached READY"
+          exit 1
+        env:
+          NODE_ENV: production
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      # Idempotent (create-only-if-absent) — safe to run on every deploy, not
+      # just the first one. Previously a manual step (open the URL in a
+      # browser); automated here so newly-added RolePermission/seed defaults
+      # (e.g. the Reconciliation Workflow Engine's role grants) get backfilled
+      # onto staging without anyone remembering to re-run it by hand.
+      - name: Seed database
+        run: |
+          response=$(curl -s -w "\n%{http_code}" "${{ steps.deploy.outputs.url }}/api/admin/seed?secret=$CRON_SECRET" \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET")
+          status="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          echo "$body"
+          if [ "$status" -ge 400 ]; then
+            echo "Seed request failed with status $status"
+            exit 1
+          fi
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      - name: Comment preview URL on commit
+        if: github.event_name == 'push'
+        run: |
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+            -f body="Staging preview deployed: ${{ steps.deploy.outputs.url }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  smoke-test:
+    needs: migrate-and-deploy
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run smoke suite against the deployed staging URL
+        run: npx tsx scripts/smoke/run-all.ts
+        env:
+          SMOKE_BASE_URL: ${{ needs.migrate-and-deploy.outputs.url }}
+          SMOKE_ADMIN_EMAIL: ${{ secrets.STAGING_SMOKE_EMAIL }}
+          SMOKE_ADMIN_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
+          # Preview deployments sit behind Vercel's own SSO wall
+          # (Deployment Protection) — this is Vercel's documented bypass
+          # secret for automated checks. Generate it in Vercel: Project ->
+          # Settings -> Deployment Protection -> Protection Bypass for
+          # Automation, then add it here as a repo/environment secret.
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}

@@ -1,6 +1,15 @@
 # UAT Checklist — tips Cashier Management
 **Goal:** confirm the system is correct and safe before full go‑live. Run this at **one pilot outlet for ~1–3 weeks, in parallel with the manual books.** Sign off only when the app's figures match the manual records.
 
+> `scripts/smoke/*` (see `npm run smoke`, wired into the staging/production
+> deploy pipeline per `docs/GO-LIVE-RUNBOOK.md` §5) now mechanically checks
+> that core routes are reachable and don't 500 — permissions, POS order
+> validation, a real collection post, reconciliation-stages, a signed bill,
+> pricing, HR, payroll (skips cleanly if disabled), business calendar, and
+> inventory stock-levels. That's plumbing-level coverage, not correctness —
+> everything below (exact figures, approval semantics, edge cases, "does
+> this match the manual books") still needs a human running this checklist.
+
 App: https://cashier-app-psi.vercel.app · Tester: ______________ · Period: ____________
 
 Legend: ✅ pass · ❌ fail (log issue) · ⬜ not tested

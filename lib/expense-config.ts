@@ -15,7 +15,7 @@ export type ExpenseScope = (typeof EXPENSE_SCOPES)[number]
 export const OVER_BUDGET_BEHAVIORS = ['BLOCK', 'WARN', 'APPROVE'] as const
 export type OverBudgetBehavior = (typeof OVER_BUDGET_BEHAVIORS)[number]
 
-export const FUNDING_SOURCE_TYPES = ['CASH', 'BANK', 'MOBILE_MONEY', 'CARD', 'OTHER'] as const
+export const FUNDING_SOURCE_TYPES = ['CASH', 'BANK', 'MOBILE_MONEY', 'CARD', 'CASHIER_DRAWER', 'OTHER'] as const
 export type FundingSourceType = (typeof FUNDING_SOURCE_TYPES)[number]
 
 export const BUDGET_VALIDATION_MODES = ['NONE', 'WARN', 'BLOCK'] as const
@@ -34,6 +34,9 @@ export type AttachmentDocType = (typeof ATTACHMENT_DOC_TYPES)[number]
 
 export const ATTACHMENT_ENTITY_TYPES = ['ExpenseRequest', 'ExpensePayment', 'VerificationRecord'] as const
 export type AttachmentEntityType = (typeof ATTACHMENT_ENTITY_TYPES)[number]
+
+export const REQUEST_TYPE_FIELD_TYPES = ['TEXT', 'NUMBER', 'DATE', 'PHONE', 'TEXTAREA', 'SELECT'] as const
+export type RequestTypeFieldType = (typeof REQUEST_TYPE_FIELD_TYPES)[number]
 
 export interface ExpenseTerminology {
   module: string
@@ -170,4 +173,64 @@ export async function setExpenseModuleConfig(db: Db, scope: ExpenseScope, scopeI
     update: data,
     create: { scope, scopeId, ...data },
   })
+}
+
+// ─── RequestTypeField — the Digital Expense Form's configurable custom
+// fields, graduating RequestType.requiredFields from a JSON escape hatch to
+// a real child table (see prisma/schema.prisma model doc). ───────────────
+
+export interface RequestTypeFieldInput {
+  fieldKey: string
+  label: string
+  fieldType?: RequestTypeFieldType
+  required?: boolean
+  options?: string[] | null
+  sortOrder?: number
+}
+
+export async function listRequestTypeFields(db: Db, requestTypeId: string) {
+  return db.requestTypeField.findMany({ where: { requestTypeId, isActive: true }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] })
+}
+
+/** Creates a custom field. isSystem is never set here — only lib/expense-seed.ts
+ *  creates isSystem=true rows; every admin-added field is isSystem=false, per
+ *  "Do not hard-code the form fields" — an admin can add as many as they want. */
+export async function createRequestTypeField(db: Db, requestTypeId: string, input: RequestTypeFieldInput) {
+  const fieldKey = input.fieldKey.trim().replace(/[^a-zA-Z0-9_]+/g, '_')
+  if (!fieldKey) throw new Error('fieldKey is required')
+  const fieldType = input.fieldType && (REQUEST_TYPE_FIELD_TYPES as readonly string[]).includes(input.fieldType) ? input.fieldType : 'TEXT'
+  return db.requestTypeField.create({
+    data: {
+      requestTypeId, fieldKey, label: input.label.trim() || fieldKey,
+      fieldType, required: input.required ?? false,
+      options: input.options?.length ? JSON.stringify(input.options) : null,
+      sortOrder: input.sortOrder ?? 0,
+      isSystem: false,
+    },
+  })
+}
+
+/** Updates a field. System fields (isSystem=true, the seeded Digital Expense
+ *  defaults) may only have label/required/sortOrder changed — fieldKey/
+ *  fieldType are load-bearing for the seeded form and stay fixed. */
+export async function updateRequestTypeField(db: Db, fieldId: string, patch: Partial<RequestTypeFieldInput>) {
+  const existing = await db.requestTypeField.findUniqueOrThrow({ where: { id: fieldId } })
+  const data: Record<string, unknown> = {}
+  if (patch.label !== undefined) data.label = patch.label.trim() || existing.label
+  if (patch.required !== undefined) data.required = patch.required
+  if (patch.sortOrder !== undefined) data.sortOrder = patch.sortOrder
+  if (!existing.isSystem) {
+    if (patch.fieldType !== undefined && (REQUEST_TYPE_FIELD_TYPES as readonly string[]).includes(patch.fieldType)) data.fieldType = patch.fieldType
+    if (patch.options !== undefined) data.options = patch.options?.length ? JSON.stringify(patch.options) : null
+  }
+  return db.requestTypeField.update({ where: { id: fieldId }, data })
+}
+
+/** Soft-deletes a custom field. System fields can never be deleted — only
+ *  relabeled/reordered/required-toggled (matches the request's "admin can
+ *  relabel/reorder/require but not delete" system-field rule). */
+export async function deactivateRequestTypeField(db: Db, fieldId: string) {
+  const existing = await db.requestTypeField.findUniqueOrThrow({ where: { id: fieldId } })
+  if (existing.isSystem) throw new Error(`${existing.label} is a system field and cannot be removed — you can still relabel, reorder, or toggle whether it's required`)
+  return db.requestTypeField.update({ where: { id: fieldId }, data: { isActive: false } })
 }

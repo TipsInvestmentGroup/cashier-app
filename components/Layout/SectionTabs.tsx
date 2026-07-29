@@ -73,6 +73,8 @@ export const PETTY_TABS: Tab[] = [
   // see docs/expense-disbursement-framework-design.md decision 1). Lives in
   // this same section since it generalizes exactly what Petty Cash does.
   { href: '/expense-requests', label: 'Expense Requests', icon: Receipt, roles: CASHIER_ROLES },
+  { href: '/petty-cash-ledger', label: 'Petty Cash Ledger', icon: BookOpen, roles: CASHIER_ROLES },
+  { href: '/digital-expenses', label: 'Digital Expenses', icon: CreditCard, roles: CASHIER_ROLES },
 ]
 
 export const FINANCE_TABS: Tab[] = [

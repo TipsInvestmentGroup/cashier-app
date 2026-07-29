@@ -3,9 +3,8 @@ import { randomBytes } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, hashPassword } from '@/lib/auth'
 import { VALID_ROLES } from '@/lib/shared-constants'
+import { isOwner, resolveManageUsersPermission, MANAGE_USERS_RESOURCES } from '@/lib/rbac'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
-const isOwner = (email?: string) => !!OWNER_EMAIL && (email || '').toLowerCase() === OWNER_EMAIL
 const PIN_RE = /^\d{4}$/
 
 export async function GET(req: NextRequest) {
@@ -28,7 +27,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!['ADMIN', 'DIRECTOR'].includes(user.role) && !isOwner(user.email)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!(await resolveManageUsersPermission(user, MANAGE_USERS_RESOURCES.ADD_USER))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { name, email, password, role, outletId, pin, position, isCasual } = await req.json()
   if (!VALID_ROLES.includes(role)) return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
