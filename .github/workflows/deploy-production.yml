@@ -84,6 +84,26 @@ jobs:
           NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
+      # Idempotent (create-only-if-absent) — see the matching step + comment
+      # in deploy-staging.yml (#72). Missing here until now, which is why
+      # newly-added seed defaults (e.g. the Reconciliation Workflow Engine's
+      # RolePermission role grants, added 2026-07-20) never backfilled onto
+      # production — confirmed by the post-deploy smoke check's
+      # `reconciliation` 403 on 2026-07-29.
+      - name: Seed database
+        run: |
+          response=$(curl -s -w "\n%{http_code}" "${{ secrets.PROD_APP_URL }}/api/admin/seed?secret=$CRON_SECRET" \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET")
+          status="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          echo "$body"
+          if [ "$status" -ge 400 ]; then
+            echo "Seed request failed with status $status"
+            exit 1
+          fi
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
       - name: Post-deploy smoke check (read-only — runs against live business data)
         run: npx tsx scripts/smoke/run-all.ts --readonly
         env:
