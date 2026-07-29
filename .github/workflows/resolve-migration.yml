@@ -1,0 +1,49 @@
+name: "Ops: Resolve Prisma migration"
+
+# Manual, one-off recovery tool. Use when `prisma migrate deploy` fails with
+# P3018 "relation already exists" because a database's schema was previously
+# managed via `prisma db push` (no _prisma_migrations history) rather than
+# migrations — this marks a specific migration as already-applied WITHOUT
+# re-running its SQL, since the tables it would create are confirmed already
+# present. Gated behind the same environment approval as a real deploy,
+# since it mutates that environment's live migration ledger.
+#
+# Do NOT use this for a migration that hasn't actually been applied to the
+# target database yet — it will skip running the SQL entirely and silently
+# leave the schema change missing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Which environment's database to resolve against"
+        required: true
+        type: choice
+        options: [production, staging]
+      migration_name:
+        description: "Exact migration folder name, e.g. 20260728180000_add_expense_ledger_custodians_custom_fields"
+        required: true
+        type: string
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      DATABASE_URL: ${{ secrets.PROD_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ${{ secrets.PROD_DATABASE_URL_UNPOOLED || secrets.STAGING_DATABASE_URL_UNPOOLED }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+
+      - name: Resolve migration as applied
+        run: |
+          node scripts/prepare-db.mjs
+          npx prisma generate
+          npx prisma migrate resolve --applied "${{ inputs.migration_name }}"
+        env:
+          NODE_ENV: production
