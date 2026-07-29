@@ -70,20 +70,31 @@ jobs:
           vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
           vercel build --token="$VERCEL_TOKEN"
 
-          # The upload step itself has been reproducibly flaky (2026-07-29:
-          # "Upload aborted" 6/6 times in a row across two CLI versions, plus
-          # an unrelated npm-install ECONNRESET the same day) — retry the
-          # already-built artifact a few times before giving up, since
-          # `--prebuilt` re-uploads from .vercel/output without rebuilding.
-          for attempt in 1 2 3; do
-            if url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN"); then
-              echo "url=$url" >> "$GITHUB_OUTPUT"
+          # `vercel deploy`'s own exit code is unreliable: on 2026-07-29 it
+          # reported "Upload aborted" and exited non-zero on every attempt
+          # (including 3 back-to-back retries with a 15s backoff), yet
+          # `vercel inspect`/the dashboard showed every one of those
+          # deployments actually reached READY — the CLI process loses the
+          # final confirmation response over the network after the upload
+          # was already accepted, and misreports success as failure. So:
+          # run it once, ignore its exit code, then verify the ACTUAL state
+          # of the deployment tied to this exact commit instead of trusting
+          # the command's own report.
+          vercel deploy --prebuilt --token="$VERCEL_TOKEN" || true
+
+          for attempt in 1 2 3 4 5; do
+            result=$(vercel ls cashier-app --format json --meta githubCommitSha="$GITHUB_SHA" --token="$VERCEL_TOKEN" 2>/dev/null)
+            state=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].state)}catch{console.log('')}")
+            if [ "$state" = "READY" ]; then
+              url=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].url)}catch{console.log('')}")
+              echo "url=https://$url" >> "$GITHUB_OUTPUT"
+              echo "Deployment for $GITHUB_SHA confirmed READY: https://$url"
               exit 0
             fi
-            echo "vercel deploy attempt $attempt failed, retrying in 15s..."
+            echo "Deployment for $GITHUB_SHA not READY yet (state=${state:-none}), checking again in 15s... ($attempt/5)"
             sleep 15
           done
-          echo "vercel deploy failed after 3 attempts"
+          echo "Deployment for $GITHUB_SHA never reached READY"
           exit 1
         env:
           NODE_ENV: production
