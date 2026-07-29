@@ -15,6 +15,8 @@
 import type { Db } from '@/lib/ledger'
 import { prisma } from '@/lib/prisma'
 import type { ExpenseRequestStatus } from '@/lib/expense-config'
+import { createNotification, notifyUsersByRole } from '@/lib/notifications'
+import { listCustodiansForRequestType } from '@/lib/expense-access'
 
 function parseApproverRoles(raw: string | null | undefined): string[] {
   if (!raw) return []
@@ -50,6 +52,14 @@ export async function openNextApprovalStep(db: Db, expenseRequestId: string): Pr
       comment: `${request.requestType.name}: ${request.purpose}${roles.length > 1 ? ` (level ${approvedCount + 1} of ${roles.length})` : ''}`,
     },
   })
+
+  await notifyUsersByRole(approverRole, request.outletId, {
+    type: 'EXPENSE_REQUEST_APPROVAL_NEEDED',
+    title: `${request.requestType.name} awaiting your approval`,
+    message: `"${request.purpose}" for ${request.amount} ${request.currency} needs your approval.`,
+    entityType: 'ExpenseRequest', entityId: expenseRequestId,
+  }).catch(() => {})
+
   return { approverRole }
 }
 
@@ -62,8 +72,16 @@ export async function openNextApprovalStep(db: Db, expenseRequestId: string): Pr
  * APPROVED.
  */
 export async function advanceExpenseApproval(db: Db, expenseRequestId: string, decision: 'APPROVED' | 'REJECTED'): Promise<{ status: ExpenseRequestStatus }> {
+  const request = await db.expenseRequest.findUniqueOrThrow({ where: { id: expenseRequestId }, include: { requestType: true } })
+
   if (decision === 'REJECTED') {
     await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'REJECTED' } })
+    await createNotification({
+      userId: request.requestedById, type: 'EXPENSE_REQUEST_REJECTED',
+      title: `${request.requestType.name} rejected`,
+      message: `"${request.purpose}" for ${request.amount} ${request.currency} was rejected.`,
+      entityType: 'ExpenseRequest', entityId: expenseRequestId,
+    }).catch(() => {})
     return { status: 'REJECTED' }
   }
 
@@ -71,6 +89,24 @@ export async function advanceExpenseApproval(db: Db, expenseRequestId: string, d
   if (next) return { status: 'PENDING_APPROVAL' }
 
   await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'APPROVED' } })
+
+  await createNotification({
+    userId: request.requestedById, type: 'EXPENSE_REQUEST_APPROVED',
+    title: `${request.requestType.name} approved`,
+    message: `"${request.purpose}" for ${request.amount} ${request.currency} has been approved.`,
+    entityType: 'ExpenseRequest', entityId: expenseRequestId,
+  }).catch(() => {})
+
+  // Petty Cash Custodian: notify whoever can now disburse this request so
+  // "requests have been approved and are ready for payment" reaches them.
+  const custodians = await listCustodiansForRequestType(request.requestType.allowedFundingSourceIds).catch(() => [])
+  await Promise.all(custodians.map((c) => createNotification({
+    userId: c.id, type: 'EXPENSE_REQUEST_READY_FOR_PAYMENT',
+    title: `${request.requestType.name} ready for payment`,
+    message: `"${request.purpose}" for ${request.amount} ${request.currency} is approved and ready to be paid.`,
+    entityType: 'ExpenseRequest', entityId: expenseRequestId,
+  }).catch(() => {})))
+
   return { status: 'APPROVED' }
 }
 

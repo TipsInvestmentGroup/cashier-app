@@ -10,6 +10,7 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { MoneyInput } from '@/components/MoneyInput'
+import { ExpenseDynamicFields } from '@/components/ExpenseDynamicFields'
 import toast from 'react-hot-toast'
 
 interface RequestType { id: string; name: string; allowedCategoryIds: string | null; isActive: boolean }
@@ -48,6 +49,7 @@ export default function ExpenseRequestsPage() {
   const [purpose, setPurpose] = useState('')
   const [amount, setAmount] = useState('')
   const [lineItems, setLineItems] = useState<{ detail: string; unit: string; unitCost: string }[]>([])
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const itemRowAmount = (r: { unit: string; unitCost: string }) => (Number(r.unit) || 0) * (Number(r.unitCost) || 0)
   const itemsTotal = lineItems.reduce((s, r) => s + itemRowAmount(r), 0)
   const hasItems = lineItems.some((r) => r.detail.trim() || Number(r.unitCost) > 0)
@@ -76,7 +78,7 @@ export default function ExpenseRequestsPage() {
   const updItem = (i: number, patch: Partial<{ detail: string; unit: string; unitCost: string }>) => setLineItems(lineItems.map((r, x) => (x === i ? { ...r, ...patch } : r)))
   const rmItem = (i: number) => setLineItems(lineItems.filter((_, x) => x !== i))
 
-  const resetForm = () => { setRequestTypeId(''); setCategoryId(''); setPurpose(''); setAmount(''); setLineItems([]) }
+  const resetForm = () => { setRequestTypeId(''); setCategoryId(''); setPurpose(''); setAmount(''); setLineItems([]); setFieldValues({}) }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -90,7 +92,7 @@ export default function ExpenseRequestsPage() {
 
     setSubmitting(true)
     try {
-      const created = await request('/api/expense/requests', { method: 'POST', body: JSON.stringify({ requestTypeId, categoryId, purpose, amount: finalAmount, items: cleanItems }) })
+      const created = await request('/api/expense/requests', { method: 'POST', body: JSON.stringify({ requestTypeId, categoryId, purpose, amount: finalAmount, items: cleanItems, fieldValues }) })
       await request(`/api/expense/requests/${created.id}/submit`, { method: 'POST' })
       toast.success('Request submitted!')
       resetForm(); load()
@@ -199,6 +201,8 @@ export default function ExpenseRequestsPage() {
                   <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)}
                     className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" rows={2} placeholder="What is this for?" required />
                 </div>
+
+                {requestTypeId && <ExpenseDynamicFields requestTypeId={requestTypeId} values={fieldValues} onChange={setFieldValues} />}
 
                 <div className="border-2 border-gray-100 rounded-xl p-3">
                   <div className="flex items-center justify-between mb-2">

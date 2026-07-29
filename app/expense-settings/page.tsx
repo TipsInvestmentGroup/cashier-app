@@ -8,7 +8,7 @@ import toast from 'react-hot-toast'
 
 type OverBudget = 'BLOCK' | 'WARN' | 'APPROVE'
 type BudgetValidation = 'NONE' | 'WARN' | 'BLOCK'
-const SOURCE_TYPES = ['CASH', 'BANK', 'MOBILE_MONEY', 'CARD', 'OTHER'] as const
+const SOURCE_TYPES = ['CASH', 'BANK', 'MOBILE_MONEY', 'CARD', 'CASHIER_DRAWER', 'OTHER'] as const
 const APPROVER_ROLE_OPTIONS = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const VERIFICATION_STAGE_OPTIONS = ['RECEIPT_UPLOADED', 'RECEIPT_VERIFIED', 'GOODS_CONFIRMED', 'VALIDATED']
 const ATTACHMENT_DOC_TYPE_OPTIONS = ['RECEIPT', 'INVOICE', 'PROOF_OF_PAYMENT', 'SCREENSHOT', 'OTHER']
@@ -34,9 +34,10 @@ interface Category {
 interface FundingSource {
   id: string; code: string; name: string; sourceType: string
   companyPaymentAccountId: string | null; companyPaymentAccount?: { id: string; accountName: string; bankName: string | null } | null
-  openingBalance: number; currentBalance: number; dailyLimit: number; isActive: boolean
+  openingBalance: number; currentBalance: number; liveBalance?: number; dailyLimit: number; isActive: boolean
   _count?: { payments: number }
 }
+interface UserOption { id: string; name: string; role: string }
 interface Account { id: string; code: string; name: string; type: string }
 interface CompanyPaymentAccount { id: string; accountName: string; bankName: string | null; paymentChannel: { label: string } }
 
@@ -298,11 +299,92 @@ function TypeEditor({ initial, categories, sources, onCancel, onSaved }: {
           <p className="text-[11px] text-gray-400 mt-1">{sources.map((s) => s.name).join(' · ')}</p>
         )}
       </div>
+      {isEdit && <CustomFieldsEditor requestTypeId={initial.id!} />}
       <div className="flex gap-2 mt-3">
         <button onClick={save} disabled={saving || !f.name} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
         <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200">Cancel</button>
       </div>
     </Card>
+  )
+}
+
+interface CustomField { id: string; fieldKey: string; label: string; fieldType: string; required: boolean; isSystem: boolean; sortOrder: number }
+const FIELD_TYPE_OPTIONS = ['TEXT', 'NUMBER', 'DATE', 'PHONE', 'TEXTAREA', 'SELECT']
+
+/** Admin-managed custom fields for one RequestType — the Digital Expense
+ *  Form's "do not hard-code the form fields" requirement. System (seeded)
+ *  fields may be relabeled/reordered/required-toggled but not deleted;
+ *  admins can add unlimited further fields here with zero code changes. */
+function CustomFieldsEditor({ requestTypeId }: { requestTypeId: string }) {
+  const { request } = useApi()
+  const [fields, setFields] = useState<CustomField[]>([])
+  const [loading, setLoading] = useState(true)
+  const [newLabel, setNewLabel] = useState('')
+  const [newType, setNewType] = useState('TEXT')
+  const [newRequired, setNewRequired] = useState(false)
+  const [adding, setAdding] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try { setFields(await request(`/api/expense/request-types/${requestTypeId}/fields`)) }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load fields') }
+    finally { setLoading(false) }
+  }, [request, requestTypeId])
+  useEffect(() => { load() }, [load])
+
+  const addField = async () => {
+    if (!newLabel.trim()) return toast.error('Label is required')
+    setAdding(true)
+    try {
+      const fieldKey = newLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+      await request(`/api/expense/request-types/${requestTypeId}/fields`, {
+        method: 'POST', body: JSON.stringify({ fieldKey, label: newLabel.trim(), fieldType: newType, required: newRequired, sortOrder: fields.length }),
+      })
+      toast.success('Field added'); setNewLabel(''); setNewType('TEXT'); setNewRequired(false); load()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not add field') }
+    finally { setAdding(false) }
+  }
+
+  const toggleRequired = async (f: CustomField) => {
+    try { await request(`/api/expense/request-types/${requestTypeId}/fields/${f.id}`, { method: 'PATCH', body: JSON.stringify({ required: !f.required }) }); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not update field') }
+  }
+
+  const removeField = async (f: CustomField) => {
+    if (!confirm(`Remove "${f.label}"?`)) return
+    try { await request(`/api/expense/request-types/${requestTypeId}/fields/${f.id}`, { method: 'DELETE' }); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not remove field') }
+  }
+
+  return (
+    <div className="mb-3 border-2 border-gray-100 rounded-xl p-3">
+      <span className="text-xs text-gray-500 block mb-2">Custom fields <span className="text-gray-400">(shown on the request form for this type — add as many as you need)</span></span>
+      {loading ? <p className="text-xs text-gray-400">Loading…</p> : (
+        <div className="space-y-2 mb-3">
+          {fields.map((f) => (
+            <div key={f.id} className="flex items-center gap-2 text-sm">
+              <span className="flex-1 font-medium text-gray-700">{f.label}{f.isSystem && <span className="ml-1 text-[10px] text-gray-400">(system)</span>}</span>
+              <span className="text-xs text-gray-400 w-20">{f.fieldType}</span>
+              <label className="flex items-center gap-1 text-xs text-gray-500">
+                <input type="checkbox" checked={f.required} onChange={() => toggleRequired(f)} /> required
+              </label>
+              {!f.isSystem && <button onClick={() => removeField(f)} className="text-red-500 hover:text-red-700 text-xs">✕</button>}
+            </div>
+          ))}
+          {!fields.length && <p className="text-xs text-gray-400">No custom fields yet</p>}
+        </div>
+      )}
+      <div className="grid grid-cols-12 gap-2 items-center">
+        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Field label" className="col-span-5 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm" />
+        <select value={newType} onChange={(e) => setNewType(e.target.value)} className="col-span-3 px-2 py-2 border-2 border-gray-200 rounded-lg text-sm">
+          {FIELD_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <label className="col-span-2 flex items-center gap-1 text-xs text-gray-500">
+          <input type="checkbox" checked={newRequired} onChange={(e) => setNewRequired(e.target.checked)} /> required
+        </label>
+        <button type="button" onClick={addField} disabled={adding} className="col-span-2 px-2 py-2 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-lg hover:bg-indigo-100 disabled:opacity-40">+ Add</button>
+      </div>
+    </div>
   )
 }
 
@@ -427,6 +509,7 @@ function FundingSourcesTab() {
   const { request } = useApi()
   const [sources, setSources] = useState<FundingSource[]>([])
   const [accounts, setAccounts] = useState<CompanyPaymentAccount[]>([])
+  const [users, setUsers] = useState<UserOption[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -434,8 +517,8 @@ function FundingSourcesTab() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, a] = await Promise.all([request('/api/expense/funding-sources'), request('/api/finance/company-accounts').catch(() => [])])
-      setSources(s); setAccounts(a || [])
+      const [s, a, u] = await Promise.all([request('/api/expense/funding-sources'), request('/api/finance/company-accounts').catch(() => []), request('/api/users').catch(() => [])])
+      setSources(s); setAccounts(a || []); setUsers(u || [])
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load') }
     finally { setLoading(false) }
   }, [request])
@@ -454,7 +537,7 @@ function FundingSourcesTab() {
       <div className="flex justify-end">
         <button onClick={() => setCreating(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700">+ New funding source</button>
       </div>
-      {creating && <SourceEditor initial={blankSource} accounts={accounts} onCancel={() => setCreating(false)} onSaved={() => { setCreating(false); load() }} />}
+      {creating && <SourceEditor initial={blankSource} accounts={accounts} users={users} onCancel={() => setCreating(false)} onSaved={() => { setCreating(false); load() }} />}
 
       <Card>
         <div className="overflow-x-auto">
@@ -467,7 +550,13 @@ function FundingSourcesTab() {
                 <tr key={s.id} className="border-b border-gray-50">
                   <td className="py-2 pr-3"><span className="font-medium text-gray-800">{s.name}</span><span className="block text-[11px] text-gray-400">{s.code}{s.companyPaymentAccount ? ` · ${s.companyPaymentAccount.accountName}` : ''}</span></td>
                   <td className="pr-3 text-gray-600">{s.sourceType}</td>
-                  <td className="pr-3 text-gray-600">{s.sourceType === 'CASH' || s.sourceType === 'OTHER' ? formatCurrency(s.currentBalance) : <span className="text-gray-400">from GL</span>}</td>
+                  <td className="pr-3 text-gray-600">
+                    {s.sourceType === 'CASH' || s.sourceType === 'OTHER'
+                      ? formatCurrency(s.currentBalance)
+                      : s.sourceType === 'CASHIER_DRAWER'
+                        ? <>{formatCurrency(s.liveBalance ?? 0)}<span className="block text-[10px] text-gray-400">from today&apos;s cash position</span></>
+                        : <span className="text-gray-400">from GL</span>}
+                  </td>
                   <td className="pr-3 text-gray-600">{s.dailyLimit > 0 ? formatCurrency(s.dailyLimit) : '—'}</td>
                   <td className="pr-3 text-gray-600">{s._count?.payments ?? 0}</td>
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${s.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{s.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
@@ -486,15 +575,58 @@ function FundingSourcesTab() {
       {editing && (() => {
         const s = sources.find((x) => x.id === editing)!
         return <SourceEditor initial={{ id: s.id, name: s.name, code: s.code, sourceType: s.sourceType, companyPaymentAccountId: s.companyPaymentAccountId || '', openingBalance: s.openingBalance, dailyLimit: s.dailyLimit }}
-          accounts={accounts} isEditMode onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
+          accounts={accounts} users={users} isEditMode onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       })()}
     </div>
   )
 }
 
-function SourceEditor({ initial, accounts, isEditMode, onCancel, onSaved }: {
+function CustodianPicker({ fundingSourceId, users }: { fundingSourceId: string; users: UserOption[] }) {
+  const { request } = useApi()
+  const [assignedIds, setAssignedIds] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const rows: { userId: string }[] = await request(`/api/expense/funding-sources/${fundingSourceId}/custodians`)
+      setAssignedIds(rows.map((r) => r.userId))
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load custodians') }
+    finally { setLoading(false) }
+  }, [request, fundingSourceId])
+  useEffect(() => { load() }, [load])
+
+  const toggle = async (userId: string) => {
+    try {
+      if (assignedIds.includes(userId)) await request(`/api/expense/funding-sources/${fundingSourceId}/custodians?userId=${userId}`, { method: 'DELETE' })
+      else await request(`/api/expense/funding-sources/${fundingSourceId}/custodians`, { method: 'POST', body: JSON.stringify({ userId }) })
+      load()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not update custodian') }
+  }
+
+  const eligible = users.filter((u) => ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'].includes(u.role))
+
+  return (
+    <div className="mb-3">
+      <span className="text-xs text-gray-500 block mb-1">Custodians <span className="text-gray-400">(who can receive/disburse this fund)</span></span>
+      {loading ? <p className="text-xs text-gray-400">Loading…</p> : (
+        <div className="flex flex-wrap gap-2 mt-2">
+          {eligible.map((u) => (
+            <button key={u.id} type="button" onClick={() => toggle(u.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border-2 transition ${assignedIds.includes(u.id) ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-500'}`}>
+              {u.name}
+            </button>
+          ))}
+          {!eligible.length && <p className="text-xs text-gray-400">No eligible users found</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SourceEditor({ initial, accounts, users, isEditMode, onCancel, onSaved }: {
   initial: { id?: string; name: string; code: string; sourceType: string; companyPaymentAccountId: string; openingBalance: number; dailyLimit: number }
-  accounts: CompanyPaymentAccount[]; isEditMode?: boolean; onCancel: () => void; onSaved: () => void
+  accounts: CompanyPaymentAccount[]; users: UserOption[]; isEditMode?: boolean; onCancel: () => void; onSaved: () => void
 }) {
   const { request } = useApi()
   const isEdit = !!initial.id
@@ -502,6 +634,7 @@ function SourceEditor({ initial, accounts, isEditMode, onCancel, onSaved }: {
   const [saving, setSaving] = useState(false)
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p })
   const isAccountBacked = f.sourceType === 'BANK' || f.sourceType === 'MOBILE_MONEY' || f.sourceType === 'CARD'
+  const isLiveBalance = isAccountBacked || f.sourceType === 'CASHIER_DRAWER'
 
   const save = async () => {
     setSaving(true)
@@ -530,12 +663,14 @@ function SourceEditor({ initial, accounts, isEditMode, onCancel, onSaved }: {
               {accounts.map((a) => <option key={a.id} value={a.id}>{a.paymentChannel.label} · {a.accountName}{a.bankName ? ` (${a.bankName})` : ''}</option>)}
             </select></label>
         )}
-        {!isEdit && !isAccountBacked && (
+        {!isEdit && !isLiveBalance && (
           <label className="block"><span className="text-xs text-gray-500">Opening balance</span><input type="number" className={inputCls} value={f.openingBalance} onChange={(e) => set({ openingBalance: Number(e.target.value) })} /></label>
         )}
         <label className="block"><span className="text-xs text-gray-500">Daily limit (0 = none)</span><input type="number" className={inputCls} value={f.dailyLimit} onChange={(e) => set({ dailyLimit: Number(e.target.value) })} /></label>
       </div>
       {isAccountBacked && <p className="text-[11px] text-gray-400 mb-3">Bank/mobile-money/card sources have no stored balance — every read computes it live from the linked payment account&apos;s GL balance, so it never drifts from the ledger.</p>}
+      {f.sourceType === 'CASHIER_DRAWER' && <p className="text-[11px] text-gray-400 mb-3">No opening balance needed — this fund&apos;s balance always follows the assigned cashier&apos;s current daily cash position.</p>}
+      {isEdit && <CustodianPicker fundingSourceId={initial.id!} users={users} />}
       <div className="flex gap-2 mt-3">
         <button onClick={save} disabled={saving || !f.name || (!isEdit && isAccountBacked && !f.companyPaymentAccountId)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
         <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200">Cancel</button>

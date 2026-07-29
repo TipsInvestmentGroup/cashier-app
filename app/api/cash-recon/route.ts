@@ -11,38 +11,10 @@ import { syncFromCashRecon } from '@/lib/payment-verification'
 import { autoSettleExcessPayment } from '@/lib/excess-settlement'
 import { postJournalEntry } from '@/lib/ledger'
 import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { previousClosing, computeCash } from '@/lib/cash-recon'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
-
-/** Yesterday's (or the most recent prior) closing balance becomes today's opening. */
-async function previousClosing(day: Date, outletId?: string | null): Promise<number> {
-  const prev = await prisma.cashRecon.findFirst({
-    where: { date: { lt: startOfDay(day) }, outletId: outletId || null },
-    orderBy: { date: 'desc' },
-  })
-  return prev?.closingBalance || 0
-}
-
-/** Computed cash figures for a day+outlet (collected / paid-cash / expenses). */
-async function computeCash(dayStart: Date, dayEnd: Date, outletId?: string | null) {
-  const range = { gte: dayStart, lte: dayEnd }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const f: any = { date: range }
-  if (outletId) f.outletId = outletId
-  const [coll, paid, petty] = await Promise.all([
-    prisma.dailyCollection.aggregate({ where: f, _sum: { cash: true } }),
-    prisma.paidBill.aggregate({ where: { ...f, paymentMethod: 'CASH' }, _sum: { amountPaid: true } }),
-    // Only cash actually disbursed from the cashier's drawer reduces it — paid,
-    // CASH, and drawn from the cashier fund (accountant-fund payments don't count).
-    prisma.pettyCash.aggregate({ where: { ...f, paymentMethod: 'CASH', paymentStatus: 'PAID', pettyType: 'CASHIER' }, _sum: { amount: true } }),
-  ])
-  return {
-    cashCollected: coll._sum.cash || 0,
-    paidBillsCash: paid._sum.amountPaid || 0,
-    cashExpenses: petty._sum.amount || 0,
-  }
-}
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
