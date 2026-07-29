@@ -29,6 +29,16 @@ interface Snapshot {
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+      {children}
+      {hint && <p className="text-[11px] text-gray-400 mt-1">{hint}</p>}
+    </div>
+  )
+}
+
 export default function BusinessCalendarPage() {
   const { request } = useApi()
   const [rows, setRows] = useState<ConfigRow[]>([])
@@ -100,13 +110,6 @@ export default function BusinessCalendarPage() {
   }
 
   const inputCls = 'w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none text-sm bg-white'
-  const Field = ({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) => (
-    <div>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-      {children}
-      {hint && <p className="text-[11px] text-gray-400 mt-1">{hint}</p>}
-    </div>
-  )
 
   if (loading) return <AppShell><SetupTabs /><div className="py-10 text-center text-gray-400">Loading…</div></AppShell>
 

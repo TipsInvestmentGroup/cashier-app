@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { useApi } from '@/hooks/useApi'
 
@@ -44,11 +44,11 @@ export function StageGridRenderer({ stage, onSubmit, batchMode }: Props) {
   })
 
   const query = search.trim().toLowerCase()
-  const matchesSearch = (s: Option) => !query || s.name.toLowerCase().includes(query)
+  const matchesSearch = useCallback((s: Option) => !query || s.name.toLowerCase().includes(query), [query])
   // In the chip picker, keep an already-selected chip visible even if it no
   // longer matches what's typed — losing track of who's picked mid-search
   // would be worse than a slightly longer chip list.
-  const chipOptions = useMemo(() => staffOptions.filter((s) => matchesSearch(s) || selected.has(s.id)), [staffOptions, query, selected])
+  const chipOptions = useMemo(() => staffOptions.filter((s) => matchesSearch(s) || selected.has(s.id)), [staffOptions, selected, matchesSearch])
   const visibleStaff = (batchMode ? staffOptions.filter((s) => selected.has(s.id)) : staffOptions).filter(matchesSearch)
 
   const setCell = (staffId: string, fieldId: string, value: string) =>
@@ -83,7 +83,7 @@ export function StageGridRenderer({ stage, onSubmit, batchMode }: Props) {
                 {s.name}
               </button>
             ))}
-            {chipOptions.length === 0 && <p className="text-xs text-gray-400 py-1">No staff match "{search}"</p>}
+            {chipOptions.length === 0 && <p className="text-xs text-gray-400 py-1">No staff match &quot;{search}&quot;</p>}
           </div>
         </div>
       )}

@@ -15,7 +15,7 @@ export interface SmokeClient {
   post(path: string, data?: unknown): Promise<SmokeResponse>
 }
 
-export function makeClient(baseUrl: string): SmokeClient {
+export function makeClient(baseUrl: string, protectionBypassSecret?: string): SmokeClient {
   let token: string | null = null
 
   async function request(path: string, init: RequestInit): Promise<SmokeResponse> {
@@ -24,6 +24,10 @@ export function makeClient(baseUrl: string): SmokeClient {
       ...((init.headers as Record<string, string>) || {}),
     }
     if (token) headers.Authorization = `Bearer ${token}`
+    // Preview deployments sit behind Vercel's own SSO wall (Deployment
+    // Protection) — this header is Vercel's documented bypass for exactly
+    // this case (automated checks with no browser session to satisfy SSO).
+    if (protectionBypassSecret) headers['x-vercel-protection-bypass'] = protectionBypassSecret
 
     const res = await fetch(`${baseUrl}${path}`, { ...init, headers })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

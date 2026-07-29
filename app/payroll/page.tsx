@@ -6,7 +6,6 @@ import { useConfirm } from '@/components/ui/ConfirmProvider'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency } from '@/lib/utils'
-import { BILL_TYPE_COLORS, BILL_TYPE_LABELS } from '@/lib/utils'
 import toast from 'react-hot-toast'
 import { format, subMonths } from 'date-fns'
 

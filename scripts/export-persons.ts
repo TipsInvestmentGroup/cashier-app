@@ -4,10 +4,9 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import 'dotenv/config'
 
-const prisma = new PrismaClient({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  adapter: new PrismaBetterSqlite3({ url: process.env.DATABASE_URL || 'file:./dev.db' }),
-} as any)
+const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL || 'file:./dev.db' })
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const prisma = new PrismaClient({ adapter } as any)
 
 async function main() {
   const persons = await prisma.person.findMany({

@@ -30,24 +30,58 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+      # NODE_ENV must NOT be set here (or at job level) — npm ci honors
+      # NODE_ENV=production by omitting devDependencies, which would drop
+      # `tsx` (a devDependency) and break every npx tsx step below. Set it
+      # per-step instead, only where validate-config.ts/the app actually
+      # need it.
       - run: npm ci
 
       - name: Validate configuration
         run: npx tsx scripts/validate-config.ts --env=production
+        env:
+          NODE_ENV: production
 
       - name: Apply pending migrations
         run: |
           node scripts/prepare-db.mjs
           npx prisma generate
           npx prisma migrate deploy
+        env:
+          NODE_ENV: production
 
       - name: Deploy to Vercel (Production)
         run: |
-          npm i -g vercel
+          # Pinned rather than @latest — see the matching comment in
+          # deploy-staging.yml: 57.0.0 reproducibly failed uploads there, and
+          # 56.5.0 (its replacement) started failing the same way 4/4 times
+          # on 2026-07-29, so both pins moved to 58.1.0 together.
+          npm i -g vercel@58.1.0
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           vercel build --prod --token="$VERCEL_TOKEN"
-          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+
+          # See the matching comment + fix in deploy-staging.yml — `vercel
+          # deploy`'s own exit code is unreliable (reported "Upload aborted"
+          # and exited non-zero on deployments that had actually reached
+          # READY, confirmed via `vercel inspect`/the dashboard on
+          # 2026-07-29). Run it once, ignore its exit code, then verify the
+          # ACTUAL state of the deployment tied to this exact commit.
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" || true
+
+          for attempt in 1 2 3 4 5; do
+            result=$(vercel ls cashier-app --format json --meta githubCommitSha="$GITHUB_SHA" --token="$VERCEL_TOKEN" 2>/dev/null)
+            state=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].state)}catch{console.log('')}")
+            if [ "$state" = "READY" ]; then
+              echo "Deployment for $GITHUB_SHA confirmed READY"
+              exit 0
+            fi
+            echo "Deployment for $GITHUB_SHA not READY yet (state=${state:-none}), checking again in 15s... ($attempt/5)"
+            sleep 15
+          done
+          echo "Deployment for $GITHUB_SHA never reached READY"
+          exit 1
         env:
+          NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
       - name: Post-deploy smoke check (read-only — runs against live business data)
@@ -56,3 +90,6 @@ jobs:
           SMOKE_BASE_URL: ${{ secrets.PROD_APP_URL }}
           SMOKE_ADMIN_EMAIL: ${{ secrets.PROD_SMOKE_READONLY_EMAIL }}
           SMOKE_ADMIN_PASSWORD: ${{ secrets.PROD_SMOKE_READONLY_PASSWORD }}
+          # No-op if production isn't behind Deployment Protection — see the
+          # matching comment in deploy-staging.yml.
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
