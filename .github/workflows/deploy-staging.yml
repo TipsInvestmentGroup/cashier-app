@@ -58,11 +58,15 @@ jobs:
       - name: Deploy to Vercel (Preview)
         id: deploy
         run: |
-          # Pinned rather than @latest — 57.0.0 (released 2 days before this
-          # pin) reproducibly failed `vercel deploy --prebuilt` uploads with
-          # "Upload aborted" 3/3 times in this workflow; 56.5.0 is the last
-          # version before it. Bump deliberately, not automatically.
-          npm i -g vercel@56.5.0
+          # Pinned rather than @latest — 57.0.0 (released 2 days before the
+          # prior pin) reproducibly failed `vercel deploy --prebuilt` uploads
+          # with "Upload aborted" 3/3 times in this workflow; 56.5.0 was the
+          # last version before it. 56.5.0 has now started failing the same
+          # way (4/4 times, 2026-07-29) — bumping to 58.1.0 (latest stable as
+          # of this pin) since the fault clearly isn't specific to one old
+          # version. Bump deliberately, not automatically, and re-verify
+          # against this exact "Upload aborted" failure mode if it recurs.
+          npm i -g vercel@58.1.0
           vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
           vercel build --token="$VERCEL_TOKEN"
           url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
