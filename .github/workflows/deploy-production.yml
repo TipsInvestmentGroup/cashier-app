@@ -60,18 +60,25 @@ jobs:
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           vercel build --prod --token="$VERCEL_TOKEN"
 
-          # See the matching retry loop + comment in deploy-staging.yml —
-          # the upload step has been reproducibly flaky independent of CLI
-          # version; `--prebuilt` re-uploads from .vercel/output without
-          # rebuilding, so retrying just this command is safe and cheap.
-          for attempt in 1 2 3; do
-            if vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"; then
+          # See the matching comment + fix in deploy-staging.yml — `vercel
+          # deploy`'s own exit code is unreliable (reported "Upload aborted"
+          # and exited non-zero on deployments that had actually reached
+          # READY, confirmed via `vercel inspect`/the dashboard on
+          # 2026-07-29). Run it once, ignore its exit code, then verify the
+          # ACTUAL state of the deployment tied to this exact commit.
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" || true
+
+          for attempt in 1 2 3 4 5; do
+            result=$(vercel ls cashier-app --format json --meta githubCommitSha="$GITHUB_SHA" --token="$VERCEL_TOKEN" 2>/dev/null)
+            state=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].state)}catch{console.log('')}")
+            if [ "$state" = "READY" ]; then
+              echo "Deployment for $GITHUB_SHA confirmed READY"
               exit 0
             fi
-            echo "vercel deploy attempt $attempt failed, retrying in 15s..."
+            echo "Deployment for $GITHUB_SHA not READY yet (state=${state:-none}), checking again in 15s... ($attempt/5)"
             sleep 15
           done
-          echo "vercel deploy failed after 3 attempts"
+          echo "Deployment for $GITHUB_SHA never reached READY"
           exit 1
         env:
           NODE_ENV: production
