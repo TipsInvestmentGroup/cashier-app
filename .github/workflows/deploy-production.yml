@@ -53,8 +53,10 @@ jobs:
       - name: Deploy to Vercel (Production)
         run: |
           # Pinned rather than @latest — see the matching comment in
-          # deploy-staging.yml: 57.0.0 reproducibly failed uploads there.
-          npm i -g vercel@56.5.0
+          # deploy-staging.yml: 57.0.0 reproducibly failed uploads there, and
+          # 56.5.0 (its replacement) started failing the same way 4/4 times
+          # on 2026-07-29, so both pins moved to 58.1.0 together.
+          npm i -g vercel@58.1.0
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           vercel build --prod --token="$VERCEL_TOKEN"
           vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
