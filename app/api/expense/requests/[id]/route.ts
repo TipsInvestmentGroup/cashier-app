@@ -20,6 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       items: true,
       paymentAllocations: { include: { expensePayment: true } },
       verifications: true,
+      fieldValues: true,
     },
   })
   if (!request) return NextResponse.json({ error: 'Request not found' }, { status: 404 })

@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
-import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, Workflow, GitBranch, CalendarClock, Landmark, Wallet, Contact, SlidersHorizontal, Receipt, type LucideIcon } from 'lucide-react'
+import { Package, FolderTree, Tag, Tags, CreditCard, Users, Building2, UserCog, LayoutGrid, Ban, Hash, Settings2, Coins, Workflow, GitBranch, CalendarClock, Landmark, Wallet, Contact, SlidersHorizontal, Receipt, ShieldCheck, type LucideIcon } from 'lucide-react'
 
 // The Setup groups, in the order they appear. Role-gated per group.
 export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles: string[] }[] = [
@@ -18,7 +18,8 @@ export const SETUP_TABS: { href: string; label: string; icon: LucideIcon; roles:
   { href: '/persons', label: 'Persons', icon: Users, roles: ['ACCOUNTANT', 'MANAGER', 'ADMIN'] },
   { href: '/outlets', label: 'Outlets', icon: Building2, roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
   { href: '/pos-tables', label: 'Tables', icon: LayoutGrid, roles: ['ADMIN'] },
-  { href: '/users', label: 'Users', icon: UserCog, roles: ['ADMIN'] },
+  { href: '/users', label: 'Users', icon: UserCog, roles: ['ADMIN', 'MANAGER', 'DIRECTOR'] },
+  { href: '/manage-access', label: 'Manage Access', icon: ShieldCheck, roles: ['ADMIN'] },
   { href: '/company-preferences', label: 'Company', icon: Settings2, roles: ['ADMIN'] },
   { href: '/business-calendar', label: 'Business Calendar', icon: CalendarClock, roles: ['ADMIN'] },
   { href: '/collection-templates', label: 'Collection Templates', icon: Workflow, roles: ['ADMIN'] },

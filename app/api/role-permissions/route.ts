@@ -2,17 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import {
   isOwner, listRolePermissions, setRolePermission,
-  BUSINESS_DAY_RESOURCES, RECONCILIATION_STAGE_RESOURCES, WRITE_OFF_RESOURCES,
-  type BusinessDayResource, type ReconciliationStageResource, type WriteOffResource,
+  BUSINESS_DAY_RESOURCES, RECONCILIATION_STAGE_RESOURCES, WRITE_OFF_RESOURCES, MANAGE_USERS_RESOURCES,
+  type BooleanResource,
 } from '@/lib/rbac'
 import { prisma } from '@/lib/prisma'
 
-type GrantableResource = BusinessDayResource | ReconciliationStageResource | WriteOffResource
+type GrantableResource = BooleanResource
 
 const VALID_RESOURCES = [
   ...Object.values(BUSINESS_DAY_RESOURCES),
   ...Object.values(RECONCILIATION_STAGE_RESOURCES),
   ...Object.values(WRITE_OFF_RESOURCES),
+  ...Object.values(MANAGE_USERS_RESOURCES),
 ] as string[]
 
 /** Owner-only: list every role default for a resource. */
