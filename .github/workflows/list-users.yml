@@ -1,0 +1,39 @@
+name: "Ops: List users"
+
+# Read-only diagnostic — prints email/role/active status for every user in
+# the chosen environment's database. Never selects password/pin/resetToken,
+# so it's safe to run without handling any credential. Useful for confirming
+# a smoke-test or admin account actually exists before wiring its email into
+# a secret (e.g. PROD_SMOKE_READONLY_EMAIL).
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Which environment's database to list users from"
+        required: true
+        type: choice
+        options: [production, staging]
+
+jobs:
+  list-users:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      DATABASE_URL: ${{ secrets.PROD_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ${{ secrets.PROD_DATABASE_URL_UNPOOLED || secrets.STAGING_DATABASE_URL_UNPOOLED }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+
+      - name: List users (email, role, active — no credentials)
+        run: |
+          node scripts/prepare-db.mjs
+          npx prisma generate
+          npx tsx scripts/ops-list-users.ts
+        env:
+          NODE_ENV: production
