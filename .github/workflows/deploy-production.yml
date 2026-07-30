@@ -84,6 +84,15 @@ jobs:
           NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
+      # TEMPORARY debug step — remove once the CRON_SECRET mismatch below is
+      # resolved. Prints only a SHA-256 hash of the GitHub-side secret, never
+      # the value itself: compare against `printf '%s' '<value you pasted
+      # into Vercel>' | sha256sum` run locally to confirm both sides actually
+      # hold the exact same bytes (catches trailing whitespace/newline diffs
+      # that look identical but fail strict string equality in the route).
+      - name: "DEBUG: hash PROD_CRON_SECRET"
+        run: printf '%s' "$CRON_SECRET" | sha256sum
+
       # Idempotent (create-only-if-absent) — see the matching step + comment
       # in deploy-staging.yml (#72). Missing here until now, which is why
       # newly-added seed defaults (e.g. the Reconciliation Workflow Engine's
