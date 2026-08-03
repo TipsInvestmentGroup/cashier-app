@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
@@ -11,6 +12,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { ExportBar } from '@/components/ExportBar'
 import { MoneyInput } from '@/components/MoneyInput'
 import { PayModal } from '@/components/petty/PayModal'
+import { CASHIER_CUTOVER_ENABLED } from '@/lib/expense-cutover'
 import { format, subDays } from 'date-fns'
 import toast from 'react-hot-toast'
 
@@ -123,6 +125,18 @@ export default function PettyPaymentsPage() {
         {/* ===== PAY ===== */}
         {view === 'pay' && (
           <div className="space-y-6">
+            {toPay.some((i) => i.pettyType === 'ACCOUNTANT') && (
+              <div className="rounded-xl border-2 border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-900">
+                New fund-backed (Accountant) requests are now created in <Link href="/digital-expenses" className="underline font-semibold">Digital Expenses</Link>.
+                The Accountant requests below were created before that change and can still be paid out here until resolved.
+              </div>
+            )}
+            {CASHIER_CUTOVER_ENABLED && toPay.some((i) => i.pettyType !== 'ACCOUNTANT') && (
+              <div className="rounded-xl border-2 border-indigo-100 bg-indigo-50 p-3 text-sm text-indigo-900">
+                New cashier/drawer requests are now created in <Link href="/expense-requests" className="underline font-semibold">Expense Requests</Link>.
+                The Cashier requests below were created before that change and can still be paid out here until resolved.
+              </div>
+            )}
             <Card className="p-0 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 font-semibold text-gray-800">Approved — awaiting payment</div>
               {loading ? <div className="py-12 text-center text-gray-400">Loading…</div> : toPay.length === 0 ? (
