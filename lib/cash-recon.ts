@@ -21,17 +21,25 @@ export async function computeCash(dayStart: Date, dayEnd: Date, outletId?: strin
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const f: any = { date: range }
   if (outletId) f.outletId = outletId
-  const [coll, paid, petty] = await Promise.all([
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fundingSourceFilter: any = { sourceType: { in: ['CASH', 'CASHIER_DRAWER'] } }
+  if (outletId) fundingSourceFilter.outletId = outletId
+  const [coll, paid, petty, expensePayments] = await Promise.all([
     prisma.dailyCollection.aggregate({ where: f, _sum: { cash: true } }),
     prisma.paidBill.aggregate({ where: { ...f, paymentMethod: 'CASH' }, _sum: { amountPaid: true } }),
     // Only cash actually disbursed from the cashier's drawer reduces it — paid,
     // CASH, and drawn from the cashier fund (accountant-fund payments don't count).
     prisma.pettyCash.aggregate({ where: { ...f, paymentMethod: 'CASH', paymentStatus: 'PAID', pettyType: 'CASHIER' }, _sum: { amount: true } }),
+    // Same cash-drawer disbursements, but made through the new Expense &
+    // Disbursement Framework's ExpensePayment table instead of legacy PettyCash
+    // — without this, cash paid out via the new framework's Pay flow would
+    // never reduce the drawer here, letting it be spent twice.
+    prisma.expensePayment.aggregate({ where: { paidAt: range, fundingSource: fundingSourceFilter }, _sum: { amount: true } }),
   ])
   return {
     cashCollected: coll._sum.cash || 0,
     paidBillsCash: paid._sum.amountPaid || 0,
-    cashExpenses: petty._sum.amount || 0,
+    cashExpenses: (petty._sum.amount || 0) + (expensePayments._sum.amount || 0),
   }
 }
 
