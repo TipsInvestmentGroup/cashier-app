@@ -68,13 +68,17 @@ export const PETTY_TABS: Tab[] = [
   { href: '/petty-cash', label: 'Petty Cash', icon: Wallet, roles: CASHIER_ROLES },
   { href: '/approvals', label: 'Approval Requests', icon: ClipboardCheck, roles: CASHIER_ROLES },
   { href: '/petty-payments', label: 'Payments', icon: CreditCard, roles: CASHIER_ROLES },
-  // Universal Expense & Disbursement Framework (Phase 1) — a new, separate
-  // engine alongside the legacy Petty Cash flow above (side-by-side rollout,
-  // see docs/expense-disbursement-framework-design.md decision 1). Lives in
-  // this same section since it generalizes exactly what Petty Cash does.
+  // Universal Expense & Disbursement Framework — a new, separate engine
+  // alongside the legacy Petty Cash flow above (side-by-side rollout, see
+  // docs/expense-disbursement-framework-design.md decision 1, and the
+  // request-type-by-request-type migration plan). Digital Expenses is listed
+  // first among these because fund-backed (Accountant) requests have already
+  // been cut over here (migration Phase 2); Expense Requests/Petty Cash
+  // Ledger become equally primary once the cash-drawer cutover (Phase 3,
+  // gated by CASHIER_CUTOVER_ENABLED in lib/expense-cutover.ts) goes live.
+  { href: '/digital-expenses', label: 'Digital Expenses', icon: CreditCard, roles: CASHIER_ROLES },
   { href: '/expense-requests', label: 'Expense Requests', icon: Receipt, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger', label: 'Petty Cash Ledger', icon: BookOpen, roles: CASHIER_ROLES },
-  { href: '/digital-expenses', label: 'Digital Expenses', icon: CreditCard, roles: CASHIER_ROLES },
 ]
 
 export const FINANCE_TABS: Tab[] = [
