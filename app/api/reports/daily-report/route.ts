@@ -5,6 +5,7 @@ import { roundMoney } from '@/lib/utils'
 import { resolveAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { BILL_TYPE_CODES } from '@/lib/bill-types'
 import { channelAmountsFor } from '@/lib/collection-channels-shared'
+import { sumApprovedPettyCash } from '@/lib/petty-cash-metrics'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
 /**
@@ -94,7 +95,7 @@ export async function GET(req: NextRequest) {
   // --- Petty cash expenses ---
   const pettyRows = pettyCash.map((p) => ({ purpose: p.purpose, by: p.requestedBy, dept: p.department || '', method: p.paymentMethod, amount: roundMoney(p.amount), status: p.status }))
   const pettyTotal = roundMoney(pettyCash.reduce((s, p) => s + p.amount, 0))
-  const pettyApproved = roundMoney(pettyCash.filter((p) => p.status === 'APPROVED').reduce((s, p) => s + p.amount, 0))
+  const pettyApproved = sumApprovedPettyCash(pettyCash)
 
   // --- Settlements paid out of the till (cash) ---
   // Cash physically leaves the drawer when a payable over-collection is paid

@@ -12,6 +12,12 @@
 // against this list wherever role is set.
 export const VALID_ROLES = ['CASHIER', 'WAITER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
+// Fixed cash-verification officers (besides the owner) — server-side access
+// grant lives in lib/cash-verify.ts::canVerifyCash, which re-exports this.
+// Kept here (not re-typed) so the "extra verifier" dropdown on app/petty-cash
+// always excludes exactly the same emails the server already always allows.
+export const CASH_VERIFIERS_FIXED = ['shabinam@tips.co.tz', 'siyer.mkama@tips.co.tz', 'derickjasselly@gmail.com']
+
 // MyPos floor staff normally work one physical station, so both the Counter
 // View UI (client) and its API (server) lock a staffer to their assigned
 // counter(s) by this map. Positions with no entry here (e.g. OUTSIDE STAFF,

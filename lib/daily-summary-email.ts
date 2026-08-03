@@ -5,6 +5,7 @@ import { resolveAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping
 import { getCompanyConfig } from '@/lib/company-config'
 import { DEFAULT_COMPANY_CONFIG, formatAmountLabel } from '@/lib/company-config-shared'
 import { resolveEffectiveConfig, resolveBusinessDate } from '@/lib/business-calendar'
+import { sumApprovedPettyCash } from '@/lib/petty-cash-metrics'
 import { startOfDay, endOfDay, parse, isValid, format } from 'date-fns'
 
 // Currency label comes from Company Preferences — set from config at the top
@@ -49,7 +50,7 @@ export async function sendDailySummary(opts: { date?: string | null; outletId?: 
   const paidTotal = roundMoney(paid.reduce((s, p) => s + p.amountPaid, 0))
   const paidCash = roundMoney(paid.filter((p) => (p.paymentMethod || '').toUpperCase() === 'CASH').reduce((s, p) => s + p.amountPaid, 0))
   const cancelTotal = roundMoney(cancellations.reduce((s, c) => s + (c.amount || 0), 0))
-  const pettyApproved = roundMoney(petty.filter((p) => p.status === 'APPROVED').reduce((s, p) => s + p.amount, 0))
+  const pettyApproved = sumApprovedPettyCash(petty)
 
   // Cash paid out of the till to settle payable over-collections — derived
   // from the GL (Cash-account credits from excess settlements, net of unsettle

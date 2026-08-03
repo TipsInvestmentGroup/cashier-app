@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
 import { Button } from '@/components/ui/Button'
@@ -17,6 +18,8 @@ import { useBusinessMonth } from '@/hooks/useBusinessMonth'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
 import { notifyPendingCountsChanged } from '@/lib/pendingBellEvents'
+import { CASHIER_CUTOVER_ENABLED } from '@/lib/expense-cutover'
+import { CASH_VERIFIERS_FIXED } from '@/lib/shared-constants'
 
 interface PettyCashItem { id?: string; detail: string; unit: number; unitCost: number; amount: number }
 interface PettyCash {
@@ -252,6 +255,8 @@ function PettyCashPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (form.pettyType === 'ACCOUNTANT') return toast.error('Fund-backed requests are now created in Digital Expenses')
+    if (form.pettyType === 'CASHIER' && CASHIER_CUTOVER_ENABLED) return toast.error('Drawer cash requests are now created in Expense Requests')
     if (!form.requestedBy) return toast.error('Requested by is required')
     if (!form.purpose) return toast.error('Purpose is required')
     // Build the itemized breakdown (if any); the grand total drives the amount.
@@ -573,6 +578,32 @@ function PettyCashPage() {
                     </div>
                     <p className="text-[11px] text-gray-400 mt-1">Cashier = paid from daily collections; Accountant = paid from the allocated fund.</p>
                   </div>
+
+                  {form.pettyType === 'ACCOUNTANT' ? (
+                    <div className="rounded-xl border-2 border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+                      <p className="font-semibold mb-1">🏦 Fund-backed payments have moved</p>
+                      <p className="text-indigo-800 mb-3">
+                        Accountant/fund-backed requests (bank, mobile money, card) are now created in the new
+                        Expense screen — it checks the real account balance instead of a manually-tracked fund
+                        figure, so you won&apos;t see a false &quot;insufficient balance&quot; error.
+                      </p>
+                      <Link href="/digital-expenses" className="inline-block px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+                        Go to Digital Expenses →
+                      </Link>
+                    </div>
+                  ) : form.pettyType === 'CASHIER' && CASHIER_CUTOVER_ENABLED ? (
+                    <div className="rounded-xl border-2 border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
+                      <p className="font-semibold mb-1">🧾 Drawer cash requests have moved</p>
+                      <p className="text-indigo-800 mb-3">
+                        Cashier/drawer requests are now created in the new Expense screen against your cash
+                        drawer&apos;s funding source. Cash Reconciliation already reflects payments made there.
+                      </p>
+                      <Link href="/expense-requests" className="inline-block px-4 py-2 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+                        Go to Expense Requests →
+                      </Link>
+                    </div>
+                  ) : (
+                  <>
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">Payment Method</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -608,6 +639,8 @@ function PettyCashPage() {
                   <Button type="submit" size="lg" disabled={submitting} className="w-full">
                     {submitting ? 'Submitting…' : 'Submit Cash Request'}
                   </Button>
+                  </>
+                  )}
                 </form>
               </div>
             </div>
@@ -707,10 +740,10 @@ function PettyCashPage() {
                       className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
                       <option value="">— None —</option>
                       {verifierUsers
-                        .filter((u) => !['shabinam@tips.co.tz', 'siyer.mkama@tips.co.tz', ownerEmail].includes(u.email.toLowerCase()))
+                        .filter((u) => ![...CASH_VERIFIERS_FIXED, ownerEmail].includes(u.email.toLowerCase()))
                         .map((u) => <option key={u.id} value={u.email}>{u.name} ({u.email})</option>)}
                     </select>
-                    <p className="text-[11px] text-gray-400 mt-1">Always allowed: owner, shabinam@tips.co.tz, siyer.mkama@tips.co.tz.</p>
+                    <p className="text-[11px] text-gray-400 mt-1">Always allowed: owner, {CASH_VERIFIERS_FIXED.join(', ')}.</p>
                   </div>
                 )}
 
@@ -853,10 +886,10 @@ function PettyCashPage() {
                     className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
                     <option value="">— None —</option>
                     {verifierUsers
-                      .filter((u) => !['shabinam@tips.co.tz', 'siyer.mkama@tips.co.tz', ownerEmail].includes(u.email.toLowerCase()))
+                      .filter((u) => ![...CASH_VERIFIERS_FIXED, ownerEmail].includes(u.email.toLowerCase()))
                       .map((u) => <option key={u.id} value={u.email}>{u.name} ({u.email})</option>)}
                   </select>
-                  <p className="text-[11px] text-gray-400 mt-1">Same officers as cash verification: owner, shabinam@tips.co.tz, siyer.mkama@tips.co.tz.</p>
+                  <p className="text-[11px] text-gray-400 mt-1">Same officers as cash verification: owner, {CASH_VERIFIERS_FIXED.join(', ')}.</p>
                 </div>
               )}
 
