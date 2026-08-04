@@ -159,7 +159,12 @@ export default function DailyReportPage() {
         if (!ctx) break
         ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx)
         if (!firstPage) doc.addPage()
-        doc.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', xOffsetMm, marginMm, drawWidthMm, sliceHeightPx / pxPerMm)
+        // JPEG, not PNG: this design has no transparency, and lossless PNG
+        // compresses the soft box-shadow gradients (pressed/raised rows,
+        // dozens per report) very poorly — JPEG's DCT compression handles
+        // smooth gradients far better, cutting file size drastically with
+        // no visible loss on this mostly-flat UI content.
+        doc.addImage(sliceCanvas.toDataURL('image/jpeg', 0.92), 'JPEG', xOffsetMm, marginMm, drawWidthMm, sliceHeightPx / pxPerMm)
         renderedPx += sliceHeightPx
         firstPage = false
       }
