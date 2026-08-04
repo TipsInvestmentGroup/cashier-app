@@ -93,7 +93,35 @@ export default function DailyReportPage() {
     document.body.appendChild(wrapper)
 
     try {
-      const canvas = await html2canvas(clone, { scale: 2, backgroundColor: '#e9edf3', useCORS: true })
+      const scale = 2
+      // Record every row-like element's vertical span (in canvas px) BEFORE
+      // rendering, so page breaks can be nudged to a gap between rows instead
+      // of slicing straight through one — html2canvas pagination is just
+      // pixel-cropping and has no concept of "don't break inside this row"
+      // the way a real browser print does.
+      const rootTop = clone.getBoundingClientRect().top
+      const unsafeSelector = '.cdr-row, .cdr-ledger-item, .cdr-collection-grid .cdr-cell, .cdr-total-row, .cdr-ref-line, .cdr-variance-row, .cdr-category-title'
+      const unsafeRanges = Array.from(clone.querySelectorAll(unsafeSelector))
+        .map((el) => {
+          const r = el.getBoundingClientRect()
+          return [(r.top - rootTop) * scale, (r.bottom - rootTop) * scale] as [number, number]
+        })
+        .sort((a, b) => a[0] - b[0])
+
+      const canvas = await html2canvas(clone, { scale, backgroundColor: '#e9edf3', useCORS: true })
+
+      // If an ideal page-break y falls inside a row's span, back it up to
+      // that row's top — unless that would leave the page nearly empty
+      // (a pathological single-row-taller-than-a-page case), in which case
+      // just allow the cut through it as a last resort.
+      const adjustBreak = (idealY: number, pageStartY: number) => {
+        for (const [start, end] of unsafeRanges) {
+          if (idealY > start && idealY < end) {
+            return start - pageStartY >= (idealY - pageStartY) * 0.3 ? start : idealY
+          }
+        }
+        return idealY
+      }
 
       const pageWidthMm = 210
       const pageHeightMm = 297
@@ -121,7 +149,9 @@ export default function DailyReportPage() {
       let renderedPx = 0
       let firstPage = true
       while (renderedPx < canvas.height) {
-        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx)
+        let idealEnd = Math.min(renderedPx + pageHeightPx, canvas.height)
+        if (idealEnd < canvas.height) idealEnd = adjustBreak(idealEnd, renderedPx)
+        const sliceHeightPx = Math.max(idealEnd - renderedPx, 1)
         const sliceCanvas = document.createElement('canvas')
         sliceCanvas.width = canvas.width
         sliceCanvas.height = sliceHeightPx
