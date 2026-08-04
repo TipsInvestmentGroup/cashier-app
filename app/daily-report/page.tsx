@@ -15,8 +15,18 @@ interface ReportData {
   outletName: string
   generatedBy: string
   collection: { systemSales: number; cash: number; channels: { code: string; label: string; amount: number }[]; total: number; variance: number }
-  signed: { byType: Record<string, number>; rows: { type: string; name: string; staff: string; amount: number }[]; total: number }
-  paid: { byMethod: { code: string; label: string; amount: number }[]; rows: { name: string; category: string; method: string; amount: number }[]; total: number; cash: number }
+  signed: {
+    byType: Record<string, number>
+    rows: { type: string; name: string; staff: string; amount: number }[]
+    byCategory: { key: string; label: string; total: number; people: { name: string; total: number; details: { who: string; amt: number }[] }[] }[]
+    total: number
+  }
+  paid: {
+    byMethod: { code: string; label: string; amount: number }[]
+    rows: { name: string; category: string; method: string; amount: number }[]
+    byCategory: { key: string; label: string; total: number; payers: { name: string; amount: number; method: string }[] }[]
+    total: number; cash: number
+  }
   cancellations: { rows: { product: string; staff: string; qty: number; amount: number; reason: string }[]; total: number }
   pettyCash: { rows: { purpose: string; by: string; dept: string; method: string; amount: number; status: string }[]; total: number; approved: number }
   settlementsPaidFromTill?: number
@@ -25,6 +35,10 @@ interface ReportData {
 
 const SIGNED_LABELS: Record<string, string> = {
   ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', TIPS: 'Tips', DJ: 'DJ', STAFF_LOSS: 'Staff Loss',
+}
+
+const CATEGORY_DOTS: Record<string, string> = {
+  DIRECTOR: 'bg-indigo-500', ADMIN: 'bg-gray-400', CUSTOMER: 'bg-emerald-500', TIPS: 'bg-amber-500', STAFF_LOSS: 'bg-red-500',
 }
 
 export default function DailyReportPage() {
@@ -314,31 +328,77 @@ export default function DailyReportPage() {
                 valueClass={data.collection.variance < 0 ? 'text-red-600' : data.collection.variance > 0 ? 'text-green-600' : ''} />
             </Section>
 
-            {/* Signed bills */}
+            {/* Signed bills — grouped by category, then by signer */}
             <Section title="2 · Signed Bills (credit given)">
-              {data.signed.rows.length === 0 ? (
+              {data.signed.byCategory.length === 0 ? (
                 <Empty>No signed bills</Empty>
               ) : (
                 <>
-                  <MiniTable
-                    head={['Type', 'Name', 'Staff', 'Amount']}
-                    rows={data.signed.rows.map((r) => [SIGNED_LABELS[r.type] || r.type, r.name, r.staff, money(r.amount)])}
-                  />
-                  <Row label="Total Signed Bills" value={money(data.signed.total)} bold accent />
+                  {data.signed.byCategory.map((cat) => (
+                    <div key={cat.key} className="mb-3">
+                      <div className="flex items-center justify-between text-xs font-bold text-gray-800 mb-1.5">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${CATEGORY_DOTS[cat.key] || 'bg-gray-400'}`} />
+                          {cat.label}
+                        </span>
+                        <span className="tabular-nums text-gray-500 font-semibold">{money(cat.total)}</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-0.5">
+                        {cat.people.map((p) => (
+                          <div key={p.name} className="flex items-baseline justify-between gap-2 border-b border-gray-100 py-1 text-xs">
+                            <span className="text-gray-700 leading-tight">
+                              {p.name}
+                              {p.details.length > 1 && <span className="text-[10px] text-gray-400 ml-1">({p.details.length} bills)</span>}
+                            </span>
+                            <span className="tabular-nums font-semibold text-gray-800 whitespace-nowrap">{money(p.total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <Row label={`Total Signed Bills (${data.signed.byCategory.reduce((s, c) => s + c.people.length, 0)} people)`} value={money(data.signed.total)} bold accent />
+                  {(() => {
+                    const multi = data.signed.byCategory.flatMap((c) => c.people.filter((p) => p.details.length > 1))
+                    return multi.length > 0 ? (
+                      <div className="mt-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-[11px] text-gray-500 leading-relaxed">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Multi-recipient breakdown</p>
+                        {multi.map((p) => (
+                          <p key={p.name}><b className="text-gray-700">{p.name}:</b> {p.details.map((d) => `${d.who} ${money(d.amt)}`).join(' · ')}</p>
+                        ))}
+                      </div>
+                    ) : null
+                  })()}
                 </>
               )}
             </Section>
 
-            {/* Paid bills */}
+            {/* Paid bills — grouped by category, then by payer */}
             <Section title="3 · Paid Bills (debts collected)">
-              {data.paid.rows.length === 0 ? (
+              {data.paid.byCategory.length === 0 ? (
                 <Empty>No paid bills</Empty>
               ) : (
                 <>
-                  <MiniTable
-                    head={['Payer', 'Category', 'Method', 'Amount']}
-                    rows={data.paid.rows.map((r) => [r.name, r.category, r.method, money(r.amount)])}
-                  />
+                  {data.paid.byCategory.map((cat) => (
+                    <div key={cat.key} className="mb-3">
+                      <div className="flex items-center justify-between text-xs font-bold text-gray-800 mb-1.5">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${CATEGORY_DOTS[cat.key] || 'bg-gray-400'}`} />
+                          {cat.label}
+                        </span>
+                        <span className="tabular-nums text-gray-500 font-semibold">{money(cat.total)}</span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-0.5">
+                        {cat.payers.map((p) => (
+                          <div key={p.name} className="flex items-baseline justify-between gap-2 border-b border-gray-100 py-1 text-xs">
+                            <span className="text-gray-700 leading-tight">
+                              {p.name}<span className="text-[10px] text-gray-400 ml-1">{p.method}</span>
+                            </span>
+                            <span className="tabular-nums font-semibold text-gray-800 whitespace-nowrap">{money(p.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                   <Row label="Total Paid Bills" value={money(data.paid.total)} bold accent />
                 </>
               )}
