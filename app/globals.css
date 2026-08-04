@@ -57,3 +57,122 @@ body {
     margin: 12mm;
   }
 }
+
+/* ============================================================
+   Cashier Daily Report — neumorphism design system ("cdr-" prefix).
+   Mirrors the standalone cashier-daily-report skill template so the
+   on-screen report, its PDF snapshot, and manually-built ad-hoc
+   reports all look like one product.
+   ============================================================ */
+.cdr-panel {
+  --cdr-bg: #e9edf3;
+  --cdr-light: #ffffff;
+  --cdr-dark: #c1c9d6;
+  --cdr-ink: #3a4152;
+  --cdr-ink-soft: #6b7386;
+  --cdr-ink-mid: #565f78;
+  --cdr-accent: #5b4fd6;
+  --cdr-raised: 8px 8px 16px var(--cdr-dark), -8px -8px 16px var(--cdr-light);
+  --cdr-raised-sm: 4px 4px 10px var(--cdr-dark), -4px -4px 10px var(--cdr-light);
+  --cdr-pressed: inset 4px 4px 8px var(--cdr-dark), inset -4px -4px 8px var(--cdr-light);
+  background: var(--cdr-bg);
+  color: var(--cdr-ink);
+  border-radius: 20px;
+  box-shadow: var(--cdr-raised);
+  padding: 20px 24px;
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.cdr-logo-badge {
+  width: 56px; height: 56px; border-radius: 16px; background: var(--cdr-bg);
+  box-shadow: var(--cdr-raised-sm); display: flex; align-items: center; justify-content: center;
+  font-weight: 700; color: var(--cdr-accent); font-size: 15px; flex-shrink: 0;
+}
+.cdr-header { padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--cdr-dark); }
+.cdr-header-top { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.cdr-company-name { font-size: 17px; font-weight: 700; color: var(--cdr-ink); }
+.cdr-company-addr { font-size: 12px; color: var(--cdr-ink-soft); margin-top: 2px; }
+.cdr-meta { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 8px; }
+.cdr-title { font-size: 20px; font-weight: 700; color: var(--cdr-ink); margin: 0; }
+.cdr-sub { font-size: 12px; color: var(--cdr-ink-soft); margin-top: 2px; }
+.cdr-right { text-align: right; font-size: 12px; color: var(--cdr-ink-soft); line-height: 1.6; }
+
+.cdr-section { margin-bottom: 20px; }
+.cdr-section-title {
+  font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--cdr-accent); margin: 0 0 10px; display: flex; justify-content: space-between;
+}
+.cdr-category { margin-bottom: 12px; }
+.cdr-category-title {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12.5px; font-weight: 700; color: var(--cdr-ink); margin: 0 2px 5px;
+}
+.cdr-category-title .cdr-name { display: flex; align-items: center; gap: 8px; }
+.cdr-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+.cdr-category-title .cdr-subtotal { font-variant-numeric: tabular-nums; color: var(--cdr-ink-soft); font-weight: 600; }
+
+.cdr-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 8px 14px; border-radius: 12px; margin-bottom: 5px;
+  background: var(--cdr-bg); box-shadow: var(--cdr-pressed);
+}
+.cdr-row .cdr-label { font-size: 13.5px; }
+.cdr-row .cdr-amount { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cdr-row .cdr-amount.cdr-neg { color: #c0392b; }
+
+.cdr-ref-line {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 14px; border-radius: 12px; margin-bottom: 10px;
+  border: 1px dashed var(--cdr-dark); font-size: 12.5px; color: var(--cdr-ink-soft);
+}
+.cdr-ref-line b { color: var(--cdr-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.cdr-collection-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 10px; }
+.cdr-collection-grid .cdr-cell { background: var(--cdr-bg); box-shadow: var(--cdr-pressed); border-radius: 12px; padding: 10px 12px; }
+.cdr-collection-grid .cdr-cell .cdr-label { font-size: 11px; color: var(--cdr-ink-soft); margin-bottom: 4px; }
+.cdr-collection-grid .cdr-cell .cdr-amount { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 680px) { .cdr-collection-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 420px) { .cdr-collection-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.cdr-variance-row { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 14px 12px; font-size: 12.5px; color: var(--cdr-ink-soft); }
+.cdr-variance-row .cdr-amount { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.cdr-total-row {
+  display: flex; justify-content: space-between; padding: 12px 14px; border-radius: 12px;
+  background: var(--cdr-bg); box-shadow: var(--cdr-raised-sm); font-weight: 700; font-size: 13.5px;
+  color: var(--cdr-accent);
+}
+.cdr-grand {
+  background: var(--cdr-accent); color: #fff; box-shadow: var(--cdr-raised-sm);
+  print-color-adjust: exact; -webkit-print-color-adjust: exact;
+}
+
+.cdr-ledger-cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px 16px; margin-bottom: 4px; }
+@media (max-width: 680px) { .cdr-ledger-cols { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 420px) { .cdr-ledger-cols { grid-template-columns: repeat(2, 1fr); } }
+.cdr-ledger-item {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 3px 2px; border-bottom: 1px solid var(--cdr-dark); font-size: 11.5px;
+  break-inside: avoid;
+}
+.cdr-ledger-item .cdr-lname { line-height: 1.25; }
+.cdr-ledger-item .cdr-lamt { font-weight: 600; font-variant-numeric: tabular-nums; flex-shrink: 0; white-space: nowrap; }
+.cdr-ledger-item .cdr-multi { font-size: 9.5px; color: var(--cdr-ink-soft); margin-left: 3px; font-weight: 400; }
+
+.cdr-appendix {
+  margin-top: 8px; padding: 10px 14px; border-radius: 12px;
+  background: var(--cdr-bg); box-shadow: var(--cdr-pressed); font-size: 10.5px; color: var(--cdr-ink-mid); line-height: 1.7;
+}
+.cdr-appendix .cdr-a-title { font-size: 10.5px; font-weight: 700; color: var(--cdr-ink-soft); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 5px; }
+.cdr-appendix .cdr-a-entry b { color: var(--cdr-ink); }
+
+.cdr-footer { text-align: center; font-size: 11px; color: var(--cdr-ink-soft); margin-top: 14px; }
+.cdr-fit-note { margin-top: 4px; font-size: 10px; }
+
+@media print {
+  .cdr-panel { box-shadow: none; border: 1px solid #d5d9e0; }
+  .cdr-row, .cdr-collection-grid .cdr-cell, .cdr-total-row, .cdr-ref-line, .cdr-appendix {
+    box-shadow: none; border: 1px solid #d5d9e0;
+  }
+  .cdr-fit-note { display: none; }
+  .cdr-category, .cdr-ledger-item, .cdr-collection-grid .cdr-cell, .cdr-total-row, .cdr-row { page-break-inside: avoid; }
+}
