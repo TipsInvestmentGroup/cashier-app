@@ -51,38 +51,62 @@ jobs:
           NODE_ENV: production
 
       - name: Deploy to Vercel (Production)
+        id: deploy
         run: |
+          set -euo pipefail
           # Pinned rather than @latest — see the matching comment in
           # deploy-staging.yml: 57.0.0 reproducibly failed uploads there, and
           # 56.5.0 (its replacement) started failing the same way 4/4 times
           # on 2026-07-29, so both pins moved to 58.1.0 together.
           npm i -g vercel@58.1.0
+
+          # Watermark taken BEFORE deploying: nothing created earlier can
+          # possibly be this run's output. This is what makes the verification
+          # below immune to matching a pre-existing deployment.
+          SINCE_MS="$(node -e 'console.log(Date.now())')"
+          export SINCE_MS
+
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           vercel build --prod --token="$VERCEL_TOKEN"
 
-          # See the matching comment + fix in deploy-staging.yml — `vercel
-          # deploy`'s own exit code is unreliable (reported "Upload aborted"
-          # and exited non-zero on deployments that had actually reached
-          # READY, confirmed via `vercel inspect`/the dashboard on
-          # 2026-07-29). Run it once, ignore its exit code, then verify the
-          # ACTUAL state of the deployment tied to this exact commit.
-          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" || true
-
-          for attempt in 1 2 3 4 5; do
-            result=$(vercel ls cashier-app --format json --meta githubCommitSha="$GITHUB_SHA" --token="$VERCEL_TOKEN" 2>/dev/null)
-            state=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].state)}catch{console.log('')}")
-            if [ "$state" = "READY" ]; then
-              echo "Deployment for $GITHUB_SHA confirmed READY"
-              exit 0
+          # `vercel deploy`'s exit code is untrusted in BOTH directions:
+          #   2026-07-29: non-zero ("Upload aborted") on deploys that DID reach READY.
+          #   2026-08-04: non-zero having created NOTHING — a hard account quota,
+          #     Error: Too many requests - try again in 24 hours
+          #            (more than 5000, code: "api-upload-free")
+          #     after Uploading (0.0B/4.4MB).
+          # So retry, but ask the API between attempts so the 2026-07-29 false
+          # negative doesn't burn more upload quota. --archive=tgz uploads one
+          # tarball instead of thousands of files — Vercel's own suggested
+          # mitigation for the api-upload-free quota that caused the outage.
+          for attempt in 1 2 3; do
+            echo "::group::vercel deploy attempt $attempt"
+            set +e
+            vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN"
+            rc=$?
+            set -e
+            echo "::endgroup::"
+            echo "attempt $attempt exited rc=$rc"
+            if [ "$rc" -eq 0 ]; then break; fi
+            if node scripts/ci/verify-vercel-deploy.mjs --mode=production --exists-only; then
+              echo "deployment exists despite rc=$rc (known false negative) — not retrying"
+              break
             fi
-            echo "Deployment for $GITHUB_SHA not READY yet (state=${state:-none}), checking again in 15s... ($attempt/5)"
-            sleep 15
+            if [ "$attempt" -lt 3 ]; then echo "nothing was created; retrying in 20s"; sleep 20; fi
           done
-          echo "Deployment for $GITHUB_SHA never reached READY"
-          exit 1
+
+          # The ONLY thing that decides success. Requires a deployment that is
+          # source=cli AND target=production AND for THIS commit AND newer than
+          # the watermark AND READY AND actually served by the production alias.
+          # (The old check tested deployments[0].state alone and so accepted
+          # Vercel's git-integration preview of the same commit — see
+          # scripts/ci/verify-vercel-deploy.mjs for the full incident writeup.)
+          node scripts/ci/verify-vercel-deploy.mjs --mode=production
         env:
           NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT: cashier-app
+          PROD_HOST: ${{ secrets.PROD_APP_URL }}
 
       # Idempotent (create-only-if-absent) — see the matching step + comment
       # in deploy-staging.yml (#72). Missing here until now, which is why
@@ -113,3 +137,28 @@ jobs:
           # No-op if production isn't behind Deployment Protection — see the
           # matching comment in deploy-staging.yml.
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+      # Seed + smoke above hit PROD_APP_URL, so they pass whatever the alias
+      # happens to serve — during the 2026-08-04 false greens they green-lit the
+      # STALE build. Re-assert here that the alias still serves the deployment we
+      # verified, so a competing production deploy landing mid-run (e.g. a push
+      # to the Vercel production branch) can't leave a green run over stale code.
+      - name: Re-assert production alias still serves this commit
+        run: |
+          set -euo pipefail
+          host="${PROD_HOST#http://}"; host="${host#https://}"; host="${host%%/*}"
+          if [ -z "$host" ] || [ -z "$EXPECTED" ]; then
+            echo "::error::cannot re-assert alias (host or expected deployment id empty)"; exit 1
+          fi
+          seen=$(curl -sSf -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v4/aliases/$host" \
+            | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log((d.deployment&&d.deployment.id)||d.deploymentId||"")')
+          if [ "$seen" != "$EXPECTED" ]; then
+            echo "::error::Production alias now serves ${seen:-nothing}, expected $EXPECTED — $GITHUB_SHA is NOT live."
+            exit 1
+          fi
+          echo "alias $host still serves $EXPECTED"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PROD_HOST: ${{ secrets.PROD_APP_URL }}
+          EXPECTED: ${{ steps.deploy.outputs.id }}
