@@ -84,16 +84,25 @@ jobs:
           # git-integration preview and green-lit runs that deployed nothing
           # (30953998291, 30947892530). --archive=tgz is Vercel's suggested
           # mitigation for the upload quota.
+          # Read the URL from STDOUT only. `vercel deploy` prints exactly the
+          # deployment URL on stdout and sends all decoration to stderr —
+          # including the trailing hint "To deploy to production
+          # (cashier-app-psi.vercel.app), run `vercel --prod`". Grepping the
+          # merged stream and taking the last match picks up that hint, i.e.
+          # the PRODUCTION alias, which then can never match this preview
+          # deployment (observed: staging run 30958353288 failed this way even
+          # though its deploy succeeded).
           CLI_HOST=""
           for attempt in 1 2 3; do
             echo "::group::vercel deploy attempt $attempt"
             set +e
-            vercel deploy --prebuilt --archive=tgz --token="$VERCEL_TOKEN" 2>&1 | tee deploy.out
-            rc=${PIPESTATUS[0]}
+            vercel deploy --prebuilt --archive=tgz --token="$VERCEL_TOKEN" >deploy.url 2>deploy.err
+            rc=$?
             set -e
+            cat deploy.err
             echo "::endgroup::"
             echo "attempt $attempt exited rc=$rc"
-            CLI_HOST=$(grep -oE '[a-z0-9-]+\.vercel\.app' deploy.out | tail -1 || true)
+            CLI_HOST=$(tr -d ' \t\r\n' <deploy.url | sed 's#^https\?://##')
             if [ -n "$CLI_HOST" ]; then
               echo "CLI reported deployment host: $CLI_HOST"
               break
