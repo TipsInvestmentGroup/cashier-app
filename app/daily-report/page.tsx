@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
@@ -33,12 +33,8 @@ interface ReportData {
   cashInHand: number
 }
 
-const SIGNED_LABELS: Record<string, string> = {
-  ADMIN: 'Admin', DIRECTOR: 'Director', CUSTOMER: 'Customer', TIPS: 'Tips', DJ: 'DJ', STAFF_LOSS: 'Staff Loss',
-}
-
-const CATEGORY_DOTS: Record<string, string> = {
-  DIRECTOR: 'bg-indigo-500', ADMIN: 'bg-gray-400', CUSTOMER: 'bg-emerald-500', TIPS: 'bg-amber-500', STAFF_LOSS: 'bg-red-500',
+const CATEGORY_COLORS: Record<string, string> = {
+  DIRECTOR: '#5b4fd6', ADMIN: '#6b7386', CUSTOMER: '#2f9e83', TIPS: '#c9822f', STAFF_LOSS: '#c0392b',
 }
 
 export default function DailyReportPage() {
@@ -71,84 +67,76 @@ export default function DailyReportPage() {
   useEffect(() => { load() }, [load])
 
   const [busy, setBusy] = useState(false)
+  const printRef = useRef<HTMLDivElement>(null)
 
-  // Build a clean one-page PDF (Blob) from the report — mirrors the on-screen layout.
-  const buildPdf = async (d: ReportData) => {
+  // Build the PDF (Blob) by snapshotting the actual rendered report — so the
+  // PDF is a pixel match of the on-screen neumorphism design, not a separately
+  // drawn table. Renders a fixed-width (760px) clone off-screen so the PDF looks
+  // the same regardless of the viewport it was triggered from (mobile vs desktop).
+  const buildPdf = async () => {
+    const node = printRef.current
+    if (!node) throw new Error('Report not ready')
+    const html2canvas = (await import('html2canvas')).default
     const { jsPDF } = await import('jspdf')
-    const autoTable = (await import('jspdf-autotable')).default
-    const doc = new jsPDF()
-    const W = doc.internal.pageSize.getWidth()
-    const n = (v: number) => Number(v).toLocaleString('en-US')
 
-    // Header band
-    doc.setFillColor(79, 70, 229); doc.rect(0, 0, W, 28, 'F')
-    doc.setTextColor(255, 255, 255)
-    doc.setFontSize(20); doc.setFont('helvetica', 'bold'); doc.text('tips', 14, 14)
-    doc.setFontSize(11); doc.setFont('helvetica', 'normal'); doc.text('CASHIER DAILY REPORT', 14, 22)
-    doc.setFontSize(10)
-    doc.text(d.outletName, W - 14, 12, { align: 'right' })
-    doc.text(format(new Date(d.date), 'EEEE, dd MMM yyyy'), W - 14, 18, { align: 'right' })
-    doc.text(`By: ${d.generatedBy || '—'}`, W - 14, 24, { align: 'right' })
-    doc.setTextColor(31, 41, 55)
+    const wrapper = document.createElement('div')
+    wrapper.style.position = 'fixed'
+    wrapper.style.top = '0'
+    wrapper.style.left = '-9999px'
+    wrapper.style.width = '760px'
+    const clone = node.cloneNode(true) as HTMLElement
+    clone.removeAttribute('id')
+    clone.style.width = '760px'
+    clone.style.maxWidth = '760px'
+    clone.style.margin = '0'
+    wrapper.appendChild(clone)
+    document.body.appendChild(wrapper)
 
-    const base = {
-      theme: 'grid' as const, styles: { fontSize: 9 },
-      headStyles: { fillColor: [79, 70, 229] as [number, number, number] },
-      margin: { left: 14, right: 14 }, columnStyles: { 1: { halign: 'right' as const } },
+    try {
+      const canvas = await html2canvas(clone, { scale: 2, backgroundColor: '#e9edf3', useCORS: true })
+
+      const pageWidthMm = 210
+      const pageHeightMm = 297
+      const marginMm = 10
+      const usableWidthMm = pageWidthMm - marginMm * 2
+      const usableHeightMm = pageHeightMm - marginMm * 2
+      let pxPerMm = canvas.width / usableWidthMm
+      let pageHeightPx = Math.floor(usableHeightMm * pxPerMm)
+
+      // If the content only slightly overflows one page (e.g. a light day whose
+      // last line is just the footer), shrink it a little to fit on a single
+      // page rather than spilling one line onto an almost-blank second page.
+      const OVERFLOW_TOLERANCE = 1.12
+      if (canvas.height > pageHeightPx && canvas.height <= pageHeightPx * OVERFLOW_TOLERANCE) {
+        pxPerMm = canvas.height / usableHeightMm
+        pageHeightPx = canvas.height
+      }
+
+      // Width in mm the image is actually drawn at — equals usableWidthMm unless
+      // the shrink-to-fit branch above rescaled by height instead of width.
+      const drawWidthMm = canvas.width / pxPerMm
+      const xOffsetMm = marginMm + (usableWidthMm - drawWidthMm) / 2
+
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      let renderedPx = 0
+      let firstPage = true
+      while (renderedPx < canvas.height) {
+        const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx)
+        const sliceCanvas = document.createElement('canvas')
+        sliceCanvas.width = canvas.width
+        sliceCanvas.height = sliceHeightPx
+        const ctx = sliceCanvas.getContext('2d')
+        if (!ctx) break
+        ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx)
+        if (!firstPage) doc.addPage()
+        doc.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', xOffsetMm, marginMm, drawWidthMm, sliceHeightPx / pxPerMm)
+        renderedPx += sliceHeightPx
+        firstPage = false
+      }
+      return doc
+    } finally {
+      document.body.removeChild(wrapper)
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const afterY = () => (doc as any).lastAutoTable.finalY + 5
-    const foot = (rgb: [number, number, number], white = false) => ({ fillColor: rgb, textColor: (white ? [255, 255, 255] : [31, 41, 55]) as [number, number, number], fontStyle: 'bold' as const })
-
-    autoTable(doc, {
-      ...base, startY: 34,
-      head: [['COLLECTION (SALES)', 'TZS']],
-      body: [
-        ['System Sales', n(d.collection.systemSales)],
-        ['Cash', n(d.collection.cash)],
-        ...d.collection.channels.map((c) => [c.label, n(c.amount)]),
-        ['Variance (Collected − System)', n(d.collection.variance)],
-      ],
-      foot: [['TOTAL COLLECTED', n(d.collection.total)]], footStyles: foot([238, 242, 255]),
-    })
-    autoTable(doc, {
-      ...base, startY: afterY(),
-      head: [['SIGNED BILLS', 'TYPE', 'TZS']], columnStyles: { 2: { halign: 'right' } },
-      body: d.signed.rows.length ? d.signed.rows.map((r) => [`${r.name}${r.staff ? ` — ${r.staff}` : ''}`, SIGNED_LABELS[r.type] || r.type, n(r.amount)]) : [['No signed bills', '', '0']],
-      foot: [['TOTAL SIGNED BILLS', '', n(d.signed.total)]], footStyles: foot([255, 247, 237]),
-    })
-    autoTable(doc, {
-      ...base, startY: afterY(),
-      head: [['PAID BILLS (DEBTS COLLECTED)', 'METHOD', 'TZS']], columnStyles: { 2: { halign: 'right' } },
-      body: d.paid.rows.length ? d.paid.rows.map((r) => [`${r.name}${r.category ? ` (${r.category})` : ''}`, r.method, n(r.amount)]) : [['No paid bills', '', '0']],
-      foot: [['TOTAL PAID BILLS', '', n(d.paid.total)]], footStyles: foot([236, 253, 245]),
-    })
-    if (d.cancellations.rows.length) {
-      autoTable(doc, {
-        ...base, startY: afterY(),
-        head: [['CANCELLATIONS', 'QTY', 'TZS']], columnStyles: { 2: { halign: 'right' } },
-        body: d.cancellations.rows.map((r) => [`${r.product}${r.staff ? ` — ${r.staff}` : ''}`, String(r.qty), n(r.amount)]),
-        foot: [['TOTAL CANCELLATIONS', '', n(d.cancellations.total)]], footStyles: foot([255, 241, 242]),
-      })
-    }
-    autoTable(doc, {
-      ...base, startY: afterY(),
-      head: [['PETTY CASH / EXPENSES', 'STATUS', 'TZS']], columnStyles: { 2: { halign: 'right' } },
-      body: d.pettyCash.rows.length ? d.pettyCash.rows.map((r) => [`${r.purpose}${r.by ? ` — ${r.by}` : ''}`, r.status, n(r.amount)]) : [['No petty cash', '', '0']],
-      foot: [['TOTAL PETTY CASH', '', n(d.pettyCash.total)]], footStyles: foot([240, 253, 244]),
-    })
-    autoTable(doc, {
-      ...base, startY: afterY(),
-      head: [['SUMMARY', 'TZS']],
-      body: [
-        ['Approved Petty Cash Paid Out', n(d.pettyCash.approved)],
-        ...(d.settlementsPaidFromTill ? [['Cash Settlements Paid From Till', n(d.settlementsPaidFromTill)]] : []),
-      ],
-      foot: [['CASH IN HAND', n(d.cashInHand)]], footStyles: foot([79, 70, 229], true),
-    })
-    doc.setFontSize(8); doc.setTextColor(150)
-    doc.text(`Generated ${format(new Date(), 'dd MMM yyyy HH:mm')} · tips Cashier Management`, 14, doc.internal.pageSize.getHeight() - 8)
-    return doc
   }
 
   const fileName = (d: ReportData) => `tips-daily-${d.outletName.replace(/\s+/g, '-')}-${format(new Date(d.date), 'yyyy-MM-dd')}.pdf`
@@ -158,7 +146,7 @@ export default function DailyReportPage() {
     if (!data) return
     setBusy(true)
     try {
-      const doc = await buildPdf(data)
+      const doc = await buildPdf()
       const blob = doc.output('blob')
       const file = new File([blob], fileName(data), { type: 'application/pdf' })
       const nav = navigator as Navigator & { canShare?: (d?: ShareData) => boolean }
@@ -177,7 +165,7 @@ export default function DailyReportPage() {
   const downloadReport = async () => {
     if (!data) return
     setBusy(true)
-    try { (await buildPdf(data)).save(fileName(data)); toast.success('PDF downloaded') }
+    try { (await buildPdf()).save(fileName(data)); toast.success('PDF downloaded') }
     catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not build PDF') }
     finally { setBusy(false) }
   }
@@ -309,197 +297,182 @@ export default function DailyReportPage() {
 
         {/* The printable report */}
         {data && !loading && (
-          <div className="print-area bg-white rounded-2xl shadow-sm border border-gray-200 p-6 md:p-8 max-w-3xl mx-auto">
+          <div ref={printRef} id="reportPrintArea" className="print-area cdr-panel max-w-3xl mx-auto">
             {/* Header */}
-            <div className="text-center border-b-2 border-gray-200 pb-4 mb-5">
-              <div className="text-3xl font-extrabold tracking-wide text-gray-900">tips</div>
-              <h2 className="text-lg font-bold text-gray-800 mt-1">Cashier Sales Report — {data.outletName}</h2>
-              <p className="text-gray-500 text-sm">{prettyDate}</p>
+            <div className="cdr-header">
+              <div className="cdr-header-top" style={{ justifyContent: 'center', textAlign: 'center', flexDirection: 'column' }}>
+                <div className="cdr-logo-badge">tips</div>
+                <div>
+                  <div className="cdr-company-name">Tips Investment Limited</div>
+                  <div className="cdr-company-addr">{data.outletName}</div>
+                </div>
+              </div>
+              <div className="cdr-meta">
+                <div>
+                  <h1 className="cdr-title">Cashier daily report</h1>
+                  <div className="cdr-sub">By {data.generatedBy || '—'}</div>
+                </div>
+                <div className="cdr-right">
+                  <span>{data.outletName}</span><br />
+                  <span>{prettyDate}</span>
+                </div>
+              </div>
             </div>
 
             {/* Collection */}
-            <Section title="1 · Collection (Sales)">
-              <Row label="System Sales" value={money(data.collection.systemSales)} bold />
-              <Row label="Cash" value={money(data.collection.cash)} />
-              {data.collection.channels.map((c) => <Row key={c.code} label={c.label} value={money(c.amount)} />)}
-              <Row label="Total Collected" value={money(data.collection.total)} bold accent />
-              <Row label="Variance (Collected − System)"
-                value={money(data.collection.variance)}
-                valueClass={data.collection.variance < 0 ? 'text-red-600' : data.collection.variance > 0 ? 'text-green-600' : ''} />
-            </Section>
+            <section className="cdr-section">
+              <h2 className="cdr-section-title"><span>Collection (sales)</span><span>TZS</span></h2>
+              <div className="cdr-ref-line"><span>System sales (per POS, for comparison only)</span><b>{money(data.collection.systemSales)}</b></div>
+              <div className="cdr-collection-grid">
+                <div className="cdr-cell"><div className="cdr-label">Cash</div><div className="cdr-amount">{money(data.collection.cash)}</div></div>
+                {data.collection.channels.map((c) => (
+                  <div key={c.code} className="cdr-cell"><div className="cdr-label">{c.label}</div><div className="cdr-amount">{money(c.amount)}</div></div>
+                ))}
+              </div>
+              <div className="cdr-total-row"><span>Total collected</span><span>{money(data.collection.total)}</span></div>
+              <div className="cdr-variance-row">
+                <span>Variance (collected − system sales)</span>
+                <span className={`cdr-amount ${data.collection.variance < 0 ? 'cdr-neg' : ''}`}>{money(data.collection.variance)}</span>
+              </div>
+            </section>
 
             {/* Signed bills — grouped by category, then by signer */}
-            <Section title="2 · Signed Bills (credit given)">
+            <section className="cdr-section">
+              <h2 className="cdr-section-title"><span>Signed bills — by category, then by person</span><span>TZS</span></h2>
               {data.signed.byCategory.length === 0 ? (
-                <Empty>No signed bills</Empty>
+                <div className="cdr-row"><span className="cdr-label">No signed bills</span><span className="cdr-amount">0</span></div>
               ) : (
-                <>
-                  {data.signed.byCategory.map((cat) => (
-                    <div key={cat.key} className="mb-3">
-                      <div className="flex items-center justify-between text-xs font-bold text-gray-800 mb-1.5">
-                        <span className="flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${CATEGORY_DOTS[cat.key] || 'bg-gray-400'}`} />
-                          {cat.label}
-                        </span>
-                        <span className="tabular-nums text-gray-500 font-semibold">{money(cat.total)}</span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-0.5">
-                        {cat.people.map((p) => (
-                          <div key={p.name} className="flex items-baseline justify-between gap-2 border-b border-gray-100 py-1 text-xs">
-                            <span className="text-gray-700 leading-tight">
-                              {p.name}
-                              {p.details.length > 1 && <span className="text-[10px] text-gray-400 ml-1">({p.details.length} bills)</span>}
-                            </span>
-                            <span className="tabular-nums font-semibold text-gray-800 whitespace-nowrap">{money(p.total)}</span>
-                          </div>
-                        ))}
-                      </div>
+                data.signed.byCategory.map((cat) => (
+                  <div key={cat.key} className="cdr-category">
+                    <div className="cdr-category-title">
+                      <span className="cdr-name"><span className="cdr-dot" style={{ background: CATEGORY_COLORS[cat.key] || '#6b7386' }} />{cat.label}</span>
+                      <span className="cdr-subtotal">{money(cat.total)}</span>
                     </div>
-                  ))}
-                  <Row label={`Total Signed Bills (${data.signed.byCategory.reduce((s, c) => s + c.people.length, 0)} people)`} value={money(data.signed.total)} bold accent />
-                  {(() => {
-                    const multi = data.signed.byCategory.flatMap((c) => c.people.filter((p) => p.details.length > 1))
-                    return multi.length > 0 ? (
-                      <div className="mt-2 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-[11px] text-gray-500 leading-relaxed">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1">Multi-recipient breakdown</p>
-                        {multi.map((p) => (
-                          <p key={p.name}><b className="text-gray-700">{p.name}:</b> {p.details.map((d) => `${d.who} ${money(d.amt)}`).join(' · ')}</p>
-                        ))}
-                      </div>
-                    ) : null
-                  })()}
-                </>
+                    <div className="cdr-ledger-cols">
+                      {cat.people.map((p) => (
+                        <div key={p.name} className="cdr-ledger-item">
+                          <span className="cdr-lname">{p.name}{p.details.length > 1 && <span className="cdr-multi">({p.details.length} bills)</span>}</span>
+                          <span className="cdr-lamt">{money(p.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
               )}
-            </Section>
+              <div className="cdr-total-row">
+                <span>Total signed bills ({data.signed.byCategory.reduce((s, c) => s + c.people.length, 0)} people)</span>
+                <span>{money(data.signed.total)}</span>
+              </div>
+              {(() => {
+                const multi = data.signed.byCategory.flatMap((c) => c.people.filter((p) => p.details.length > 1))
+                return multi.length > 0 ? (
+                  <div className="cdr-appendix">
+                    <div className="cdr-a-title">Multi-recipient breakdown</div>
+                    {multi.map((p) => (
+                      <div key={p.name} className="cdr-a-entry"><b>{p.name}:</b> {p.details.map((d) => `${d.who} ${money(d.amt)}`).join(' · ')}</div>
+                    ))}
+                  </div>
+                ) : null
+              })()}
+            </section>
 
             {/* Paid bills — grouped by category, then by payer */}
-            <Section title="3 · Paid Bills (debts collected)">
+            <section className="cdr-section">
+              <h2 className="cdr-section-title"><span>Paid bills (debts collected)</span><span>TZS</span></h2>
               {data.paid.byCategory.length === 0 ? (
-                <Empty>No paid bills</Empty>
+                <div className="cdr-row"><span className="cdr-label">No paid bills</span><span className="cdr-amount">0</span></div>
               ) : (
-                <>
-                  {data.paid.byCategory.map((cat) => (
-                    <div key={cat.key} className="mb-3">
-                      <div className="flex items-center justify-between text-xs font-bold text-gray-800 mb-1.5">
-                        <span className="flex items-center gap-1.5">
-                          <span className={`w-2 h-2 rounded-full ${CATEGORY_DOTS[cat.key] || 'bg-gray-400'}`} />
-                          {cat.label}
-                        </span>
-                        <span className="tabular-nums text-gray-500 font-semibold">{money(cat.total)}</span>
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-0.5">
-                        {cat.payers.map((p) => (
-                          <div key={p.name} className="flex items-baseline justify-between gap-2 border-b border-gray-100 py-1 text-xs">
-                            <span className="text-gray-700 leading-tight">
-                              {p.name}<span className="text-[10px] text-gray-400 ml-1">{p.method}</span>
-                            </span>
-                            <span className="tabular-nums font-semibold text-gray-800 whitespace-nowrap">{money(p.amount)}</span>
-                          </div>
-                        ))}
-                      </div>
+                data.paid.byCategory.map((cat) => (
+                  <div key={cat.key} className="cdr-category">
+                    <div className="cdr-category-title">
+                      <span className="cdr-name"><span className="cdr-dot" style={{ background: CATEGORY_COLORS[cat.key] || '#6b7386' }} />{cat.label}</span>
+                      <span className="cdr-subtotal">{money(cat.total)}</span>
                     </div>
-                  ))}
-                  <Row label="Total Paid Bills" value={money(data.paid.total)} bold accent />
-                </>
+                    <div className="cdr-ledger-cols">
+                      {cat.payers.map((p) => (
+                        <div key={p.name} className="cdr-ledger-item">
+                          <span className="cdr-lname">{p.name}<span className="cdr-multi">{p.method}</span></span>
+                          <span className="cdr-lamt">{money(p.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
               )}
-            </Section>
+              <div className="cdr-total-row"><span>Total paid bills</span><span>{money(data.paid.total)}</span></div>
+            </section>
 
             {/* Cancellations */}
-            <Section title="4 · Cancellations">
+            <section className="cdr-section">
+              <h2 className="cdr-section-title"><span>Cancellations</span><span>TZS</span></h2>
               {data.cancellations.rows.length === 0 ? (
-                <Empty>No cancellations</Empty>
+                <div className="cdr-row"><span className="cdr-label">No cancellations</span><span className="cdr-amount">0</span></div>
               ) : (
-                <>
-                  <MiniTable
-                    head={['Product', 'Staff', 'Qty', 'Amount']}
-                    rows={data.cancellations.rows.map((r) => [r.product, r.staff, String(r.qty), money(r.amount)])}
-                  />
-                  <Row label="Total Cancellations" value={money(data.cancellations.total)} bold accent />
-                </>
+                <div className="cdr-ledger-cols">
+                  {data.cancellations.rows.map((r, i) => (
+                    <div key={i} className="cdr-ledger-item">
+                      <span className="cdr-lname">
+                        {r.product}
+                        {r.staff && <span className="cdr-multi">{r.staff}</span>}
+                        <span className="cdr-multi">qty {r.qty}</span>
+                      </span>
+                      <span className="cdr-lamt">{money(r.amount)}</span>
+                    </div>
+                  ))}
+                </div>
               )}
-            </Section>
+              <div className="cdr-total-row"><span>Total cancellations</span><span>{money(data.cancellations.total)}</span></div>
+            </section>
 
             {/* Petty cash */}
-            <Section title="5 · Petty Cash / Expenses">
+            <section className="cdr-section">
+              <h2 className="cdr-section-title"><span>Petty cash / expenses</span><span>TZS</span></h2>
               {data.pettyCash.rows.length === 0 ? (
-                <Empty>No petty cash</Empty>
+                <div className="cdr-row"><span className="cdr-label">No petty cash</span><span className="cdr-amount">0</span></div>
               ) : (
-                <>
-                  <MiniTable
-                    head={['Purpose', 'Requested By', 'Status', 'Amount']}
-                    rows={data.pettyCash.rows.map((r) => [r.purpose, r.by, r.status, money(r.amount)])}
-                  />
-                  <Row label="Total Petty Cash" value={money(data.pettyCash.total)} bold accent />
-                  <Row label="Approved & Paid Out" value={money(data.pettyCash.approved)} />
-                </>
+                <div className="cdr-ledger-cols">
+                  {data.pettyCash.rows.map((r, i) => (
+                    <div key={i} className="cdr-ledger-item">
+                      <span className="cdr-lname">
+                        {r.purpose}
+                        {r.by && <span className="cdr-multi">{r.by}</span>}
+                        <span className="cdr-multi">{r.status}</span>
+                      </span>
+                      <span className="cdr-lamt">{money(r.amount)}</span>
+                    </div>
+                  ))}
+                </div>
               )}
-            </Section>
+              <div className="cdr-total-row"><span>Total petty cash</span><span>{money(data.pettyCash.total)}</span></div>
+            </section>
 
             {/* Settlements paid from the till (separate from operational collections) */}
             {!!data.settlementsPaidFromTill && data.settlementsPaidFromTill !== 0 && (
-              <Section title="6 · SETTLEMENTS PAID FROM TILL">
-                <Row label="Excess/reconciliation payouts (cash)" value={money(data.settlementsPaidFromTill)} bold accent />
-                <p className="text-xs text-gray-400 mt-1">Cash paid out to settle payable over-collections — reduces cash in hand, not an operational expense.</p>
-              </Section>
+              <section className="cdr-section">
+                <h2 className="cdr-section-title"><span>Settlements paid from till</span><span>TZS</span></h2>
+                <div className="cdr-total-row"><span>Excess/reconciliation payouts (cash)</span><span>{money(data.settlementsPaidFromTill)}</span></div>
+                <p style={{ fontSize: '11px', color: 'var(--cdr-ink-soft)', marginTop: '6px' }}>Cash paid out to settle payable over-collections — reduces cash in hand, not an operational expense.</p>
+              </section>
             )}
 
             {/* Cash in hand */}
-            <div className="mt-6 rounded-xl bg-indigo-50 border-2 border-indigo-200 p-4 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-indigo-900">Cash in Hand</p>
-                <p className="text-xs text-indigo-500">Cash collected + cash debts − approved petty cash{data.settlementsPaidFromTill ? ' − cash settlements paid' : ''}</p>
+            <section className="cdr-section">
+              <div className="cdr-row" style={{ marginBottom: '5px' }}>
+                <span className="cdr-label">Approved petty cash paid out</span>
+                <span className="cdr-amount">{money(data.pettyCash.approved)}</span>
               </div>
-              <p className="text-2xl font-extrabold text-indigo-700">{money(data.cashInHand)}</p>
-            </div>
+              <div className="cdr-total-row cdr-grand">
+                <span>Cash in hand</span>
+                <span>{money(data.cashInHand)}</span>
+              </div>
+            </section>
 
-            <p className="text-center text-xs text-gray-400 mt-6">
-              Generated by {data.generatedBy || '—'} · {format(new Date(), 'dd MMM yyyy HH:mm')} · tips Cashier Management
-            </p>
+            <div className="cdr-footer">
+              Generated by {data.generatedBy || '—'} · {format(new Date(), 'dd MMM yyyy HH:mm')} · Tips Cashier Management
+            </div>
           </div>
         )}
       </div>
     </AppShell>
   )
-}
-
-/* ---------- small presentational helpers ---------- */
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-5">
-      <h3 className="text-sm font-bold uppercase tracking-wide text-indigo-700 border-b border-gray-200 pb-1 mb-2">{title}</h3>
-      <div className="space-y-0.5">{children}</div>
-    </div>
-  )
-}
-
-function Row({ label, value, bold, accent, valueClass = '' }: { label: string; value: string; bold?: boolean; accent?: boolean; valueClass?: string }) {
-  return (
-    <div className={`flex items-center justify-between py-1 text-sm ${accent ? 'bg-yellow-50 px-2 rounded' : ''}`}>
-      <span className={`${bold ? 'font-bold text-gray-900' : 'text-gray-600'}`}>{label}</span>
-      <span className={`tabular-nums ${bold ? 'font-bold text-gray-900' : 'text-gray-800'} ${valueClass}`}>{value}</span>
-    </div>
-  )
-}
-
-function MiniTable({ head, rows }: { head: string[]; rows: string[][] }) {
-  return (
-    <table className="w-full text-xs mb-1">
-      <thead>
-        <tr className="text-left text-gray-500 border-b border-gray-200">
-          {head.map((h, i) => <th key={i} className={`py-1 font-semibold ${i === head.length - 1 ? 'text-right' : ''}`}>{h}</th>)}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, ri) => (
-          <tr key={ri} className="border-b border-gray-50">
-            {r.map((c, ci) => <td key={ci} className={`py-1 ${ci === r.length - 1 ? 'text-right tabular-nums font-medium text-gray-800' : 'text-gray-600'}`}>{c}</td>)}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-gray-400 italic py-1">{children}</p>
 }
