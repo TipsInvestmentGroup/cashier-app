@@ -100,16 +100,6 @@ jobs:
           NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 
-      # TEMPORARY debug step — remove once the CRON_SECRET mismatch below is
-      # resolved. Prints only a SHA-256 hash of the GitHub-side secret, never
-      # the value itself: compare against a local hash of what's actually
-      # configured in Vercel's Preview environment to confirm both sides hold
-      # the exact same bytes (catches trailing whitespace/newline diffs that
-      # look identical but fail strict string equality in the route). Same
-      # technique used to fix this same class of bug in deploy-production.yml.
-      - name: "DEBUG: hash STAGING_CRON_SECRET"
-        run: printf '%s' "$CRON_SECRET" | sha256sum
-
       # Idempotent (create-only-if-absent) — safe to run on every deploy, not
       # just the first one. Previously a manual step (open the URL in a
       # browser); automated here so newly-added RolePermission/seed defaults
