@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { resolveAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
-import { BILL_TYPE_CODES } from '@/lib/bill-types'
+import { BILL_TYPE_CODES, PAID_BILL_CATEGORY_MAP } from '@/lib/bill-types'
 import { channelAmountsFor } from '@/lib/collection-channels-shared'
 import { sumApprovedPettyCash } from '@/lib/petty-cash-metrics'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
@@ -74,6 +74,32 @@ export async function GET(req: NextRequest) {
   })
   const signedTotal = roundMoney(signedBills.reduce((s, b) => s + b.amount, 0))
 
+  // --- Signed bills grouped by category, then by signer (summed), for the
+  // Daily Cashier report's compact ledger view. Fixed category order per the
+  // report spec: Director, Admin, Customer, Tips/DJ, Staff Loss. Within a
+  // category, signers are sorted by their total (desc); a signer with more
+  // than one bill carries a `details` breakdown for the report's appendix. ---
+  const SIGNED_CATEGORY_GROUPS: { key: string; label: string; types: string[] }[] = [
+    { key: 'DIRECTOR', label: 'Director bills', types: ['DIRECTOR'] },
+    { key: 'ADMIN', label: 'Admin bills', types: ['ADMIN'] },
+    { key: 'CUSTOMER', label: 'Customer bills', types: ['CUSTOMER'] },
+    { key: 'TIPS', label: 'Tips, dancer & DJ bills', types: ['TIPS', 'DJ'] },
+    { key: 'STAFF_LOSS', label: 'Staff bills (losses)', types: ['STAFF_LOSS'] },
+  ]
+  const signedByCategory = SIGNED_CATEGORY_GROUPS.map((group) => {
+    const inGroup = signedBills.filter((b) => group.types.includes(String(b.billType).toUpperCase()))
+    const byPerson = new Map<string, { who: string; amt: number }[]>()
+    for (const b of inGroup) {
+      const list = byPerson.get(b.personName) || []
+      list.push({ who: b.serviceStaff || b.personName, amt: roundMoney(b.amount) })
+      byPerson.set(b.personName, list)
+    }
+    const people = Array.from(byPerson.entries())
+      .map(([name, details]) => ({ name, details, total: roundMoney(details.reduce((s, d) => s + d.amt, 0)) }))
+      .sort((a, b) => b.total - a.total)
+    return { key: group.key, label: group.label, people, total: roundMoney(people.reduce((s, p) => s + p.total, 0)) }
+  }).filter((g) => g.people.length > 0)
+
   // --- Paid bills (debts collected) by method — any active channel, else "Other" ---
   const paidByMethodTotals: Record<string, number> = {}
   const paidRows = paidBills.map((p) => {
@@ -87,6 +113,30 @@ export async function GET(req: NextRequest) {
   }))
   const paidTotal = roundMoney(paidBills.reduce((s, p) => s + p.amountPaid, 0))
   const paidCash = roundMoney(paidByMethodTotals.CASH || 0)
+
+  // --- Paid bills grouped by category, then by payer (summed), mirroring the
+  // signed-bills ledger. No Tips category here — tips aren't debts. Each
+  // payer line carries the payment method(s) instead of a recipient
+  // breakdown; a payer with more than one method shows "(N payments)". ---
+  const PAID_CATEGORY_LABELS: Record<string, string> = { DIRECTOR: 'Director', ADMIN: 'Admin', CUSTOMER: 'Customer', STAFF_LOSS: 'Staff' }
+  const PAID_CATEGORY_ORDER = ['DIRECTOR', 'ADMIN', 'CUSTOMER', 'STAFF_LOSS']
+  const paidByCategory = PAID_CATEGORY_ORDER.map((code) => {
+    const inGroup = paidBills.filter((p) => (PAID_BILL_CATEGORY_MAP[p.payerCategory || ''] || 'OTHER') === code)
+    const byPayer = new Map<string, { amount: number; methods: Set<string> }>()
+    for (const p of inGroup) {
+      const entry = byPayer.get(p.payerName) || { amount: 0, methods: new Set<string>() }
+      entry.amount += p.amountPaid
+      entry.methods.add(String(p.paymentMethod || 'OTHER').toUpperCase())
+      byPayer.set(p.payerName, entry)
+    }
+    const payers = Array.from(byPayer.entries())
+      .map(([name, e]) => ({
+        name, amount: roundMoney(e.amount),
+        method: e.methods.size > 1 ? `${e.methods.size} payments` : (allChannels.find((c) => c.code === [...e.methods][0])?.label || [...e.methods][0]),
+      }))
+      .sort((a, b) => b.amount - a.amount)
+    return { key: code, label: PAID_CATEGORY_LABELS[code], payers, total: roundMoney(payers.reduce((s, p) => s + p.amount, 0)) }
+  }).filter((g) => g.payers.length > 0)
 
   // --- Cancellations ---
   const cancelRows = cancellations.map((c) => ({ product: c.productName, staff: c.staffName || '', qty: c.quantity, amount: roundMoney(c.amount), reason: c.reason }))
@@ -136,8 +186,8 @@ export async function GET(req: NextRequest) {
       cash: roundMoney(collection.cash), channels: collectionChannels,
       total: roundMoney(collection.total), variance,
     },
-    signed: { byType: signedByType, rows: signedRows, total: signedTotal },
-    paid: { byMethod: paidByMethod, rows: paidRows, total: paidTotal, cash: paidCash },
+    signed: { byType: signedByType, rows: signedRows, byCategory: signedByCategory, total: signedTotal },
+    paid: { byMethod: paidByMethod, rows: paidRows, byCategory: paidByCategory, total: paidTotal, cash: paidCash },
     cancellations: { rows: cancelRows, total: cancelTotal },
     pettyCash: { rows: pettyRows, total: pettyTotal, approved: pettyApproved },
     settlementsPaidFromTill,
