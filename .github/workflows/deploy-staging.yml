@@ -58,6 +58,7 @@ jobs:
       - name: Deploy to Vercel (Preview)
         id: deploy
         run: |
+          set -euo pipefail
           # Pinned rather than @latest — 57.0.0 (released 2 days before the
           # prior pin) reproducibly failed `vercel deploy --prebuilt` uploads
           # with "Upload aborted" 3/3 times in this workflow; 56.5.0 was the
@@ -67,38 +68,59 @@ jobs:
           # version. Bump deliberately, not automatically, and re-verify
           # against this exact "Upload aborted" failure mode if it recurs.
           npm i -g vercel@58.1.0
+
+          # Watermark BEFORE deploying — see deploy-production.yml.
+          SINCE_MS="$(node -e 'console.log(Date.now())')"
+          export SINCE_MS
+
           vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
           vercel build --token="$VERCEL_TOKEN"
 
-          # `vercel deploy`'s own exit code is unreliable: on 2026-07-29 it
-          # reported "Upload aborted" and exited non-zero on every attempt
-          # (including 3 back-to-back retries with a 15s backoff), yet
-          # `vercel inspect`/the dashboard showed every one of those
-          # deployments actually reached READY — the CLI process loses the
-          # final confirmation response over the network after the upload
-          # was already accepted, and misreports success as failure. So:
-          # run it once, ignore its exit code, then verify the ACTUAL state
-          # of the deployment tied to this exact commit instead of trusting
-          # the command's own report.
-          vercel deploy --prebuilt --token="$VERCEL_TOKEN" || true
-
-          for attempt in 1 2 3 4 5; do
-            result=$(vercel ls cashier-app --format json --meta githubCommitSha="$GITHUB_SHA" --token="$VERCEL_TOKEN" 2>/dev/null)
-            state=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].state)}catch{console.log('')}")
-            if [ "$state" = "READY" ]; then
-              url=$(echo "$result" | node -e "try{console.log(JSON.parse(require('fs').readFileSync(0,'utf8')).deployments[0].url)}catch{console.log('')}")
-              echo "url=https://$url" >> "$GITHUB_OUTPUT"
-              echo "Deployment for $GITHUB_SHA confirmed READY: https://$url"
-              exit 0
+          # Exit code untrusted in both directions (2026-07-29 false negative;
+          # 2026-08-04 hard api-upload-free quota that created nothing). Capture
+          # the CLI's own output so verification can anchor on the deployment
+          # URL *it* printed — this workflow's previous check took
+          # `deployments[0]` for the commit, which silently matched Vercel's
+          # git-integration preview and green-lit runs that deployed nothing
+          # (30953998291, 30947892530). --archive=tgz is Vercel's suggested
+          # mitigation for the upload quota.
+          # Read the URL from STDOUT only. `vercel deploy` prints exactly the
+          # deployment URL on stdout and sends all decoration to stderr —
+          # including the trailing hint "To deploy to production
+          # (cashier-app-psi.vercel.app), run `vercel --prod`". Grepping the
+          # merged stream and taking the last match picks up that hint, i.e.
+          # the PRODUCTION alias, which then can never match this preview
+          # deployment (observed: staging run 30958353288 failed this way even
+          # though its deploy succeeded).
+          CLI_HOST=""
+          for attempt in 1 2 3; do
+            echo "::group::vercel deploy attempt $attempt"
+            set +e
+            vercel deploy --prebuilt --archive=tgz --token="$VERCEL_TOKEN" >deploy.url 2>deploy.err
+            rc=$?
+            set -e
+            cat deploy.err
+            echo "::endgroup::"
+            echo "attempt $attempt exited rc=$rc"
+            CLI_HOST=$(tr -d ' \t\r\n' <deploy.url | sed 's#^https\?://##')
+            if [ -n "$CLI_HOST" ]; then
+              echo "CLI reported deployment host: $CLI_HOST"
+              break
             fi
-            echo "Deployment for $GITHUB_SHA not READY yet (state=${state:-none}), checking again in 15s... ($attempt/5)"
-            sleep 15
+            if [ "$attempt" -lt 3 ]; then echo "no deployment URL printed; retrying in 20s"; sleep 20; fi
           done
-          echo "Deployment for $GITHUB_SHA never reached READY"
-          exit 1
+          if [ -z "$CLI_HOST" ]; then
+            echo "::error::vercel deploy printed no deployment URL across 3 attempts — nothing was deployed."
+            exit 1
+          fi
+
+          # Decides success: must be OUR cli deployment, for THIS commit, newer
+          # than the watermark, at the exact host the CLI printed, and READY.
+          node scripts/ci/verify-vercel-deploy.mjs --mode=preview --expect-url="$CLI_HOST"
         env:
           NODE_ENV: production
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT: cashier-app
 
       # Idempotent (create-only-if-absent) — safe to run on every deploy, not
       # just the first one. Previously a manual step (open the URL in a
