@@ -3,11 +3,17 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveCompanyId } from '@/lib/expense-config'
 import { createExpenseRequest } from '@/lib/expense-requests'
+import { hasGrant, requestGateActive } from '@/lib/expense-grants'
 
 // Roles that can see every request, not just their own — mirrors the
 // CASHIER/WAITER-vs-management split used across the app's other
 // role-scoped list endpoints.
 const MGMT_ROLES = ['ADMIN', 'MANAGER', 'DIRECTOR', 'ACCOUNTANT']
+
+// Who may raise a request in someone else's name (a manager entering a
+// reimbursement for a waiter). The requester still has to hold Requesting Access
+// themselves — this only controls who can do the data entry.
+const ON_BEHALF_ROLES = ['ADMIN', 'MANAGER', 'DIRECTOR', 'ACCOUNTANT']
 
 /** GET — list expense requests. Management roles see everything (optionally
  *  filtered by status); everyone else sees only their own requests. */
@@ -52,12 +58,28 @@ export async function POST(req: NextRequest) {
   const companyId = await resolveCompanyId(prisma, body.outletId || user.outletId || null)
   if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
 
+  // §4: the access list decides who may submit an Expense Form. The gate only
+  // applies once any REQUEST grant exists (see requestGateActive) — before that,
+  // submitting stays open exactly as it was, so this needs no backfill.
+  const requestedById = body.requestedById ? String(body.requestedById) : user.userId
+  if (requestedById !== user.userId && !ON_BEHALF_ROLES.includes(user.role)) {
+    return NextResponse.json({ error: 'You cannot raise a request on behalf of someone else' }, { status: 403 })
+  }
+  if (await requestGateActive(companyId)) {
+    if (!(await hasGrant(requestedById, 'REQUEST', { outletId: body.outletId ? String(body.outletId) : user.outletId || null }))) {
+      const who = requestedById === user.userId ? 'You do not' : 'That user does not'
+      return NextResponse.json({ error: `${who} have Requesting Access for this outlet. Grant it under Setup → Expense Settings → Manage Access.` }, { status: 403 })
+    }
+  }
+
   try {
     const result = await createExpenseRequest(prisma, {
       companyId,
       requestTypeId: String(body.requestTypeId),
       categoryId: String(body.categoryId),
-      requestedById: user.userId,
+      requestedById,
+      fundingSourceId: body.fundingSourceId ? String(body.fundingSourceId) : null,
+      direction: body.direction === 'IN' ? 'IN' : 'OUT',
       amount: body.amount !== undefined ? Number(body.amount) : undefined,
       currency: body.currency ? String(body.currency) : undefined,
       purpose: String(body.purpose),

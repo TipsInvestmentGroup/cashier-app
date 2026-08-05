@@ -233,6 +233,81 @@ otherwise a custodian reasonably concludes the screen is broken.
 
 ---
 
+## Phase 4 — Expense Form funding source + routing, §3
+
+**The Expense Form now leads with "Pay From".** Selecting a fund drives
+everything below it: the custodians who will pay it (shown inline, with a warning
+when none are assigned), the available balance, and whether the amount is below
+the fund's threshold and so needs no approval at all. `createExpenseRequest`
+accepts `fundingSourceId` and `direction`, validates the fund is active and
+allowed by the request type, and enforces its per-request `dailyLimit`.
+
+**§5 balance validation is per fund.** The policy *value* is still the existing
+`ExpenseModuleConfig.allowOverBudget` (`BLOCK|WARN|APPROVE`); what changed is
+that it is evaluated against **each fund's own computed balance** instead of one
+shared pool. `WARN`/`APPROVE` return a `balanceWarning` ("allow but flag"),
+`BLOCK` throws. A `direction=IN` top-up skips the check entirely — it *adds* to
+the fund, so measuring it against the current balance would be backwards.
+
+**Approval is routed by grant, not by job title.** This is the significant
+behavioural change:
+
+- `WorkflowApproval.approverRole` now holds a **stage grant**
+  (`FIRST_APPROVER`/`SECOND_APPROVER`) for expense approvals, rather than a
+  `User.role`. Use `isStageGrant()` to tell the two apart.
+- The chain is two-tier by design (§4 defines exactly those two stages), narrowed
+  to the stages actually staffed for that fund class and outlet. Stage 2 is
+  dropped when nobody holds `SECOND_APPROVER`, since a two-tier chain with an
+  empty second tier would strand every request in `PENDING_APPROVAL` forever.
+- The chain is scoped to the **fund's** outlet when it has one, not the
+  requester's — a fund belongs to an outlet, and its approvers are whoever holds
+  access there.
+- **Submission is refused when approval is required but stage 1 is unstaffed.**
+  Auto-approving would let a forgotten access grant turn into unapproved money
+  going out; leaving it pending with no approver would strand it invisibly. The
+  error names the fix.
+- `RequestType.approverRoles` is kept purely as the "does this need approval at
+  all" switch (unchanged semantics); grants decide *who*.
+
+Both consumers of `WorkflowApproval` had to follow:
+`GET /api/collection-approvals` fetches expense rows alongside role-matched ones
+and narrows them by grant in code (they can't be filtered by `approverRole` in
+SQL), and the decide endpoint checks the grant instead of role equality —
+**without which anyone sharing the approver's job title could decide it**, exactly
+what §4 exists to prevent. Rows whose `approverRole` is a `User.role` predate this
+and keep the role test, so nothing already pending vanishes on deploy.
+
+**The threshold shortcut still nudges the custodian.** A skipped request is
+immediately payable, so it fires the same `READY_FOR_PAYMENT` notification a
+fully-approved one does — otherwise the shortcut would make small requests *less*
+visible than large ones.
+
+**Requesting Access is enforced with a zero-rows-means-off gate**
+(`requestGateActive`). Until any `REQUEST` grant exists, submitting stays open to
+any authenticated user exactly as before, so this needed no backfill. The
+trade-off is deliberate and worth knowing: **granting `REQUEST` to one user
+silently closes the gate for everyone else.** Management roles may raise a
+request on someone else's behalf, but that person must still hold the grant.
+
+`/api/expense/access-grants/eligible` was widened, but split rather than opened:
+ADMIN (or a `COLLECTION_APPROVALS` holder) may query any grant type; everyone who
+can reach the Expense Form may query `REQUEST` only, so the approval structure
+stays hidden.
+
+### A resolver bug found while verifying this
+
+`resolveExpenseModuleConfig` only ever derived the company **from an outlet**, so
+any caller without an `outletId` skipped straight to `GLOBAL` and **silently
+ignored a company-scoped policy an admin had deliberately saved**. That hit the
+new per-fund `BLOCK` check (a request with no outlet), and also
+`GET /api/expense/config` — meaning the Expense Settings screen was already
+showing global defaults rather than the saved company config. The resolver now
+takes an optional `companyId` and falls back to the default company, so the
+COMPANY tier is always reachable. Note this is a real behaviour change for any
+deployment that had saved company-scoped config: it now takes effect.
+
+---
+
 ## Verification approach
 
 `next build` **does not complete on the current dev machine** — bare
@@ -264,6 +339,15 @@ API, a revoked grant blocking new assignments while leaving existing ones intact
 and `CASHIER_DRAWER`'s reported balance equalling `computeAvailableCashToday()`
 exactly.
 
+Phase 4 added **34 more**: per-fund balance validation under both `WARN` and
+`BLOCK`, the fund's per-request limit, a fund disallowed by the request type, the
+threshold shortcut end-to-end, an unstaffed chain refusing submission and leaving
+the request `DRAFT`, single- vs two-stage chains by staffing, the approval row
+carrying a stage grant rather than a role, inbox visibility (stage-1 approver sees
+it, stage-2 approver does not, ungranted user does not, and it swaps over once
+stage 1 is decided), decide authorization by grant, stage-2 progression, rejection
+stopping the chain, and the threshold-skip custodian nudge.
+
 All were throwaway `scripts/_tmp-*.ts` files run via `npx tsx`, deleted after
 use. Worth recreating if this area changes.
 
@@ -287,7 +371,7 @@ the error fallback. Do not read an empty table as a passing API.
 | Deferred | Why | Lands in |
 |---|---|---|
 | ~~Enforcing the `CUSTODIAN` grant on assignment~~ | — | **Done in Phase 3** |
-| Widening `/api/expense/access-grants/eligible` beyond ADMIN | The response carries names and emails; not widened ahead of a real caller. | Phase 4 (Requested By dropdown) |
+| ~~Widening `/api/expense/access-grants/eligible`~~ | — | **Done in Phase 4** (split by grant type) |
 | WhatsApp notifications | Needs a Business API integration (provider account, template approval). The channel abstraction is built; the value is simply ignored by the dispatcher. | Post-launch |
 | `ALLOCATOR` grant issuance | The Second Approver executes allocations, so nothing to staff. Enum value reserved. | Only if the decision reverses |
 | Staging/production migration SQL | Both still deploy via `db push` per [`MIGRATIONS.md`](MIGRATIONS.md). All Phase 1 changes are additive with defaults, so they carry no data-loss risk. | The Postgres baseline in `MIGRATIONS.md` |

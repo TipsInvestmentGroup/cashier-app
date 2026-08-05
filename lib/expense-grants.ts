@@ -349,6 +349,27 @@ export async function backfillCustodianGrants(grantedById = 'system-backfill'): 
   return { granted, skippedNoFundClass, skippedInactiveUser }
 }
 
+/**
+ * Whether the "Requesting Access" gate is live for a company — i.e. whether any
+ * REQUEST grant has been issued at all.
+ *
+ * Zero REQUEST grants means an admin has not configured requesting access yet,
+ * so submitting stays open to any authenticated user exactly as it was before
+ * §4 existed. This is the same "zero config rows ⇒ today's behavior unchanged"
+ * convention ExpenseModuleConfig/CollectionModeConfig already follow, and it is
+ * what makes this enforceable without a backfill: the moment an admin grants
+ * requesting access to one person, the gate closes for everyone else.
+ *
+ * The trade-off is deliberate and worth knowing: granting REQUEST to exactly one
+ * user silently revokes it from everyone else. The Manage Access screen says so.
+ */
+export async function requestGateActive(companyId: string): Promise<boolean> {
+  const count = await prisma.expenseAccessGrant.count({
+    where: { companyId, grantType: 'REQUEST', revokedAt: null },
+  })
+  return count > 0
+}
+
 /** Fund classes a user custodians, for the given outlet — drives which ledger
  *  screens and Ready-to-Pay queues they see. */
 export async function custodianFundClasses(userId: string, outletId?: string | null): Promise<FundClass[]> {

@@ -95,18 +95,29 @@ function parseTerminology(raw: string | null | undefined): ExpenseTerminology {
 }
 
 /**
- * Resolve the effective expense module config for an outlet, checking
- * narrowest to widest: OUTLET → COMPANY → GLOBAL, falling back to
- * DEFAULT_MODULE_CONFIG when no row exists. GLOBAL rows carry scopeId = null.
+ * Resolve the effective expense module config, checking narrowest to widest:
+ * OUTLET → COMPANY → GLOBAL, falling back to DEFAULT_MODULE_CONFIG when no row
+ * exists. GLOBAL rows carry scopeId = null.
+ *
+ * The COMPANY tier is always considered, even with no outletId — resolve it from
+ * an explicit companyId, else from the outlet, else from the default company.
+ * Previously the company was only ever derived FROM an outlet, so any caller
+ * without one (the Expense Settings config endpoint, and an expense request
+ * raised with no outlet) silently skipped straight to GLOBAL and ignored a
+ * company-scoped policy an admin had deliberately saved.
  */
-export async function resolveExpenseModuleConfig(db: Db, opts: { outletId?: string | null } = {}): Promise<ResolvedExpenseModuleConfig> {
+export async function resolveExpenseModuleConfig(
+  db: Db,
+  opts: { outletId?: string | null; companyId?: string | null } = {},
+): Promise<ResolvedExpenseModuleConfig> {
   const priority: { scope: ExpenseScope; scopeId: string | null }[] = []
-  let companyId: string | null = null
+  let companyId: string | null = opts.companyId || null
   if (opts.outletId) {
     const outlet = await db.outlet.findUnique({ where: { id: opts.outletId }, select: { companyId: true } })
-    companyId = outlet?.companyId || null
+    companyId = outlet?.companyId || companyId
     priority.push({ scope: 'OUTLET', scopeId: opts.outletId })
   }
+  if (!companyId) companyId = await resolveDefaultCompanyId(db)
   if (companyId) priority.push({ scope: 'COMPANY', scopeId: companyId })
   priority.push({ scope: 'GLOBAL', scopeId: null })
 
