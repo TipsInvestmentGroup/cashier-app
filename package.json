@@ -11,6 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "prepare": "node scripts/setup-hooks.mjs",
     "hooks:install": "git config core.hooksPath .githooks",
     "check:skill-sync": "node scripts/check-skill-sync.mjs",
     "validate-config": "tsx scripts/validate-config.ts",
