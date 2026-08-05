@@ -86,6 +86,9 @@ export default function DailyReportPage() {
     wrapper.style.width = '760px'
     const clone = node.cloneNode(true) as HTMLElement
     clone.removeAttribute('id')
+    // Flatten the neumorphic box-shadows to borders for the snapshot — html2canvas
+    // renders screen media (not @media print) and peels shadow+radius corners.
+    clone.classList.add('cdr-flat')
     clone.style.width = '760px'
     clone.style.maxWidth = '760px'
     clone.style.margin = '0'
@@ -356,7 +359,7 @@ export default function DailyReportPage() {
 
             {/* Collection */}
             <section className="cdr-section">
-              <h2 className="cdr-section-title"><span>Collection (sales)</span><span>TZS</span></h2>
+              <h2 className="cdr-section-title"><span>Collection (sales)</span><span>TSh</span></h2>
               <div className="cdr-ref-line"><span>System sales (per POS, for comparison only)</span><b>{money(data.collection.systemSales)}</b></div>
               <div className="cdr-collection-grid">
                 <div className="cdr-cell"><div className="cdr-label">Cash</div><div className="cdr-amount">{money(data.collection.cash)}</div></div>
@@ -373,9 +376,9 @@ export default function DailyReportPage() {
 
             {/* Signed bills — grouped by category, then by signer */}
             <section className="cdr-section">
-              <h2 className="cdr-section-title"><span>Signed bills — by category, then by person</span><span>TZS</span></h2>
+              <h2 className="cdr-section-title"><span>Signed bills — by category, then by person</span><span>TSh</span></h2>
               {data.signed.byCategory.length === 0 ? (
-                <div className="cdr-row"><span className="cdr-label">No signed bills</span><span className="cdr-amount">0</span></div>
+                <div className="cdr-row"><span className="cdr-label">No signed bills</span><span className="cdr-amount">{money(0)}</span></div>
               ) : (
                 data.signed.byCategory.map((cat) => (
                   <div key={cat.key} className="cdr-category">
@@ -413,9 +416,9 @@ export default function DailyReportPage() {
 
             {/* Paid bills — grouped by category, then by payer */}
             <section className="cdr-section">
-              <h2 className="cdr-section-title"><span>Paid bills (debts collected)</span><span>TZS</span></h2>
+              <h2 className="cdr-section-title"><span>Paid bills (debts collected)</span><span>TSh</span></h2>
               {data.paid.byCategory.length === 0 ? (
-                <div className="cdr-row"><span className="cdr-label">No paid bills</span><span className="cdr-amount">0</span></div>
+                <div className="cdr-row"><span className="cdr-label">No paid bills</span><span className="cdr-amount">{money(0)}</span></div>
               ) : (
                 data.paid.byCategory.map((cat) => (
                   <div key={cat.key} className="cdr-category">
@@ -439,9 +442,9 @@ export default function DailyReportPage() {
 
             {/* Cancellations */}
             <section className="cdr-section">
-              <h2 className="cdr-section-title"><span>Cancellations</span><span>TZS</span></h2>
+              <h2 className="cdr-section-title"><span>Cancellations</span><span>TSh</span></h2>
               {data.cancellations.rows.length === 0 ? (
-                <div className="cdr-row"><span className="cdr-label">No cancellations</span><span className="cdr-amount">0</span></div>
+                <div className="cdr-row"><span className="cdr-label">No cancellations</span><span className="cdr-amount">{money(0)}</span></div>
               ) : (
                 <div className="cdr-ledger-cols">
                   {data.cancellations.rows.map((r, i) => (
@@ -461,9 +464,9 @@ export default function DailyReportPage() {
 
             {/* Petty cash */}
             <section className="cdr-section">
-              <h2 className="cdr-section-title"><span>Petty cash / expenses</span><span>TZS</span></h2>
+              <h2 className="cdr-section-title"><span>Petty cash / expenses</span><span>TSh</span></h2>
               {data.pettyCash.rows.length === 0 ? (
-                <div className="cdr-row"><span className="cdr-label">No petty cash</span><span className="cdr-amount">0</span></div>
+                <div className="cdr-row"><span className="cdr-label">No petty cash</span><span className="cdr-amount">{money(0)}</span></div>
               ) : (
                 <div className="cdr-ledger-cols">
                   {data.pettyCash.rows.map((r, i) => (
@@ -484,7 +487,7 @@ export default function DailyReportPage() {
             {/* Settlements paid from the till (separate from operational collections) */}
             {!!data.settlementsPaidFromTill && data.settlementsPaidFromTill !== 0 && (
               <section className="cdr-section">
-                <h2 className="cdr-section-title"><span>Settlements paid from till</span><span>TZS</span></h2>
+                <h2 className="cdr-section-title"><span>Settlements paid from till</span><span>TSh</span></h2>
                 <div className="cdr-total-row"><span>Excess/reconciliation payouts (cash)</span><span>{money(data.settlementsPaidFromTill)}</span></div>
                 <p style={{ fontSize: '11px', color: 'var(--cdr-ink-soft)', marginTop: '6px' }}>Cash paid out to settle payable over-collections — reduces cash in hand, not an operational expense.</p>
               </section>

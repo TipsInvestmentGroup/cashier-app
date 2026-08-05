@@ -69,7 +69,7 @@ body {
   --cdr-light: #ffffff;
   --cdr-dark: #c1c9d6;
   --cdr-ink: #3a4152;
-  --cdr-ink-soft: #6b7386;
+  --cdr-ink-soft: #525a70;
   --cdr-ink-mid: #565f78;
   --cdr-accent: #5b4fd6;
   --cdr-raised: 8px 8px 16px var(--cdr-dark), -8px -8px 16px var(--cdr-light);
@@ -167,6 +167,20 @@ body {
 
 .cdr-footer { text-align: center; font-size: 11px; color: var(--cdr-ink-soft); margin-top: 14px; }
 .cdr-fit-note { margin-top: 4px; font-size: 10px; }
+
+/* Flat variant for the PDF snapshot (html2canvas). html2canvas renders the
+   screen media — it never sees the @media print block below — and its
+   box-shadow renderer mangles the neumorphic shadow+radius corners into
+   detached "peeling" artifacts. Flattening every shadow to a rounded border
+   (which html2canvas handles cleanly) is applied to the off-screen clone in
+   buildPdf() so the on-screen neumorphism is untouched. */
+.cdr-flat, .cdr-flat .cdr-logo-badge,
+.cdr-flat .cdr-row, .cdr-flat .cdr-collection-grid .cdr-cell,
+.cdr-flat .cdr-total-row, .cdr-flat .cdr-appendix {
+  box-shadow: none !important;
+  border: 1px solid var(--cdr-dark);
+}
+.cdr-flat .cdr-grand { border-color: var(--cdr-accent); }
 
 @media print {
   .cdr-panel { box-shadow: none; border: 1px solid #d5d9e0; }
