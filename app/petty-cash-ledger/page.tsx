@@ -8,6 +8,7 @@ import { ExportBar } from '@/components/ExportBar'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { MoneyInput } from '@/components/MoneyInput'
+import { allowsManualAllocation, fundClassOf } from '@/lib/expense-funds'
 import { format, subDays } from 'date-fns'
 import toast from 'react-hot-toast'
 
@@ -65,7 +66,12 @@ export default function PettyCashLedgerPage() {
   useEffect(() => { loadLedger() }, [loadLedger])
 
   const source = sources.find((s) => s.id === selected)
-  const canReplenish = source && (source.sourceType === 'CASH' || source.sourceType === 'OTHER')
+  // §5: only a fixed-allocation fund has an allocation to record. Derived from
+  // the shared mapping (lib/expense-funds.ts) rather than a second list of
+  // source types, so this can never disagree with the Funding Sources editor or
+  // with replenishFundingSource()'s own guard.
+  const canReplenish = !!source && allowsManualAllocation(source.sourceType)
+  const fundClass = source ? fundClassOf(source.sourceType) : null
 
   const submitReplenish = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -214,6 +220,19 @@ export default function PettyCashLedgerPage() {
                     <input value={note} onChange={(e) => setNote(e.target.value)} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Optional" /></label>
                   <Button type="submit" disabled={submitting}>{submitting ? 'Recording…' : 'Record allocation'}</Button>
                 </form>
+              </div>
+            )}
+
+            {/* Saying WHY there is no allocation box beats silently omitting it —
+                otherwise a custodian reasonably concludes the screen is broken. */}
+            {source && !canReplenish && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                <h2 className="font-semibold text-gray-800 mb-1">No allocation needed for this fund</h2>
+                <p className="text-gray-500 text-sm">
+                  {fundClass === 'CASHIER_CASH'
+                    ? "This fund's balance always follows the cashier's current cash position — yesterday's closing cash plus what staff hand over today, less what has been paid out. There is nothing to allocate by hand."
+                    : "This fund is funded by its linked bank/mobile-money account, so its balance is read live from that account. Top it up at the bank, not here."}
+                </p>
               </div>
             )}
 

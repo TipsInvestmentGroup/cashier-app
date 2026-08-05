@@ -176,6 +176,63 @@ cannot express "eligible but not currently holding anything".
 
 ---
 
+## Phase 3 — custodian setup + §5 balance logic
+
+**Eligibility is now enforced on assignment.** `assignFundingSourceCustodian()`
+checks the `CUSTODIAN` grant for the fund's class and outlet before writing the
+assignment, closing the gap Phase 2 documented. Two deliberate escape hatches: a
+fund with no fund class (`OTHER`) is exempt rather than unassignable, and
+`skipEligibilityCheck` exists for the backfill path, which derives grants *from*
+these assignments and so cannot require them first.
+
+The rejection surfaces as **400 with its message**, not 500 — it is a validation
+failure, and the message tells the admin to grant access under Manage Access.
+
+**`scripts/backfill-custodian-grants.ts`** must run before that enforcement
+reaches real data, or the Funding Sources screen starts rejecting people who
+legitimately hold a fund today. Idempotent; run once against production after
+deploy:
+
+```
+npx tsx scripts/backfill-custodian-grants.ts
+```
+
+It backfills from both `FundingSourceCustodian` rows and each fund's legacy
+single `responsibleUserId`, skips funds with no fund class, and skips
+deactivated users (whose grants `usersWithGrant` filters out at read time
+anyway).
+
+**The custodian picker now reads eligibility from grants, not `User.role`.** It
+previously offered anyone with a management role, which would let an admin assign
+a fund to someone the access list never authorized. New endpoint
+`GET /api/expense/access-grants/eligible?grantType=&fundClass=&outletId=`.
+ADMIN-only for now — Phase 4's "Requested By" dropdown needs the same primitive
+with `grantType=REQUEST` and will have to widen it. Deliberately not widened
+ahead of a caller, since the response carries names and emails.
+
+**§5 balance logic is now surfaced for every type, not just `CASHIER_DRAWER`.**
+`GET /api/expense/funding-sources` returns a computed `availableBalance` for
+every fund plus derived `fundClass` / `allocationMode` /
+`supportsManualAllocation`, so no caller needs to know which types materialize a
+balance and which compute it live. The old `liveBalance` field is gone (its only
+consumer was the settings page).
+
+**Allocation UI is gated by one shared rule.** `allowsManualAllocation(sourceType)`
+in `lib/expense-funds.ts` is the single definition, used by both the Funding
+Sources editor and the ledger screen, so they cannot disagree with each other or
+with `replenishFundingSource()`'s own guard. `OTHER` deliberately stays
+allocatable — silently removing its allocation UI would strand any
+director/project float relying on it.
+
+Where the allocation panel is hidden, the ledger screen now says **why** —
+otherwise a custodian reasonably concludes the screen is broken.
+
+**Per-fund policy is editable**: `approvalThreshold`, `escalationHours`,
+`lowBalanceThreshold` on the Funding Sources editor, with negatives clamped to 0
+(the meaningful "off" for all three).
+
+---
+
 ## Verification approach
 
 `next build` **does not complete on the current dev machine** — bare
@@ -199,8 +256,20 @@ Phases 1–2 were verified by 45 assertions against `dev.db`:
   validation branch, batch atomicity (a partially-invalid batch writes nothing),
   email lookup, idempotent revoke.
 
-Both were throwaway `scripts/_tmp-*.ts` files run via `npx tsx`, deleted after
+Phase 3 added **31 more**: the full fund-class mapping (including `OTHER` and an
+unknown value both mapping to no class), the allocation-mode table, and
+enforcement — assignment refused without a grant, refused with a grant for the
+*wrong* fund class, accepted with the right one, `400` rather than `500` from the
+API, a revoked grant blocking new assignments while leaving existing ones intact,
+and `CASHIER_DRAWER`'s reported balance equalling `computeAvailableCashToday()`
+exactly.
+
+All were throwaway `scripts/_tmp-*.ts` files run via `npx tsx`, deleted after
 use. Worth recreating if this area changes.
+
+One trap to note: a cleanup step that deletes a user's `CUSTODIAN` grants will
+also delete grants the backfill created. Re-run
+`scripts/backfill-custodian-grants.ts` afterwards.
 
 The `scopeWhere()` null-as-wildcard logic is the piece most worth re-testing on
 any change: a grant with `outletId = null` is business-wide and applies to every
@@ -217,7 +286,8 @@ the error fallback. Do not read an empty table as a passing API.
 
 | Deferred | Why | Lands in |
 |---|---|---|
-| Enforcing the `CUSTODIAN` grant on `assignFundingSourceCustodian()` | Would make the working Funding Sources screen reject people who legitimately hold a fund today, before grants exist for them. Needs the seeding first. | Phase 3 |
+| ~~Enforcing the `CUSTODIAN` grant on assignment~~ | — | **Done in Phase 3** |
+| Widening `/api/expense/access-grants/eligible` beyond ADMIN | The response carries names and emails; not widened ahead of a real caller. | Phase 4 (Requested By dropdown) |
 | WhatsApp notifications | Needs a Business API integration (provider account, template approval). The channel abstraction is built; the value is simply ignored by the dispatcher. | Post-launch |
 | `ALLOCATOR` grant issuance | The Second Approver executes allocations, so nothing to staff. Enum value reserved. | Only if the decision reverses |
 | Staging/production migration SQL | Both still deploy via `db push` per [`MIGRATIONS.md`](MIGRATIONS.md). All Phase 1 changes are additive with defaults, so they carry no data-loss risk. | The Postgres baseline in `MIGRATIONS.md` |

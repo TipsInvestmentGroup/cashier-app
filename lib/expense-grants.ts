@@ -34,7 +34,7 @@
 // See docs/expense-module-upgrade-brief.md §4 and prisma/schema.prisma
 // (ExpenseAccessGrant).
 import { prisma } from '@/lib/prisma'
-import { FUND_CLASSES, isFundClass, type FundClass } from '@/lib/expense-funds'
+import { FUND_CLASSES, fundClassOf, isFundClass, type FundClass } from '@/lib/expense-funds'
 import { EXPENSE_GRANT_TYPES, EXPENSE_GRANT_FLAGS, EXPENSE_RESERVED_GRANT_TYPES } from '@/lib/shared-constants'
 
 // The grant vocabulary itself lives in lib/shared-constants.ts (dependency-free)
@@ -270,6 +270,83 @@ export async function approversForStage(stage: 1 | 2, scope: GrantScope) {
 export async function chainIsStaffed(scope: GrantScope): Promise<{ first: boolean; second: boolean }> {
   const [first, second] = await Promise.all([approversForStage(1, scope), approversForStage(2, scope)])
   return { first: first.length > 0, second: second.length > 0 }
+}
+
+/**
+ * Backfills a CUSTODIAN eligibility grant for everyone already assigned to a
+ * fund today — every FundingSourceCustodian row plus each fund's legacy single
+ * responsibleUserId. This must run BEFORE eligibility is enforced on assignment
+ * (lib/expense-access.ts assignFundingSourceCustodian), otherwise the existing
+ * Funding Sources admin screen would start rejecting people who legitimately
+ * hold a fund.
+ *
+ * Idempotent — grantAccess() is a no-op when a live grant already exists, so
+ * re-running never duplicates and never clobbers a grant an admin has since
+ * scoped differently. Funds whose sourceType maps to no fund class (OTHER) are
+ * skipped: there is no fund class to be a custodian OF, and inventing one would
+ * put money under a custodian who never agreed to hold it.
+ *
+ * Returns what it did, so a script or seed can report it rather than claiming
+ * success blindly.
+ */
+export async function backfillCustodianGrants(grantedById = 'system-backfill'): Promise<{
+  granted: number
+  skippedNoFundClass: number
+  skippedInactiveUser: number
+}> {
+  const sources = await prisma.fundingSource.findMany({
+    where: { isActive: true },
+    select: { id: true, companyId: true, name: true, sourceType: true, outletId: true, responsibleUserId: true },
+  })
+
+  let granted = 0
+  let skippedNoFundClass = 0
+  let skippedInactiveUser = 0
+
+  for (const source of sources) {
+    const fundClass = fundClassOf(source.sourceType)
+    if (!fundClass) {
+      skippedNoFundClass++
+      continue
+    }
+
+    const assignments = await prisma.fundingSourceCustodian.findMany({
+      where: { fundingSourceId: source.id },
+      select: { userId: true },
+    })
+    const userIds = [...new Set([
+      ...assignments.map((a) => a.userId),
+      ...(source.responsibleUserId ? [source.responsibleUserId] : []),
+    ])]
+    if (!userIds.length) continue
+
+    // A grant on a deactivated account would be dead weight that usersWithGrant
+    // filters out at read time anyway — don't create it.
+    const activeUsers = await prisma.user.findMany({
+      where: { id: { in: userIds }, isActive: true },
+      select: { id: true },
+    })
+    skippedInactiveUser += userIds.length - activeUsers.length
+
+    for (const user of activeUsers) {
+      const before = await prisma.expenseAccessGrant.count({
+        where: { companyId: source.companyId, userId: user.id, grantType: 'CUSTODIAN', fundClass, outletId: source.outletId, revokedAt: null },
+      })
+      await grantAccess({
+        companyId: source.companyId,
+        userId: user.id,
+        grantType: 'CUSTODIAN',
+        fundClass,
+        outletId: source.outletId,
+        grantedById,
+        grantedByName: 'Backfill from existing fund assignments',
+        note: `Backfilled from assignment on "${source.name}"`,
+      })
+      if (before === 0) granted++
+    }
+  }
+
+  return { granted, skippedNoFundClass, skippedInactiveUser }
 }
 
 /** Fund classes a user custodians, for the given outlet — drives which ledger

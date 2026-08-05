@@ -75,6 +75,18 @@ export function supportsManualAllocation(fundClass: FundClass): boolean {
   return allocationModeFor(fundClass) === 'FIXED_ALLOCATION'
 }
 
+/** The same test starting from a raw sourceType — the form every UI actually has
+ *  in hand. A source belonging to no fund class (OTHER) keeps today's behavior
+ *  and stays allocatable: lib/expense-ledger.ts replenishFundingSource() accepts
+ *  CASH and OTHER, and silently removing OTHER's allocation UI would strand any
+ *  director/project float that relies on it. Single definition so the ledger
+ *  screen and the Funding Sources editor can never disagree about whether a fund
+ *  has an allocation field. */
+export function allowsManualAllocation(sourceType: string): boolean {
+  const fundClass = fundClassOf(sourceType)
+  return fundClass ? supportsManualAllocation(fundClass) : true
+}
+
 /** Default display labels. Deliberately NOT the source of truth for what a
  *  tenant calls these — Expense Settings' terminology map (lib/expense-config.ts
  *  ExpenseTerminology) stays authoritative for admin-editable labels. These are

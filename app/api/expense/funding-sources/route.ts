@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { FUNDING_SOURCE_TYPES, type FundingSourceType } from '@/lib/expense-config'
 import { getFundingSourceBalance } from '@/lib/expense-ledger'
+import { fundClassOf, allocationModeFor, supportsManualAllocation } from '@/lib/expense-funds'
 
 // Same audience as PETTY_TABS/the Expense Requests screens — everyone who
 // can reach the Pay action or just wants visibility, but not WAITER. This
@@ -24,13 +25,27 @@ export async function GET(req: NextRequest) {
     orderBy: [{ name: 'asc' }],
     include: { companyPaymentAccount: { select: { id: true, accountName: true, bankName: true } }, _count: { select: { payments: true } } },
   })
-  // CASHIER_DRAWER's balance always follows the assigned cashier's daily cash
-  // position (Petty Cash Custodian scenario A) — resolve it for display since
-  // currentBalance is never materialized for this type.
-  const withLiveBalance = await Promise.all(sources.map(async (s) => (
-    s.sourceType === 'CASHIER_DRAWER' ? { ...s, liveBalance: await getFundingSourceBalance(prisma, s) } : s
-  )))
-  return NextResponse.json(withLiveBalance)
+  // §5: available balance is COMPUTED per fund type, never a single stored
+  // field — CASHIER_DRAWER follows the cashier's daily cash position,
+  // BANK/MOBILE_MONEY/CARD follow their GL account, CASH/OTHER materialize.
+  // Resolved here for every type (not just CASHIER_DRAWER as before) so callers
+  // never have to know which types materialize and which don't, and so the
+  // three fund screens all read one field.
+  //
+  // fundClass/allocationMode/supportsManualAllocation are derived, not stored
+  // (lib/expense-funds.ts) — sent down so the UI can hide the controls that
+  // don't apply to a fund without duplicating the mapping client-side.
+  const enriched = await Promise.all(sources.map(async (s) => {
+    const fundClass = fundClassOf(s.sourceType)
+    return {
+      ...s,
+      availableBalance: await getFundingSourceBalance(prisma, s),
+      fundClass,
+      allocationMode: fundClass ? allocationModeFor(fundClass) : null,
+      supportsManualAllocation: fundClass ? supportsManualAllocation(fundClass) : false,
+    }
+  }))
+  return NextResponse.json(enriched)
 }
 
 /**
