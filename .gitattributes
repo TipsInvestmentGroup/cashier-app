@@ -1,0 +1,3 @@
+# Git hooks are executed by /bin/sh — they must use LF line endings on every
+# platform, or Unix/macOS shells fail with "/bin/sh^M: bad interpreter".
+.githooks/** text eol=lf

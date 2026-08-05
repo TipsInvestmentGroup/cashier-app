@@ -1,0 +1,6 @@
+#!/bin/sh
+# Repo pre-commit hook. Activated via: git config core.hooksPath .githooks
+# (run once per clone, or `npm run hooks:install`).
+
+# Keep the daily-cashier-report template's two mirrored copies in sync.
+node scripts/check-skill-sync.mjs --hook || exit 1

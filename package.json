@@ -11,6 +11,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "check:skill-sync": "node scripts/check-skill-sync.mjs",
     "validate-config": "tsx scripts/validate-config.ts",
     "smoke": "tsx scripts/smoke/run-all.ts",
     "db:generate": "node scripts/prepare-db.mjs && prisma generate",
