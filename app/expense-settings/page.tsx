@@ -4,6 +4,12 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency } from '@/lib/utils'
+// Client-safe: lib/expense-funds.ts has no runtime imports (its only import is
+// type-only, so it is erased), and the grant vocabulary lives in
+// lib/shared-constants.ts precisely so this page can read it without pulling
+// prisma into the bundle — lib/expense-grants.ts re-exports it server-side.
+import { FUND_CLASSES, FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
+import { EXPENSE_GRANT_FLAGS } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 
 type OverBudget = 'BLOCK' | 'WARN' | 'APPROVE'
@@ -38,6 +44,7 @@ interface FundingSource {
   _count?: { payments: number }
 }
 interface UserOption { id: string; name: string; role: string }
+interface OutletOption { id: string; name: string }
 interface Account { id: string; code: string; name: string; type: string }
 interface CompanyPaymentAccount { id: string; accountName: string; bankName: string | null; paymentChannel: { label: string } }
 
@@ -71,7 +78,7 @@ function ChipToggle({ options, value, onChange }: { options: string[]; value: st
 }
 const inputCls = 'px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white w-full'
 
-type Tab = 'module' | 'requestTypes' | 'categories' | 'fundingSources'
+type Tab = 'module' | 'requestTypes' | 'categories' | 'fundingSources' | 'manageAccess'
 
 export default function ExpenseSettingsPage() {
   const [tab, setTab] = useState<Tab>('module')
@@ -84,7 +91,7 @@ export default function ExpenseSettingsPage() {
           <p className="text-gray-500 text-sm">Configure the expense/disbursement module — request types, categories, and funding sources are admin-defined rows, not code. Runs side-by-side with the existing Petty Cash flow until you opt a request type into it.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {([['module', 'Module'], ['requestTypes', 'Request Types'], ['categories', 'Categories'], ['fundingSources', 'Funding Sources']] as [Tab, string][]).map(([k, label]) => (
+          {([['module', 'Module'], ['requestTypes', 'Request Types'], ['categories', 'Categories'], ['fundingSources', 'Funding Sources'], ['manageAccess', 'Manage Access']] as [Tab, string][]).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)}
               className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${tab === k ? 'bg-indigo-600 text-white shadow' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               {label}
@@ -95,6 +102,7 @@ export default function ExpenseSettingsPage() {
         {tab === 'requestTypes' && <RequestTypesTab />}
         {tab === 'categories' && <CategoriesTab />}
         {tab === 'fundingSources' && <FundingSourcesTab />}
+        {tab === 'manageAccess' && <ManageAccessTab />}
       </div>
     </AppShell>
   )
@@ -674,6 +682,235 @@ function SourceEditor({ initial, accounts, users, isEditMode, onCancel, onSaved 
       <div className="flex gap-2 mt-3">
         <button onClick={save} disabled={saving || !f.name || (!isEdit && isAccountBacked && !f.companyPaymentAccountId)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
         <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200">Cancel</button>
+      </div>
+    </Card>
+  )
+}
+
+// ─── Manage Access tab ───────────────────────────────────────────────────────
+// §4's access list — the single source of truth for who may request, custody a
+// fund, and approve at each stage. Everything downstream (the Requested By
+// dropdown, custodian assignment, approval routing, and §7's "action needed"
+// notifications) reads these grants rather than User.role.
+interface AccessGrant {
+  id: string; userId: string; grantType: string; fundClass: string | null; outletId: string | null
+  grantedById: string; grantedByName: string | null; grantedAt: string
+  revokedAt: string | null; revokedById: string | null; note: string | null
+  user: { id: string; name: string; email: string; role: string } | null
+  outlet: { id: string; name: string } | null
+}
+
+/** Stable key for one flag, so a (grantType, fundClass) pair round-trips through
+ *  checkbox state without a nested structure. */
+const flagKey = (grantType: string, fundClass: string | null) => `${grantType}:${fundClass || ''}`
+
+function labelForGrant(grantType: string, fundClass: string | null): string {
+  const flag = EXPENSE_GRANT_FLAGS.find((f) => flagKey(f.grantType, f.fundClass) === flagKey(grantType, fundClass))
+  if (flag) return flag.label
+  // An approver grant narrowed to one fund has no matching flag row (the flag
+  // list carries fundClass=null for approvers), so compose its label instead.
+  const fundLabel = fundClass ? FUND_CLASS_LABELS[fundClass as FundClass] || fundClass : ''
+  const base = EXPENSE_GRANT_FLAGS.find((f) => f.grantType === grantType)?.label || grantType.replace(/_/g, ' ')
+  return fundLabel ? `${base} · ${fundLabel}` : base
+}
+
+function ManageAccessTab() {
+  const { request } = useApi()
+  const [grants, setGrants] = useState<AccessGrant[]>([])
+  const [users, setUsers] = useState<UserOption[]>([])
+  const [outlets, setOutlets] = useState<OutletOption[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showRevoked, setShowRevoked] = useState(false)
+  const [adding, setAdding] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [g, u, o] = await Promise.all([
+        request(`/api/expense/access-grants${showRevoked ? '?includeRevoked=true' : ''}`),
+        request('/api/users').catch(() => []),
+        request('/api/outlets').catch(() => []),
+      ])
+      setGrants(g || []); setUsers(u || []); setOutlets(o || [])
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load access grants') }
+    finally { setLoading(false) }
+  }, [request, showRevoked])
+  useEffect(() => { load() }, [load])
+
+  const revoke = async (g: AccessGrant) => {
+    if (!confirm(`Revoke "${labelForGrant(g.grantType, g.fundClass)}" from ${g.user?.name || 'this user'}? The grant is kept for the audit trail, not deleted.`)) return
+    try { await request(`/api/expense/access-grants/${g.id}`, { method: 'DELETE' }); toast.success('Revoked'); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not revoke') }
+  }
+
+  // Grouped by user so the table reads as "this person holds these flags" — a
+  // custodian who also approves would otherwise be scattered across the list.
+  const byUser = new Map<string, AccessGrant[]>()
+  for (const g of grants) {
+    const list = byUser.get(g.userId) || []
+    list.push(g)
+    byUser.set(g.userId, list)
+  }
+
+  if (loading) return <div className="py-10 text-center text-gray-400">Loading…</div>
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <p className="text-sm text-gray-600">
+          This list decides who can submit an Expense Form, who holds each fund, and who approves at each stage.
+          It is the only thing those checks read — a user&apos;s role no longer grants expense access by itself.
+        </p>
+        <p className="text-xs text-gray-400 mt-2">
+          Each fund gets its own approval chain: a request against Petty Cash is routed to whoever holds First or
+          Second Approver for Petty Cash at that outlet. Leave the fund as &ldquo;All funds&rdquo; to have someone
+          approve for all three. Grants are revoked, never deleted, so past approvals stay explainable.
+        </p>
+      </Card>
+
+      <div className="flex justify-between items-center gap-3 flex-wrap">
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+          Show revoked (audit trail)
+        </label>
+        <button onClick={() => setAdding(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700">+ Grant access</button>
+      </div>
+
+      {adding && <GrantEditor users={users} outlets={outlets} onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); load() }} />}
+
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+              <th className="py-2 pr-3">User</th><th className="pr-3">Access</th><th className="pr-3">Outlet</th><th className="pr-3">Granted</th><th></th>
+            </tr></thead>
+            <tbody>
+              {[...byUser.entries()].map(([userId, userGrants]) => (
+                userGrants.map((g, i) => (
+                  <tr key={g.id} className={`border-b border-gray-50 ${g.revokedAt ? 'opacity-50' : ''}`}>
+                    {i === 0 && (
+                      <td className="py-2 pr-3 align-top" rowSpan={userGrants.length}>
+                        <span className="font-medium text-gray-800">{g.user?.name || userId}</span>
+                        <span className="block text-[11px] text-gray-400">{g.user?.email}{g.user?.role ? ` · ${g.user.role}` : ''}</span>
+                      </td>
+                    )}
+                    <td className="pr-3">
+                      <span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${g.revokedAt ? 'bg-gray-100 text-gray-500 line-through' : 'bg-indigo-50 text-indigo-700'}`}>
+                        {labelForGrant(g.grantType, g.fundClass)}
+                      </span>
+                      {!g.fundClass && (g.grantType === 'FIRST_APPROVER' || g.grantType === 'SECOND_APPROVER') && (
+                        <span className="block text-[10px] text-gray-400">all funds</span>
+                      )}
+                    </td>
+                    <td className="pr-3 text-gray-600">{g.outlet?.name || <span className="text-gray-400">All outlets</span>}</td>
+                    <td className="pr-3 text-gray-500 text-[11px]">
+                      {new Date(g.grantedAt).toLocaleDateString()}{g.grantedByName ? ` by ${g.grantedByName}` : ''}
+                      {g.revokedAt && <span className="block text-red-500">revoked {new Date(g.revokedAt).toLocaleDateString()}</span>}
+                    </td>
+                    <td className="text-right whitespace-nowrap">
+                      {!g.revokedAt && <button onClick={() => revoke(g)} className="text-xs text-red-500 hover:text-red-700">Revoke</button>}
+                    </td>
+                  </tr>
+                ))
+              ))}
+              {!grants.length && (
+                <tr><td colSpan={5} className="py-6 text-center text-gray-400">
+                  No access granted yet — nobody can submit or approve an expense until someone is added here.
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function GrantEditor({ users, outlets, onCancel, onSaved }: {
+  users: UserOption[]; outlets: OutletOption[]
+  onCancel: () => void; onSaved: () => void
+}) {
+  const { request } = useApi()
+  const [userId, setUserId] = useState('')
+  const [outletId, setOutletId] = useState('')
+  const [checked, setChecked] = useState<string[]>([])
+  // Approver flags can additionally be narrowed to a single fund; the custodian
+  // flags already name their fund and Requesting Access is fund-agnostic.
+  const [approverFund, setApproverFund] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+
+  const toggle = (key: string) => setChecked((c) => (c.includes(key) ? c.filter((k) => k !== key) : [...c, key]))
+
+  const save = async () => {
+    if (!userId) { toast.error('Pick a user'); return }
+    if (!checked.length) { toast.error('Tick at least one access flag'); return }
+    setSaving(true)
+    try {
+      const flags = checked.map((key) => {
+        const flag = EXPENSE_GRANT_FLAGS.find((f) => flagKey(f.grantType, f.fundClass) === key)!
+        return { grantType: flag.grantType, fundClass: flag.fundClass ?? (approverFund[key] || null) }
+      })
+      await request('/api/expense/access-grants', {
+        method: 'POST',
+        body: JSON.stringify({ userId, outletId: outletId || null, flags }),
+      })
+      toast.success('Access granted')
+      onSaved()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not grant access') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <h3 className="font-semibold text-gray-800 mb-3">Grant access</h3>
+      <div className="grid md:grid-cols-2 gap-3 mb-4">
+        <label className="block"><span className="text-xs text-gray-500">User</span>
+          <select className={inputCls} value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">Select a user…</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+          </select>
+        </label>
+        <label className="block"><span className="text-xs text-gray-500">Outlet</span>
+          <select className={inputCls} value={outletId} onChange={(e) => setOutletId(e.target.value)}>
+            <option value="">All outlets (business-wide)</option>
+            {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <span className="block text-[11px] text-gray-400 mt-1">One person can hold the same access at both outlets — grant it business-wide, or add a separate grant per outlet.</span>
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        {EXPENSE_GRANT_FLAGS.map((f) => {
+          const key = flagKey(f.grantType, f.fundClass)
+          const isApprover = f.grantType === 'FIRST_APPROVER' || f.grantType === 'SECOND_APPROVER'
+          return (
+            <div key={key} className="border-2 border-gray-100 rounded-xl p-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" checked={checked.includes(key)} onChange={() => toggle(key)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
+                <span>
+                  <span className="text-sm font-medium text-gray-800">{f.label}</span>
+                  <span className="block text-xs text-gray-400">{f.hint}</span>
+                </span>
+              </label>
+              {isApprover && checked.includes(key) && (
+                <label className="block mt-2 ml-7">
+                  <span className="text-[11px] text-gray-500">Approves for</span>
+                  <select className={inputCls} value={approverFund[key] || ''} onChange={(e) => setApproverFund((m) => ({ ...m, [key]: e.target.value }))}>
+                    <option value="">All funds</option>
+                    {FUND_CLASSES.map((c) => <option key={c} value={c}>{FUND_CLASS_LABELS[c]}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="flex gap-2 mt-4">
+        <button onClick={save} disabled={saving} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+          {saving ? 'Granting…' : 'Grant access'}
+        </button>
+        <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-200">Cancel</button>
       </div>
     </Card>
   )
