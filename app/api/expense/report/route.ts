@@ -29,7 +29,10 @@ export async function GET(req: NextRequest) {
   const from = parseD(searchParams.get('from')) || to
   const dateRange = { gte: startOfDay(from), lte: endOfDay(to) }
 
-  const requestWhere: Record<string, unknown> = { createdAt: dateRange }
+  // direction=OUT only: a fund top-up (direction=IN) moves money INTO a fund and
+  // is not expenditure. Counting one here would overstate spend by the size of
+  // every petty cash replenishment in the period.
+  const requestWhere: Record<string, unknown> = { createdAt: dateRange, direction: 'OUT' }
   if (outletId) requestWhere.outletId = outletId
 
   const paymentWhere: Record<string, unknown> = { paidAt: dateRange }

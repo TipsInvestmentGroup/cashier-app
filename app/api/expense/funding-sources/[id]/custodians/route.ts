@@ -33,7 +33,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const targetUser = await prisma.user.findUnique({ where: { id: userId } })
   if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
-  await assignFundingSourceCustodian(id, userId)
+  // assignFundingSourceCustodian enforces the §4 CUSTODIAN eligibility grant.
+  // That rejection is a validation failure, not a server fault — surface it as
+  // 400 with its message so the admin is told to grant access under Manage
+  // Access, rather than seeing an opaque 500.
+  try {
+    await assignFundingSourceCustodian(id, userId)
+  } catch (e: unknown) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'Could not assign custodian' }, { status: 400 })
+  }
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'CREATE', entity: 'FundingSourceCustodian', entityId: id, details: `Assigned ${targetUser.name} as custodian of ${source.name}` },
   })
