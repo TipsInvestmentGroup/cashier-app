@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
@@ -32,7 +32,10 @@ interface ExpenseReport {
 
 const TYPE_LABEL: Record<string, string> = { OPEN: 'Opening balance', REPLENISH: 'Funds received', PAYMENT: 'Expense paid', ADJUST: 'Adjustment' }
 
-export default function PettyCashLedgerPage() {
+// Reads useSearchParams (?fund=), so it must sit under a Suspense boundary or
+// `next build` fails prerendering this page — the same wrapper pattern the other
+// query-reading pages here (app/petty-cash, app/customer-bills) already use.
+function PettyCashLedgerPage() {
   const { request } = useApi()
   const searchParams = useSearchParams()
   // §1/§2: one ledger page serves Cashier / Petty Cash / Digital via ?fund=,
@@ -400,5 +403,13 @@ export default function PettyCashLedgerPage() {
         ))}
       </div>
     </AppShell>
+  )
+}
+
+export default function Page() {
+  return (
+    <Suspense fallback={<AppShell><div className="py-12 text-center text-gray-400">Loading…</div></AppShell>}>
+      <PettyCashLedgerPage />
+    </Suspense>
   )
 }
