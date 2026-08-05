@@ -344,18 +344,57 @@ three* funds' queues at once, triple-counting in `totalOutstanding`. The queue
 is now scoped to requests that name the fund; fund-agnostic ones stay payable
 from the request detail page, which is unaffected.
 
-### Scope note — two nav items deferred
+### Cash Reconciliation + Digital Payment Reconciliation (§1, completing the six items)
 
-§1 lists six sub-items; two are **not** wired yet: **Cash Reconciliation** and
-**Digital Payment Reconciliation**. Both already exist as functionality
-elsewhere — cash recon is a modal on `/petty-cash` driven by `/api/cash-recon`,
-and digital reconciliation is `/payment-verifications` under Finance (MGMT-only,
-with its own tab set). Pointing Expenses-section nav entries at either would
-either duplicate a recon surface (the single-source-of-truth mistake this
-codebase avoids) or drop a CASHIER custodian onto a MGMT page with the wrong
-tabs. Purpose-built custodian-facing recon views are their own piece of work and
-were left for a decision rather than shipped broken. Everything else in §1/§2 is
-done.
+Both were initially deferred, then built on the user's decision (2026-08-05) as
+**custodian-facing, read-only** views — deliberately not re-entering data the
+existing Cash Reconciliation flow (`/api/cash-recon`) and Payment Verifications
+screen already own, which would have been the duplicate-source mistake.
+
+One endpoint, `GET /api/expense/funding-sources/[id]/reconciliation`, does the §6
+comparison for any fund. A shared `components/ReconciliationView.tsx` renders it;
+two thin routes (`/cash-reconciliation` filtered to `CASHIER_CASH`,
+`/digital-payment-reconciliation` filtered to `DIGITAL`) supply the class.
+
+**The endpoint returns an honest three-state `status`, not a green/red boolean:**
+`RECONCILED` (an independent figure was compared and agrees), `MISMATCH` (compared
+and disagrees — §6's flag, never a silent override), or `UNVERIFIABLE` (there is
+nothing independent to compare against, so a green tick would be a lie). This
+replaced a `mismatch` boolean found to be misleading — see the finding below.
+
+What each reconciles, per §6:
+- **Cashier Cash** — `UNVERIFIABLE` by design: the balance *is* the live cash
+  position (`getFundingSourceBalance` reads `computeAvailableCashToday`), so there
+  is no separate stored ledger to drift against. The genuine reconciliation is the
+  physical count, so it surfaces the daily cash breakdown (opening + collection +
+  cash paid bills − disbursed) and the latest `CashRecon` variance, linking
+  physical-count entry back to the Daily-screen flow.
+- **Petty Cash** — the one class with a real independent check: it sums the
+  append-only `FundingSourceTxn` rows **directly** and compares to
+  `currentBalance`. A fund born in the framework has an `OPEN` row, so the two
+  must be equal — any gap is genuine drift (`MISMATCH`). A fund seeded from a
+  legacy `PettyFund` has `currentBalance` but no `OPEN` row and no migrated
+  history, so there is no anchor to check against → `UNVERIFIABLE`, with the
+  pre-ledger opening shown explicitly rather than faked as reconciled.
+- **Digital** — the balance reads live from the wrapped account's GL, so it ties
+  to the statement by construction; the meaningful gap is unverified payments, so
+  `MISMATCH` here means "N payments still lack proof," linking to Finance →
+  Payment Verifications.
+
+### Finding fixed during verification (2026-08-05)
+
+The WIP first backed the §6 check with `listFundingSourceLedger`, whose
+`closingBalance` is **back-derived** as `currentBalance − Σtxns` and therefore
+*always* equals `currentBalance`. So the comparison could never disagree: the
+petty-cash "mismatch" the doc claimed to detect was structurally impossible to
+fire, and cashier/digital have no separate ledger at all — yet the UI reported a
+confident green "the append-only ledger agrees." The endpoint now sums the txns
+independently (real drift detection, verified by tampering `currentBalance` in a
+test), and reports `UNVERIFIABLE` where the seed threw away the history rather
+than showing a check that didn't happen. Confirmed: the live seeded "Petty Cash"
+and "Cashier Janeth Drawer" funds correctly read `UNVERIFIABLE`.
+
+All of §1/§2 is now done.
 
 ### Scope note — legacy flow retained
 
@@ -407,12 +446,20 @@ it, stage-2 approver does not, ungranted user does not, and it swaps over once
 stage 1 is decided), decide authorization by grant, stage-2 progression, rejection
 stopping the chain, and the threshold-skip custodian nudge.
 
-Phase 5 added **20 more**: the nav structure (Expense Form leads, three fund
-ledgers sharing a path but differing by `?fund=`, legacy flow retained), the
-query-aware tab matcher highlighting each ledger independently, and the
-Ready-to-Pay endpoint (approved appears, draft does not, IN top-up excluded,
-partial payment nets outstanding down while staying in the queue, fully-paid
-drops out, 401 unauthenticated).
+Phase 5 added **20** for the nav + Ready-to-Pay: the nav structure (Expense Form
+leads, three fund ledgers sharing a path but differing by `?fund=`, legacy flow
+retained), the query-aware tab matcher highlighting each ledger independently, and
+the Ready-to-Pay endpoint (approved appears, draft does not, IN top-up excluded,
+partial payment nets outstanding down while staying in the queue, fully-paid drops
+out, 401 unauthenticated).
+
+The reconciliation views added **14 more**: auth gating (401/403/404), an
+anchored fund reconciling before and after a payment, **genuine drift detected by
+tampering `currentBalance` away from Σtxns** (`MISMATCH` with the right amount), a
+seeded fund with no `OPEN` row reporting `UNVERIFIABLE` with its pre-ledger
+opening surfaced, and every live fund resolving to a valid status without
+throwing. Both new pages confirmed rendering in the browser with the full
+Expenses nav and no console errors.
 
 All were throwaway `scripts/_tmp-*.ts` files run via `npx tsx`, deleted after
 use. Worth recreating if this area changes.

@@ -28,7 +28,7 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 
   { href: '/signed-bills', icon: Receipt, label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/admin-director-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 
-  { href: '/expense-requests', icon: Wallet, label: 'Expenses', section: 'Expenses', roles: CASHIER_ROLES, match: ['/expense-requests', '/petty-cash-ledger', '/digital-expenses', '/petty-cash', '/approvals', '/petty-payments'] },
+  { href: '/expense-requests', icon: Wallet, label: 'Expenses', section: 'Expenses', roles: CASHIER_ROLES, match: ['/expense-requests', '/petty-cash-ledger', '/digital-expenses', '/cash-reconciliation', '/digital-payment-reconciliation', '/petty-cash', '/approvals', '/petty-payments'] },
 
   { href: '/analytics', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/analytics', '/receivables', '/admin-director-bills', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/trends', '/payroll', '/reports', '/audit', '/business-days', '/business-day-management', '/business-day-unlock-requests', '/business-day-exceptions-report'] },
 

@@ -81,6 +81,8 @@ export const EXPENSE_TABS: Tab[] = [
   { href: '/petty-cash-ledger?fund=CASHIER_CASH', label: 'Cashier Ledger', icon: BookOpen, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=PETTY_CASH', label: 'Petty Cash Ledger', icon: BookOpen, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=DIGITAL', label: 'Digital Expenses Ledger', icon: CreditCard, roles: CASHIER_ROLES },
+  { href: '/cash-reconciliation', label: 'Cash Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+  { href: '/digital-payment-reconciliation', label: 'Digital Payment Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
   { href: '/digital-expenses', label: 'Digital Expense Form', icon: CreditCard, roles: CASHIER_ROLES },
   // Legacy flow — retained until cutover (see note above).
   { href: '/petty-cash', label: 'Petty Cash (legacy)', icon: Wallet, roles: CASHIER_ROLES },
