@@ -3,6 +3,14 @@ name: daily-cashier-report
 description: Generate a daily cashier report for Tips Investment Limited (or any company using the same multi-tenant template) — reconciles collection/sales against system sales, groups signed bills by category (Director, Admin, Customer, Tips/Dancer/DJ, Staff losses) then auto-sums by person, plus paid bills, cancellations, discounts, petty cash, and cash-in-hand. Use this whenever asked to generate, produce, build, or update a "daily cashier report", "cashier report", "today's cashier report", or an outlet's end-of-day cashier reconciliation — even if the user just pastes raw sales/bills numbers, attaches an Excel/Mypos/PDF export, or asks for "today's numbers written up" without naming the report explicitly.
 ---
 
+<!-- SYNC: mirror of the invokable Claude skill at claude-skills/daily-cashier-report/SKILL.md -->
+> **Keep in sync.** This is a mirror of the invokable Claude skill at
+> `claude-skills/daily-cashier-report/SKILL.md`. It lives in the repo so the
+> template travels with the app it mirrors — the app's report
+> (`app/daily-report/page.tsx` plus the `cdr-*` styles in `app/globals.css`) is
+> meant to look identical to this template. **If you edit either copy — this doc
+> or the skill — apply the same change to the other.**
+
 ## Daily cashier report — Tips Investment Limited (multi-tenant template)
 
 This skill produces the daily cashier report used by Tips Investment Limited's outlets (Mikocheni, Coco, Tips Outside), built from the real Mikocheni Outlet, 17 Jul 2026 report and refined through several rounds of review with the business owner (John John). The template is company-agnostic: a new company just gets its own `COMPANY_CONFIG`.
