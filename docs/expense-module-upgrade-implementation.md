@@ -568,4 +568,28 @@ the error fallback. Do not read an empty table as a passing API.
 | `ALLOCATOR` grant issuance | The Second Approver executes allocations, so nothing to staff. Enum value reserved. | Only if the decision reverses |
 | Approver-adjusted top-up amount in the shared inbox UI | The API + `decideExpenseRequestViaWorkflow` fully support `allocatedAmount` (tested); the `/collection-approvals` inbox doesn't yet expose an input for it, so it defaults to the requested amount. The admin override covers amount corrections in the meantime. | When the inbox grows a per-request amount field |
 | Hiding the "Petty Cash Top-Up" request type from the OUT Expense Form | Would need a top-up-only flag on request types; a hardcoded client-side code filter would be fragile. Picking it for an OUT request is harmless. | When request types gain a purpose/kind flag |
-| Staging/production migration SQL | Both still deploy via `db push` per [`MIGRATIONS.md`](MIGRATIONS.md). All schema changes (incl. Phase 8's `ExpenseRequest.reference`) are additive with defaults, so they carry no data-loss risk. | The Postgres baseline in `MIGRATIONS.md` |
+| ~~Staging/production migration SQL~~ | — | **Done** — see below |
+
+## Deploy path + the migration (added 2026-08-05)
+
+The memory that staging/prod deploy via `db push` was **stale**. The Postgres
+baseline in `MIGRATIONS.md` has since run: `migration_lock.toml` is
+`postgresql`, and both `deploy-staging.yml` (push to `staging`) and
+`deploy-production.yml` (push to `main`, gated by a required reviewer approval on
+the `production` GitHub Environment) run **`prisma migrate deploy`** — which
+applies committed migration files and does **not** create tables from
+`schema.prisma`. Only the Vercel **preview** deploy uses `db push`, which is why
+the PR preview built green while prod would have broken.
+
+All of this session's schema changes were applied locally with `db push`
+(SQLite) and had **no migration file**, so a `migrate deploy` to staging/prod
+would not have created them → runtime 500s across the module. Fixed by adding
+`prisma/migrations/20260805120000_add_expense_three_funds/migration.sql`,
+generated offline with `prisma migrate diff --from-schema <pre-change> --to-schema
+<current>` (both temporarily set to the `postgresql` provider) so the SQL,
+constraint names (incl. the two 63-char-truncated composite keys), and FK actions
+are exactly what Prisma itself produces — no drift on a future `migrate dev`.
+Purely additive (new tables + nullable/defaulted columns; zero `DROP`s), so it
+carries no data-loss risk. Validated on staging before production, per the
+`db push`-only-for-preview / `migrate deploy`-for-real-envs split in
+[`MIGRATIONS.md`](MIGRATIONS.md).
