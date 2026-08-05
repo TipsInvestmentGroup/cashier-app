@@ -45,34 +45,45 @@ export interface ReplenishFundingSourceInput {
   createdByName?: string | null
 }
 
-/** Allocates funds to a custodian (Petty Cash Ledger scenario B's "Funds
- *  Received"). CASH/OTHER only — CASHIER_DRAWER's balance always follows the
- *  cashier's daily cash automatically, and BANK/MOBILE_MONEY/CARD balances
- *  follow their GL account, so "replenishing" either would be meaningless. */
-export async function replenishFundingSource(input: ReplenishFundingSourceInput) {
+/**
+ * The credit half of the ledger — a REPLENISH row + a materialized-balance bump,
+ * on the passed `db` so it composes inside a caller's transaction (the §8 top-up
+ * allocation runs inside the approval-decide transaction and must NOT open a
+ * nested one). CASH/OTHER only, same guard as before. `expensePaymentId` is
+ * reused as a loose ref back to the ExpenseRequest that triggered the credit
+ * (top-ups have no ExpensePayment of their own), so the ledger row is traceable.
+ */
+export async function creditFundingSource(db: Db, input: ReplenishFundingSourceInput & { expenseRequestId?: string | null }) {
   const amount = roundMoney(input.amount)
   if (amount <= 0) throw new Error('Amount must be greater than zero')
 
-  return prisma.$transaction(async (tx) => {
-    const source = await tx.fundingSource.findUnique({ where: { id: input.fundingSourceId } })
-    if (!source || !source.isActive) throw new Error('Funding source not found or inactive')
-    if (source.sourceType !== 'CASH' && source.sourceType !== 'OTHER') {
-      throw new Error(`${source.sourceType} funding sources are not replenished this way — their balance is always computed live`)
-    }
+  const source = await db.fundingSource.findUnique({ where: { id: input.fundingSourceId } })
+  if (!source || !source.isActive) throw new Error('Funding source not found or inactive')
+  if (source.sourceType !== 'CASH' && source.sourceType !== 'OTHER') {
+    throw new Error(`${source.sourceType} funding sources are not replenished this way — their balance is always computed live`)
+  }
 
-    await tx.fundingSourceTxn.create({
-      data: {
-        fundingSourceId: source.id, type: 'REPLENISH', amount,
-        reference: input.reference || null, note: input.note || null,
-        createdById: input.createdById, createdByName: input.createdByName || null,
-      },
-    })
-    const updated = await tx.fundingSource.update({
-      where: { id: source.id },
-      data: { currentBalance: roundMoney(source.currentBalance + amount) },
-    })
-    return updated
+  await db.fundingSourceTxn.create({
+    data: {
+      fundingSourceId: source.id, type: 'REPLENISH', amount,
+      reference: input.reference || null, note: input.note || null,
+      expensePaymentId: input.expenseRequestId || null,
+      createdById: input.createdById, createdByName: input.createdByName || null,
+    },
   })
+  return db.fundingSource.update({
+    where: { id: source.id },
+    data: { currentBalance: roundMoney(source.currentBalance + amount) },
+  })
+}
+
+/** Allocates funds to a custodian (Petty Cash Ledger scenario B's "Funds
+ *  Received"). CASH/OTHER only — CASHIER_DRAWER's balance always follows the
+ *  cashier's daily cash automatically, and BANK/MOBILE_MONEY/CARD balances
+ *  follow their GL account, so "replenishing" either would be meaningless.
+ *  Owns its own transaction; the tx-aware core is creditFundingSource above. */
+export async function replenishFundingSource(input: ReplenishFundingSourceInput) {
+  return prisma.$transaction((tx) => creditFundingSource(tx, input))
 }
 
 export interface LedgerRow {

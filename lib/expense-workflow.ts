@@ -19,6 +19,8 @@ import { createNotification } from '@/lib/notifications'
 import { listCustodiansForRequestType, listFundingSourceCustodians } from '@/lib/expense-access'
 import { fundClassOf, type FundClass } from '@/lib/expense-funds'
 import { chainIsStaffed, usersWithGrant } from '@/lib/expense-grants'
+import { creditFundingSource } from '@/lib/expense-ledger'
+import { roundMoney } from '@/lib/utils'
 
 function parseApproverRoles(raw: string | null | undefined): string[] {
   if (!raw) return []
@@ -169,22 +171,84 @@ export async function openNextApprovalStep(db: Db, expenseRequestId: string): Pr
 }
 
 /**
+ * Executes an approved petty-cash top-up (§8): creates the DEBIT ledger entry
+ * that credits the fund, marks the request CLOSED, records the allocated amount
+ * (which may differ from the requested amount — a cheque rounded to a whole
+ * figure), and confirms receipt to the custodian who requested it.
+ *
+ * Per the 2026-08-05 decision the Second Approver's approval executes this
+ * directly — there is no separate allocator step — so this runs INSIDE the
+ * decide transaction (hence creditFundingSource, the tx-aware core, not
+ * replenishFundingSource which would nest a transaction). It is also the path a
+ * below-threshold top-up takes at submit time (no approval needed).
+ *
+ * Idempotent guard: refuses to run twice for the same request, so a double
+ * decide can't credit the fund twice.
+ */
+export async function executeTopUpAllocation(
+  db: Db,
+  expenseRequestId: string,
+  opts: { allocatedAmount?: number | null; actorId?: string | null; actorName?: string | null } = {},
+): Promise<{ status: ExpenseRequestStatus; allocated: number }> {
+  const request = await db.expenseRequest.findUniqueOrThrow({ where: { id: expenseRequestId }, include: { requestType: true } })
+  if (request.direction !== 'IN') throw new Error('Not a top-up request')
+  if (!request.fundingSourceId) throw new Error('Top-up request has no fund to credit')
+  if (request.status === 'CLOSED') return { status: 'CLOSED', allocated: request.allocatedAmount ?? request.amount }
+
+  const allocated = roundMoney(opts.allocatedAmount && opts.allocatedAmount > 0 ? opts.allocatedAmount : request.amount)
+
+  await creditFundingSource(db, {
+    fundingSourceId: request.fundingSourceId,
+    amount: allocated,
+    reference: request.reference,
+    note: `Top-up: ${request.purpose}`,
+    expenseRequestId,
+    createdById: opts.actorId || request.requestedById,
+    createdByName: opts.actorName || null,
+  })
+
+  await db.expenseRequest.update({
+    where: { id: expenseRequestId },
+    // CLOSED, not PAID: a top-up brings money IN, so "paid" (money out) would
+    // misread. CLOSED = allocation recorded, nothing further to do.
+    data: { status: 'CLOSED', allocatedAmount: allocated },
+  })
+
+  await createNotification({
+    userId: request.requestedById, type: 'EXPENSE_TOPUP_ALLOCATED',
+    title: `${request.requestType.name} allocated`,
+    message: `Your top-up "${request.purpose}" was allocated: ${allocated} ${request.currency} is now in the fund${
+      allocated !== request.amount ? ` (requested ${request.amount})` : ''
+    }.`,
+    entityType: 'ExpenseRequest', entityId: expenseRequestId,
+  }).catch(() => {})
+
+  return { status: 'CLOSED', allocated }
+}
+
+/**
  * Cascades a decision that has ALREADY been written onto its WorkflowApproval
  * row (the caller — the shared /api/collection-approvals decide route —
  * updates the row generically for every approval kind) onto the
  * ExpenseRequest: REJECTED stops the whole chain immediately; APPROVED either
- * opens the next level or, once every level has approved, marks the request
- * APPROVED.
+ * opens the next level or, once every level has approved, finalizes — executing
+ * the allocation for an IN top-up, or marking an OUT request ready to pay.
  */
-export async function advanceExpenseApproval(db: Db, expenseRequestId: string, decision: 'APPROVED' | 'REJECTED'): Promise<{ status: ExpenseRequestStatus }> {
+export async function advanceExpenseApproval(
+  db: Db,
+  expenseRequestId: string,
+  decision: 'APPROVED' | 'REJECTED',
+  opts: { allocatedAmount?: number | null; actorId?: string | null; actorName?: string | null } = {},
+): Promise<{ status: ExpenseRequestStatus }> {
   const request = await db.expenseRequest.findUniqueOrThrow({ where: { id: expenseRequestId }, include: { requestType: true } })
+  const isTopUp = request.direction === 'IN'
 
   if (decision === 'REJECTED') {
     await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'REJECTED' } })
     await createNotification({
       userId: request.requestedById, type: 'EXPENSE_REQUEST_REJECTED',
       title: `${request.requestType.name} rejected`,
-      message: `"${request.purpose}" for ${request.amount} ${request.currency} was rejected.`,
+      message: `${isTopUp ? 'Your top-up' : 'Request'} "${request.purpose}" for ${request.amount} ${request.currency} was rejected.`,
       entityType: 'ExpenseRequest', entityId: expenseRequestId,
     }).catch(() => {})
     return { status: 'REJECTED' }
@@ -192,6 +256,14 @@ export async function advanceExpenseApproval(db: Db, expenseRequestId: string, d
 
   const next = await openNextApprovalStep(db, expenseRequestId)
   if (next) return { status: 'PENDING_APPROVAL' }
+
+  // Final approval reached. A top-up is executed here and now (the approver's
+  // approval IS the allocation, per §8's decision) rather than being handed to a
+  // separate allocator.
+  if (isTopUp) {
+    const { status } = await executeTopUpAllocation(db, expenseRequestId, opts)
+    return { status }
+  }
 
   await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'APPROVED' } })
 
@@ -229,7 +301,7 @@ export async function advanceExpenseApproval(db: Db, expenseRequestId: string, d
  * PENDING approval row, resolves it, and cascades. Owns its own transaction —
  * mirrors lib/expense-payments.ts createExpensePayment's shape.
  */
-export async function decideExpenseRequestViaWorkflow(opts: { expenseRequestId: string; approve: boolean; decidedById: string; comment?: string | null }): Promise<{ status: ExpenseRequestStatus; approverRole: string }> {
+export async function decideExpenseRequestViaWorkflow(opts: { expenseRequestId: string; approve: boolean; decidedById: string; decidedByName?: string | null; comment?: string | null; allocatedAmount?: number | null }): Promise<{ status: ExpenseRequestStatus; approverRole: string }> {
   return prisma.$transaction(async (tx) => {
     const approval = await tx.workflowApproval.findFirst({ where: { expenseRequestId: opts.expenseRequestId, status: 'PENDING' } })
     if (!approval) throw new Error('This request has no pending approval to decide')
@@ -239,7 +311,9 @@ export async function decideExpenseRequestViaWorkflow(opts: { expenseRequestId: 
       where: { id: approval.id },
       data: { status: decision, resolvedAt: new Date(), approverId: opts.decidedById, comment: opts.comment ?? approval.comment },
     })
-    const { status } = await advanceExpenseApproval(tx, opts.expenseRequestId, decision)
+    const { status } = await advanceExpenseApproval(tx, opts.expenseRequestId, decision, {
+      allocatedAmount: opts.allocatedAmount, actorId: opts.decidedById, actorName: opts.decidedByName,
+    })
     return { status, approverRole: approval.approverRole! }
   })
 }

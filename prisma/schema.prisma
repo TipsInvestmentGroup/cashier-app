@@ -4810,6 +4810,13 @@ model ExpenseRequest {
   // the variance stays auditable rather than overwriting the request.
   allocatedAmount Float?
 
+  // A payment reference the request carries end to end — a cheque/voucher/txn
+  // number. For a top-up (§8) it is entered on the Request Top-Up form and
+  // copied onto the credit ledger entry when the allocation executes, so the
+  // ledger row is traceable to the paper. Nullable: most disbursement requests
+  // set their reference on the ExpensePayment instead.
+  reference String?
+
   items              ExpenseItem[]
   paymentAllocations PaymentAllocation[]
   verifications      VerificationRecord[]

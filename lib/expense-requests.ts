@@ -10,9 +10,10 @@ import { roundMoney } from '@/lib/utils'
 import { computeActual } from '@/lib/finance-budget'
 import type { BudgetValidationMode, ExpenseRequestStatus } from '@/lib/expense-config'
 import { resolveExpenseModuleConfig } from '@/lib/expense-config'
-import { openNextApprovalStep, cancelPendingExpenseApproval, resolveApprovalPlan } from '@/lib/expense-workflow'
+import { openNextApprovalStep, cancelPendingExpenseApproval, resolveApprovalPlan, executeTopUpAllocation } from '@/lib/expense-workflow'
 import { getFundingSourceBalance } from '@/lib/expense-ledger'
 import { listFundingSourceCustodians } from '@/lib/expense-access'
+import { allowsManualAllocation } from '@/lib/expense-funds'
 import { createNotification } from '@/lib/notifications'
 
 function parseIdList(raw: string | null | undefined): string[] | null {
@@ -51,6 +52,8 @@ export interface CreateExpenseRequestInput {
   fundingSourceId?: string | null
   /** §8 — OUT (a disbursement, the default) or IN (a fund top-up request). */
   direction?: 'OUT' | 'IN'
+  /** A payment reference carried to the ledger (cheque/voucher/txn no.). */
+  reference?: string | null
 }
 
 export interface CreateExpenseRequestResult {
@@ -117,6 +120,14 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
     }
     fundingSourceId = source.id
 
+    // A top-up only makes sense for a manually-allocated fund. A cashier drawer
+    // follows the till and a digital fund follows the bank, so there is nothing
+    // to "top up" — the same rule allowsManualAllocation enforces on the ledger
+    // screen, applied here so the request can't even be created.
+    if ((input.direction ?? 'OUT') === 'IN' && !allowsManualAllocation(source.sourceType)) {
+      throw new Error(`${source.name} cannot be topped up — its balance is computed live, not allocated`)
+    }
+
     if ((input.direction ?? 'OUT') === 'OUT') {
       if (source.dailyLimit > 0 && amount > source.dailyLimit) {
         throw new Error(`Amount ${amount} exceeds ${source.name}'s per-request limit of ${source.dailyLimit}`)
@@ -178,6 +189,7 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
       dueDate: input.dueDate || null,
       fundingSourceId,
       direction: input.direction ?? 'OUT',
+      reference: input.reference?.trim() || null,
       items: items.length ? { create: items.map((it) => ({ detail: it.detail, unit: it.unit ?? 1, unitCost: it.unitCost ?? 0, amount: roundMoney(it.amount) })) } : undefined,
       fieldValues: fieldValueRows.length ? { create: fieldValueRows } : undefined,
     },
@@ -211,24 +223,38 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
     )
   }
 
-  const status: ExpenseRequestStatus = plan.skip ? 'APPROVED' : 'PENDING_APPROVAL'
-  await db.expenseRequest.update({ where: { id: requestId }, data: { status } })
-  if (status === 'PENDING_APPROVAL') await openNextApprovalStep(db, requestId)
-
-  await createNotification({
+  const submittedNote = () => createNotification({
     userId: request.requestedById,
     type: 'EXPENSE_REQUEST_SUBMITTED',
     title: `${request.requestType.name} submitted`,
-    message: `Your request "${request.purpose}" for ${request.amount} ${request.currency} has been submitted${
-      status === 'PENDING_APPROVAL' ? ' and is awaiting approval' : ` and needs no approval (${plan.reason})`
+    message: `Your ${request.direction === 'IN' ? 'top-up' : 'request'} "${request.purpose}" for ${request.amount} ${request.currency} has been submitted${
+      plan.skip ? ` and needs no approval (${plan.reason})` : ' and is awaiting approval'
     }.`,
     entityType: 'ExpenseRequest', entityId: request.id,
   }).catch(() => {})
 
-  // A threshold-skipped request is immediately payable, so its custodians need
-  // the same "ready to pay" nudge a fully-approved one gets — otherwise the
-  // shortcut would make small requests LESS visible than large ones.
-  if (plan.skip && request.fundingSourceId) {
+  // Needs approval: open the first stage and wait.
+  if (!plan.skip) {
+    await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'PENDING_APPROVAL' } })
+    await openNextApprovalStep(db, requestId)
+    await submittedNote()
+    return { status: 'PENDING_APPROVAL', skipReason: null }
+  }
+
+  // No approval needed. A top-up (§8) that skips approval is allocated
+  // immediately — the shortcut must not leave money un-credited — so it runs the
+  // same executor the final approver would, ending CLOSED. A disbursement that
+  // skips approval is APPROVED and dropped into the custodian's Ready-to-Pay
+  // queue instead.
+  if (request.direction === 'IN') {
+    const { status } = await executeTopUpAllocation(db, requestId)
+    await submittedNote()
+    return { status, skipReason: plan.reason }
+  }
+
+  await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'APPROVED' } })
+  await submittedNote()
+  if (request.fundingSourceId) {
     const custodians = await listFundingSourceCustodians(request.fundingSourceId).catch(() => [])
     await Promise.all(custodians.map((c) => createNotification({
       userId: c.userId,
@@ -238,8 +264,7 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
       entityType: 'ExpenseRequest', entityId: request.id,
     }).catch(() => {})))
   }
-
-  return { status, skipReason: plan.skip ? plan.reason : null }
+  return { status: 'APPROVED', skipReason: plan.reason }
 }
 
 // decideExpenseRequest (M3's direct status flip) is superseded by

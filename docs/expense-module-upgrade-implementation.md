@@ -396,6 +396,68 @@ and "Cashier Janeth Drawer" funds correctly read `UNVERIFIABLE`.
 
 All of §1/§2 is now done.
 
+---
+
+## Phase 8 — petty cash top-up requests, §8
+
+A top-up is an `ExpenseRequest` with `direction=IN`, so it reuses the entire
+create → submit → approve → execute machinery rather than forking a parallel
+table or flow. Only the genuinely top-up-specific parts are new.
+
+**Flow.** A Petty Cash Custodian raises a top-up on the ledger screen
+(`POST /api/expense/funding-sources/[id]/top-up`, authorized on the §4 `CUSTODIAN`
+grant for the fund — not a job title). It enters the **same** First → Second
+Approver chain as a disbursement, routed by the same grant logic. Per the
+2026-08-05 decision, **the Second Approver's approval executes the allocation
+directly** — no separate allocator step: `advanceExpenseApproval` branches on
+`direction` and, at final approval of an IN request, calls
+`executeTopUpAllocation`, which writes the credit ledger entry, bumps the
+balance, marks the request `CLOSED`, and confirms receipt to the custodian.
+
+**Key decisions honoured:**
+- **Allocated amount may differ from requested** — the finalizing approver can
+  pass `allocatedAmount` (a cheque rounded to a whole figure); both `amount` and
+  `allocatedAmount` are stored, and the fund is credited by the allocated figure.
+- **Below-threshold shortcut** — a top-up at/under the fund's `approvalThreshold`
+  is allocated immediately at submit time (status `CLOSED`), the same shortcut
+  disbursements get, so small top-ups aren't slower than large ones.
+- **Admin override retained** — `/replenish` is now **ADMIN-only** and every entry
+  it makes is flagged `[Admin override — no approval]` in the ledger note, so the
+  audit trail shows it bypassed the chain. Previously ACCOUNTANT/MANAGER/DIRECTOR
+  could allocate directly; that path is now the approved top-up request.
+
+**Terminal status is `CLOSED`, not `PAID`** — a top-up brings money *in*, so
+"paid" (money out) would misread. `CLOSED` = allocation recorded, nothing further.
+
+**Transaction + idempotency.** The submit route and the decide route both wrap
+the execution so the credit + status change are atomic; `executeTopUpAllocation`
+refuses to run twice (returns early if already `CLOSED`) so a double decide can't
+credit the fund twice.
+
+**Reference plumbing.** Added `ExpenseRequest.reference` (additive column) so the
+Amount / Reference / Note a custodian enters survives to the credit ledger row —
+without it the reference would be lost between request and allocation, which can
+be far apart in time under the approve-executes model.
+
+**New pieces:** `lib/expense-topup.ts` (`ensureTopUpConfig` idempotently creates
+the "Petty Cash Top-Up" request type + "Fund Top-Up" category on first use;
+`createTopUpRequest`), the `/top-up` route, `executeTopUpAllocation` +
+`creditFundingSource` (the tx-aware core extracted from `replenishFundingSource`),
+the `EXPENSE_TOPUP_ALLOCATED` notification, and the Request Top-Up form (with the
+admin-override behind a `<details>`) on the ledger screen.
+
+**Guards added while building:** an IN request is rejected for a non-allocatable
+fund (`allowsManualAllocation`) — a cashier drawer or digital fund has nothing to
+top up — enforced in `createExpenseRequest` so the request can't even be created;
+and top-ups are already excluded from the OUT-only Ready-to-Pay queue and expense
+report (Phase 1/4 direction guards), re-confirmed here.
+
+**Minor consideration, not fixed:** the "Petty Cash Top-Up" request type appears
+in the generic Expense Form's request-type dropdown. Picking it for an ordinary
+OUT expense would create an OUT request of that type — harmless, just odd. A
+top-up-only flag on request types would hide it; deferred rather than add a
+fragile hardcoded-code filter in the client.
+
 ### Scope note — legacy flow retained
 
 The legacy Petty Cash tabs (`Petty Cash (legacy)`, `Approval Requests`,
@@ -461,8 +523,25 @@ opening surfaced, and every live fund resolving to a valid status without
 throwing. Both new pages confirmed rendering in the browser with the full
 Expenses nav and no console errors.
 
+Phase 8 (top-ups) added **25 more**: non-custodian creation refused (403); an
+above-threshold top-up entering the chain without crediting the fund; inbox
+routing (first approver sees it, outsider does not) and exclusion from the
+OUT-only Ready-to-Pay queue; the fund crediting only at final approval, **by the
+adjusted `allocatedAmount`** while preserving the requested `amount`, with a
+linked credit ledger row and the requester notified; the below-threshold shortcut
+allocating immediately with no approval row; rejection leaving the fund
+un-credited; a cashier drawer refusing a top-up (400); and the admin override
+(non-admin 403, admin 201, credited, ledger note flagged).
+
 All were throwaway `scripts/_tmp-*.ts` files run via `npx tsx`, deleted after
 use. Worth recreating if this area changes.
+
+**Browser limitation (Phase 8):** the top-up UI could not be exercised in the
+browser — the dev server had to be restarted this session and the fresh tab has
+no auth cookie, so protected pages redirect to `/login` and authenticating would
+mean entering a password (off-limits). The route compiles with no server errors
+and the form mirrors the existing, working forms on the same page; its behaviour
+is covered by the 25 server-side assertions instead.
 
 One trap to note: a cleanup step that deletes a user's `CUSTODIAN` grants will
 also delete grants the backfill created. Re-run
@@ -487,4 +566,6 @@ the error fallback. Do not read an empty table as a passing API.
 | ~~Widening `/api/expense/access-grants/eligible`~~ | — | **Done in Phase 4** (split by grant type) |
 | WhatsApp notifications | Needs a Business API integration (provider account, template approval). The channel abstraction is built; the value is simply ignored by the dispatcher. | Post-launch |
 | `ALLOCATOR` grant issuance | The Second Approver executes allocations, so nothing to staff. Enum value reserved. | Only if the decision reverses |
-| Staging/production migration SQL | Both still deploy via `db push` per [`MIGRATIONS.md`](MIGRATIONS.md). All Phase 1 changes are additive with defaults, so they carry no data-loss risk. | The Postgres baseline in `MIGRATIONS.md` |
+| Approver-adjusted top-up amount in the shared inbox UI | The API + `decideExpenseRequestViaWorkflow` fully support `allocatedAmount` (tested); the `/collection-approvals` inbox doesn't yet expose an input for it, so it defaults to the requested amount. The admin override covers amount corrections in the meantime. | When the inbox grows a per-request amount field |
+| Hiding the "Petty Cash Top-Up" request type from the OUT Expense Form | Would need a top-up-only flag on request types; a hardcoded client-side code filter would be fragile. Picking it for an OUT request is harmless. | When request types gain a purpose/kind flag |
+| Staging/production migration SQL | Both still deploy via `db push` per [`MIGRATIONS.md`](MIGRATIONS.md). All schema changes (incl. Phase 8's `ExpenseRequest.reference`) are additive with defaults, so they carry no data-loss risk. | The Postgres baseline in `MIGRATIONS.md` |

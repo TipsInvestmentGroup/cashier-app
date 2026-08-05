@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { ExportBar } from '@/components/ExportBar'
 import { useApi } from '@/hooks/useApi'
+import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { MoneyInput } from '@/components/MoneyInput'
 import { allowsManualAllocation, fundClassOf, isFundClass, sourceTypesFor, FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
@@ -39,6 +40,9 @@ export default function PettyCashLedgerPage() {
   // param falls back to Petty Cash — the historical home of this route.
   const fundParam = searchParams.get('fund')
   const activeFundClass: FundClass = isFundClass(fundParam) ? fundParam : 'PETTY_CASH'
+
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'ADMIN'
 
   const [view, setView] = useState<'ledger' | 'queue' | 'report'>('ledger')
   const [sources, setSources] = useState<FundingSource[]>([])
@@ -104,23 +108,43 @@ export default function PettyCashLedgerPage() {
   useEffect(() => { if (view === 'queue') loadQueue() }, [view, loadQueue])
 
   const source = sources.find((s) => s.id === selected)
-  // §5: only a fixed-allocation fund has an allocation to record. Derived from
-  // the shared mapping (lib/expense-funds.ts) rather than a second list of
-  // source types, so this can never disagree with the Funding Sources editor or
-  // with replenishFundingSource()'s own guard.
-  const canReplenish = !!source && allowsManualAllocation(source.sourceType)
+  // §5/§8: only a fixed-allocation fund can be topped up. Derived from the
+  // shared mapping (lib/expense-funds.ts) rather than a second list of source
+  // types, so this can never disagree with the Funding Sources editor or with
+  // the server guards on /top-up and /replenish.
+  const canAllocate = !!source && allowsManualAllocation(source.sourceType)
   const fundClass = source ? fundClassOf(source.sourceType) : null
 
-  const submitReplenish = async (e: React.FormEvent) => {
+  const clearForm = () => { setAmount(''); setReference(''); setNote('') }
+
+  // §8: the standard path — anyone with Petty Cash Custodian access requests a
+  // top-up, which goes through the First → Second Approver chain (or is
+  // allocated immediately when below the fund's threshold). Server authorizes.
+  const submitTopUp = async (e: React.FormEvent) => {
     e.preventDefault()
     const amt = Number(amount)
     if (!amt || amt <= 0) return toast.error('Enter an amount greater than zero')
     setSubmitting(true)
     try {
+      const res = await request(`/api/expense/funding-sources/${selected}/top-up`, { method: 'POST', body: JSON.stringify({ amount: amt, reference: reference || undefined, note: note || undefined }) })
+      toast.success(res?.status === 'CLOSED' ? 'Top-up allocated (below approval threshold)' : 'Top-up requested — awaiting approval')
+      clearForm(); loadLedger()
+    } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not request top-up') }
+    finally { setSubmitting(false) }
+  }
+
+  // §8 override: an admin may allocate directly, no approval. Flagged in the
+  // ledger note as an override so the audit trail shows it bypassed the chain.
+  const submitReplenish = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const amt = Number(amount)
+    if (!amt || amt <= 0) return toast.error('Enter an amount greater than zero')
+    if (!confirm('Record this allocation directly, with no approval? It will be flagged in the ledger as an admin override.')) return
+    setSubmitting(true)
+    try {
       await request(`/api/expense/funding-sources/${selected}/replenish`, { method: 'POST', body: JSON.stringify({ amount: amt, reference: reference || undefined, note: note || undefined }) })
-      toast.success('Allocation recorded')
-      setAmount(''); setReference(''); setNote('')
-      loadLedger()
+      toast.success('Allocation recorded (admin override)')
+      clearForm(); loadLedger()
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not record allocation') }
     finally { setSubmitting(false) }
   }
@@ -292,24 +316,45 @@ export default function PettyCashLedgerPage() {
               </div>
             </div>
 
-            {canReplenish && (
+            {/* §8: Request Top-Up — the standard, approval-backed way to add
+                funds. Same Amount / Reference / Note fields as the old direct
+                allocation, but it creates a request instead of an immediate
+                ledger entry. Shown for any allocatable fund; the server rejects
+                it unless the caller holds Custodian access. */}
+            {canAllocate && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-                <h2 className="font-semibold text-gray-800 mb-3">Record allocation to custodian</h2>
-                <form onSubmit={submitReplenish} className="grid sm:grid-cols-4 gap-3 items-end">
+                <h2 className="font-semibold text-gray-800 mb-1">Request top-up</h2>
+                <p className="text-xs text-gray-400 mb-3">Adds funds to this fund through the approval chain. Below the fund&apos;s threshold it is allocated immediately; above it, a First and Second Approver sign off and the final approval credits the fund.</p>
+                <form onSubmit={submitTopUp} className="grid sm:grid-cols-4 gap-3 items-end">
                   <label className="block"><span className="text-xs text-gray-500">Amount *</span>
                     <MoneyInput value={amount} onChange={setAmount} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="0" /></label>
                   <label className="block"><span className="text-xs text-gray-500">Reference</span>
                     <input value={reference} onChange={(e) => setReference(e.target.value)} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Cheque no., voucher…" /></label>
                   <label className="block sm:col-span-1"><span className="text-xs text-gray-500">Note</span>
                     <input value={note} onChange={(e) => setNote(e.target.value)} className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" placeholder="Optional" /></label>
-                  <Button type="submit" disabled={submitting}>{submitting ? 'Recording…' : 'Record allocation'}</Button>
+                  <Button type="submit" disabled={submitting}>{submitting ? 'Requesting…' : 'Request top-up'}</Button>
                 </form>
+
+                {/* §8 override: admins can still allocate directly, no approval —
+                    flagged in the ledger. Deliberately de-emphasised so it reads
+                    as the exception, not the default. */}
+                {isAdmin && (
+                  <details className="mt-4 border-t border-gray-100 pt-3">
+                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Admin: record allocation directly (no approval)</summary>
+                    <p className="text-[11px] text-amber-600 mt-2">Bypasses the approval chain. The entry is flagged as an admin override in the ledger. Use only for corrections.</p>
+                    <div className="mt-2">
+                      <Button type="button" variant="outline" disabled={submitting} onClick={(ev) => submitReplenish(ev as unknown as React.FormEvent)}>
+                        {submitting ? 'Recording…' : 'Record allocation (override)'}
+                      </Button>
+                    </div>
+                  </details>
+                )}
               </div>
             )}
 
             {/* Saying WHY there is no allocation box beats silently omitting it —
                 otherwise a custodian reasonably concludes the screen is broken. */}
-            {source && !canReplenish && (
+            {source && !canAllocate && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
                 <h2 className="font-semibold text-gray-800 mb-1">No allocation needed for this fund</h2>
                 <p className="text-gray-500 text-sm">

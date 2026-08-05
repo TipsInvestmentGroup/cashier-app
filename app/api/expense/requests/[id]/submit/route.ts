@@ -17,7 +17,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   try {
-    const result = await submitExpenseRequest(prisma, id)
+    // Wrapped so a below-threshold top-up's credit + status change are atomic
+    // (submitExpenseRequest may execute the allocation for an IN request that
+    // skips approval).
+    const result = await prisma.$transaction((tx) => submitExpenseRequest(tx, id))
     await prisma.auditLog.create({
       data: { userId: user.userId, action: 'UPDATE', entity: 'ExpenseRequest', entityId: id, details: `Submitted expense request → ${result.status}` },
     })

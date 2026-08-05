@@ -28,6 +28,11 @@ export type NotificationType =
   | 'EXPENSE_REQUEST_READY_FOR_PAYMENT'
   | 'EXPENSE_REQUEST_PARTIALLY_PAID'
   | 'EXPENSE_REQUEST_PAID'
+  // Petty cash top-up flow (§8) — the reversed direction. Submitted/approval-
+  // needed/rejected reuse the EXPENSE_REQUEST_* types above (an approver just
+  // sees "awaiting approval"; the purpose text says it is a top-up); only the
+  // terminal "funds are now in the fund" confirmation is top-up-specific.
+  | 'EXPENSE_TOPUP_ALLOCATED'
 
 export async function createNotification(input: {
   userId: string

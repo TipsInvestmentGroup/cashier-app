@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   if (!canDecide) return NextResponse.json({ error: 'You are not authorized to decide this approval' }, { status: 403 })
 
-  const { decision, comment } = await req.json().catch(() => ({}))
+  const { decision, comment, allocatedAmount } = await req.json().catch(() => ({}))
   if (decision !== 'APPROVED' && decision !== 'REJECTED') return NextResponse.json({ error: 'decision must be APPROVED or REJECTED' }, { status: 400 })
 
   await prisma.$transaction(async (tx) => {
@@ -59,7 +59,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // the ExpenseRequest — opening the next sequential approval level, or
     // finalizing APPROVED/REJECTED. See lib/expense-workflow.ts.
     if (approval.expenseRequestId) {
-      await advanceExpenseApproval(tx, approval.expenseRequestId, decision)
+      // allocatedAmount only bites when this decision finalizes an IN top-up
+      // (advanceExpenseApproval applies it at the execution point); for every
+      // other case it is harmlessly ignored.
+      await advanceExpenseApproval(tx, approval.expenseRequestId, decision, {
+        allocatedAmount: allocatedAmount != null ? Number(allocatedAmount) : null,
+        actorId: user.userId, actorName: user.name,
+      })
     }
   })
 
