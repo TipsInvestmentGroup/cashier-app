@@ -15,7 +15,7 @@ const ALL = VALID_ROLES
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
-const SECTIONS = ['MyPos', 'Daily', 'Targets', 'My Pay', 'Bills & Requests', 'Petty Cash', 'Finance', 'Setup'] as const
+const SECTIONS = ['MyPos', 'Daily', 'Targets', 'My Pay', 'Bills & Requests', 'Expenses', 'Finance', 'Setup'] as const
 
 const navItems: { href: string; icon: LucideIcon; label: string; section: string; roles: string[]; match?: string[] }[] = [
   { href: '/mypos', icon: UtensilsCrossed, label: 'MyPos', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'], match: ['/mypos', '/pos', '/schedule', '/events'] },
@@ -28,7 +28,7 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 
   { href: '/signed-bills', icon: Receipt, label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/admin-director-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 
-  { href: '/petty-cash', icon: Wallet, label: 'Petty Cash', section: 'Petty Cash', roles: CASHIER_ROLES, match: ['/petty-cash', '/approvals', '/petty-payments', '/expense-requests', '/petty-cash-ledger', '/digital-expenses'] },
+  { href: '/expense-requests', icon: Wallet, label: 'Expenses', section: 'Expenses', roles: CASHIER_ROLES, match: ['/expense-requests', '/petty-cash-ledger', '/digital-expenses', '/petty-cash', '/approvals', '/petty-payments'] },
 
   { href: '/analytics', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/analytics', '/receivables', '/admin-director-bills', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/trends', '/payroll', '/reports', '/audit', '/business-days', '/business-day-management', '/business-day-unlock-requests', '/business-day-exceptions-report'] },
 

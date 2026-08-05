@@ -60,11 +60,14 @@ export interface ResolvedExpenseModuleConfig {
 // any scope (today's PettyCash flow keeps working regardless — this fallback
 // only shapes the NEW engine's own screens). Keep in sync with
 // lib/expense-seed.ts's GLOBAL seed.
+// §1: the module's default label is now "Expenses" (the section covers three
+// funds, not just petty cash). Still admin-editable — this is only the fallback
+// when no terminology row has been saved.
 const DEFAULT_TERMINOLOGY: ExpenseTerminology = {
-  module: 'Petty Cash', requestType: 'Request Type', category: 'Function', fundingSource: 'Fund', request: 'Petty Cash Request',
+  module: 'Expenses', requestType: 'Request Type', category: 'Function', fundingSource: 'Fund', request: 'Expense Request',
 }
 const DEFAULT_MODULE_CONFIG: ResolvedExpenseModuleConfig = {
-  moduleName: 'Petty Cash',
+  moduleName: 'Expenses',
   enabled: true,
   defaultCurrency: 'TZS',
   requireReceiptDefault: true,

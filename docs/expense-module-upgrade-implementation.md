@@ -308,6 +308,65 @@ deployment that had saved company-scoped config: it now takes effect.
 
 ---
 
+## Phase 5 — per-custodian ledger views + nav restructure, §1/§2
+
+**The sidebar section is renamed `Petty Cash` → `Expenses`** and its sub-items
+restructured. `PETTY_TABS` became `EXPENSE_TABS` (with a back-compat alias, so
+the seven pages importing `PETTY_TABS` needed no edit). The module's default
+terminology label is now `Expenses` too (still admin-editable).
+
+**One ledger page serves all three fund classes via `?fund=`.** Cashier Ledger,
+Petty Cash Ledger and Digital Expenses Ledger are three nav entries into
+`/petty-cash-ledger` differing only by query string — the per-custodian ledger
+views of §2 as one screen rather than three near-identical pages. The page reads
+`?fund=`, filters the fund dropdown to that class (via `sourceTypesFor`), titles
+itself accordingly, and reselects within the class when the view changes.
+
+`SectionTabs` was made **query-aware** to support this: a tab whose href carries
+a `?fund=` only matches when that query is present, so the three ledger tabs
+highlight independently instead of all lighting up on the shared path. Because
+that reads `useSearchParams`, the component now wraps its inner body in a
+`Suspense` boundary — without it, `useSearchParams` would force every page
+rendering a `SectionTabs` (i.e. most of the app) into client-side rendering
+during prerender. The boundary is internal, so no consumer changed.
+
+**The "Ready to Pay" queue** (§7's queue half, which belongs on the ledger
+screen) is a third tab on the ledger page, backed by
+`GET /api/expense/funding-sources/[id]/ready-to-pay`. It lists every
+fully-approved-or-partially-paid, unsettled OUT request **naming that fund**,
+each with its outstanding balance (amount − already allocated), and a tab-badge
+count.
+
+A design flaw surfaced during verification and was fixed: the endpoint first
+also included **fund-agnostic** approved requests (no `fundingSourceId`) that a
+request type allowed. dev.db had exactly such a row, and it showed up in *all
+three* funds' queues at once, triple-counting in `totalOutstanding`. The queue
+is now scoped to requests that name the fund; fund-agnostic ones stay payable
+from the request detail page, which is unaffected.
+
+### Scope note — two nav items deferred
+
+§1 lists six sub-items; two are **not** wired yet: **Cash Reconciliation** and
+**Digital Payment Reconciliation**. Both already exist as functionality
+elsewhere — cash recon is a modal on `/petty-cash` driven by `/api/cash-recon`,
+and digital reconciliation is `/payment-verifications` under Finance (MGMT-only,
+with its own tab set). Pointing Expenses-section nav entries at either would
+either duplicate a recon surface (the single-source-of-truth mistake this
+codebase avoids) or drop a CASHIER custodian onto a MGMT page with the wrong
+tabs. Purpose-built custodian-facing recon views are their own piece of work and
+were left for a decision rather than shipped broken. Everything else in §1/§2 is
+done.
+
+### Scope note — legacy flow retained
+
+The legacy Petty Cash tabs (`Petty Cash (legacy)`, `Approval Requests`,
+`Payments`) are kept in the Expenses section, below the new items. They are still
+the live production flow under the side-by-side rollout, and hiding them before
+the cash-drawer cutover (`CASHIER_CUTOVER_ENABLED`) would strand a working
+screen. They drop off at cutover.
+
+---
+
 ## Verification approach
 
 `next build` **does not complete on the current dev machine** — bare
@@ -347,6 +406,13 @@ carrying a stage grant rather than a role, inbox visibility (stage-1 approver se
 it, stage-2 approver does not, ungranted user does not, and it swaps over once
 stage 1 is decided), decide authorization by grant, stage-2 progression, rejection
 stopping the chain, and the threshold-skip custodian nudge.
+
+Phase 5 added **20 more**: the nav structure (Expense Form leads, three fund
+ledgers sharing a path but differing by `?fund=`, legacy flow retained), the
+query-aware tab matcher highlighting each ledger independently, and the
+Ready-to-Pay endpoint (approved appears, draft does not, IN top-up excluded,
+partial payment nets outstanding down while staying in the queue, fully-paid
+drops out, 401 unauthenticated).
 
 All were throwaway `scripts/_tmp-*.ts` files run via `npx tsx`, deleted after
 use. Worth recreating if this area changes.

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
 import { Button } from '@/components/ui/Button'
@@ -8,7 +9,8 @@ import { ExportBar } from '@/components/ExportBar'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { MoneyInput } from '@/components/MoneyInput'
-import { allowsManualAllocation, fundClassOf } from '@/lib/expense-funds'
+import { allowsManualAllocation, fundClassOf, isFundClass, sourceTypesFor, FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
+import { useSearchParams } from 'next/navigation'
 import { format, subDays } from 'date-fns'
 import toast from 'react-hot-toast'
 
@@ -16,6 +18,11 @@ interface FundingSource { id: string; name: string; code: string; sourceType: st
 interface LedgerRow { id: string; type: string; amount: number; reference: string | null; note: string | null; createdByName: string | null; createdAt: string; runningBalance?: number }
 interface Ledger { fundingSourceId: string; openingBalance: number; totalReceived: number; totalPaid: number; closingBalance: number; rows: LedgerRow[]; live?: boolean }
 interface Group { label: string; count: number; amount: number }
+interface ReadyToPayRow {
+  id: string; purpose: string; amount: number; paid: number; outstanding: number
+  currency: string; status: string; requestedById: string; requestType: string; category: string; createdAt: string
+}
+interface ReadyToPay { fundingSourceId: string; count: number; totalOutstanding: number; rows: ReadyToPayRow[] }
 interface ExpenseReport {
   totals: { requested: number; paid: number; pending: number; approvedUnpaid: number; cashierPaid: number; fundBackedPaid: number }
   byOutlet: Group[]; byCategory: Group[]; byDepartment: Group[]; byRequester: Group[]; byFundingSource: Group[]; byRequestType: Group[]
@@ -26,9 +33,17 @@ const TYPE_LABEL: Record<string, string> = { OPEN: 'Opening balance', REPLENISH:
 
 export default function PettyCashLedgerPage() {
   const { request } = useApi()
-  const [view, setView] = useState<'ledger' | 'report'>('ledger')
+  const searchParams = useSearchParams()
+  // §1/§2: one ledger page serves Cashier / Petty Cash / Digital via ?fund=,
+  // so each nav item is a filtered view of the same screen. Missing/invalid
+  // param falls back to Petty Cash — the historical home of this route.
+  const fundParam = searchParams.get('fund')
+  const activeFundClass: FundClass = isFundClass(fundParam) ? fundParam : 'PETTY_CASH'
+
+  const [view, setView] = useState<'ledger' | 'queue' | 'report'>('ledger')
   const [sources, setSources] = useState<FundingSource[]>([])
   const [selected, setSelected] = useState('')
+  const [names, setNames] = useState<Record<string, string>>({})
   const [ledger, setLedger] = useState<Ledger | null>(null)
   const [loading, setLoading] = useState(true)
   const [amount, setAmount] = useState('')
@@ -48,12 +63,17 @@ export default function PettyCashLedgerPage() {
   const loadSources = useCallback(async () => {
     try {
       const s: FundingSource[] = await request('/api/expense/funding-sources')
-      const active = (s || []).filter((x) => x.isActive)
+      // Only the funds belonging to THIS view's class (§2 per-custodian ledger
+      // views). sourceTypesFor keeps the class→sourceType mapping in one place.
+      const allowedTypes = sourceTypesFor(activeFundClass) as readonly string[]
+      const active = (s || []).filter((x) => x.isActive && allowedTypes.includes(x.sourceType))
       setSources(active)
-      if (!selected && active.length) setSelected(active[0].id)
+      // Reselect within the new class rather than keeping a fund from the
+      // previous view — otherwise switching Cashier→Petty Cash would show the
+      // wrong fund's ledger until the user touches the dropdown.
+      setSelected(active.length ? active[0].id : '')
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load funding sources') }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request])
+  }, [request, activeFundClass])
   useEffect(() => { loadSources() }, [loadSources])
 
   const loadLedger = useCallback(async () => {
@@ -64,6 +84,24 @@ export default function PettyCashLedgerPage() {
     finally { setLoading(false) }
   }, [request, selected])
   useEffect(() => { loadLedger() }, [loadLedger])
+
+  // Requester id → name, for the Ready-to-Pay queue. Loaded once; a best-effort
+  // lookup, so a failure just shows the id-less fallback rather than blocking.
+  useEffect(() => {
+    request('/api/users').then((us: { id: string; name: string }[] | null) => {
+      setNames(Object.fromEntries((us || []).map((u) => [u.id, u.name])))
+    }).catch(() => {})
+  }, [request])
+
+  // §7: the custodian's "Ready to Pay" queue — the reliable list of what to pay
+  // from this fund, so nobody has to reconstruct it from notifications.
+  const [queue, setQueue] = useState<ReadyToPay | null>(null)
+  const loadQueue = useCallback(async () => {
+    if (!selected) { setQueue(null); return }
+    try { setQueue(await request(`/api/expense/funding-sources/${selected}/ready-to-pay`)) }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load the queue') }
+  }, [request, selected])
+  useEffect(() => { if (view === 'queue') loadQueue() }, [view, loadQueue])
 
   const source = sources.find((s) => s.id === selected)
   // §5: only a fixed-allocation fund has an allocation to record. Derived from
@@ -92,29 +130,75 @@ export default function PettyCashLedgerPage() {
       <SectionTabs tabs={PETTY_TABS} />
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Petty Cash Ledger</h1>
-          <p className="text-gray-500 text-sm">Every allocation (DR) and disbursement (CR) against a petty cash fund, with a running balance for audit.</p>
+          <h1 className="text-2xl font-bold text-gray-900">{FUND_CLASS_LABELS[activeFundClass]} Ledger</h1>
+          <p className="text-gray-500 text-sm">Every credit (DR) and disbursement (CR) against this fund, with a running balance for audit.</p>
         </div>
 
         <div className="flex gap-2 border-b border-gray-100">
-          {(['ledger', 'report'] as const).map((v) => (
+          {(['ledger', 'queue', 'report'] as const).map((v) => (
             <button key={v} onClick={() => setView(v)}
               className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${view === v ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-              {v === 'ledger' ? 'Ledger' : 'Report'}
+              {v === 'ledger' ? 'Ledger' : v === 'queue' ? `Ready to Pay${queue?.count ? ` (${queue.count})` : ''}` : 'Report'}
             </button>
           ))}
         </div>
 
-        {view === 'ledger' && (
+        {(view === 'ledger' || view === 'queue') && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
           <label className="block max-w-sm">
-            <span className="text-xs text-gray-500">Funding source</span>
-            <select value={selected} onChange={(e) => setSelected(e.target.value)}
-              className="w-full mt-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
-              {sources.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.sourceType})</option>)}
-            </select>
+            <span className="text-xs text-gray-500">{FUND_CLASS_LABELS[activeFundClass]} fund</span>
+            {sources.length ? (
+              <select value={selected} onChange={(e) => setSelected(e.target.value)}
+                className="w-full mt-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                {sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            ) : (
+              <p className="mt-1 text-sm text-gray-400">No {FUND_CLASS_LABELS[activeFundClass]} fund configured yet — add one in Expense Settings.</p>
+            )}
           </label>
         </div>
+        )}
+
+        {view === 'queue' && (
+          !queue ? <div className="py-16 text-center text-gray-400">Loading…</div> : queue.rows.length === 0 ? (
+            <EmptyState icon="✅" title="Nothing to pay" hint="Fully-approved, unpaid requests for this fund show up here." />
+          ) : (
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+                <h2 className="font-semibold text-gray-800">Ready to Pay</h2>
+                <span className="text-sm text-gray-500">{queue.count} request{queue.count === 1 ? '' : 's'} · {formatCurrency(queue.totalOutstanding)} outstanding</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50"><tr className="text-left text-gray-600">
+                    <th className="px-4 py-3 font-semibold">Date</th>
+                    <th className="px-4 py-3 font-semibold">Requester</th>
+                    <th className="px-4 py-3 font-semibold">Purpose</th>
+                    <th className="px-4 py-3 font-semibold">Type / Category</th>
+                    <th className="px-4 py-3 font-semibold text-right">Outstanding</th>
+                    <th className="px-4 py-3"></th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {queue.rows.map((r) => (
+                      <tr key={r.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{formatDate(r.createdAt)}</td>
+                        <td className="px-4 py-3 text-gray-700">{names[r.requestedById] || '—'}</td>
+                        <td className="px-4 py-3 text-gray-700 max-w-[220px] truncate" title={r.purpose}>{r.purpose}</td>
+                        <td className="px-4 py-3 text-gray-500">{r.requestType}<span className="block text-[11px] text-gray-400">{r.category}</span></td>
+                        <td className="px-4 py-3 text-right font-bold text-gray-900">
+                          {formatCurrency(r.outstanding)}
+                          {r.paid > 0 && <span className="block text-[11px] text-amber-600 font-normal">of {formatCurrency(r.amount)} · partly paid</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Link href={`/expense-requests/${r.id}`} className="text-indigo-600 hover:text-indigo-800 font-medium">Pay →</Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
         )}
 
         {view === 'report' && (
