@@ -131,6 +131,7 @@ model User {
   businessDayUnlockRequestsMade     BusinessDayUnlockRequest[] @relation("BusinessDayUnlockRequestedBy")
   businessDayUnlockRequestsApproved BusinessDayUnlockRequest[] @relation("BusinessDayUnlockApprover")
   notifications                     Notification[]
+  notificationPreferences           NotificationPreference[]
 }
 
 /// Per-user, per-resource grant of Add/Edit/Delete(/Settle/Unsettle for
@@ -209,6 +210,9 @@ model Company {
   expenseCategories ExpenseCategory[]
   fundingSources    FundingSource[]
   expenseRequests   ExpenseRequest[]
+
+  expenseAccessGrants     ExpenseAccessGrant[]
+  expenseNotificationRule ExpenseNotificationRule[]
 }
 
 model Outlet {
@@ -4691,9 +4695,28 @@ model FundingSource {
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
 
+  // ── Per-fund approval + alert policy (Expense Module Upgrade §3/§7) ──
+  // The approval CHAIN itself is not stored here: it is whoever holds a
+  // FIRST_APPROVER/SECOND_APPROVER ExpenseAccessGrant for this fund's class and
+  // outlet, so each of the three funds gets its own chain purely from grant
+  // rows (decision 2026-08-05: "per funding source"). What IS per-fund is the
+  // policy applied to that chain — kept here rather than on RequestType because
+  // Cashier Cash and Digital Expenses need materially different thresholds and
+  // SLAs even under the same request type.
+  //   approvalThreshold: requests at/below this skip the chain and land
+  //     straight in the custodian's Ready-to-Pay queue. 0 = never skip.
+  //   escalationHours: hours a request may sit at one approval stage before
+  //     reminders fire (§7's "Pending approval > X hours"). 0 = no escalation.
+  //   lowBalanceThreshold: available balance at/below which the custodian gets
+  //     §7's low-balance alert. 0 = no alert.
+  approvalThreshold   Float @default(0)
+  escalationHours     Int   @default(0)
+  lowBalanceThreshold Float @default(0)
+
   payments   ExpensePayment[]
   txns       FundingSourceTxn[]
   custodians FundingSourceCustodian[]
+  requests   ExpenseRequest[]
 
   @@unique([companyId, code])
   @@index([companyId, isActive])
@@ -4763,6 +4786,30 @@ model ExpenseRequest {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
+  // ── Expense Module Upgrade §3 + §8 ──
+  // direction reverses the SAME request→approve→execute machinery instead of
+  // forking a parallel top-up table (§8: "reuse the expense approval flow,
+  // direction reversed"). OUT = a disbursement from the fund (today's only
+  // behavior, hence the default — every existing row keeps its exact meaning).
+  // IN = a petty-cash top-up request, where the custodian sits in the
+  // requester's seat and approval CREDITS the fund via a DEBIT ledger entry.
+  //   direction: OUT | IN
+  direction String @default("OUT")
+
+  // The fund this request moves money on — pay-from for OUT, top-up-into for
+  // IN. Nullable because §3 makes it required only on the new Expense Form;
+  // requests created before the upgrade (and any created via a request type
+  // that doesn't scope funding) legitimately have none, and the funding source
+  // is then resolved at payment time exactly as it is today.
+  fundingSourceId String?
+  fundingSource   FundingSource? @relation(fields: [fundingSourceId], references: [id])
+
+  // IN only: what the approver actually allocated, when it differs from the
+  // requested `amount` (a cheque rounded to 500,000 against a 487,300
+  // request). Null = allocated exactly as requested. Both figures are kept so
+  // the variance stays auditable rather than overwriting the request.
+  allocatedAmount Float?
+
   items              ExpenseItem[]
   paymentAllocations PaymentAllocation[]
   verifications      VerificationRecord[]
@@ -4774,6 +4821,10 @@ model ExpenseRequest {
   @@index([requestTypeId])
   @@index([categoryId])
   @@index([outletId])
+  // Drives §7's per-custodian "Ready to Pay" queue (one fund, direction=OUT,
+  // status=APPROVED) and §8's ready-to-allocate list (direction=IN) without a
+  // table scan per custodian screen load.
+  @@index([fundingSourceId, direction, status])
 }
 
 /// Optional line-item breakdown of an ExpenseRequest — identical shape to
@@ -4912,4 +4963,134 @@ model ExpenseRequestFieldValue {
   value            String
 
   @@unique([expenseRequestId, fieldKey])
+}
+
+// ─── Expense Module Upgrade — three custodian-owned funds ────────────────────
+// Splits the one shared funding pool into Cashier Cash / Petty Cash / Digital
+// Expenses, each custodian-owned, each with its own approval chain and
+// notification routing. See docs/expense-module-upgrade-brief.md.
+//
+// Deliberately NOT introducing the brief's literal `Custodian` / `Ledger` /
+// `LedgerEntry` tables: FundingSource (+ outletId), FundingSourceCustodian
+// (M:N) and FundingSourceTxn (append-only, signed) already model exactly those
+// three things, and forking them would create the dual source of truth
+// docs/expense-disbursement-framework-design.md explicitly rejects. The
+// brief's three fund "types" are therefore a VIEW over FundingSource.sourceType
+// rather than a stored duplicate (see lib/expense-funds.ts fundClassOf):
+//   CASHIER_CASH → sourceType CASHIER_DRAWER (balance = live cash-recon position)
+//   PETTY_CASH   → sourceType CASH           (balance = materialized + txn ledger)
+//   DIGITAL      → sourceType BANK | MOBILE_MONEY | CARD (balance = live GL)
+// What genuinely did not exist, and is added below: the access-grant layer that
+// §4 makes the single source of truth, and the event-driven notification
+// routing table §7 requires in place of scattered conditionals.
+
+/// §4's Manage Access list — the single source of truth for who may request,
+/// who may custody which fund, and who approves at which stage. Replaces the
+/// role-string guessing in lib/expense-workflow.ts (RequestType.approverRoles
+/// broadcast to every user holding a User.role), which §7 explicitly forbids:
+/// "action needed" must reach the specific individual(s) holding the grant for
+/// the relevant outlet/fund, not everyone with the role.
+///
+/// Revoked, never deleted (§4 audit trail) — revokedAt is the only "is this
+/// live" test; a historical request must still be able to show that the person
+/// who approved it did hold the grant at the time.
+///   grantType: REQUEST | CUSTODIAN | FIRST_APPROVER | SECOND_APPROVER | ALLOCATOR
+///   fundClass: CASHIER_CASH | PETTY_CASH | DIGITAL (null = every fund)
+model ExpenseAccessGrant {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+  userId    String // no relation — mirrors CreditAccount.userId / FundingSourceCustodian.userId
+
+  grantType String
+
+  // Which fund class this grant applies to. Required for CUSTODIAN (a Petty
+  // Cash custodian is not thereby a Digital custodian) and meaningful for
+  // approver grants (decision 2026-08-05: each fund gets its own chain). Null
+  // on a REQUEST grant, which is fund-agnostic.
+  fundClass String?
+
+  // Outlet the grant is scoped to; null = business-wide. Nullable rather than
+  // required because one person legitimately custodians or approves across both
+  // Mikocheni and Coco Beach — the existing FundingSourceCustodian M:N already
+  // permits that, and forcing an outlet here would be stricter than the model
+  // it feeds.
+  outletId String?
+
+  grantedById   String
+  grantedByName String?
+  grantedAt     DateTime  @default(now())
+  revokedAt     DateTime?
+  revokedById   String?
+  note          String?
+
+  // NOTE: this constraint is a backstop, NOT the real guard. fundClass,
+  // outletId and revokedAt are all nullable, and both SQLite and Postgres treat
+  // NULLs as distinct in a unique index — so the exact case that matters most
+  // (a live, business-wide grant, where outletId and revokedAt are both null)
+  // would NOT be rejected by the database. "One live grant per (user, type,
+  // fund class, outlet)" must therefore be enforced in the grants layer
+  // (lib/expense-grants.ts, added with §4's Manage Access) before insert. Kept
+  // anyway because it does catch fully-specified duplicates and costs nothing.
+  @@unique([companyId, userId, grantType, fundClass, outletId, revokedAt])
+  @@index([companyId, grantType, fundClass, revokedAt])
+  @@index([userId, revokedAt])
+}
+
+/// §7's notification matrix as DATA — one row per (event × recipient role ×
+/// fund class), so adding a role, an event, or a channel is a config change
+/// rather than another branch in the workflow code. Seeded from the two tables
+/// in §7 (disbursement) and §8 (top-up, direction reversed); admins can toggle
+/// isActive or channels per row.
+///
+/// kind is what makes §7's opt-out rule enforceable in one place: ACTION_NEEDED
+/// rows are the notification a role exists for and are never mutable by the
+/// recipient (a First Approver cannot silence "awaiting your approval"), while
+/// STATUS_UPDATE/ALERT/REMINDER rows honour NotificationPreference below.
+///   event:         EXPENSE_SUBMITTED | FIRST_APPROVED | FIRST_REJECTED |
+///                  SECOND_APPROVED | SECOND_REJECTED | PAID | UNPAID_NO_FUNDS |
+///                  FUND_LOW | LEDGER_MISMATCH | APPROVAL_OVERDUE |
+///                  TOPUP_SUBMITTED | TOPUP_FIRST_APPROVED | TOPUP_FIRST_REJECTED |
+///                  TOPUP_SECOND_APPROVED | TOPUP_SECOND_REJECTED | TOPUP_ALLOCATED
+///   recipientRole: REQUESTER | FIRST_APPROVER | SECOND_APPROVER | CUSTODIAN | ALLOCATOR
+///   kind:          ACTION_NEEDED | STATUS_UPDATE | ALERT | REMINDER
+model ExpenseNotificationRule {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  event         String
+  recipientRole String
+  fundClass     String? // null = applies to every fund class
+  kind          String
+
+  /// JSON array of channels, e.g. ["IN_APP","EMAIL"]. In-app and email are the
+  /// launch channels (both already implemented — lib/notifications.ts and
+  /// lib/email.ts); WHATSAPP is a valid value the dispatcher will ignore until
+  /// that integration exists, so enabling it later needs no schema change.
+  channels String @default("[\"IN_APP\",\"EMAIL\"]")
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, event, recipientRole, fundClass])
+  @@index([companyId, event, isActive])
+}
+
+/// Per-user opt-out for the notifications §7 allows opting out of. Absence of a
+/// row means "send it" — so this table stays empty until someone actively mutes
+/// something, and no backfill is needed for existing users. The dispatcher
+/// consults it only for non-ACTION_NEEDED rules, which is where the
+/// "can't silence your own role's action-needed" rule is enforced.
+model NotificationPreference {
+  id      String  @id @default(cuid())
+  userId  String
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event   String
+  channel String // IN_APP | EMAIL | WHATSAPP
+  enabled Boolean @default(true)
+
+  @@unique([userId, event, channel])
+  @@index([userId])
 }

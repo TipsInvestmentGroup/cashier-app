@@ -18,8 +18,13 @@ export async function GET(req: NextRequest) {
   const status = req.nextUrl.searchParams.get('status') || undefined
   const isMgmt = MGMT_ROLES.includes(user.role)
 
+  // Disbursements only. Fund top-up requests share this table (direction=IN, so
+  // §8's approval chain and notifications are reused rather than forked) but are
+  // a different thing to a user — they belong on the custodian's ledger screen,
+  // not in "my expense requests". Explicit filter rather than relying on there
+  // being no IN rows yet.
   const requests = await prisma.expenseRequest.findMany({
-    where: { ...(status ? { status } : {}), ...(isMgmt ? {} : { requestedById: user.userId }) },
+    where: { direction: 'OUT', ...(status ? { status } : {}), ...(isMgmt ? {} : { requestedById: user.userId }) },
     orderBy: [{ createdAt: 'desc' }],
     include: {
       requestType: { select: { id: true, name: true } },
