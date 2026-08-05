@@ -60,11 +60,14 @@ export interface ResolvedExpenseModuleConfig {
 // any scope (today's PettyCash flow keeps working regardless — this fallback
 // only shapes the NEW engine's own screens). Keep in sync with
 // lib/expense-seed.ts's GLOBAL seed.
+// §1: the module's default label is now "Expenses" (the section covers three
+// funds, not just petty cash). Still admin-editable — this is only the fallback
+// when no terminology row has been saved.
 const DEFAULT_TERMINOLOGY: ExpenseTerminology = {
-  module: 'Petty Cash', requestType: 'Request Type', category: 'Function', fundingSource: 'Fund', request: 'Petty Cash Request',
+  module: 'Expenses', requestType: 'Request Type', category: 'Function', fundingSource: 'Fund', request: 'Expense Request',
 }
 const DEFAULT_MODULE_CONFIG: ResolvedExpenseModuleConfig = {
-  moduleName: 'Petty Cash',
+  moduleName: 'Expenses',
   enabled: true,
   defaultCurrency: 'TZS',
   requireReceiptDefault: true,
@@ -95,18 +98,29 @@ function parseTerminology(raw: string | null | undefined): ExpenseTerminology {
 }
 
 /**
- * Resolve the effective expense module config for an outlet, checking
- * narrowest to widest: OUTLET → COMPANY → GLOBAL, falling back to
- * DEFAULT_MODULE_CONFIG when no row exists. GLOBAL rows carry scopeId = null.
+ * Resolve the effective expense module config, checking narrowest to widest:
+ * OUTLET → COMPANY → GLOBAL, falling back to DEFAULT_MODULE_CONFIG when no row
+ * exists. GLOBAL rows carry scopeId = null.
+ *
+ * The COMPANY tier is always considered, even with no outletId — resolve it from
+ * an explicit companyId, else from the outlet, else from the default company.
+ * Previously the company was only ever derived FROM an outlet, so any caller
+ * without one (the Expense Settings config endpoint, and an expense request
+ * raised with no outlet) silently skipped straight to GLOBAL and ignored a
+ * company-scoped policy an admin had deliberately saved.
  */
-export async function resolveExpenseModuleConfig(db: Db, opts: { outletId?: string | null } = {}): Promise<ResolvedExpenseModuleConfig> {
+export async function resolveExpenseModuleConfig(
+  db: Db,
+  opts: { outletId?: string | null; companyId?: string | null } = {},
+): Promise<ResolvedExpenseModuleConfig> {
   const priority: { scope: ExpenseScope; scopeId: string | null }[] = []
-  let companyId: string | null = null
+  let companyId: string | null = opts.companyId || null
   if (opts.outletId) {
     const outlet = await db.outlet.findUnique({ where: { id: opts.outletId }, select: { companyId: true } })
-    companyId = outlet?.companyId || null
+    companyId = outlet?.companyId || companyId
     priority.push({ scope: 'OUTLET', scopeId: opts.outletId })
   }
+  if (!companyId) companyId = await resolveDefaultCompanyId(db)
   if (companyId) priority.push({ scope: 'COMPANY', scopeId: companyId })
   priority.push({ scope: 'GLOBAL', scopeId: null })
 

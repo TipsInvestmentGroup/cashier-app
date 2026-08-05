@@ -59,3 +59,31 @@ export function allowedCountersForCategory(category: string | null | undefined):
 // Food amount; see components/UploadSalesModal.tsx and /api/sales-metrics*).
 // Unrelated to allowedCountersForCategory above (that's product routing).
 export const SALES_METRIC_DEPARTMENTS = ['SHISHA', 'FOOD'] as const
+
+// ─── Expense module access grants (§4 Manage Access) ─────────────────────────
+// The grant vocabulary, kept here rather than in lib/expense-grants.ts because
+// that module imports prisma and so cannot be pulled into a client component.
+// lib/expense-grants.ts re-exports these for server callers, the same way
+// lib/cash-verify.ts re-exports CASH_VERIFIERS_FIXED above — one definition,
+// two audiences.
+export const EXPENSE_GRANT_TYPES = ['REQUEST', 'CUSTODIAN', 'FIRST_APPROVER', 'SECOND_APPROVER', 'ALLOCATOR'] as const
+
+// ALLOCATOR is reserved, not issued: the Second Approver's approval directly
+// executes a petty cash top-up allocation (decision 2026-08-05), so there is no
+// separate allocator to staff. The value exists so that splitting execution back
+// out later is a config change rather than a migration.
+export const EXPENSE_RESERVED_GRANT_TYPES: string[] = ['ALLOCATOR']
+
+// The six access flags exactly as §4 lists them. Note that the three custodian
+// flags are one grant type carrying a fund class, not three enum values —
+// holding the petty cash float does not make someone the Digital custodian, and
+// (grantType, fundClass) says that in one place instead of three branches
+// downstream.
+export const EXPENSE_GRANT_FLAGS: { grantType: string; fundClass: string | null; label: string; hint: string }[] = [
+  { grantType: 'REQUEST', fundClass: null, label: 'Requesting Access', hint: 'May submit an Expense Form.' },
+  { grantType: 'CUSTODIAN', fundClass: 'PETTY_CASH', label: 'Petty Cash Custodian', hint: 'Holds and disburses the petty cash float; may request a top-up.' },
+  { grantType: 'CUSTODIAN', fundClass: 'DIGITAL', label: 'Digital Expenses Custodian', hint: 'Pays approved requests from the bank/mobile-money account.' },
+  { grantType: 'CUSTODIAN', fundClass: 'CASHIER_CASH', label: 'Cashier Cash Custodian', hint: 'Disburses from the cashier drawer.' },
+  { grantType: 'FIRST_APPROVER', fundClass: null, label: 'First Approver', hint: 'First stage of the approval chain.' },
+  { grantType: 'SECOND_APPROVER', fundClass: null, label: 'Second Approver', hint: 'Final approval — also executes petty cash top-up allocations.' },
+]

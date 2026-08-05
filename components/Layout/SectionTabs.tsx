@@ -1,7 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useApi } from '@/hooks/useApi'
 import {
@@ -64,22 +64,35 @@ export const BILLS_TABS: Tab[] = [
   { href: '/cancellations', label: 'Cancellations', icon: Ban, roles: CASHIER_ROLES },
 ]
 
-export const PETTY_TABS: Tab[] = [
-  { href: '/petty-cash', label: 'Petty Cash', icon: Wallet, roles: CASHIER_ROLES },
+// The Expenses section (brief §1). The new Universal Expense & Disbursement
+// Framework's items lead; one ledger page serves all three fund classes via
+// ?fund= (SectionTabs matches on the query so they highlight independently),
+// which keeps the per-custodian ledger views (§2) as one screen rather than
+// three near-identical pages.
+//
+// The legacy Petty Cash flow (/petty-cash, /approvals, /petty-payments) is
+// RETAINED below the new items, not removed: it is still the live production
+// flow under the side-by-side rollout (docs/expense-disbursement-framework-
+// design.md decision 1), and hiding it before the cash-drawer cutover
+// (CASHIER_CUTOVER_ENABLED, lib/expense-cutover.ts) would strand a working
+// screen. These drop off once that cutover lands.
+export const EXPENSE_TABS: Tab[] = [
+  { href: '/expense-requests', label: 'Expense Form', icon: Receipt, roles: CASHIER_ROLES },
+  { href: '/petty-cash-ledger?fund=CASHIER_CASH', label: 'Cashier Ledger', icon: BookOpen, roles: CASHIER_ROLES },
+  { href: '/petty-cash-ledger?fund=PETTY_CASH', label: 'Petty Cash Ledger', icon: BookOpen, roles: CASHIER_ROLES },
+  { href: '/petty-cash-ledger?fund=DIGITAL', label: 'Digital Expenses Ledger', icon: CreditCard, roles: CASHIER_ROLES },
+  { href: '/cash-reconciliation', label: 'Cash Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+  { href: '/digital-payment-reconciliation', label: 'Digital Payment Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+  { href: '/digital-expenses', label: 'Digital Expense Form', icon: CreditCard, roles: CASHIER_ROLES },
+  // Legacy flow — retained until cutover (see note above).
+  { href: '/petty-cash', label: 'Petty Cash (legacy)', icon: Wallet, roles: CASHIER_ROLES },
   { href: '/approvals', label: 'Approval Requests', icon: ClipboardCheck, roles: CASHIER_ROLES },
   { href: '/petty-payments', label: 'Payments', icon: CreditCard, roles: CASHIER_ROLES },
-  // Universal Expense & Disbursement Framework — a new, separate engine
-  // alongside the legacy Petty Cash flow above (side-by-side rollout, see
-  // docs/expense-disbursement-framework-design.md decision 1, and the
-  // request-type-by-request-type migration plan). Digital Expenses is listed
-  // first among these because fund-backed (Accountant) requests have already
-  // been cut over here (migration Phase 2); Expense Requests/Petty Cash
-  // Ledger become equally primary once the cash-drawer cutover (Phase 3,
-  // gated by CASHIER_CUTOVER_ENABLED in lib/expense-cutover.ts) goes live.
-  { href: '/digital-expenses', label: 'Digital Expenses', icon: CreditCard, roles: CASHIER_ROLES },
-  { href: '/expense-requests', label: 'Expense Requests', icon: Receipt, roles: CASHIER_ROLES },
-  { href: '/petty-cash-ledger', label: 'Petty Cash Ledger', icon: BookOpen, roles: CASHIER_ROLES },
 ]
+
+// Back-compat alias: several pages import PETTY_TABS. Kept pointing at the same
+// list so the rename is one edit here, not a sweep across every screen.
+export const PETTY_TABS = EXPENSE_TABS
 
 export const FINANCE_TABS: Tab[] = [
   { href: '/analytics', label: 'Analytics', icon: LayoutDashboard, roles: MGMT },
@@ -115,9 +128,22 @@ export const FINANCE_TABS: Tab[] = [
   { href: '/payment-integration-connectors', label: 'Payment Connectors', icon: Landmark, roles: MGMT },
 ]
 
-/** Horizontal tab bar shown at the top of a section's pages. */
+/** Horizontal tab bar shown at the top of a section's pages. Wrapped in Suspense
+ *  because the inner component reads useSearchParams (to tell query-differentiated
+ *  tabs apart) — without the boundary that read would force every page rendering
+ *  a SectionTabs into client-side rendering during prerender. The fallback is a
+ *  bare bar so there is no layout jump before the query resolves. */
 export function SectionTabs({ tabs }: { tabs: Tab[] }) {
+  return (
+    <Suspense fallback={<div className="mb-5 h-10" />}>
+      <SectionTabsInner tabs={tabs} />
+    </Suspense>
+  )
+}
+
+function SectionTabsInner({ tabs }: { tabs: Tab[] }) {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { user } = useAuth()
   const { request } = useApi()
   const [mode, setMode] = useState<'DEFAULT' | 'TRANSACTION_VERIFICATION' | 'HYBRID' | null>(null)
@@ -137,8 +163,20 @@ export function SectionTabs({ tabs }: { tabs: Tab[] }) {
     if (t.modeGate?.forRoles.includes(user?.role || '') && mode !== null && mode !== 'HYBRID' && mode !== t.modeGate.mode) return false
     return true
   })
-  // Longest matching href wins so nested routes don't also light up their parent.
-  const matches = (h: string) => pathname === h || pathname.startsWith(h + '/')
+  // Longest matching href wins so nested routes don't also light up their
+  // parent. Several tabs can share a path and differ only by query string —
+  // e.g. one ledger page serving Cashier/Petty Cash/Digital via ?fund= — so a
+  // tab whose href carries a query only matches when that query is present too.
+  // Without this, all three ledger tabs (same path) would highlight at once.
+  const matches = (href: string) => {
+    const [path, query] = href.split('?')
+    const pathOk = pathname === path || pathname.startsWith(path + '/')
+    if (!pathOk) return false
+    if (!query) return true
+    return new URLSearchParams(query).get('fund') === searchParams.get('fund')
+  }
+  // A query-bearing tab is more specific than a bare one on the same path, so
+  // rank by full href length (query included) to break the tie toward it.
   const best = visible.filter((t) => matches(t.href)).sort((a, b) => b.href.length - a.href.length)[0]?.href
 
   return (

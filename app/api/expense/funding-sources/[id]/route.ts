@@ -30,6 +30,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.currency !== undefined) data.currency = String(body.currency)
   if (body.isActive !== undefined) data.isActive = body.isActive === true
 
+  // Per-fund approval + alert policy (§3/§7). Negative values are clamped to 0
+  // rather than rejected, since 0 is the meaningful "off" for all three: no
+  // threshold skip, no escalation reminders, no low-balance alert.
+  if (body.approvalThreshold !== undefined) data.approvalThreshold = Math.max(0, Number(body.approvalThreshold) || 0)
+  if (body.escalationHours !== undefined) data.escalationHours = Math.max(0, Math.floor(Number(body.escalationHours) || 0))
+  if (body.lowBalanceThreshold !== undefined) data.lowBalanceThreshold = Math.max(0, Number(body.lowBalanceThreshold) || 0)
+
   const source = await prisma.fundingSource.update({ where: { id }, data })
   await prisma.auditLog.create({
     data: { userId: user.userId, action: 'UPDATE', entity: 'FundingSource', entityId: id, details: `Updated funding source ${source.name}` },

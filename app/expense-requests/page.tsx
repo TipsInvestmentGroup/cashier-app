@@ -11,10 +11,16 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { MoneyInput } from '@/components/MoneyInput'
 import { ExpenseDynamicFields } from '@/components/ExpenseDynamicFields'
+import { FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
 import toast from 'react-hot-toast'
 
 interface RequestType { id: string; name: string; allowedCategoryIds: string | null; isActive: boolean }
 interface Category { id: string; name: string; isActive: boolean }
+interface FundingSourceOption {
+  id: string; name: string; sourceType: string; isActive: boolean
+  fundClass: FundClass | null; allocationMode: string | null
+  availableBalance: number; approvalThreshold: number
+}
 interface ExpenseItem { id?: string; detail: string; unit: number; unitCost: number; amount: number }
 interface ExpenseRequest {
   id: string; purpose: string; amount: number; currency: string; status: string; createdAt: string
@@ -44,6 +50,11 @@ export default function ExpenseRequestsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  const [fundingSources, setFundingSources] = useState<FundingSourceOption[]>([])
+  const [requesters, setRequesters] = useState<{ id: string; name: string }[]>([])
+
+  const [fundingSourceId, setFundingSourceId] = useState('')
+  const [requestedById, setRequestedById] = useState('')
   const [requestTypeId, setRequestTypeId] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [purpose, setPurpose] = useState('')
@@ -57,18 +68,35 @@ export default function ExpenseRequestsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [its, types, cats, users] = await Promise.all([
+      const [its, types, cats, users, sources, eligible] = await Promise.all([
         request('/api/expense/requests'), request('/api/expense/request-types'), request('/api/expense/categories'),
         request('/api/users').catch(() => []),
+        request('/api/expense/funding-sources').catch(() => []),
+        // §4: who may be named as the requester comes from the access list, not
+        // from the user table. Empty means requesting access hasn't been
+        // configured yet, in which case the form falls back to the caller.
+        request('/api/expense/access-grants/eligible?grantType=REQUEST').catch(() => []),
       ])
       setItems(its || [])
       setRequestTypes((types || []).filter((t: RequestType) => t.isActive))
       setCategories((cats || []).filter((c: Category) => c.isActive))
       setNames(Object.fromEntries((users || []).map((u: { id: string; name: string }) => [u.id, u.name])))
+      setFundingSources((sources || []).filter((s: FundingSourceOption) => s.isActive && s.fundClass))
+      setRequesters(eligible || [])
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load') }
     finally { setLoading(false) }
   }, [request])
   useEffect(() => { load() }, [load])
+
+  const selectedFund = fundingSources.find((s) => s.id === fundingSourceId)
+  const requestedAmount = hasItems ? itemsTotal : Number(amount) || 0
+  // §5: flag before submit rather than only on the server round-trip — the
+  // requester can then fix the amount or pick a different fund instead of
+  // discovering the problem after the request exists.
+  const overBalance = !!selectedFund && requestedAmount > 0 && requestedAmount > selectedFund.availableBalance
+  // §3: selecting a fund auto-assigns the custodian who will pay it, and the
+  // threshold tells the requester up-front whether this needs approval at all.
+  const skipsApproval = !!selectedFund && selectedFund.approvalThreshold > 0 && requestedAmount > 0 && requestedAmount <= selectedFund.approvalThreshold
 
   const selectedType = requestTypes.find((t) => t.id === requestTypeId)
   const allowedCategoryIds = selectedType ? parseIdList(selectedType.allowedCategoryIds) : null
@@ -78,10 +106,11 @@ export default function ExpenseRequestsPage() {
   const updItem = (i: number, patch: Partial<{ detail: string; unit: string; unitCost: string }>) => setLineItems(lineItems.map((r, x) => (x === i ? { ...r, ...patch } : r)))
   const rmItem = (i: number) => setLineItems(lineItems.filter((_, x) => x !== i))
 
-  const resetForm = () => { setRequestTypeId(''); setCategoryId(''); setPurpose(''); setAmount(''); setLineItems([]); setFieldValues({}) }
+  const resetForm = () => { setFundingSourceId(''); setRequestedById(''); setRequestTypeId(''); setCategoryId(''); setPurpose(''); setAmount(''); setLineItems([]); setFieldValues({}) }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!fundingSourceId) return toast.error('Select where this will be paid from')
     if (!requestTypeId) return toast.error('Select a request type')
     if (!categoryId) return toast.error('Select a category')
     if (!purpose.trim()) return toast.error('Purpose is required')
@@ -92,9 +121,19 @@ export default function ExpenseRequestsPage() {
 
     setSubmitting(true)
     try {
-      const created = await request('/api/expense/requests', { method: 'POST', body: JSON.stringify({ requestTypeId, categoryId, purpose, amount: finalAmount, items: cleanItems, fieldValues }) })
-      await request(`/api/expense/requests/${created.id}/submit`, { method: 'POST' })
-      toast.success('Request submitted!')
+      const created = await request('/api/expense/requests', {
+        method: 'POST',
+        body: JSON.stringify({
+          fundingSourceId, requestTypeId, categoryId, purpose, amount: finalAmount, items: cleanItems, fieldValues,
+          ...(requestedById ? { requestedById } : {}),
+        }),
+      })
+      // The server's balance check is authoritative; surface its warning rather
+      // than assuming the client-side estimate matched (the fund's balance can
+      // move between page load and submit).
+      if (created.balanceWarning) toast(`Submitted, but flagged: ${created.balanceWarning}`, { icon: '⚠️', duration: 6000 })
+      const submitted = await request(`/api/expense/requests/${created.id}/submit`, { method: 'POST' })
+      toast.success(submitted?.skipReason ? 'Submitted — no approval needed, ready to pay' : 'Request submitted!')
       resetForm(); load()
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Error submitting request') }
     finally { setSubmitting(false) }
@@ -173,12 +212,66 @@ export default function ExpenseRequestsPage() {
             </div>
           </div>
 
-          {/* RIGHT: New Expense Request form */}
+          {/* RIGHT: Expense Form (§3) */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 lg:sticky lg:top-4">
-              <h2 className="text-lg font-bold text-gray-800 mb-1">🧾 New Expense Request</h2>
-              <p className="text-xs text-gray-400 mb-4">Choose a request type — its allowed categories, approval, and budget rules all follow from that.</p>
+              <h2 className="text-lg font-bold text-gray-800 mb-1">🧾 Expense Form</h2>
+              <p className="text-xs text-gray-400 mb-4">Start with the fund this will be paid from — the custodian, approval chain, and available balance all follow from that.</p>
               <form onSubmit={submit} className="space-y-3">
+                {/* §3: Funding Source is the FIRST field and drives everything below it. */}
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Pay From *</label>
+                  <select value={fundingSourceId} onChange={(e) => setFundingSourceId(e.target.value)}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white" required>
+                    <option value="">Select a fund…</option>
+                    {fundingSources.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.fundClass ? FUND_CLASS_LABELS[s.fundClass] : s.sourceType} — {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  {fundingSources.length === 0 && (
+                    <p className="text-[11px] text-amber-600 mt-1">No funds configured yet — ask an admin to add one in Expense Settings.</p>
+                  )}
+                  {selectedFund && (
+                    <div className="mt-2 space-y-1">
+                      <p className="text-[11px] text-gray-500">
+                        Available: <span className={`font-semibold ${overBalance ? 'text-red-600' : 'text-gray-700'}`}>{formatCurrency(selectedFund.availableBalance)}</span>
+                        <span className="text-gray-400">
+                          {selectedFund.allocationMode === 'ROLLING_CASH_BALANCE' ? " · today's cash position"
+                            : selectedFund.allocationMode === 'BANK_BALANCE' ? ' · linked bank account'
+                            : ' · allocated float'}
+                        </span>
+                      </p>
+                      <FundCustodians fundingSourceId={selectedFund.id} />
+                      {overBalance && (
+                        <p className="text-[11px] text-red-600">
+                          This is more than the fund has available. It can still be submitted, but it will be flagged for the approver.
+                        </p>
+                      )}
+                      {skipsApproval && (
+                        <p className="text-[11px] text-emerald-700">
+                          Below this fund&apos;s {formatCurrency(selectedFund.approvalThreshold)} threshold — goes straight to the custodian without approval.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* §4: only people holding Requesting Access appear here. Hidden
+                    entirely until access is configured, when the requester is
+                    always the signed-in user. */}
+                {requesters.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Requested By</label>
+                    <select value={requestedById} onChange={(e) => setRequestedById(e.target.value)}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white">
+                      <option value="">{user?.name ? `${user.name} (me)` : 'Me'}</option>
+                      {requesters.filter((r) => r.id !== user?.id).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Request Type *</label>
                   <select value={requestTypeId} onChange={(e) => { setRequestTypeId(e.target.value); setCategoryId('') }}
@@ -245,4 +338,28 @@ export default function ExpenseRequestsPage() {
       </div>
     </AppShell>
   )
+}
+
+/** §3: "selecting a funding source auto-assigns the relevant custodian" — shown
+ *  so the requester knows who will actually pay this before submitting, and so a
+ *  fund with nobody assigned is obvious rather than silently unpayable. */
+function FundCustodians({ fundingSourceId }: { fundingSourceId: string }) {
+  const { request } = useApi()
+  const [names, setNames] = useState<string[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    request(`/api/expense/funding-sources/${fundingSourceId}/custodians`)
+      .then((rows: { user: { name: string } | null }[]) => {
+        if (!cancelled) setNames(rows.map((r) => r.user?.name).filter((n): n is string => !!n))
+      })
+      .catch(() => { if (!cancelled) setNames([]) })
+    return () => { cancelled = true }
+  }, [request, fundingSourceId])
+
+  if (names === null) return null
+  if (!names.length) {
+    return <p className="text-[11px] text-amber-600">No custodian assigned to this fund yet — an admin needs to assign one before it can be paid.</p>
+  }
+  return <p className="text-[11px] text-gray-500">Paid by: <span className="text-gray-700">{names.join(', ')}</span></p>
 }

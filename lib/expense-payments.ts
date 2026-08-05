@@ -100,6 +100,16 @@ export async function createExpensePayment(input: CreateExpensePaymentInput): Pr
     for (const alloc of input.allocations) {
       const request = requests.find((r) => r.id === alloc.expenseRequestId)
       if (!request) throw new Error(`Expense request ${alloc.expenseRequestId} not found`)
+      // A direction=IN row is a fund TOP-UP request, not a disbursement — it
+      // brings money into the fund and is settled by an allocation, never by a
+      // payment out. It would otherwise pass the status gate below (an approved
+      // top-up is APPROVED), so paying against one would move money the wrong
+      // way and credit the ledger twice. Guarded here rather than only at the
+      // API layer because this is the single choke point every payment path
+      // goes through.
+      if (request.direction === 'IN') {
+        throw new Error(`"${request.purpose}" is a top-up request, not a payable expense`)
+      }
       if (request.status !== 'APPROVED' && request.status !== 'PARTIALLY_PAID') {
         throw new Error(`Request "${request.purpose}" is ${request.status}, not payable`)
       }

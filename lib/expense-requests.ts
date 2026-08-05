@@ -9,18 +9,12 @@ import type { Db } from '@/lib/ledger'
 import { roundMoney } from '@/lib/utils'
 import { computeActual } from '@/lib/finance-budget'
 import type { BudgetValidationMode, ExpenseRequestStatus } from '@/lib/expense-config'
-import { openNextApprovalStep, cancelPendingExpenseApproval } from '@/lib/expense-workflow'
+import { resolveExpenseModuleConfig } from '@/lib/expense-config'
+import { openNextApprovalStep, cancelPendingExpenseApproval, resolveApprovalPlan, executeTopUpAllocation } from '@/lib/expense-workflow'
+import { getFundingSourceBalance } from '@/lib/expense-ledger'
+import { listFundingSourceCustodians } from '@/lib/expense-access'
+import { allowsManualAllocation } from '@/lib/expense-funds'
 import { createNotification } from '@/lib/notifications'
-
-function parseRoleList(raw: string | null | undefined): string[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.map(String) : []
-  } catch {
-    return []
-  }
-}
 
 function parseIdList(raw: string | null | undefined): string[] | null {
   if (!raw) return null // null = no restriction
@@ -53,6 +47,13 @@ export interface CreateExpenseRequestInput {
   dueDate?: Date | null
   items?: ExpenseItemInput[]
   fieldValues?: Record<string, string>
+  /** §3 — the fund this will be paid from. Required on the Expense Form; still
+   *  optional here so pre-upgrade callers keep working unchanged. */
+  fundingSourceId?: string | null
+  /** §8 — OUT (a disbursement, the default) or IN (a fund top-up request). */
+  direction?: 'OUT' | 'IN'
+  /** A payment reference carried to the ledger (cheque/voucher/txn no.). */
+  reference?: string | null
 }
 
 export interface CreateExpenseRequestResult {
@@ -60,6 +61,10 @@ export interface CreateExpenseRequestResult {
   status: ExpenseRequestStatus
   amount: number
   budgetWarning: string | null
+  /** §3/§5 — set when the amount exceeds the selected fund's available balance
+   *  and the module's over-budget policy is WARN/APPROVE ("allow but flag").
+   *  BLOCK throws instead. */
+  balanceWarning: string | null
 }
 
 /**
@@ -94,6 +99,47 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
 
   if (category.spendingLimit > 0 && amount > category.spendingLimit) {
     throw new Error(`Amount ${amount} exceeds the ${category.name} category limit of ${category.spendingLimit}`)
+  }
+
+  // ── §3/§5: validate against the SELECTED FUND's available balance ──
+  // "Applying the existing Warn-allow-but-flag policy per fund rather than
+  // globally" — the policy VALUE is the existing ExpenseModuleConfig
+  // allowOverBudget (BLOCK|WARN|APPROVE); what changes is that it is now
+  // evaluated against each fund's own computed balance instead of one shared
+  // pool. A top-up (direction=IN) is skipped: it ADDS to the fund, so measuring
+  // it against the fund's current balance would be backwards.
+  let balanceWarning: string | null = null
+  let fundingSourceId: string | null = null
+  if (input.fundingSourceId) {
+    const source = await db.fundingSource.findUnique({ where: { id: input.fundingSourceId } })
+    if (!source || !source.isActive) throw new Error('Funding source not found or inactive')
+
+    const allowedSourceIds = parseIdList(requestType.allowedFundingSourceIds)
+    if (allowedSourceIds && !allowedSourceIds.includes(source.id)) {
+      throw new Error(`${source.name} is not an allowed funding source for ${requestType.name}`)
+    }
+    fundingSourceId = source.id
+
+    // A top-up only makes sense for a manually-allocated fund. A cashier drawer
+    // follows the till and a digital fund follows the bank, so there is nothing
+    // to "top up" — the same rule allowsManualAllocation enforces on the ledger
+    // screen, applied here so the request can't even be created.
+    if ((input.direction ?? 'OUT') === 'IN' && !allowsManualAllocation(source.sourceType)) {
+      throw new Error(`${source.name} cannot be topped up — its balance is computed live, not allocated`)
+    }
+
+    if ((input.direction ?? 'OUT') === 'OUT') {
+      if (source.dailyLimit > 0 && amount > source.dailyLimit) {
+        throw new Error(`Amount ${amount} exceeds ${source.name}'s per-request limit of ${source.dailyLimit}`)
+      }
+      const available = await getFundingSourceBalance(db, source)
+      if (amount > available) {
+        const message = `${source.name} has ${available} available, less than the ${amount} requested`
+        const config = await resolveExpenseModuleConfig(db, { outletId: input.outletId ?? null, companyId: input.companyId })
+        if (config.allowOverBudget === 'BLOCK') throw new Error(message)
+        balanceWarning = message
+      }
+    }
   }
 
   let budgetWarning: string | null = null
@@ -141,40 +187,84 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
       departmentId: input.departmentId || null,
       eventId: input.eventId || null,
       dueDate: input.dueDate || null,
+      fundingSourceId,
+      direction: input.direction ?? 'OUT',
+      reference: input.reference?.trim() || null,
       items: items.length ? { create: items.map((it) => ({ detail: it.detail, unit: it.unit ?? 1, unitCost: it.unitCost ?? 0, amount: roundMoney(it.amount) })) } : undefined,
       fieldValues: fieldValueRows.length ? { create: fieldValueRows } : undefined,
     },
   })
 
-  return { id: request.id, status: request.status as ExpenseRequestStatus, amount: request.amount, budgetWarning }
+  return { id: request.id, status: request.status as ExpenseRequestStatus, amount: request.amount, budgetWarning, balanceWarning }
 }
 
 /**
- * DRAFT → PENDING_APPROVAL when the request type has approver roles
- * configured (opening the first WorkflowApproval level via
- * lib/expense-workflow.ts), else straight to APPROVED (mirrors CreditGroup's
- * requiresApproval / approvalRequiredDefault behavior: no approvers
- * configured ⇒ nothing to wait for).
+ * DRAFT → PENDING_APPROVAL, or straight to APPROVED when no approval is needed
+ * (see resolveApprovalPlan: the request type configures no approvers, or the
+ * amount is at/below the fund's approvalThreshold — §3's small-request
+ * shortcut).
+ *
+ * Refuses to submit when approval IS required but nobody holds FIRST_APPROVER
+ * for the fund. Auto-approving in that case would let a forgotten access grant
+ * silently turn into unapproved money going out; leaving it PENDING with no
+ * approver would strand it invisibly. An explicit error is the only honest
+ * outcome, and it names the fix.
  */
-export async function submitExpenseRequest(db: Db, requestId: string): Promise<{ status: ExpenseRequestStatus }> {
+export async function submitExpenseRequest(db: Db, requestId: string): Promise<{ status: ExpenseRequestStatus; skipReason: string | null }> {
   const request = await db.expenseRequest.findUnique({ where: { id: requestId }, include: { requestType: true } })
   if (!request) throw new Error('Expense request not found')
   if (request.status !== 'DRAFT') throw new Error(`Cannot submit a request in status ${request.status}`)
 
-  const roles = parseRoleList(request.requestType.approverRoles)
-  const status: ExpenseRequestStatus = roles.length ? 'PENDING_APPROVAL' : 'APPROVED'
-  await db.expenseRequest.update({ where: { id: requestId }, data: { status } })
-  if (status === 'PENDING_APPROVAL') await openNextApprovalStep(db, requestId)
+  const plan = await resolveApprovalPlan(db, request)
+  if (!plan.skip && !plan.stages.length) {
+    throw new Error(
+      'This request needs approval, but nobody has First Approver access for this fund and outlet. ' +
+      'Grant it under Setup → Expense Settings → Manage Access, then submit again.'
+    )
+  }
 
-  await createNotification({
+  const submittedNote = () => createNotification({
     userId: request.requestedById,
     type: 'EXPENSE_REQUEST_SUBMITTED',
     title: `${request.requestType.name} submitted`,
-    message: `Your request "${request.purpose}" for ${request.amount} ${request.currency} has been submitted${status === 'PENDING_APPROVAL' ? ' and is awaiting approval' : ' and auto-approved'}.`,
+    message: `Your ${request.direction === 'IN' ? 'top-up' : 'request'} "${request.purpose}" for ${request.amount} ${request.currency} has been submitted${
+      plan.skip ? ` and needs no approval (${plan.reason})` : ' and is awaiting approval'
+    }.`,
     entityType: 'ExpenseRequest', entityId: request.id,
   }).catch(() => {})
 
-  return { status }
+  // Needs approval: open the first stage and wait.
+  if (!plan.skip) {
+    await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'PENDING_APPROVAL' } })
+    await openNextApprovalStep(db, requestId)
+    await submittedNote()
+    return { status: 'PENDING_APPROVAL', skipReason: null }
+  }
+
+  // No approval needed. A top-up (§8) that skips approval is allocated
+  // immediately — the shortcut must not leave money un-credited — so it runs the
+  // same executor the final approver would, ending CLOSED. A disbursement that
+  // skips approval is APPROVED and dropped into the custodian's Ready-to-Pay
+  // queue instead.
+  if (request.direction === 'IN') {
+    const { status } = await executeTopUpAllocation(db, requestId)
+    await submittedNote()
+    return { status, skipReason: plan.reason }
+  }
+
+  await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'APPROVED' } })
+  await submittedNote()
+  if (request.fundingSourceId) {
+    const custodians = await listFundingSourceCustodians(request.fundingSourceId).catch(() => [])
+    await Promise.all(custodians.map((c) => createNotification({
+      userId: c.userId,
+      type: 'EXPENSE_REQUEST_READY_FOR_PAYMENT',
+      title: `${request.requestType.name} ready for payment`,
+      message: `"${request.purpose}" for ${request.amount} ${request.currency} needs no approval and is ready to be paid.`,
+      entityType: 'ExpenseRequest', entityId: request.id,
+    }).catch(() => {})))
+  }
+  return { status: 'APPROVED', skipReason: plan.reason }
 }
 
 // decideExpenseRequest (M3's direct status flip) is superseded by

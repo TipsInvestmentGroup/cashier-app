@@ -4,6 +4,12 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency } from '@/lib/utils'
+// Client-safe: lib/expense-funds.ts has no runtime imports (its only import is
+// type-only, so it is erased), and the grant vocabulary lives in
+// lib/shared-constants.ts precisely so this page can read it without pulling
+// prisma into the bundle — lib/expense-grants.ts re-exports it server-side.
+import { FUND_CLASSES, FUND_CLASS_LABELS, fundClassOf, allowsManualAllocation, type FundClass } from '@/lib/expense-funds'
+import { EXPENSE_GRANT_FLAGS } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 
 type OverBudget = 'BLOCK' | 'WARN' | 'APPROVE'
@@ -34,10 +40,16 @@ interface Category {
 interface FundingSource {
   id: string; code: string; name: string; sourceType: string
   companyPaymentAccountId: string | null; companyPaymentAccount?: { id: string; accountName: string; bankName: string | null } | null
-  openingBalance: number; currentBalance: number; liveBalance?: number; dailyLimit: number; isActive: boolean
+  outletId: string | null
+  openingBalance: number; currentBalance: number; dailyLimit: number; isActive: boolean
+  // Computed per fund type by the API (§5) — never a stored field.
+  availableBalance: number
+  fundClass: FundClass | null; allocationMode: string | null; supportsManualAllocation: boolean
+  approvalThreshold: number; escalationHours: number; lowBalanceThreshold: number
   _count?: { payments: number }
 }
 interface UserOption { id: string; name: string; role: string }
+interface OutletOption { id: string; name: string }
 interface Account { id: string; code: string; name: string; type: string }
 interface CompanyPaymentAccount { id: string; accountName: string; bankName: string | null; paymentChannel: { label: string } }
 
@@ -71,7 +83,7 @@ function ChipToggle({ options, value, onChange }: { options: string[]; value: st
 }
 const inputCls = 'px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white w-full'
 
-type Tab = 'module' | 'requestTypes' | 'categories' | 'fundingSources'
+type Tab = 'module' | 'requestTypes' | 'categories' | 'fundingSources' | 'manageAccess'
 
 export default function ExpenseSettingsPage() {
   const [tab, setTab] = useState<Tab>('module')
@@ -84,7 +96,7 @@ export default function ExpenseSettingsPage() {
           <p className="text-gray-500 text-sm">Configure the expense/disbursement module — request types, categories, and funding sources are admin-defined rows, not code. Runs side-by-side with the existing Petty Cash flow until you opt a request type into it.</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {([['module', 'Module'], ['requestTypes', 'Request Types'], ['categories', 'Categories'], ['fundingSources', 'Funding Sources']] as [Tab, string][]).map(([k, label]) => (
+          {([['module', 'Module'], ['requestTypes', 'Request Types'], ['categories', 'Categories'], ['fundingSources', 'Funding Sources'], ['manageAccess', 'Manage Access']] as [Tab, string][]).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)}
               className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${tab === k ? 'bg-indigo-600 text-white shadow' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               {label}
@@ -95,6 +107,7 @@ export default function ExpenseSettingsPage() {
         {tab === 'requestTypes' && <RequestTypesTab />}
         {tab === 'categories' && <CategoriesTab />}
         {tab === 'fundingSources' && <FundingSourcesTab />}
+        {tab === 'manageAccess' && <ManageAccessTab />}
       </div>
     </AppShell>
   )
@@ -503,7 +516,7 @@ function CategoryEditor({ initial, accounts, onCancel, onSaved }: {
 }
 
 // ─── Funding Sources tab ─────────────────────────────────────────────────────
-const blankSource = { name: '', code: '', sourceType: 'CASH' as string, companyPaymentAccountId: '', openingBalance: 0, dailyLimit: 0 }
+const blankSource = { name: '', code: '', sourceType: 'CASH' as string, companyPaymentAccountId: '', openingBalance: 0, dailyLimit: 0, approvalThreshold: 0, escalationHours: 0, lowBalanceThreshold: 0 }
 
 function FundingSourcesTab() {
   const { request } = useApi()
@@ -537,27 +550,39 @@ function FundingSourcesTab() {
       <div className="flex justify-end">
         <button onClick={() => setCreating(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700">+ New funding source</button>
       </div>
-      {creating && <SourceEditor initial={blankSource} accounts={accounts} users={users} onCancel={() => setCreating(false)} onSaved={() => { setCreating(false); load() }} />}
+      {creating && <SourceEditor initial={blankSource} accounts={accounts} onCancel={() => setCreating(false)} onSaved={() => { setCreating(false); load() }} />}
 
       <Card>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-              <th className="py-2 pr-3">Funding source</th><th className="pr-3">Type</th><th className="pr-3">Balance</th><th className="pr-3">Daily limit</th><th className="pr-3">Payments</th><th className="pr-3">Status</th><th></th>
+              <th className="py-2 pr-3">Funding source</th><th className="pr-3">Fund</th><th className="pr-3">Available balance</th><th className="pr-3">Approval</th><th className="pr-3">Payments</th><th className="pr-3">Status</th><th></th>
             </tr></thead>
             <tbody>
               {sources.map((s) => (
                 <tr key={s.id} className="border-b border-gray-50">
                   <td className="py-2 pr-3"><span className="font-medium text-gray-800">{s.name}</span><span className="block text-[11px] text-gray-400">{s.code}{s.companyPaymentAccount ? ` · ${s.companyPaymentAccount.accountName}` : ''}</span></td>
-                  <td className="pr-3 text-gray-600">{s.sourceType}</td>
                   <td className="pr-3 text-gray-600">
-                    {s.sourceType === 'CASH' || s.sourceType === 'OTHER'
-                      ? formatCurrency(s.currentBalance)
-                      : s.sourceType === 'CASHIER_DRAWER'
-                        ? <>{formatCurrency(s.liveBalance ?? 0)}<span className="block text-[10px] text-gray-400">from today&apos;s cash position</span></>
-                        : <span className="text-gray-400">from GL</span>}
+                    {s.fundClass ? FUND_CLASS_LABELS[s.fundClass] : <span className="text-gray-400">—</span>}
+                    <span className="block text-[10px] text-gray-400">{s.sourceType}</span>
                   </td>
-                  <td className="pr-3 text-gray-600">{s.dailyLimit > 0 ? formatCurrency(s.dailyLimit) : '—'}</td>
+                  {/* §5: one computed figure per fund, with where it comes from —
+                      the source matters as much as the number when a custodian
+                      is deciding whether they can pay something. */}
+                  <td className="pr-3 text-gray-600">
+                    {formatCurrency(s.availableBalance)}
+                    <span className="block text-[10px] text-gray-400">
+                      {s.allocationMode === 'ROLLING_CASH_BALANCE' ? "today's cash position"
+                        : s.allocationMode === 'BANK_BALANCE' ? 'linked account (GL)'
+                        : s.allocationMode === 'FIXED_ALLOCATION' ? 'allocated float'
+                        : 'stored balance'}
+                    </span>
+                  </td>
+                  <td className="pr-3 text-gray-600">
+                    {s.approvalThreshold > 0
+                      ? <>≤ {formatCurrency(s.approvalThreshold)}<span className="block text-[10px] text-gray-400">skips approval</span></>
+                      : <span className="text-gray-400">always required</span>}
+                  </td>
                   <td className="pr-3 text-gray-600">{s._count?.payments ?? 0}</td>
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${s.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{s.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="text-right whitespace-nowrap">
@@ -574,26 +599,46 @@ function FundingSourcesTab() {
 
       {editing && (() => {
         const s = sources.find((x) => x.id === editing)!
-        return <SourceEditor initial={{ id: s.id, name: s.name, code: s.code, sourceType: s.sourceType, companyPaymentAccountId: s.companyPaymentAccountId || '', openingBalance: s.openingBalance, dailyLimit: s.dailyLimit }}
-          accounts={accounts} users={users} isEditMode onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
+        return <SourceEditor initial={{
+          id: s.id, name: s.name, code: s.code, sourceType: s.sourceType, companyPaymentAccountId: s.companyPaymentAccountId || '',
+          openingBalance: s.openingBalance, dailyLimit: s.dailyLimit, outletId: s.outletId ?? null,
+          approvalThreshold: s.approvalThreshold, escalationHours: s.escalationHours, lowBalanceThreshold: s.lowBalanceThreshold,
+        }}
+          accounts={accounts} isEditMode onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       })()}
     </div>
   )
 }
 
-function CustodianPicker({ fundingSourceId, users }: { fundingSourceId: string; users: UserOption[] }) {
+// Eligibility comes from the §4 access list, NOT from User.role: offering
+// everyone with a management role would let an admin assign a fund to someone
+// the access list never authorized, and the server now rejects that anyway
+// (lib/expense-access.ts assignFundingSourceCustodian). Assignment is still a
+// separate act — holding "Petty Cash Custodian" makes you eligible for every
+// petty cash fund, not automatically assigned to any of them.
+function CustodianPicker({ fundingSourceId, fundClass, outletId }: {
+  fundingSourceId: string; fundClass: FundClass | null; outletId: string | null
+}) {
   const { request } = useApi()
   const [assignedIds, setAssignedIds] = useState<string[]>([])
+  const [eligible, setEligible] = useState<UserOption[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const rows: { userId: string }[] = await request(`/api/expense/funding-sources/${fundingSourceId}/custodians`)
-      setAssignedIds(rows.map((r) => r.userId))
+      const params = new URLSearchParams({ grantType: 'CUSTODIAN' })
+      if (fundClass) params.set('fundClass', fundClass)
+      if (outletId) params.set('outletId', outletId)
+      const [rows, elig] = await Promise.all([
+        request(`/api/expense/funding-sources/${fundingSourceId}/custodians`),
+        request(`/api/expense/access-grants/eligible?${params.toString()}`).catch(() => []),
+      ])
+      setAssignedIds((rows as { userId: string }[]).map((r) => r.userId))
+      setEligible(elig || [])
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load custodians') }
     finally { setLoading(false) }
-  }, [request, fundingSourceId])
+  }, [request, fundingSourceId, fundClass, outletId])
   useEffect(() => { load() }, [load])
 
   const toggle = async (userId: string) => {
@@ -604,11 +649,9 @@ function CustodianPicker({ fundingSourceId, users }: { fundingSourceId: string; 
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not update custodian') }
   }
 
-  const eligible = users.filter((u) => ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN'].includes(u.role))
-
   return (
     <div className="mb-3">
-      <span className="text-xs text-gray-500 block mb-1">Custodians <span className="text-gray-400">(who can receive/disburse this fund)</span></span>
+      <span className="text-xs text-gray-500 block mb-1">Custodians <span className="text-gray-400">(who holds and disburses this fund)</span></span>
       {loading ? <p className="text-xs text-gray-400">Loading…</p> : (
         <div className="flex flex-wrap gap-2 mt-2">
           {eligible.map((u) => (
@@ -617,16 +660,26 @@ function CustodianPicker({ fundingSourceId, users }: { fundingSourceId: string; 
               {u.name}
             </button>
           ))}
-          {!eligible.length && <p className="text-xs text-gray-400">No eligible users found</p>}
+          {!eligible.length && (
+            <p className="text-xs text-gray-400">
+              {fundClass
+                ? `Nobody has ${FUND_CLASS_LABELS[fundClass]} Custodian access${outletId ? ' for this outlet' : ''} yet — grant it under Manage Access first.`
+                : 'This fund type has no custodian class, so no eligibility applies.'}
+            </p>
+          )}
         </div>
       )}
     </div>
   )
 }
 
-function SourceEditor({ initial, accounts, users, isEditMode, onCancel, onSaved }: {
-  initial: { id?: string; name: string; code: string; sourceType: string; companyPaymentAccountId: string; openingBalance: number; dailyLimit: number }
-  accounts: CompanyPaymentAccount[]; users: UserOption[]; isEditMode?: boolean; onCancel: () => void; onSaved: () => void
+function SourceEditor({ initial, accounts, isEditMode, onCancel, onSaved }: {
+  initial: {
+    id?: string; name: string; code: string; sourceType: string; companyPaymentAccountId: string
+    openingBalance: number; dailyLimit: number; outletId?: string | null
+    approvalThreshold: number; escalationHours: number; lowBalanceThreshold: number
+  }
+  accounts: CompanyPaymentAccount[]; isEditMode?: boolean; onCancel: () => void; onSaved: () => void
 }) {
   const { request } = useApi()
   const isEdit = !!initial.id
@@ -634,12 +687,23 @@ function SourceEditor({ initial, accounts, users, isEditMode, onCancel, onSaved 
   const [saving, setSaving] = useState(false)
   const set = (p: Partial<typeof f>) => setF({ ...f, ...p })
   const isAccountBacked = f.sourceType === 'BANK' || f.sourceType === 'MOBILE_MONEY' || f.sourceType === 'CARD'
-  const isLiveBalance = isAccountBacked || f.sourceType === 'CASHIER_DRAWER'
+  // §5: only a FIXED_ALLOCATION fund has an allocation to enter. A Cashier Cash
+  // fund follows the till and a Digital fund follows the bank, so an opening
+  // balance on either would write a figure nothing reads. Derived from the same
+  // mapping the server uses rather than re-listing source types here.
+  const fundClass = fundClassOf(f.sourceType)
+  const allowsAllocation = allowsManualAllocation(f.sourceType)
 
   const save = async () => {
     setSaving(true)
     try {
-      if (isEdit) await request(`/api/expense/funding-sources/${initial.id}`, { method: 'PATCH', body: JSON.stringify({ name: f.name, dailyLimit: f.dailyLimit }) })
+      if (isEdit) await request(`/api/expense/funding-sources/${initial.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: f.name, dailyLimit: f.dailyLimit,
+          approvalThreshold: f.approvalThreshold, escalationHours: f.escalationHours, lowBalanceThreshold: f.lowBalanceThreshold,
+        }),
+      })
       else await request('/api/expense/funding-sources', { method: 'POST', body: JSON.stringify({ ...f, companyPaymentAccountId: isAccountBacked ? f.companyPaymentAccountId : undefined }) })
       toast.success('Saved'); onSaved()
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not save') }
@@ -663,17 +727,267 @@ function SourceEditor({ initial, accounts, users, isEditMode, onCancel, onSaved 
               {accounts.map((a) => <option key={a.id} value={a.id}>{a.paymentChannel.label} · {a.accountName}{a.bankName ? ` (${a.bankName})` : ''}</option>)}
             </select></label>
         )}
-        {!isEdit && !isLiveBalance && (
+        {!isEdit && allowsAllocation && (
           <label className="block"><span className="text-xs text-gray-500">Opening balance</span><input type="number" className={inputCls} value={f.openingBalance} onChange={(e) => set({ openingBalance: Number(e.target.value) })} /></label>
         )}
         <label className="block"><span className="text-xs text-gray-500">Daily limit (0 = none)</span><input type="number" className={inputCls} value={f.dailyLimit} onChange={(e) => set({ dailyLimit: Number(e.target.value) })} /></label>
       </div>
+
+      {isEdit && (
+        <>
+          <p className="text-xs font-semibold text-gray-700 mb-2">Approval &amp; alert policy for this fund</p>
+          <div className="grid sm:grid-cols-3 gap-3 mb-3">
+            <label className="block"><span className="text-xs text-gray-500">Skip approval at or below</span>
+              <input type="number" className={inputCls} value={f.approvalThreshold} onChange={(e) => set({ approvalThreshold: Number(e.target.value) })} />
+              <span className="block text-[11px] text-gray-400 mt-1">0 = every request needs both approvers.</span>
+            </label>
+            <label className="block"><span className="text-xs text-gray-500">Escalate after (hours)</span>
+              <input type="number" className={inputCls} value={f.escalationHours} onChange={(e) => set({ escalationHours: Number(e.target.value) })} />
+              <span className="block text-[11px] text-gray-400 mt-1">0 = no reminders. Cashier Cash usually needs a much shorter window than a petty cash top-up.</span>
+            </label>
+            <label className="block"><span className="text-xs text-gray-500">Low balance alert at</span>
+              <input type="number" className={inputCls} value={f.lowBalanceThreshold} onChange={(e) => set({ lowBalanceThreshold: Number(e.target.value) })} />
+              <span className="block text-[11px] text-gray-400 mt-1">0 = no alert. Warns the custodian before the fund runs dry.</span>
+            </label>
+          </div>
+        </>
+      )}
+
       {isAccountBacked && <p className="text-[11px] text-gray-400 mb-3">Bank/mobile-money/card sources have no stored balance — every read computes it live from the linked payment account&apos;s GL balance, so it never drifts from the ledger.</p>}
       {f.sourceType === 'CASHIER_DRAWER' && <p className="text-[11px] text-gray-400 mb-3">No opening balance needed — this fund&apos;s balance always follows the assigned cashier&apos;s current daily cash position.</p>}
-      {isEdit && <CustodianPicker fundingSourceId={initial.id!} users={users} />}
+      {isEdit && <CustodianPicker fundingSourceId={initial.id!} fundClass={fundClass} outletId={initial.outletId ?? null} />}
       <div className="flex gap-2 mt-3">
         <button onClick={save} disabled={saving || !f.name || (!isEdit && isAccountBacked && !f.companyPaymentAccountId)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
         <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200">Cancel</button>
+      </div>
+    </Card>
+  )
+}
+
+// ─── Manage Access tab ───────────────────────────────────────────────────────
+// §4's access list — the single source of truth for who may request, custody a
+// fund, and approve at each stage. Everything downstream (the Requested By
+// dropdown, custodian assignment, approval routing, and §7's "action needed"
+// notifications) reads these grants rather than User.role.
+interface AccessGrant {
+  id: string; userId: string; grantType: string; fundClass: string | null; outletId: string | null
+  grantedById: string; grantedByName: string | null; grantedAt: string
+  revokedAt: string | null; revokedById: string | null; note: string | null
+  user: { id: string; name: string; email: string; role: string } | null
+  outlet: { id: string; name: string } | null
+}
+
+/** Stable key for one flag, so a (grantType, fundClass) pair round-trips through
+ *  checkbox state without a nested structure. */
+const flagKey = (grantType: string, fundClass: string | null) => `${grantType}:${fundClass || ''}`
+
+function labelForGrant(grantType: string, fundClass: string | null): string {
+  const flag = EXPENSE_GRANT_FLAGS.find((f) => flagKey(f.grantType, f.fundClass) === flagKey(grantType, fundClass))
+  if (flag) return flag.label
+  // An approver grant narrowed to one fund has no matching flag row (the flag
+  // list carries fundClass=null for approvers), so compose its label instead.
+  const fundLabel = fundClass ? FUND_CLASS_LABELS[fundClass as FundClass] || fundClass : ''
+  const base = EXPENSE_GRANT_FLAGS.find((f) => f.grantType === grantType)?.label || grantType.replace(/_/g, ' ')
+  return fundLabel ? `${base} · ${fundLabel}` : base
+}
+
+function ManageAccessTab() {
+  const { request } = useApi()
+  const [grants, setGrants] = useState<AccessGrant[]>([])
+  const [users, setUsers] = useState<UserOption[]>([])
+  const [outlets, setOutlets] = useState<OutletOption[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showRevoked, setShowRevoked] = useState(false)
+  const [adding, setAdding] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [g, u, o] = await Promise.all([
+        request(`/api/expense/access-grants${showRevoked ? '?includeRevoked=true' : ''}`),
+        request('/api/users').catch(() => []),
+        request('/api/outlets').catch(() => []),
+      ])
+      setGrants(g || []); setUsers(u || []); setOutlets(o || [])
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load access grants') }
+    finally { setLoading(false) }
+  }, [request, showRevoked])
+  useEffect(() => { load() }, [load])
+
+  const revoke = async (g: AccessGrant) => {
+    if (!confirm(`Revoke "${labelForGrant(g.grantType, g.fundClass)}" from ${g.user?.name || 'this user'}? The grant is kept for the audit trail, not deleted.`)) return
+    try { await request(`/api/expense/access-grants/${g.id}`, { method: 'DELETE' }); toast.success('Revoked'); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not revoke') }
+  }
+
+  // Grouped by user so the table reads as "this person holds these flags" — a
+  // custodian who also approves would otherwise be scattered across the list.
+  const byUser = new Map<string, AccessGrant[]>()
+  for (const g of grants) {
+    const list = byUser.get(g.userId) || []
+    list.push(g)
+    byUser.set(g.userId, list)
+  }
+
+  if (loading) return <div className="py-10 text-center text-gray-400">Loading…</div>
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <p className="text-sm text-gray-600">
+          This list decides who can submit an Expense Form, who holds each fund, and who approves at each stage.
+          It is the only thing those checks read — a user&apos;s role no longer grants expense access by itself.
+        </p>
+        <p className="text-xs text-gray-400 mt-2">
+          Each fund gets its own approval chain: a request against Petty Cash is routed to whoever holds First or
+          Second Approver for Petty Cash at that outlet. Leave the fund as &ldquo;All funds&rdquo; to have someone
+          approve for all three. Grants are revoked, never deleted, so past approvals stay explainable.
+        </p>
+      </Card>
+
+      <div className="flex justify-between items-center gap-3 flex-wrap">
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={showRevoked} onChange={(e) => setShowRevoked(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+          Show revoked (audit trail)
+        </label>
+        <button onClick={() => setAdding(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700">+ Grant access</button>
+      </div>
+
+      {adding && <GrantEditor users={users} outlets={outlets} onCancel={() => setAdding(false)} onSaved={() => { setAdding(false); load() }} />}
+
+      <Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-gray-400 border-b border-gray-100">
+              <th className="py-2 pr-3">User</th><th className="pr-3">Access</th><th className="pr-3">Outlet</th><th className="pr-3">Granted</th><th></th>
+            </tr></thead>
+            <tbody>
+              {[...byUser.entries()].map(([userId, userGrants]) => (
+                userGrants.map((g, i) => (
+                  <tr key={g.id} className={`border-b border-gray-50 ${g.revokedAt ? 'opacity-50' : ''}`}>
+                    {i === 0 && (
+                      <td className="py-2 pr-3 align-top" rowSpan={userGrants.length}>
+                        <span className="font-medium text-gray-800">{g.user?.name || userId}</span>
+                        <span className="block text-[11px] text-gray-400">{g.user?.email}{g.user?.role ? ` · ${g.user.role}` : ''}</span>
+                      </td>
+                    )}
+                    <td className="pr-3">
+                      <span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${g.revokedAt ? 'bg-gray-100 text-gray-500 line-through' : 'bg-indigo-50 text-indigo-700'}`}>
+                        {labelForGrant(g.grantType, g.fundClass)}
+                      </span>
+                      {!g.fundClass && (g.grantType === 'FIRST_APPROVER' || g.grantType === 'SECOND_APPROVER') && (
+                        <span className="block text-[10px] text-gray-400">all funds</span>
+                      )}
+                    </td>
+                    <td className="pr-3 text-gray-600">{g.outlet?.name || <span className="text-gray-400">All outlets</span>}</td>
+                    <td className="pr-3 text-gray-500 text-[11px]">
+                      {new Date(g.grantedAt).toLocaleDateString()}{g.grantedByName ? ` by ${g.grantedByName}` : ''}
+                      {g.revokedAt && <span className="block text-red-500">revoked {new Date(g.revokedAt).toLocaleDateString()}</span>}
+                    </td>
+                    <td className="text-right whitespace-nowrap">
+                      {!g.revokedAt && <button onClick={() => revoke(g)} className="text-xs text-red-500 hover:text-red-700">Revoke</button>}
+                    </td>
+                  </tr>
+                ))
+              ))}
+              {!grants.length && (
+                <tr><td colSpan={5} className="py-6 text-center text-gray-400">
+                  No access granted yet — nobody can submit or approve an expense until someone is added here.
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+function GrantEditor({ users, outlets, onCancel, onSaved }: {
+  users: UserOption[]; outlets: OutletOption[]
+  onCancel: () => void; onSaved: () => void
+}) {
+  const { request } = useApi()
+  const [userId, setUserId] = useState('')
+  const [outletId, setOutletId] = useState('')
+  const [checked, setChecked] = useState<string[]>([])
+  // Approver flags can additionally be narrowed to a single fund; the custodian
+  // flags already name their fund and Requesting Access is fund-agnostic.
+  const [approverFund, setApproverFund] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+
+  const toggle = (key: string) => setChecked((c) => (c.includes(key) ? c.filter((k) => k !== key) : [...c, key]))
+
+  const save = async () => {
+    if (!userId) { toast.error('Pick a user'); return }
+    if (!checked.length) { toast.error('Tick at least one access flag'); return }
+    setSaving(true)
+    try {
+      const flags = checked.map((key) => {
+        const flag = EXPENSE_GRANT_FLAGS.find((f) => flagKey(f.grantType, f.fundClass) === key)!
+        return { grantType: flag.grantType, fundClass: flag.fundClass ?? (approverFund[key] || null) }
+      })
+      await request('/api/expense/access-grants', {
+        method: 'POST',
+        body: JSON.stringify({ userId, outletId: outletId || null, flags }),
+      })
+      toast.success('Access granted')
+      onSaved()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not grant access') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Card>
+      <h3 className="font-semibold text-gray-800 mb-3">Grant access</h3>
+      <div className="grid md:grid-cols-2 gap-3 mb-4">
+        <label className="block"><span className="text-xs text-gray-500">User</span>
+          <select className={inputCls} value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">Select a user…</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+          </select>
+        </label>
+        <label className="block"><span className="text-xs text-gray-500">Outlet</span>
+          <select className={inputCls} value={outletId} onChange={(e) => setOutletId(e.target.value)}>
+            <option value="">All outlets (business-wide)</option>
+            {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <span className="block text-[11px] text-gray-400 mt-1">One person can hold the same access at both outlets — grant it business-wide, or add a separate grant per outlet.</span>
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        {EXPENSE_GRANT_FLAGS.map((f) => {
+          const key = flagKey(f.grantType, f.fundClass)
+          const isApprover = f.grantType === 'FIRST_APPROVER' || f.grantType === 'SECOND_APPROVER'
+          return (
+            <div key={key} className="border-2 border-gray-100 rounded-xl p-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" checked={checked.includes(key)} onChange={() => toggle(key)} className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0" />
+                <span>
+                  <span className="text-sm font-medium text-gray-800">{f.label}</span>
+                  <span className="block text-xs text-gray-400">{f.hint}</span>
+                </span>
+              </label>
+              {isApprover && checked.includes(key) && (
+                <label className="block mt-2 ml-7">
+                  <span className="text-[11px] text-gray-500">Approves for</span>
+                  <select className={inputCls} value={approverFund[key] || ''} onChange={(e) => setApproverFund((m) => ({ ...m, [key]: e.target.value }))}>
+                    <option value="">All funds</option>
+                    {FUND_CLASSES.map((c) => <option key={c} value={c}>{FUND_CLASS_LABELS[c]}</option>)}
+                  </select>
+                </label>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="flex gap-2 mt-4">
+        <button onClick={save} disabled={saving} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+          {saving ? 'Granting…' : 'Grant access'}
+        </button>
+        <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-200">Cancel</button>
       </div>
     </Card>
   )
