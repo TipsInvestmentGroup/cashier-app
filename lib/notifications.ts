@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import type { Db } from '@/lib/ledger'
 import { isSingleOutletRole } from '@/lib/auth'
 import { sendMail } from '@/lib/email'
 
@@ -34,15 +35,26 @@ export type NotificationType =
   // terminal "funds are now in the fund" confirmation is top-up-specific.
   | 'EXPENSE_TOPUP_ALLOCATED'
 
-export async function createNotification(input: {
-  userId: string
-  type: NotificationType
-  title: string
-  message: string
-  entityType?: string
-  entityId?: string
-}) {
-  return prisma.notification.create({
+/**
+ * Create one notification. Pass `db` (a transaction client) when calling from
+ * inside a `prisma.$transaction` so the write runs on the SAME connection as
+ * the surrounding work — awaiting the global client mid-transaction stalls on a
+ * connection-limited pool (serverless/Neon) and locks on single-connection
+ * SQLite, which is how expense-approval notifications were being silently lost.
+ * Defaults to the global client for the many callers outside a transaction.
+ */
+export async function createNotification(
+  input: {
+    userId: string
+    type: NotificationType
+    title: string
+    message: string
+    entityType?: string
+    entityId?: string
+  },
+  db: Db = prisma,
+) {
+  return db.notification.create({
     data: {
       userId: input.userId,
       type: input.type,

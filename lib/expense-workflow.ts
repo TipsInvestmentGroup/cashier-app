@@ -158,14 +158,14 @@ export async function openNextApprovalStep(db: Db, expenseRequestId: string): Pr
     },
   })
 
-  const approvers = await usersWithGrant(approverRole, { fundClass: plan.fundClass, outletId: plan.outletId }).catch(() => [])
+  const approvers = await usersWithGrant(approverRole, { fundClass: plan.fundClass, outletId: plan.outletId }, db).catch(() => [])
   await Promise.all(approvers.map((a) => createNotification({
     userId: a.id,
     type: 'EXPENSE_REQUEST_APPROVAL_NEEDED',
     title: `${request.requestType.name} awaiting your approval`,
     message: `"${request.purpose}" for ${request.amount} ${request.currency} needs your approval.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
-  }).catch(() => {})))
+  }, db)))
 
   return { approverRole }
 }
@@ -221,7 +221,7 @@ export async function executeTopUpAllocation(
       allocated !== request.amount ? ` (requested ${request.amount})` : ''
     }.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
-  }).catch(() => {})
+  }, db)
 
   return { status: 'CLOSED', allocated }
 }
@@ -250,7 +250,7 @@ export async function advanceExpenseApproval(
       title: `${request.requestType.name} rejected`,
       message: `${isTopUp ? 'Your top-up' : 'Request'} "${request.purpose}" for ${request.amount} ${request.currency} was rejected.`,
       entityType: 'ExpenseRequest', entityId: expenseRequestId,
-    }).catch(() => {})
+    }, db)
     return { status: 'REJECTED' }
   }
 
@@ -272,7 +272,7 @@ export async function advanceExpenseApproval(
     title: `${request.requestType.name} approved`,
     message: `"${request.purpose}" for ${request.amount} ${request.currency} has been approved.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
-  }).catch(() => {})
+  }, db)
 
   // Notify whoever can now disburse this request. When the request names a fund
   // (§3), that fund's own assigned custodians are the exact audience — far
@@ -280,16 +280,16 @@ export async function advanceExpenseApproval(
   // best available proxy before a request carried a funding source at all. Falls
   // back to that proxy for requests created before the upgrade.
   const custodians = request.fundingSourceId
-    ? await listFundingSourceCustodians(request.fundingSourceId)
+    ? await listFundingSourceCustodians(request.fundingSourceId, db)
       .then((rows) => rows.map((r) => ({ id: r.userId })))
       .catch(() => [])
-    : await listCustodiansForRequestType(request.requestType.allowedFundingSourceIds).catch(() => [])
+    : await listCustodiansForRequestType(request.requestType.allowedFundingSourceIds, db).catch(() => [])
   await Promise.all(custodians.map((c) => createNotification({
     userId: c.id, type: 'EXPENSE_REQUEST_READY_FOR_PAYMENT',
     title: `${request.requestType.name} ready for payment`,
     message: `"${request.purpose}" for ${request.amount} ${request.currency} is approved and ready to be paid.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
-  }).catch(() => {})))
+  }, db)))
 
   return { status: 'APPROVED' }
 }

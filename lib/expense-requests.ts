@@ -231,7 +231,7 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
       plan.skip ? ` and needs no approval (${plan.reason})` : ' and is awaiting approval'
     }.`,
     entityType: 'ExpenseRequest', entityId: request.id,
-  }).catch(() => {})
+  }, db)
 
   // Needs approval: open the first stage and wait.
   if (!plan.skip) {
@@ -255,14 +255,14 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
   await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'APPROVED' } })
   await submittedNote()
   if (request.fundingSourceId) {
-    const custodians = await listFundingSourceCustodians(request.fundingSourceId).catch(() => [])
+    const custodians = await listFundingSourceCustodians(request.fundingSourceId, db).catch(() => [])
     await Promise.all(custodians.map((c) => createNotification({
       userId: c.userId,
       type: 'EXPENSE_REQUEST_READY_FOR_PAYMENT',
       title: `${request.requestType.name} ready for payment`,
       message: `"${request.purpose}" for ${request.amount} ${request.currency} needs no approval and is ready to be paid.`,
       entityType: 'ExpenseRequest', entityId: request.id,
-    }).catch(() => {})))
+    }, db)))
   }
   return { status: 'APPROVED', skipReason: plan.reason }
 }
