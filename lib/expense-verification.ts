@@ -92,7 +92,7 @@ export async function recordVerificationStage(db: Db, input: RecordVerificationS
 
   let requestStatus = request.status as ExpenseRequestStatus
   if (input.stage === 'VALIDATED' && request.status === 'PAID') {
-    await db.expenseRequest.update({ where: { id: input.expenseRequestId }, data: { status: 'VERIFIED' } })
+    await db.expenseRequest.update({ where: { id: input.expenseRequestId }, data: { status: 'VERIFIED', stageEnteredAt: new Date() } })
     requestStatus = 'VERIFIED'
   }
 
@@ -105,7 +105,7 @@ export async function closeExpenseRequest(db: Db, expenseRequestId: string): Pro
   if (!request) throw new Error('Expense request not found')
   if (request.status !== 'VERIFIED') throw new Error(`Cannot close a request in status ${request.status}`)
 
-  await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'CLOSED' } })
+  await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'CLOSED', stageEnteredAt: new Date() } })
   return { status: 'CLOSED' }
 }
 

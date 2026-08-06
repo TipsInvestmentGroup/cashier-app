@@ -19,7 +19,7 @@ import { postJournalEntry } from '@/lib/ledger'
 import { roundMoney } from '@/lib/utils'
 import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
 import { recalcExpenseRequestPaymentStatus } from '@/lib/expense-requests'
-import { getFundingSourceBalance } from '@/lib/expense-ledger'
+import { getFundingSourceBalance, writeFundingSourceTxn } from '@/lib/expense-ledger'
 import { createNotification } from '@/lib/notifications'
 
 function parseIdList(raw: string | null | undefined): string[] | null {
@@ -67,6 +67,11 @@ export interface CreateExpensePaymentInput {
   reference?: string | null
   paidAt?: Date
   paidById: string
+  // Denormalized name snapshot of the acting user, stored on the PAYMENT ledger
+  // row so the ledger's "By" column shows a real name even if the user is later
+  // renamed/deactivated. Optional: writeFundingSourceTxn resolves it from
+  // paidById when omitted, so no caller can produce a nameless ledger row.
+  paidByName?: string | null
   outletId?: string | null
   allocations: PaymentAllocationInput[]
 }
@@ -189,8 +194,10 @@ export async function createExpensePayment(input: CreateExpensePaymentInput): Pr
     // also updates its materialized currentBalance above; CASHIER_DRAWER's
     // balance is always read live, so this row is purely the audit trail.
     if (fundingSource.sourceType === 'CASH' || fundingSource.sourceType === 'CASHIER_DRAWER') {
-      await tx.fundingSourceTxn.create({
-        data: { fundingSourceId: fundingSource.id, type: 'PAYMENT', amount: -amount, reference: input.reference || null, expensePaymentId: payment.id, createdById: input.paidById },
+      await writeFundingSourceTxn(tx, {
+        fundingSourceId: fundingSource.id, type: 'PAYMENT', amount: -amount,
+        reference: input.reference, expensePaymentId: payment.id,
+        createdById: input.paidById, createdByName: input.paidByName,
       })
     }
 

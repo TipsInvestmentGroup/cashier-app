@@ -66,6 +66,14 @@ export const SALES_METRIC_DEPARTMENTS = ['SHISHA', 'FOOD'] as const
 // lib/expense-grants.ts re-exports these for server callers, the same way
 // lib/cash-verify.ts re-exports CASH_VERIFIERS_FIXED above — one definition,
 // two audiences.
+// Phase 3 (Expense Requests table): the transaction KIND, distinct from the
+// cost-centre ExpenseCategory. An app-layer enum (SQLite has no native enums),
+// mirroring how every other vocabulary in this schema is validated. Seeded as
+// the default dropdown on the Expense Form; a request may still hold a
+// pre-Phase-3 null (surfaced by scripts/flag-expense-type-backfill.ts).
+export const EXPENSE_TYPES = ['Allowance', 'Purchase', 'Repair', 'Utility Bill', 'Digital Expense', 'Casual Expense'] as const
+export type ExpenseType = (typeof EXPENSE_TYPES)[number]
+
 export const EXPENSE_GRANT_TYPES = ['REQUEST', 'CUSTODIAN', 'SINGLE_APPROVER', 'FIRST_APPROVER', 'SECOND_APPROVER', 'ALLOCATOR'] as const
 
 // ALLOCATOR is reserved, not issued: the Second Approver's approval directly

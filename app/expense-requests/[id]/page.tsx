@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { waitingForText, type CurrentApproverView } from '@/lib/expense-approver'
 import toast from 'react-hot-toast'
 
 const MAX_ATTACHMENT = 2 * 1024 * 1024 // 2MB, same cap as PayModal's receipt upload
@@ -27,11 +28,14 @@ interface VerificationRecord { id: string; stage: string; verifiedById: string |
 interface ExpenseRequestDetail {
   id: string; purpose: string; amount: number; currency: string; status: string; createdAt: string
   requestedById: string; outletId: string | null
+  requestNumber: string | null; expenseType: string | null; stageEnteredAt: string | null
+  outlet: { id: string; name: string } | null
   requestType: { id: string; name: string; approverRoles: string | null; requiredVerificationStages: string | null; requiredAttachments: string | null }
   category: { id: string; name: string }
   items: ExpenseItem[]
   paymentAllocations: PaymentAllocation[]
   verifications: VerificationRecord[]
+  currentApprover?: CurrentApproverView | null
 }
 interface FundingSource { id: string; name: string; sourceType: string; isActive: boolean }
 interface Attachment { id: string; url: string; docType: string; createdAt: string; uploadedById: string | null }
@@ -203,11 +207,21 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">{data.purpose}</h1>
-              <Badge tone={STATUS_TONE[data.status] || 'gray'}>{data.status.replace('_', ' ')}</Badge>
+              {data.status === 'PENDING_APPROVAL' && data.currentApprover
+                ? <Badge tone="amber">Waiting for approval</Badge>
+                : <Badge tone={STATUS_TONE[data.status] || 'gray'}>{data.status.replace('_', ' ')}</Badge>}
             </div>
             <p className="text-gray-500 text-sm mt-1">
-              {data.requestType.name} · {data.category.name} · requested by {nameOf(data.requestedById)} on {formatDate(data.createdAt)}
+              {data.requestNumber && <span className="font-mono text-gray-700">{data.requestNumber}</span>}
+              {data.requestNumber && ' · '}
+              {data.expenseType ? `${data.expenseType} · ` : ''}{data.category.name}
+              {data.outlet ? ` · ${data.outlet.name}` : ''} · {data.requestType.name} · requested by {nameOf(data.requestedById)} on {formatDate(data.createdAt)}
             </p>
+            {data.status === 'PENDING_APPROVAL' && data.currentApprover && (
+              <p className="text-sm mt-1.5 font-medium text-amber-700">
+                ⏳ Waiting for: {waitingForText(data.currentApprover, user?.id)}
+              </p>
+            )}
           </div>
           <div className="flex gap-2 flex-wrap">
             {data.status === 'DRAFT' && (isOwner || user?.role === 'ADMIN') && (

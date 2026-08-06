@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { cancelExpenseRequest } from '@/lib/expense-requests'
+import { resolveCurrentApprover } from '@/lib/expense-workflow'
 
 const MGMT_ROLES = ['ADMIN', 'MANAGER', 'DIRECTOR', 'ACCOUNTANT']
 
@@ -17,6 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     include: {
       requestType: { select: { id: true, name: true, approverRoles: true, requiredVerificationStages: true, requiredAttachments: true } },
       category: { select: { id: true, name: true } },
+      outlet: { select: { id: true, name: true } },
       items: true,
       paymentAllocations: { include: { expensePayment: true } },
       verifications: true,
@@ -27,7 +29,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (request.requestedById !== user.userId && !MGMT_ROLES.includes(user.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
-  return NextResponse.json(request)
+  // Who the request is currently waiting on, resolved live from the grant chain
+  // (null unless PENDING_APPROVAL) — drives the "Waiting for: [Name] ([Role])"
+  // header instead of the generic "PENDING APPROVAL".
+  const currentApprover = await resolveCurrentApprover(prisma, id).catch(() => null)
+  return NextResponse.json({ ...request, currentApprover })
 }
 
 /** DELETE — cancel a DRAFT/PENDING_APPROVAL request with no payments yet.

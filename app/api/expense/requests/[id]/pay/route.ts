@@ -48,6 +48,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       reference: body.reference ? String(body.reference) : null,
       paidAt: body.paidAt ? new Date(body.paidAt) : undefined,
       paidById: user.userId,
+      paidByName: user.name,
       outletId: request.outletId,
       allocations: [{ expenseRequestId: id, amount }],
     })

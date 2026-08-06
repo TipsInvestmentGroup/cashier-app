@@ -12,6 +12,9 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { MoneyInput } from '@/components/MoneyInput'
 import { ExpenseDynamicFields } from '@/components/ExpenseDynamicFields'
 import { FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
+import { waitingForText, type CurrentApproverView } from '@/lib/expense-approver'
+import { computeAging, type AgingTone } from '@/lib/expense-aging'
+import { EXPENSE_TYPES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 
 interface RequestType { id: string; name: string; allowedCategoryIds: string | null; isActive: boolean }
@@ -26,6 +29,13 @@ interface ExpenseRequest {
   id: string; purpose: string; amount: number; currency: string; status: string; createdAt: string
   requestedById: string; requestType: { id: string; name: string }; category: { id: string; name: string }
   items: ExpenseItem[]; _count?: { paymentAllocations: number }
+  currentApprover?: CurrentApproverView | null
+  requestNumber?: string | null; expenseType?: string | null; stageEnteredAt?: string | null
+  outletId?: string | null; outlet?: { id: string; name: string } | null
+}
+
+const AGING_CLASS: Record<AgingTone, string> = {
+  green: 'text-emerald-600', amber: 'text-amber-600', red: 'text-red-600 font-semibold',
 }
 
 const STATUS_TONE: Record<string, 'gray' | 'green' | 'red' | 'amber' | 'indigo' | 'blue' | 'purple'> = {
@@ -52,9 +62,12 @@ export default function ExpenseRequestsPage() {
 
   const [fundingSources, setFundingSources] = useState<FundingSourceOption[]>([])
   const [requesters, setRequesters] = useState<{ id: string; name: string }[]>([])
+  const [outlets, setOutlets] = useState<{ id: string; name: string }[]>([])
 
   const [fundingSourceId, setFundingSourceId] = useState('')
   const [requestedById, setRequestedById] = useState('')
+  const [expenseType, setExpenseType] = useState('')
+  const [outletId, setOutletId] = useState('')
   const [requestTypeId, setRequestTypeId] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [purpose, setPurpose] = useState('')
@@ -68,7 +81,7 @@ export default function ExpenseRequestsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [its, types, cats, users, sources, eligible] = await Promise.all([
+      const [its, types, cats, users, sources, eligible, outletList] = await Promise.all([
         request('/api/expense/requests'), request('/api/expense/request-types'), request('/api/expense/categories'),
         request('/api/users').catch(() => []),
         request('/api/expense/funding-sources').catch(() => []),
@@ -76,6 +89,7 @@ export default function ExpenseRequestsPage() {
         // from the user table. Empty means requesting access hasn't been
         // configured yet, in which case the form falls back to the caller.
         request('/api/expense/access-grants/eligible?grantType=REQUEST').catch(() => []),
+        request('/api/outlets').catch(() => []),
       ])
       setItems(its || [])
       setRequestTypes((types || []).filter((t: RequestType) => t.isActive))
@@ -83,10 +97,16 @@ export default function ExpenseRequestsPage() {
       setNames(Object.fromEntries((users || []).map((u: { id: string; name: string }) => [u.id, u.name])))
       setFundingSources((sources || []).filter((s: FundingSourceOption) => s.isActive && s.fundClass))
       setRequesters(eligible || [])
+      setOutlets((outletList || []).map((o: { id: string; name: string }) => ({ id: o.id, name: o.name })))
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load') }
     finally { setLoading(false) }
   }, [request])
   useEffect(() => { load() }, [load])
+
+  const isAdmin = user?.role === 'ADMIN'
+  // §2.2: Outlet defaults to the requester's assigned outlet and is Admin-editable
+  // only. Set the default once the user is known and leave it unless an Admin picks.
+  useEffect(() => { if (!outletId && user?.outlet?.id) setOutletId(user.outlet.id) }, [user?.outlet?.id, outletId])
 
   const selectedFund = fundingSources.find((s) => s.id === fundingSourceId)
   const requestedAmount = hasItems ? itemsTotal : Number(amount) || 0
@@ -106,11 +126,13 @@ export default function ExpenseRequestsPage() {
   const updItem = (i: number, patch: Partial<{ detail: string; unit: string; unitCost: string }>) => setLineItems(lineItems.map((r, x) => (x === i ? { ...r, ...patch } : r)))
   const rmItem = (i: number) => setLineItems(lineItems.filter((_, x) => x !== i))
 
-  const resetForm = () => { setFundingSourceId(''); setRequestedById(''); setRequestTypeId(''); setCategoryId(''); setPurpose(''); setAmount(''); setLineItems([]); setFieldValues({}) }
+  const resetForm = () => { setFundingSourceId(''); setRequestedById(''); setExpenseType(''); setRequestTypeId(''); setCategoryId(''); setPurpose(''); setAmount(''); setLineItems([]); setFieldValues({}) }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!fundingSourceId) return toast.error('Select where this will be paid from')
+    if (!expenseType) return toast.error('Select an expense type')
+    if (!outletId) return toast.error('Select an outlet')
     if (!requestTypeId) return toast.error('Select a request type')
     if (!categoryId) return toast.error('Select a category')
     if (!purpose.trim()) return toast.error('Purpose is required')
@@ -125,6 +147,7 @@ export default function ExpenseRequestsPage() {
         method: 'POST',
         body: JSON.stringify({
           fundingSourceId, requestTypeId, categoryId, purpose, amount: finalAmount, items: cleanItems, fieldValues,
+          expenseType, outletId,
           ...(requestedById ? { requestedById } : {}),
         }),
       })
@@ -181,29 +204,54 @@ export default function ExpenseRequestsPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr className="text-left text-gray-600">
+                        <th className="px-4 py-3 font-semibold">Request #</th>
                         <th className="px-4 py-3 font-semibold">Date</th>
                         <th className="px-4 py-3 font-semibold">Requested By</th>
-                        <th className="px-4 py-3 font-semibold">Type / Category</th>
+                        <th className="px-4 py-3 font-semibold">Outlet</th>
+                        <th className="px-4 py-3 font-semibold">Type</th>
+                        <th className="px-4 py-3 font-semibold">Category</th>
                         <th className="px-4 py-3 font-semibold">Purpose</th>
                         <th className="px-4 py-3 font-semibold">Amount</th>
+                        <th className="px-4 py-3 font-semibold">Aging</th>
                         <th className="px-4 py-3 font-semibold">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {filtered.map((i) => (
                         <tr key={i.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => (window.location.href = `/expense-requests/${i.id}`)}>
+                          <td className="px-4 py-3 font-mono text-[11px] text-gray-600 whitespace-nowrap">{i.requestNumber || <span className="text-gray-300 italic">draft</span>}</td>
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(i.createdAt)}</td>
                           <td className="px-4 py-3 font-medium text-gray-800">{i.requestedById === user?.id ? 'You' : (names[i.requestedById] || '—')}</td>
-                          <td className="px-4 py-3 text-gray-500">{i.requestType.name}<span className="block text-[11px] text-gray-400">{i.category.name}</span></td>
+                          <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{i.outlet?.name || '—'}</td>
+                          <td className="px-4 py-3 text-gray-700">{i.expenseType || <span className="text-gray-300">—</span>}<span className="block text-[11px] text-gray-400">{i.requestType.name}</span></td>
+                          <td className="px-4 py-3 text-gray-500">{i.category.name}</td>
                           <td className="px-4 py-3 text-gray-700 max-w-[220px] truncate" title={i.purpose}>
                             <Link href={`/expense-requests/${i.id}`} className="text-indigo-600 hover:text-indigo-800" onClick={(e) => e.stopPropagation()}>{i.purpose}</Link>
                           </td>
                           <td className="px-4 py-3 font-bold text-gray-900">{formatCurrency(i.amount)}</td>
-                          <td className="px-4 py-3"><Badge tone={STATUS_TONE[i.status] || 'gray'}>{i.status.replace('_', ' ')}</Badge></td>
+                          <td className="px-4 py-3 whitespace-nowrap">{(() => {
+                            // Aging is dead only in terminal states — for CLOSED/REJECTED/
+                            // CANCELLED "time in stage" is noise, so show a dash.
+                            if (['CLOSED', 'REJECTED', 'CANCELLED', 'PAID', 'VERIFIED'].includes(i.status)) return <span className="text-gray-300">—</span>
+                            const a = computeAging(i.stageEnteredAt || i.createdAt)
+                            return a ? <span className={`text-xs ${AGING_CLASS[a.tone]}`}>{a.label}</span> : <span className="text-gray-300">—</span>
+                          })()}</td>
+                          <td className="px-4 py-3">
+                            {i.status === 'PENDING_APPROVAL' && i.currentApprover ? (
+                              <div>
+                                <Badge tone="amber">Waiting for approval</Badge>
+                                <span className="block text-[11px] text-gray-500 mt-0.5" title={`Waiting for: ${waitingForText(i.currentApprover, user?.id)}`}>
+                                  → {waitingForText(i.currentApprover, user?.id)}
+                                </span>
+                              </div>
+                            ) : (
+                              <Badge tone={STATUS_TONE[i.status] || 'gray'}>{i.status.replace('_', ' ')}</Badge>
+                            )}
+                          </td>
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={6}><EmptyState icon="🧾" title="No expense requests" hint="Submit one with the form on the right." /></td></tr>
+                        <tr><td colSpan={10}><EmptyState icon="🧾" title="No expense requests" hint="Submit one with the form on the right." /></td></tr>
                       )}
                     </tbody>
                   </table>
@@ -271,6 +319,27 @@ export default function ExpenseRequestsPage() {
                     </select>
                   </div>
                 )}
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Expense Type *</label>
+                    <select value={expenseType} onChange={(e) => setExpenseType(e.target.value)}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white" required>
+                      <option value="">Select type…</option>
+                      {EXPENSE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <p className="text-[11px] text-gray-400 mt-1">What kind of transaction (distinct from cost centre / category).</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet *</label>
+                    <select value={outletId} onChange={(e) => setOutletId(e.target.value)} disabled={!isAdmin}
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500" required>
+                      <option value="">Select outlet…</option>
+                      {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                    <p className="text-[11px] text-gray-400 mt-1">{isAdmin ? 'Defaults to the requester’s outlet; editable.' : 'Your assigned outlet (Admin can change).'}</p>
+                  </div>
+                </div>
 
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Request Type *</label>

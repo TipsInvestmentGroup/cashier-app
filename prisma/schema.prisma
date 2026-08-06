@@ -272,6 +272,7 @@ model Outlet {
   paymentVerifications PaymentVerification[]
   priceLists           PriceList[]
   dailyReports         DailyReport[]
+  expenseRequests      ExpenseRequest[]
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -4781,6 +4782,10 @@ model ExpenseRequest {
   purpose       String
   status        String          @default("DRAFT")
   outletId      String?
+  // Phase 3 surfaces the outlet name on the Expense Requests table, so this
+  // loose ref is promoted to a real relation (departmentId/eventId stay loose —
+  // nothing reads their names yet). Additive: outletId already existed.
+  outlet        Outlet?         @relation(fields: [outletId], references: [id])
   departmentId  String?
   eventId       String?
   dueDate       DateTime?
@@ -4818,6 +4823,26 @@ model ExpenseRequest {
   // set their reference on the ExpensePayment instead.
   reference String?
 
+  // ── Phase 3 (Expense Requests table additions) ──
+  // Human-readable id, format EXP-YYYYMMDD-<BRANCH>-NNNN (e.g.
+  // EXP-20260806-MIK-0001), assigned ON SUBMIT (not at draft creation, so
+  // abandoned drafts leave no gaps). The BRANCH segment (Outlet.branchCode, else
+  // a slug of the name) is what makes per-outlet numbering collision-free; NNNN
+  // is that branch's continuous counter (see ExpenseRequestSequence). Nullable:
+  // drafts and pre-Phase-3 rows have none.
+  requestNumber String? @unique
+  // The transaction KIND (Allowance | Purchase | Repair | Utility Bill | Digital
+  // Expense | Casual Expense — EXPENSE_TYPES in lib/shared-constants.ts), a
+  // dimension genuinely distinct from categoryId (the cost centre / GL account,
+  // = the spec's expense_category). Nullable: pre-Phase-3 rows predate it and
+  // are surfaced by scripts/flag-expense-type-backfill.ts for manual assignment,
+  // never auto-guessed.
+  expenseType String?
+  // When the request entered its CURRENT status — stamped on every status
+  // change, so the Aging column can show time-in-current-stage (computed at
+  // render, never stored). Backfilled to createdAt for existing rows.
+  stageEnteredAt DateTime?
+
   items              ExpenseItem[]
   paymentAllocations PaymentAllocation[]
   verifications      VerificationRecord[]
@@ -4833,6 +4858,22 @@ model ExpenseRequest {
   // status=APPROVED) and §8's ready-to-allocate list (direction=IN) without a
   // table scan per custodian screen load.
   @@index([fundingSourceId, direction, status])
+  @@index([expenseType])
+}
+
+/// CONTINUOUS per-branch counter behind ExpenseRequest.requestNumber. One row
+/// per resolved BRANCH CODE (Outlet.branchCode, else a slug of the name) — the
+/// same segment embedded in EXP-YYYYMMDD-<BRANCH>-NNNN, which is what keeps
+/// per-outlet numbering collision-free. Scoping by branch code (not outlet id)
+/// means two outlets that ever slugged to the same code would share one counter
+/// rather than mint a duplicate number. lastNumber is bumped inside the submit
+/// transaction (upsert + increment) so two concurrent submits for a branch can
+/// never draw the same number, and it NEVER resets (the date is only a stamp).
+model ExpenseRequestSequence {
+  id         String   @id @default(cuid())
+  scopeKey   String   @unique // resolved branch code, e.g. "MIK"
+  lastNumber Int      @default(0)
+  updatedAt  DateTime @updatedAt
 }
 
 /// Optional line-item breakdown of an ExpenseRequest — identical shape to

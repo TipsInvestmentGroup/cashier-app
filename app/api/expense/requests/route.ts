@@ -4,6 +4,8 @@ import { getAuthUser } from '@/lib/auth'
 import { resolveCompanyId } from '@/lib/expense-config'
 import { createExpenseRequest } from '@/lib/expense-requests'
 import { hasGrant, requestGateActive } from '@/lib/expense-grants'
+import { resolveCurrentApprover } from '@/lib/expense-workflow'
+import { EXPENSE_TYPES } from '@/lib/shared-constants'
 
 // Roles that can see every request, not just their own — mirrors the
 // CASHIER/WAITER-vs-management split used across the app's other
@@ -35,12 +37,24 @@ export async function GET(req: NextRequest) {
     include: {
       requestType: { select: { id: true, name: true } },
       category: { select: { id: true, name: true } },
+      outlet: { select: { id: true, name: true } },
       items: true,
       fieldValues: true,
       _count: { select: { paymentAllocations: true } },
     },
   })
-  return NextResponse.json(requests)
+
+  // Attach the live "current approver" only to rows actually awaiting approval —
+  // resolved from the grant chain (the 2026-08-05 build-on-grants decision), in
+  // parallel and only for PENDING_APPROVAL rows so a list of paid/closed
+  // requests costs no extra queries.
+  const withApprover = await Promise.all(requests.map(async (r) => ({
+    ...r,
+    currentApprover: r.status === 'PENDING_APPROVAL'
+      ? await resolveCurrentApprover(prisma, r.id).catch(() => null)
+      : null,
+  })))
+  return NextResponse.json(withApprover)
 }
 
 /** POST — create a DRAFT expense request. Any authenticated user may create
@@ -55,7 +69,20 @@ export async function POST(req: NextRequest) {
   if (!body.categoryId) return NextResponse.json({ error: 'categoryId is required' }, { status: 400 })
   if (!body.purpose || !String(body.purpose).trim()) return NextResponse.json({ error: 'Purpose is required' }, { status: 400 })
 
-  const companyId = await resolveCompanyId(prisma, body.outletId || user.outletId || null)
+  const direction = body.direction === 'IN' ? 'IN' : 'OUT'
+  // Phase 3: an OUT disbursement must carry a transaction type and an outlet.
+  // Enforced here (not in createExpenseRequest) so top-up (IN) and cutover
+  // callers, which have neither, keep working unchanged.
+  const outletId = body.outletId ? String(body.outletId) : user.outletId || null
+  if (direction === 'OUT') {
+    if (!body.expenseType || !String(body.expenseType).trim()) return NextResponse.json({ error: 'Expense type is required' }, { status: 400 })
+    if (!(EXPENSE_TYPES as readonly string[]).includes(String(body.expenseType))) {
+      return NextResponse.json({ error: `Expense type must be one of: ${EXPENSE_TYPES.join(', ')}` }, { status: 400 })
+    }
+    if (!outletId) return NextResponse.json({ error: 'Outlet is required — none provided and you have no assigned outlet' }, { status: 400 })
+  }
+
+  const companyId = await resolveCompanyId(prisma, outletId)
   if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
 
   // §4: the access list decides who may submit an Expense Form. The gate only
@@ -66,7 +93,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'You cannot raise a request on behalf of someone else' }, { status: 403 })
   }
   if (await requestGateActive(companyId)) {
-    if (!(await hasGrant(requestedById, 'REQUEST', { outletId: body.outletId ? String(body.outletId) : user.outletId || null }))) {
+    if (!(await hasGrant(requestedById, 'REQUEST', { outletId }))) {
       const who = requestedById === user.userId ? 'You do not' : 'That user does not'
       return NextResponse.json({ error: `${who} have Requesting Access for this outlet. Grant it under Setup → Expense Settings → Manage Access.` }, { status: 403 })
     }
@@ -79,11 +106,12 @@ export async function POST(req: NextRequest) {
       categoryId: String(body.categoryId),
       requestedById,
       fundingSourceId: body.fundingSourceId ? String(body.fundingSourceId) : null,
-      direction: body.direction === 'IN' ? 'IN' : 'OUT',
+      direction,
+      expenseType: body.expenseType ? String(body.expenseType) : null,
       amount: body.amount !== undefined ? Number(body.amount) : undefined,
       currency: body.currency ? String(body.currency) : undefined,
       purpose: String(body.purpose),
-      outletId: body.outletId ? String(body.outletId) : user.outletId || null,
+      outletId,
       departmentId: body.departmentId ? String(body.departmentId) : null,
       eventId: body.eventId ? String(body.eventId) : null,
       dueDate: body.dueDate ? new Date(body.dueDate) : null,

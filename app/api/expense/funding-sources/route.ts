@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { FUNDING_SOURCE_TYPES, type FundingSourceType } from '@/lib/expense-config'
-import { getFundingSourceBalance } from '@/lib/expense-ledger'
+import { getFundingSourceBalance, writeFundingSourceTxn } from '@/lib/expense-ledger'
 import { fundClassOf, allocationModeFor, supportsManualAllocation } from '@/lib/expense-funds'
 
 // Same audience as PETTY_TABS/the Expense Requests screens — everyone who
@@ -111,8 +111,9 @@ export async function POST(req: NextRequest) {
     },
   })
   if (sourceType === 'CASH' && openingBalance > 0) {
-    await prisma.fundingSourceTxn.create({
-      data: { fundingSourceId: source.id, type: 'OPEN', amount: openingBalance, note: 'Opening balance', createdById: user.userId, createdByName: user.name },
+    await writeFundingSourceTxn(prisma, {
+      fundingSourceId: source.id, type: 'OPEN', amount: openingBalance, note: 'Opening balance',
+      createdById: user.userId, createdByName: user.name,
     })
   }
   await prisma.auditLog.create({

@@ -21,6 +21,7 @@ import { fundClassOf, type FundClass } from '@/lib/expense-funds'
 import { chainIsStaffed, usersWithGrant } from '@/lib/expense-grants'
 import { creditFundingSource } from '@/lib/expense-ledger'
 import { roundMoney } from '@/lib/utils'
+import { EXPENSE_GRANT_FLAGS } from '@/lib/shared-constants'
 
 function parseApproverRoles(raw: string | null | undefined): string[] {
   if (!raw) return []
@@ -61,6 +62,67 @@ function stagesFromStaffed(staffed: { single: boolean; first: boolean; second: b
  *  shared approvals inbox, the decide endpoint) use this. */
 export function isStageGrant(value: string | null | undefined): value is ApprovalStageGrant {
   return !!value && (STAGE_GRANTS as readonly string[]).includes(value)
+}
+
+/** Human-readable role labels for the stage grants, taken from the same §4
+ *  access-flag definitions the Manage Access screen shows — so "Waiting for:
+ *  … (First Approver)" uses the exact wording an admin granted, never a second
+ *  hand-maintained copy. */
+const STAGE_GRANT_LABELS: Record<ApprovalStageGrant, string> = Object.fromEntries(
+  STAGE_GRANTS.map((g) => [g, EXPENSE_GRANT_FLAGS.find((f) => f.grantType === g)?.label ?? g]),
+) as Record<ApprovalStageGrant, string>
+
+/** The specific person(s) a PENDING_APPROVAL request is currently waiting on,
+ *  resolved from the live grant chain rather than a stored field — the read
+ *  model behind the UI's "Waiting for: [Name] ([Role])" (replacing the generic
+ *  "PENDING APPROVAL"). */
+export interface CurrentApprover {
+  stageGrant: ApprovalStageGrant
+  /** e.g. "First Approver" — the grant's own §4 label. */
+  roleLabel: string
+  /** 1-based position in the chain, and the chain length, for "level 1 of 2". */
+  stageNumber: number
+  stageCount: number
+  /** Everyone holding the stage grant for this fund/outlet. Empty = the stage is
+   *  unstaffed (an admin must grant it before anyone can act — surfaced so the
+   *  UI can say "unassigned" instead of a misleading blank). */
+  approvers: { id: string; name: string }[]
+}
+
+/**
+ * Resolves who a request is waiting on right now. Returns null when the request
+ * is not actually awaiting approval (any status other than PENDING_APPROVAL, or
+ * no open WorkflowApproval row / a non-stage approverRole), so callers can fall
+ * back to the plain status label.
+ *
+ * Deliberately a pure read over existing data — the PENDING WorkflowApproval
+ * row's stage grant, the approvals already granted, and the live grant holders
+ * for the fund/outlet the chain was resolved against. No schema, no stored
+ * "current approver" to keep in sync (the 2026-08-05 build-on-grants decision).
+ */
+export async function resolveCurrentApprover(db: Db, expenseRequestId: string): Promise<CurrentApprover | null> {
+  const request = await db.expenseRequest.findUnique({
+    where: { id: expenseRequestId },
+    select: { status: true, amount: true, outletId: true, fundingSourceId: true, requestType: { select: { approverRoles: true } } },
+  })
+  if (!request || request.status !== 'PENDING_APPROVAL') return null
+
+  const pending = await db.workflowApproval.findFirst({ where: { expenseRequestId, status: 'PENDING' } })
+  if (!pending || !isStageGrant(pending.approverRole)) return null
+
+  const plan = await resolveApprovalPlan(db, request)
+  const approvedCount = await db.workflowApproval.count({ where: { expenseRequestId, status: 'APPROVED' } })
+  const approvers = await usersWithGrant(pending.approverRole, { fundClass: plan.fundClass, outletId: plan.outletId }, db).catch(() => [])
+
+  return {
+    stageGrant: pending.approverRole,
+    roleLabel: STAGE_GRANT_LABELS[pending.approverRole],
+    stageNumber: approvedCount + 1,
+    // Guard against a chain that has since shrunk (a grant revoked mid-flight):
+    // never report a level below the one actually open.
+    stageCount: Math.max(plan.stages.length, approvedCount + 1),
+    approvers: approvers.map((a) => ({ id: a.id, name: a.name })),
+  }
 }
 
 export interface ApprovalPlan {
@@ -228,7 +290,7 @@ export async function executeTopUpAllocation(
     where: { id: expenseRequestId },
     // CLOSED, not PAID: a top-up brings money IN, so "paid" (money out) would
     // misread. CLOSED = allocation recorded, nothing further to do.
-    data: { status: 'CLOSED', allocatedAmount: allocated },
+    data: { status: 'CLOSED', allocatedAmount: allocated, stageEnteredAt: new Date() },
   })
 
   await createNotification({
@@ -261,7 +323,7 @@ export async function advanceExpenseApproval(
   const isTopUp = request.direction === 'IN'
 
   if (decision === 'REJECTED') {
-    await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'REJECTED' } })
+    await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'REJECTED', stageEnteredAt: new Date() } })
     await createNotification({
       userId: request.requestedById, type: 'EXPENSE_REQUEST_REJECTED',
       title: `${request.requestType.name} rejected`,
@@ -282,7 +344,7 @@ export async function advanceExpenseApproval(
     return { status }
   }
 
-  await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'APPROVED' } })
+  await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'APPROVED', stageEnteredAt: new Date() } })
 
   await createNotification({
     userId: request.requestedById, type: 'EXPENSE_REQUEST_APPROVED',
