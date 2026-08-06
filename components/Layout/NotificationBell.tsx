@@ -72,7 +72,7 @@ export function NotificationBell() {
       try { await request(`/api/notifications/${n.id}/read`, { method: 'POST' }); load() } catch { /* ignore */ }
     }
     const href = notificationHref(n)
-    if (href) { setOpen(false); window.location.href = href }
+    if (href) { setOpen(false); window.location.assign(href) }
   }
 
   const markAllRead = async () => {
