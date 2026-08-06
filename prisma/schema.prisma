@@ -5001,7 +5001,7 @@ model ExpenseRequestFieldValue {
 /// Revoked, never deleted (§4 audit trail) — revokedAt is the only "is this
 /// live" test; a historical request must still be able to show that the person
 /// who approved it did hold the grant at the time.
-///   grantType: REQUEST | CUSTODIAN | FIRST_APPROVER | SECOND_APPROVER | ALLOCATOR
+///   grantType: REQUEST | CUSTODIAN | SINGLE_APPROVER | FIRST_APPROVER | SECOND_APPROVER | ALLOCATOR
 ///   fundClass: CASHIER_CASH | PETTY_CASH | DIGITAL (null = every fund)
 model ExpenseAccessGrant {
   id        String  @id @default(cuid())

@@ -204,11 +204,12 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
  * amount is at/below the fund's approvalThreshold — §3's small-request
  * shortcut).
  *
- * Refuses to submit when approval IS required but nobody holds FIRST_APPROVER
- * for the fund. Auto-approving in that case would let a forgotten access grant
- * silently turn into unapproved money going out; leaving it PENDING with no
- * approver would strand it invisibly. An explicit error is the only honest
- * outcome, and it names the fix.
+ * Refuses to submit when approval IS required but nobody holds an approver
+ * grant for the fund (neither a Single Approver nor a First Approver).
+ * Auto-approving in that case would let a forgotten access grant silently turn
+ * into unapproved money going out; leaving it PENDING with no approver would
+ * strand it invisibly. An explicit error is the only honest outcome, and it
+ * names the fix.
  */
 export async function submitExpenseRequest(db: Db, requestId: string): Promise<{ status: ExpenseRequestStatus; skipReason: string | null }> {
   const request = await db.expenseRequest.findUnique({ where: { id: requestId }, include: { requestType: true } })
@@ -218,8 +219,8 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
   const plan = await resolveApprovalPlan(db, request)
   if (!plan.skip && !plan.stages.length) {
     throw new Error(
-      'This request needs approval, but nobody has First Approver access for this fund and outlet. ' +
-      'Grant it under Setup → Expense Settings → Manage Access, then submit again.'
+      'This request needs approval, but nobody has approver access (Single Approver, or First Approver) ' +
+      'for this fund and outlet. Grant it under Setup → Expense Settings → Manage Access, then submit again.'
     )
   }
 

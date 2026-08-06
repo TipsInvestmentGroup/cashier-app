@@ -920,9 +920,11 @@ function ManageAccessTab() {
           It is the only thing those checks read — a user&apos;s role no longer grants expense access by itself.
         </p>
         <p className="text-xs text-gray-400 mt-2">
-          Each fund gets its own approval chain: a request against Petty Cash is routed to whoever holds First or
-          Second Approver for Petty Cash at that outlet. Leave the fund as &ldquo;All funds&rdquo; to have someone
-          approve for all three. Grants are revoked, never deleted, so past approvals stay explainable.
+          Each fund gets its own approval chain. Grant a <strong>Single Approver</strong> for a one-stage
+          workflow — one approval finalizes the request. Otherwise use <strong>First</strong> and{' '}
+          <strong>Second Approver</strong> for the two-stage chain; a Single Approver, where set, replaces
+          that chain for the fund. Leave the fund as &ldquo;All funds&rdquo; to have someone approve for all
+          three. Grants are revoked, never deleted, so past approvals stay explainable.
         </p>
       </Card>
 
@@ -956,7 +958,7 @@ function ManageAccessTab() {
                       <span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${g.revokedAt ? 'bg-gray-100 text-gray-500 line-through' : 'bg-indigo-50 text-indigo-700'}`}>
                         {labelForGrant(g.grantType, g.fundClass)}
                       </span>
-                      {!g.fundClass && (g.grantType === 'FIRST_APPROVER' || g.grantType === 'SECOND_APPROVER') && (
+                      {!g.fundClass && (g.grantType === 'SINGLE_APPROVER' || g.grantType === 'FIRST_APPROVER' || g.grantType === 'SECOND_APPROVER') && (
                         <span className="block text-[10px] text-gray-400">all funds</span>
                       )}
                       {/* The eligibility→assignment shortcut: a CUSTODIAN grant
@@ -1053,7 +1055,7 @@ function GrantEditor({ users, outlets, onCancel, onSaved }: {
       <div className="space-y-2">
         {EXPENSE_GRANT_FLAGS.map((f) => {
           const key = flagKey(f.grantType, f.fundClass)
-          const isApprover = f.grantType === 'FIRST_APPROVER' || f.grantType === 'SECOND_APPROVER'
+          const isApprover = f.grantType === 'SINGLE_APPROVER' || f.grantType === 'FIRST_APPROVER' || f.grantType === 'SECOND_APPROVER'
           return (
             <div key={key} className="border-2 border-gray-100 rounded-xl p-3">
               <label className="flex items-start gap-3 cursor-pointer">

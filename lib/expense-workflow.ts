@@ -32,12 +32,27 @@ function parseApproverRoles(raw: string | null | undefined): string[] {
   }
 }
 
-/** The two approval stages, in order. §4 defines exactly First then Second
- *  Approver, so the chain is two-tier by design rather than an arbitrary-length
- *  role list — but stage 2 only applies when someone actually holds
- *  SECOND_APPROVER for the fund (see resolveApprovalPlan). */
-const STAGE_GRANTS = ['FIRST_APPROVER', 'SECOND_APPROVER'] as const
+/** The grants that can address an approval stage. Two shapes are possible:
+ *  a single-stage SINGLE_APPROVER chain, or the two-tier FIRST → SECOND chain
+ *  (each stage applying only when someone holds it for the fund — see
+ *  resolveApprovalPlan). A given fund uses one shape or the other, never both:
+ *  a configured Single Approver replaces the two-stage chain entirely. */
+const STAGE_GRANTS = ['SINGLE_APPROVER', 'FIRST_APPROVER', 'SECOND_APPROVER'] as const
 export type ApprovalStageGrant = (typeof STAGE_GRANTS)[number]
+
+/** Turns "who is staffed" into the ordered stages that will actually run.
+ *  A Single Approver takes precedence: when one is configured for the fund the
+ *  request is finalized by that one approval and never enters the First/Second
+ *  chain. Otherwise the chain is FIRST → SECOND, each stage included only when
+ *  it is staffed (an empty second tier is dropped rather than stranding the
+ *  request in PENDING_APPROVAL forever). */
+function stagesFromStaffed(staffed: { single: boolean; first: boolean; second: boolean }): ApprovalStageGrant[] {
+  if (staffed.single) return ['SINGLE_APPROVER']
+  return [
+    ...(staffed.first ? (['FIRST_APPROVER'] as const) : []),
+    ...(staffed.second ? (['SECOND_APPROVER'] as const) : []),
+  ]
+}
 
 /** WorkflowApproval.approverRole holds a User.role for collection-stage and
  *  staff-transaction approvals, but a GRANT TYPE for expense approvals — the
@@ -70,12 +85,14 @@ export interface ApprovalPlan {
  *   • it has no funding source, in which case there is no fund whose chain or
  *     threshold could apply and the pre-upgrade role behavior stands.
  *
- * Otherwise the chain is FIRST_APPROVER → SECOND_APPROVER, narrowed to the
- * stages that are actually staffed for this fund class and outlet. Stage 2 is
- * dropped when nobody holds SECOND_APPROVER — a two-tier chain with an empty
- * second tier would strand every request in PENDING_APPROVAL forever.
+ * Otherwise the chain is resolved from the grants staffed for this fund class
+ * and outlet (see stagesFromStaffed): a configured SINGLE_APPROVER yields a
+ * one-stage chain that finalizes on a single approval; failing that, the
+ * two-tier FIRST_APPROVER → SECOND_APPROVER chain, with stage 2 dropped when
+ * nobody holds SECOND_APPROVER — a two-tier chain with an empty second tier
+ * would strand every request in PENDING_APPROVAL forever.
  *
- * Deliberately does NOT auto-approve when stage 1 is unstaffed: silently
+ * Deliberately does NOT auto-approve when no stage is staffed: silently
  * approving money-out because an admin forgot to grant approver access is the
  * worst possible failure here. submitExpenseRequest surfaces that as an error.
  */
@@ -94,7 +111,7 @@ export async function resolveApprovalPlan(
     const staffed = await chainIsStaffed({ outletId: request.outletId })
     return {
       skip: false, reason: null,
-      stages: [...(staffed.first ? (['FIRST_APPROVER'] as const) : []), ...(staffed.second ? (['SECOND_APPROVER'] as const) : [])],
+      stages: stagesFromStaffed(staffed),
       fundClass: null, outletId: request.outletId,
     }
   }
@@ -122,7 +139,7 @@ export async function resolveApprovalPlan(
   const staffed = await chainIsStaffed({ fundClass, outletId })
   return {
     skip: false, reason: null,
-    stages: [...(staffed.first ? (['FIRST_APPROVER'] as const) : []), ...(staffed.second ? (['SECOND_APPROVER'] as const) : [])],
+    stages: stagesFromStaffed(staffed),
     fundClass, outletId,
   }
 }

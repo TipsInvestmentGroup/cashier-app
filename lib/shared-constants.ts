@@ -66,7 +66,7 @@ export const SALES_METRIC_DEPARTMENTS = ['SHISHA', 'FOOD'] as const
 // lib/expense-grants.ts re-exports these for server callers, the same way
 // lib/cash-verify.ts re-exports CASH_VERIFIERS_FIXED above — one definition,
 // two audiences.
-export const EXPENSE_GRANT_TYPES = ['REQUEST', 'CUSTODIAN', 'FIRST_APPROVER', 'SECOND_APPROVER', 'ALLOCATOR'] as const
+export const EXPENSE_GRANT_TYPES = ['REQUEST', 'CUSTODIAN', 'SINGLE_APPROVER', 'FIRST_APPROVER', 'SECOND_APPROVER', 'ALLOCATOR'] as const
 
 // ALLOCATOR is reserved, not issued: the Second Approver's approval directly
 // executes a petty cash top-up allocation (decision 2026-08-05), so there is no
@@ -84,6 +84,10 @@ export const EXPENSE_GRANT_FLAGS: { grantType: string; fundClass: string | null;
   { grantType: 'CUSTODIAN', fundClass: 'PETTY_CASH', label: 'Petty Cash Custodian', hint: 'Holds and disburses the petty cash float; may request a top-up.' },
   { grantType: 'CUSTODIAN', fundClass: 'DIGITAL', label: 'Digital Expenses Custodian', hint: 'Pays approved requests from the bank/mobile-money account.' },
   { grantType: 'CUSTODIAN', fundClass: 'CASHIER_CASH', label: 'Cashier Cash Custodian', hint: 'Disburses from the cashier drawer.' },
-  { grantType: 'FIRST_APPROVER', fundClass: null, label: 'First Approver', hint: 'First stage of the approval chain.' },
+  // Single Approval: one approver finalizes the request on their own. When this
+  // is held for a fund it REPLACES the First → Second chain for that fund — the
+  // request never enters the two-stage process (see resolveApprovalPlan).
+  { grantType: 'SINGLE_APPROVER', fundClass: null, label: 'Single Approver', hint: 'Single-approval workflow — one approval finalizes the request, with no first/second stage.' },
+  { grantType: 'FIRST_APPROVER', fundClass: null, label: 'First Approver', hint: 'First stage of the two-stage approval chain.' },
   { grantType: 'SECOND_APPROVER', fundClass: null, label: 'Second Approver', hint: 'Final approval — also executes petty cash top-up allocations.' },
 ]
