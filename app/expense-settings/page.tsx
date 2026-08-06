@@ -176,7 +176,110 @@ function ModuleTab() {
       <button onClick={save} disabled={saving} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">
         {saving ? 'Saving…' : 'Save changes'}
       </button>
+
+      <PaymentMethodsCard />
     </div>
+  )
+}
+
+// Per-scope payment methods — the options offered on the Record-payment screen.
+// A specific outlet may override the global default; leaving an outlet's list
+// empty makes it inherit (Outlet → Company → Global → built-in default), which
+// is exactly how the server resolves it at pay time.
+function PaymentMethodsCard() {
+  const { request } = useApi()
+  const [outlets, setOutlets] = useState<OutletOption[]>([])
+  const [scopeId, setScopeId] = useState<string>('') // '' = GLOBAL, else an outlet id
+  const [methods, setMethods] = useState<string[]>([])
+  const [resolved, setResolved] = useState<string[]>([])
+  const [newMethod, setNewMethod] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const scope = scopeId ? 'OUTLET' : 'GLOBAL'
+
+  useEffect(() => {
+    request('/api/outlets').then((o) => setOutlets(o || [])).catch(() => setOutlets([]))
+  }, [request])
+
+  const loadScope = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ scope })
+      if (scopeId) params.set('scopeId', scopeId)
+      const r = await request(`/api/expense/config/payment-methods?${params.toString()}`)
+      setMethods(r.stored || [])
+      setResolved(r.resolved || [])
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load payment methods') }
+    finally { setLoading(false) }
+  }, [request, scope, scopeId])
+  useEffect(() => { loadScope() }, [loadScope])
+
+  const addMethod = () => {
+    const v = newMethod.trim()
+    if (!v) return
+    if (methods.some((m) => m.toLowerCase() === v.toLowerCase())) { setNewMethod(''); return }
+    setMethods([...methods, v]); setNewMethod('')
+  }
+  const removeMethod = (m: string) => setMethods(methods.filter((x) => x !== m))
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const body = { scope, scopeId: scopeId || undefined, paymentMethods: methods }
+      const r = await request('/api/expense/config/payment-methods', { method: 'PUT', body: JSON.stringify(body) })
+      setMethods(r.stored || []); setResolved(r.resolved || [])
+      toast.success(scopeId ? 'Saved for this outlet' : 'Saved global default')
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not save') }
+    finally { setSaving(false) }
+  }
+
+  const inheriting = methods.length === 0
+
+  return (
+    <Card>
+      <h2 className="font-semibold text-gray-800 mb-1">Payment methods</h2>
+      <p className="text-xs text-gray-400 mb-3">The options shown when recording a payment. Set a global default, and optionally override it per outlet. An empty outlet list inherits the global default.</p>
+
+      <label className="block mb-3 max-w-sm"><span className="text-xs text-gray-500">Configure for</span>
+        <select className={inputCls} value={scopeId} onChange={(e) => setScopeId(e.target.value)}>
+          <option value="">All outlets (global default)</option>
+          {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select></label>
+
+      {loading ? <p className="text-sm text-gray-400 py-3">Loading…</p> : (
+        <>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {methods.map((m) => (
+              <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border-2 border-indigo-500 bg-indigo-50 text-indigo-700">
+                {m}
+                <button type="button" onClick={() => removeMethod(m)} className="text-indigo-400 hover:text-indigo-700" aria-label={`Remove ${m}`}>✕</button>
+              </span>
+            ))}
+            {inheriting && (
+              <span className="text-xs text-gray-400 py-1.5">
+                {scopeId ? 'No override — this outlet inherits: ' : 'No global list set — using the built-in default: '}
+                <span className="text-gray-500">{resolved.join(', ')}</span>
+              </span>
+            )}
+          </div>
+
+          <div className="flex gap-2 mb-4 max-w-sm">
+            <input value={newMethod} onChange={(e) => setNewMethod(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMethod() } }}
+              placeholder="e.g. HALOPESA, EQUITY, CHEQUE" className={inputCls} />
+            <button type="button" onClick={addMethod} className="shrink-0 px-4 py-2 bg-indigo-50 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-100">+ Add</button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button onClick={save} disabled={saving} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">
+              {saving ? 'Saving…' : 'Save payment methods'}
+            </button>
+            {!inheriting && scopeId && <button onClick={() => setMethods([])} className="text-xs text-gray-500 hover:text-gray-700">Clear override (inherit global)</button>}
+          </div>
+        </>
+      )}
+    </Card>
   )
 }
 

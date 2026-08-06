@@ -4585,6 +4585,7 @@ model ExpenseModuleConfig {
   requireReceiptDefault Boolean  @default(true)
   allowMixedPayment     Boolean  @default(true)
   allowOverBudget       String   @default("WARN")
+  paymentMethods        String? // JSON array of allowed payment-method labels (e.g. ["CASH","CRDB","M-PESA"]); null/empty = inherit wider scope, then the built-in default list
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 

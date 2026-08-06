@@ -12,6 +12,11 @@ import toast from 'react-hot-toast'
 
 const MAX_ATTACHMENT = 2 * 1024 * 1024 // 2MB, same cap as PayModal's receipt upload
 
+// Last-resort fallback only if the per-outlet payment-methods config can't be
+// fetched — the effective list is resolved server-side (Outlet → Company →
+// Global → built-in default) and configured under Expense Settings.
+const FALLBACK_PAYMENT_METHODS = ['CASH', 'CRDB', 'M-PESA', 'BANK TRANSFER']
+
 interface ExpenseItem { id: string; detail: string; unit: number; unitCost: number; amount: number }
 interface ExpensePayment {
   id: string; fundingSourceId: string; amount: number; paymentMethod: string
@@ -56,6 +61,7 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   const [sources, setSources] = useState<FundingSource[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [paymentMethods, setPaymentMethods] = useState<string[]>(FALLBACK_PAYMENT_METHODS)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -72,6 +78,10 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
       setSources((srcs || []).filter((s: FundingSource) => s.isActive))
       setNames(Object.fromEntries((users || []).map((u: { id: string; name: string }) => [u.id, u.name])))
       setAttachments(atts || [])
+      // Payment methods are resolved for this request's outlet (Expense Settings
+      // → per-outlet override → company → global → default).
+      const pm = await request(`/api/expense/config/payment-methods?outletId=${d?.outletId || ''}`).catch(() => null)
+      if (pm?.paymentMethods?.length) setPaymentMethods(pm.paymentMethods)
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load request') }
     finally { setLoading(false) }
   }, [request, id])
@@ -111,9 +121,18 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   }
 
   // ── Pay panel ──
+  // Keep the raw numeric string in state (so Number(amount) works on submit),
+  // but show it with thousand separators. e.g. "1500000" -> "1,500,000".
+  const displayAmount = (raw: string) => {
+    if (!raw) return ''
+    const [int, dec] = raw.split('.')
+    const withCommas = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+    return dec !== undefined ? `${withCommas}.${dec}` : withCommas
+  }
+  const parseAmount = (formatted: string) => formatted.replace(/[^\d.]/g, '')
   const [payOpen, setPayOpen] = useState(false)
   const [payForm, setPayForm] = useState({ fundingSourceId: '', amount: '', paymentMethod: 'CASH', payeeName: '', payeeAccount: '', reference: '' })
-  const openPay = () => { setPayForm({ fundingSourceId: sources[0]?.id || '', amount: String(outstanding), paymentMethod: sources[0]?.sourceType || 'CASH', payeeName: '', payeeAccount: '', reference: '' }); setPayOpen(true) }
+  const openPay = () => { setPayForm({ fundingSourceId: sources[0]?.id || '', amount: String(outstanding), paymentMethod: paymentMethods[0] || 'CASH', payeeName: '', payeeAccount: '', reference: '' }); setPayOpen(true) }
   const submitPay = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!payForm.fundingSourceId) return toast.error('Select a funding source')
@@ -243,9 +262,13 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
                   {sources.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.sourceType})</option>)}
                 </select></label>
               <label className="block"><span className="text-xs text-gray-500">Payment method</span>
-                <input className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full" value={payForm.paymentMethod} onChange={(e) => setPayForm({ ...payForm, paymentMethod: e.target.value })} placeholder="CASH, CRDB, MPESA…" /></label>
+                <select className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full bg-white" value={payForm.paymentMethod} onChange={(e) => setPayForm({ ...payForm, paymentMethod: e.target.value })}>
+                  {/* Guard: if the stored value isn't in the resolved list (e.g. an
+                      older payment or a since-removed method), still show it. */}
+                  {(paymentMethods.includes(payForm.paymentMethod) ? paymentMethods : [payForm.paymentMethod, ...paymentMethods].filter(Boolean)).map((m) => <option key={m} value={m}>{m}</option>)}
+                </select></label>
               <label className="block"><span className="text-xs text-gray-500">Amount <span className="text-gray-400">(defaults to outstanding {formatCurrency(outstanding)})</span></span>
-                <input type="number" className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} /></label>
+                <input type="text" inputMode="decimal" className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full" value={displayAmount(payForm.amount)} onChange={(e) => setPayForm({ ...payForm, amount: parseAmount(e.target.value) })} /></label>
               <label className="block"><span className="text-xs text-gray-500">Reference</span>
                 <input className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full" value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })} placeholder="Bank/MoMo txn id, cheque no." /></label>
               <label className="block"><span className="text-xs text-gray-500">Payee name</span>
