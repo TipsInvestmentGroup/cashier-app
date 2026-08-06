@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
@@ -777,6 +777,10 @@ interface AccessGrant {
   outlet: { id: string; name: string } | null
 }
 
+/** The fund fields the "Assign to funds" shortcut needs — the /funding-sources
+ *  GET returns more, but the shortcut only matches on class + outlet + active. */
+interface FundOption { id: string; name: string; fundClass: string | null; outletId: string | null; isActive: boolean }
+
 /** Stable key for one flag, so a (grantType, fundClass) pair round-trips through
  *  checkbox state without a nested structure. */
 const flagKey = (grantType: string, fundClass: string | null) => `${grantType}:${fundClass || ''}`
@@ -791,24 +795,101 @@ function labelForGrant(grantType: string, fundClass: string | null): string {
   return fundLabel ? `${base} · ${fundLabel}` : base
 }
 
+/**
+ * The eligibility→assignment shortcut, shown inline under a CUSTODIAN grant row.
+ * A grant only says "this person MAY hold a <class> fund" (ExpenseAccessGrant);
+ * the actual "holds THIS fund" record is FundingSourceCustodian, written per
+ * fund. This lists the funds the grant covers — same fund class, and either the
+ * grant's outlet or (for a business-wide grant) every outlet — and toggles the
+ * assignment straight against the same endpoint the Funding Sources → Edit
+ * picker uses, so the two entry points can never disagree. The server still
+ * enforces the eligibility grant on POST (lib/expense-access.ts), which sitting
+ * on the grant row already satisfies.
+ */
+function AssignToFunds({ grant, sources }: { grant: AccessGrant; sources: FundOption[] }) {
+  const { request } = useApi()
+  const matching = useMemo(
+    () => sources.filter((s) => s.isActive && s.fundClass === grant.fundClass && (!grant.outletId || s.outletId === grant.outletId)),
+    [sources, grant.fundClass, grant.outletId],
+  )
+  const [assigned, setAssigned] = useState<Set<string> | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    const entries = await Promise.all(
+      matching.map(async (f) => {
+        const rows = await request(`/api/expense/funding-sources/${f.id}/custodians`).catch(() => [])
+        return [f.id, (rows as { userId: string }[]).some((r) => r.userId === grant.userId)] as const
+      }),
+    )
+    setAssigned(new Set(entries.filter(([, has]) => has).map(([id]) => id)))
+  }, [request, matching, grant.userId])
+  useEffect(() => { load() }, [load])
+
+  const toggle = async (fundId: string) => {
+    setBusy(fundId)
+    try {
+      if (assigned?.has(fundId)) {
+        await request(`/api/expense/funding-sources/${fundId}/custodians?userId=${grant.userId}`, { method: 'DELETE' })
+      } else {
+        await request(`/api/expense/funding-sources/${fundId}/custodians`, { method: 'POST', body: JSON.stringify({ userId: grant.userId }) })
+      }
+      await load()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not update assignment') }
+    finally { setBusy(null) }
+  }
+
+  const classLabel = grant.fundClass ? FUND_CLASS_LABELS[grant.fundClass as FundClass] || grant.fundClass : ''
+  return (
+    <div className="mt-2 p-2 rounded-lg bg-gray-50 border border-gray-100">
+      <span className="text-[11px] text-gray-500 block mb-1.5">Assign to a {classLabel} fund <span className="text-gray-400">(who actually holds and pays it)</span></span>
+      {matching.length === 0 ? (
+        <p className="text-[11px] text-gray-400">No {classLabel} funds{grant.outletId ? ' at this outlet' : ''} exist yet — create one under Funding Sources first.</p>
+      ) : assigned === null ? (
+        <p className="text-[11px] text-gray-400">Loading funds…</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {matching.map((f) => {
+            const on = assigned.has(f.id)
+            return (
+              <button key={f.id} type="button" disabled={busy === f.id} onClick={() => toggle(f.id)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 transition ${on ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'} ${busy === f.id ? 'opacity-50' : ''}`}>
+                {on ? '✓ ' : '+ '}{f.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ManageAccessTab() {
   const { request } = useApi()
   const [grants, setGrants] = useState<AccessGrant[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
   const [outlets, setOutlets] = useState<OutletOption[]>([])
+  // Funds are pulled here purely so the per-row "Assign to funds" shortcut can
+  // list the funds a CUSTODIAN grant covers without a second screen. Only the
+  // handful of fields the shortcut filters on are kept (see FundOption).
+  const [sources, setSources] = useState<FundOption[]>([])
   const [loading, setLoading] = useState(true)
   const [showRevoked, setShowRevoked] = useState(false)
   const [adding, setAdding] = useState(false)
+  // Which CUSTODIAN grant row has its fund-assignment panel open (grant id).
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [g, u, o] = await Promise.all([
+      const [g, u, o, s] = await Promise.all([
         request(`/api/expense/access-grants${showRevoked ? '?includeRevoked=true' : ''}`),
         request('/api/users').catch(() => []),
         request('/api/outlets').catch(() => []),
+        request('/api/expense/funding-sources').catch(() => []),
       ])
       setGrants(g || []); setUsers(u || []); setOutlets(o || [])
+      setSources((s || []).map((f: FundOption) => ({ id: f.id, name: f.name, fundClass: f.fundClass, outletId: f.outletId, isActive: f.isActive })))
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load access grants') }
     finally { setLoading(false) }
   }, [request, showRevoked])
@@ -878,6 +959,14 @@ function ManageAccessTab() {
                       {!g.fundClass && (g.grantType === 'FIRST_APPROVER' || g.grantType === 'SECOND_APPROVER') && (
                         <span className="block text-[10px] text-gray-400">all funds</span>
                       )}
+                      {/* The eligibility→assignment shortcut: a CUSTODIAN grant
+                          only makes this person *eligible* to hold a fund; the
+                          panel below writes the actual FundingSourceCustodian
+                          assignment (what clears the "No custodian assigned"
+                          banner) without leaving for the Funding Sources tab. */}
+                      {expandedId === g.id && g.grantType === 'CUSTODIAN' && !g.revokedAt && (
+                        <AssignToFunds grant={g} sources={sources} />
+                      )}
                     </td>
                     <td className="pr-3 text-gray-600">{g.outlet?.name || <span className="text-gray-400">All outlets</span>}</td>
                     <td className="pr-3 text-gray-500 text-[11px]">
@@ -885,6 +974,11 @@ function ManageAccessTab() {
                       {g.revokedAt && <span className="block text-red-500">revoked {new Date(g.revokedAt).toLocaleDateString()}</span>}
                     </td>
                     <td className="text-right whitespace-nowrap">
+                      {!g.revokedAt && g.grantType === 'CUSTODIAN' && (
+                        <button onClick={() => setExpandedId(expandedId === g.id ? null : g.id)} className="text-xs text-indigo-600 hover:text-indigo-800 mr-3">
+                          {expandedId === g.id ? 'Close' : 'Assign to funds'}
+                        </button>
+                      )}
                       {!g.revokedAt && <button onClick={() => revoke(g)} className="text-xs text-red-500 hover:text-red-700">Revoke</button>}
                     </td>
                   </tr>
