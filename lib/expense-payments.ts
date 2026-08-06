@@ -20,6 +20,7 @@ import { roundMoney } from '@/lib/utils'
 import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
 import { recalcExpenseRequestPaymentStatus } from '@/lib/expense-requests'
 import { getFundingSourceBalance, writeFundingSourceTxn } from '@/lib/expense-ledger'
+import { payableAmount } from '@/lib/expense-funds'
 import { createNotification } from '@/lib/notifications'
 
 function parseIdList(raw: string | null | undefined): string[] | null {
@@ -123,7 +124,10 @@ export async function createExpensePayment(input: CreateExpensePaymentInput): Pr
         throw new Error(`${fundingSource.name} is not an allowed funding source for ${request.requestType.name}`)
       }
       const alreadyPaid = roundMoney(request.paymentAllocations.reduce((s, a) => s + a.amount, 0))
-      const outstanding = roundMoney(request.amount - alreadyPaid)
+      // The payable ceiling is the APPROVED figure (payableAmount), not the
+      // requested one — a request approved for less than requested can only be
+      // paid up to what was approved.
+      const outstanding = roundMoney(payableAmount(request) - alreadyPaid)
       const allocAmount = roundMoney(alloc.amount)
       if (allocAmount > outstanding + 0.001) {
         throw new Error(`Allocation of ${allocAmount} exceeds outstanding balance (${outstanding}) on request "${request.purpose}"`)

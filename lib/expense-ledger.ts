@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
 import { companyAccountBalance } from '@/lib/finance-banking'
 import { computeAvailableCashToday } from '@/lib/cash-recon'
+import { payableAmount } from '@/lib/expense-funds'
 
 export interface FundingSourceLike {
   id: string
@@ -378,11 +379,13 @@ export async function computeFundingSourceMetrics(
 ): Promise<FundingSourceMetrics> {
   const openReqs = await db.expenseRequest.findMany({
     where: { fundingSourceId: source.id, direction: 'OUT', status: { in: ['APPROVED', 'PARTIALLY_PAID'] } },
-    select: { amount: true, paymentAllocations: { select: { amount: true } } },
+    select: { amount: true, allocatedAmount: true, paymentAllocations: { select: { amount: true } } },
   })
   const reserved = roundMoney(openReqs.reduce((s, r) => {
     const paid = r.paymentAllocations.reduce((a, p) => a + p.amount, 0)
-    return s + Math.max(0, r.amount - paid)
+    // Reserve against the APPROVED figure, not the requested one — a request
+    // approved for less commits only what was approved.
+    return s + Math.max(0, payableAmount(r) - paid)
   }, 0))
   const available = roundMoney(closingBalance - reserved)
 

@@ -27,6 +27,9 @@ interface PaymentAllocation { id: string; amount: number; expensePayment: Expens
 interface VerificationRecord { id: string; stage: string; verifiedById: string | null; verifiedAt: string; note: string | null }
 interface ExpenseRequestDetail {
   id: string; purpose: string; amount: number; currency: string; status: string; createdAt: string
+  // allocatedAmount = the approver-adjusted (approved) figure; null until an
+  // approver sets a partial amount. direction OUT = disbursement, IN = top-up.
+  allocatedAmount: number | null; direction: string
   requestedById: string; outletId: string | null
   requestNumber: string | null; expenseType: string | null; stageEnteredAt: string | null
   outlet: { id: string; name: string } | null
@@ -68,6 +71,8 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   const [paymentMethods, setPaymentMethods] = useState<string[]>(FALLBACK_PAYMENT_METHODS)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
+  // Approver-adjusted amount (partial approval); blank = approve as requested.
+  const [approveAmount, setApproveAmount] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -96,7 +101,12 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   const isOwner = data?.requestedById === user?.id
   const canDisburse = DISBURSER_ROLES.includes(user?.role || '')
   const canClose = CLOSER_ROLES.includes(user?.role || '')
-  const outstanding = data ? data.amount - data.paymentAllocations.reduce((s, a) => s + a.amount, 0) : 0
+  // The payable figure is the approved amount once an approver adjusted it,
+  // otherwise the requested amount (mirrors lib/expense-funds.ts payableAmount).
+  // Every "how much is left" figure on this page is against it, not `amount`.
+  const approvedAmt = data ? (data.allocatedAmount != null && data.allocatedAmount > 0 ? data.allocatedAmount : data.amount) : 0
+  const isPartialApproval = !!data && data.allocatedAmount != null && data.allocatedAmount > 0 && data.allocatedAmount !== data.amount
+  const outstanding = data ? approvedAmt - data.paymentAllocations.reduce((s, a) => s + a.amount, 0) : 0
 
   const submitDraft = async () => {
     setBusy('submit')
@@ -106,7 +116,15 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   }
   const decide = async (approve: boolean) => {
     setBusy(approve ? 'approve' : 'reject')
-    try { const r = await request(`/api/expense/requests/${id}/decide`, { method: 'POST', body: JSON.stringify({ approve }) }); toast.success(`Now ${r.status.replace('_', ' ')}`); load() }
+    // On approve, an approver may sign off a different (usually smaller) amount
+    // than requested — sent only when they entered one and it actually differs.
+    // The server applies it at the FINAL approval level (lib/expense-workflow.ts).
+    const adj = approveAmount.trim() ? Number(approveAmount) : null
+    const allocatedAmount = approve && adj != null && adj > 0 && data && adj !== data.amount ? adj : undefined
+    try {
+      const r = await request(`/api/expense/requests/${id}/decide`, { method: 'POST', body: JSON.stringify({ approve, ...(allocatedAmount != null ? { allocatedAmount } : {}) }) })
+      toast.success(`Now ${r.status.replace('_', ' ')}`); setApproveAmount(''); load()
+    }
     catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not decide') }
     finally { setBusy(null) }
   }
@@ -232,6 +250,18 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
             )}
             {data.status === 'PENDING_APPROVAL' && (
               <>
+                {/* Optional partial approval: approve for less than requested. Only
+                    for OUT disbursements (an IN top-up's amount is set in its own
+                    flow). Applied when the FINAL level clears; blank = as requested. */}
+                {data.direction === 'OUT' && (
+                  <label className="flex flex-col">
+                    <span className="text-[10px] text-gray-400 leading-tight">Approve for (optional)</span>
+                    <input type="text" inputMode="decimal"
+                      className="w-32 px-2 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none"
+                      value={displayAmount(approveAmount)} onChange={(e) => setApproveAmount(parseAmount(e.target.value))}
+                      placeholder={formatCurrency(data.amount)} />
+                  </label>
+                )}
                 <Button variant="success" onClick={() => decide(true)} disabled={!!busy}>{busy === 'approve' ? 'Working…' : 'Approve'}</Button>
                 <Button variant="danger" onClick={() => decide(false)} disabled={!!busy}>{busy === 'reject' ? 'Working…' : 'Reject'}</Button>
                 {(isOwner || user?.role === 'ADMIN') && <Button variant="outline" onClick={cancelRequest} disabled={!!busy}>Cancel</Button>}
@@ -243,8 +273,12 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card><p className="text-xs text-gray-500">Amount</p><p className="text-xl font-bold mt-1 text-gray-800">{formatCurrency(data.amount)}</p></Card>
-          <Card><p className="text-xs text-gray-500">Paid</p><p className="text-xl font-bold mt-1 text-gray-800">{formatCurrency(data.amount - outstanding)}</p></Card>
+          <Card>
+            <p className="text-xs text-gray-500">{isPartialApproval ? 'Approved' : 'Amount'}</p>
+            <p className="text-xl font-bold mt-1 text-gray-800">{formatCurrency(approvedAmt)}</p>
+            {isPartialApproval && <p className="text-[11px] text-amber-600 mt-0.5">of {formatCurrency(data.amount)} requested</p>}
+          </Card>
+          <Card><p className="text-xs text-gray-500">Paid</p><p className="text-xl font-bold mt-1 text-gray-800">{formatCurrency(data.paymentAllocations.reduce((s, a) => s + a.amount, 0))}</p></Card>
           <Card><p className="text-xs text-gray-500">Outstanding</p><p className={`text-xl font-bold mt-1 ${outstanding > 0 ? 'text-orange-600' : 'text-gray-800'}`}>{formatCurrency(outstanding)}</p></Card>
           <Card><p className="text-xs text-gray-500">Payments</p><p className="text-xl font-bold mt-1 text-gray-800">{data.paymentAllocations.length}</p></Card>
         </div>

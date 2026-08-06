@@ -53,9 +53,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json().catch(() => ({}))
   if (typeof body.approve !== 'boolean') return NextResponse.json({ error: 'approve (boolean) is required' }, { status: 400 })
 
+  // Optional approver-adjusted amount (a partial approval, or a top-up rounded
+  // to a whole cheque). Only meaningful on approve, and only when the final
+  // level clears — lib/expense-workflow.ts applies it at that point and stores
+  // it as ExpenseRequest.allocatedAmount, leaving the requested amount intact.
+  let allocatedAmount: number | null = null
+  if (body.approve && body.allocatedAmount != null && body.allocatedAmount !== '') {
+    const n = Number(body.allocatedAmount)
+    if (!Number.isFinite(n) || n <= 0) return NextResponse.json({ error: 'allocatedAmount must be a positive number' }, { status: 400 })
+    allocatedAmount = n
+  }
+
   try {
     const result = await decideExpenseRequestViaWorkflow({
       expenseRequestId: id, approve: body.approve, decidedById: user.userId, comment: body.comment ? String(body.comment) : null,
+      allocatedAmount,
     })
     await prisma.auditLog.create({
       data: { userId: user.userId, action: 'UPDATE', entity: 'ExpenseRequest', entityId: id, details: `${body.approve ? 'Approved' : 'Rejected'} (${result.approverRole} level) expense request${body.comment ? `: ${body.comment}` : ''}` },

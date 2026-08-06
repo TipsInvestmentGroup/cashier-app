@@ -344,12 +344,27 @@ export async function advanceExpenseApproval(
     return { status }
   }
 
-  await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'APPROVED', stageEnteredAt: new Date() } })
+  // A partial approval on an OUT disbursement: the final approver may sign off a
+  // different figure than requested (approve 80k of a 100k request), stored as
+  // allocatedAmount so the requested amount stays auditable and every downstream
+  // money path (lib/expense-funds.ts payableAmount) pays against the approved
+  // figure, not the requested one. Only applied at final approval and only when
+  // it actually differs — matching how an IN top-up's allocation is captured.
+  const approved = opts.allocatedAmount && opts.allocatedAmount > 0 ? roundMoney(opts.allocatedAmount) : null
+  await db.expenseRequest.update({
+    where: { id: expenseRequestId },
+    data: {
+      status: 'APPROVED', stageEnteredAt: new Date(),
+      ...(approved != null && approved !== request.amount ? { allocatedAmount: approved } : {}),
+    },
+  })
 
   await createNotification({
     userId: request.requestedById, type: 'EXPENSE_REQUEST_APPROVED',
     title: `${request.requestType.name} approved`,
-    message: `"${request.purpose}" for ${request.amount} ${request.currency} has been approved.`,
+    message: approved != null && approved !== request.amount
+      ? `"${request.purpose}" was approved for ${approved} ${request.currency} (requested ${request.amount}).`
+      : `"${request.purpose}" for ${request.amount} ${request.currency} has been approved.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
   }, db)
 
@@ -363,10 +378,11 @@ export async function advanceExpenseApproval(
       .then((rows) => rows.map((r) => ({ id: r.userId })))
       .catch(() => [])
     : await listCustodiansForRequestType(request.requestType.allowedFundingSourceIds, db).catch(() => [])
+  const payableForMsg = approved != null && approved !== request.amount ? approved : request.amount
   await Promise.all(custodians.map((c) => createNotification({
     userId: c.id, type: 'EXPENSE_REQUEST_READY_FOR_PAYMENT',
     title: `${request.requestType.name} ready for payment`,
-    message: `"${request.purpose}" for ${request.amount} ${request.currency} is approved and ready to be paid.`,
+    message: `"${request.purpose}" for ${payableForMsg} ${request.currency} is approved and ready to be paid.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
   }, db)))
 

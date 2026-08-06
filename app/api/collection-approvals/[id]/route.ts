@@ -59,9 +59,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // the ExpenseRequest — opening the next sequential approval level, or
     // finalizing APPROVED/REJECTED. See lib/expense-workflow.ts.
     if (approval.expenseRequestId) {
-      // allocatedAmount only bites when this decision finalizes an IN top-up
-      // (advanceExpenseApproval applies it at the execution point); for every
-      // other case it is harmlessly ignored.
+      // allocatedAmount bites only when this decision FINALIZES the chain —
+      // executing an IN top-up's allocation, or storing an OUT request's approved
+      // (partial) amount. At an intermediate level advanceExpenseApproval opens
+      // the next step and ignores it.
       await advanceExpenseApproval(tx, approval.expenseRequestId, decision, {
         allocatedAmount: allocatedAmount != null ? Number(allocatedAmount) : null,
         actorId: user.userId, actorName: user.name,

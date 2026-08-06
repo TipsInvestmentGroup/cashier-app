@@ -13,7 +13,7 @@ import { resolveExpenseModuleConfig } from '@/lib/expense-config'
 import { openNextApprovalStep, cancelPendingExpenseApproval, resolveApprovalPlan, executeTopUpAllocation } from '@/lib/expense-workflow'
 import { getFundingSourceBalance } from '@/lib/expense-ledger'
 import { listFundingSourceCustodians } from '@/lib/expense-access'
-import { allowsManualAllocation } from '@/lib/expense-funds'
+import { allowsManualAllocation, payableAmount } from '@/lib/expense-funds'
 import { createNotification } from '@/lib/notifications'
 import { resolveOutletCode } from '@/lib/bill-reference'
 
@@ -351,7 +351,9 @@ export async function recalcExpenseRequestPaymentStatus(db: Db, requestId: strin
   if (request.status !== 'APPROVED' && request.status !== 'PARTIALLY_PAID') return request.status as ExpenseRequestStatus
 
   const paid = roundMoney(request.paymentAllocations.reduce((s, a) => s + a.amount, 0))
-  const status: ExpenseRequestStatus = paid + 0.001 >= request.amount ? 'PAID' : 'PARTIALLY_PAID'
+  // Fully paid = paid up to the APPROVED figure, not the requested one — a
+  // partially-approved request is PAID once its approved amount is disbursed.
+  const status: ExpenseRequestStatus = paid + 0.001 >= payableAmount(request) ? 'PAID' : 'PARTIALLY_PAID'
   if (status !== request.status) await db.expenseRequest.update({ where: { id: requestId }, data: { status, stageEnteredAt: new Date() } })
   return status
 }

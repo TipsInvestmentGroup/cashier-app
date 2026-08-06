@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
+import { payableAmount } from '@/lib/expense-funds'
 
 const VIEWER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
@@ -46,12 +47,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const rows = payable
     .map((r) => {
       const paid = roundMoney(r.paymentAllocations.reduce((s, a) => s + a.amount, 0))
+      // Outstanding is against the APPROVED figure — a partially-approved
+      // request shows only what was approved (minus paid) as left to pay.
+      const approved = payableAmount(r)
       return {
         id: r.id,
         purpose: r.purpose,
-        amount: r.amount,
+        amount: approved,
         paid,
-        outstanding: roundMoney(r.amount - paid),
+        outstanding: roundMoney(approved - paid),
         currency: r.currency,
         status: r.status,
         requestedById: r.requestedById,
