@@ -6,7 +6,28 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatDateTime } from '@/lib/utils'
 import { NOTIFICATIONS_CHANGED } from '@/lib/pendingBellEvents'
 
-interface Notification { id: string; type: string; title: string; message: string; read: boolean; createdAt: string }
+interface Notification { id: string; type: string; title: string; message: string; read: boolean; createdAt: string; entityType?: string | null; entityId?: string | null }
+
+/**
+ * Where a notification takes you when clicked. The backend already stamps
+ * entityType/entityId on every actionable notification (see lib/notifications.ts
+ * and the expense/reconciliation/business-day workflows) — this just turns that
+ * into a destination. Returns null for notifications with no navigable target,
+ * in which case clicking only marks them read (the prior behaviour).
+ */
+function notificationHref(n: Notification): string | null {
+  switch (n.entityType) {
+    // Both disbursements AND fund top-ups (direction=IN) are ExpenseRequests, so
+    // this one route serves every "awaiting your approval" item — the detail page
+    // already carries the Approve/Reject buttons regardless of direction.
+    case 'ExpenseRequest': return n.entityId ? `/expense-requests/${n.entityId}` : null
+    case 'BusinessDay': return '/business-day-unlock-requests'
+    case 'ReconciliationStage':
+    case 'ReconciliationStageUnlockRequest': return '/reconciliation-stages'
+    case 'DailyReport': return '/reports'
+    default: return null
+  }
+}
 
 export function NotificationBell() {
   const { request } = useApi()
@@ -44,10 +65,14 @@ export function NotificationBell() {
 
   if (!user) return null
 
-  const markRead = async (n: Notification) => {
+  const onSelect = async (n: Notification) => {
     if (!n.read) {
+      // Await the mark-read so the badge is correct before we leave the page;
+      // navigation below unmounts this component anyway.
       try { await request(`/api/notifications/${n.id}/read`, { method: 'POST' }); load() } catch { /* ignore */ }
     }
+    const href = notificationHref(n)
+    if (href) { setOpen(false); window.location.href = href }
   }
 
   const markAllRead = async () => {
@@ -76,14 +101,23 @@ export function NotificationBell() {
             {items.length === 0 ? (
               <div className="px-3 py-4 text-sm text-gray-400 text-center">✓ No notifications</div>
             ) : (
-              items.map((n) => (
-                <button key={n.id} onClick={() => markRead(n)}
-                  className={`block w-full text-left px-3 py-2.5 text-sm hover:bg-indigo-50 border-b border-gray-50 last:border-0 ${n.read ? 'opacity-60' : ''}`}>
-                  <p className="font-semibold text-gray-800">{n.title}</p>
-                  <p className="text-gray-600 text-xs">{n.message}</p>
-                  <p className="text-gray-400 text-[11px] mt-0.5">{formatDateTime(n.createdAt)}</p>
-                </button>
-              ))
+              items.map((n) => {
+                const href = notificationHref(n)
+                return (
+                  <button key={n.id} onClick={() => onSelect(n)}
+                    className={`block w-full text-left px-3 py-2.5 text-sm hover:bg-indigo-50 border-b border-gray-50 last:border-0 ${n.read ? 'opacity-60' : ''}`}>
+                    <p className="font-semibold text-gray-800 flex items-center gap-1">
+                      {n.title}
+                      {href && <span className="text-indigo-400 text-xs" aria-hidden>›</span>}
+                    </p>
+                    <p className="text-gray-600 text-xs">{n.message}</p>
+                    <div className="flex items-center justify-between mt-0.5">
+                      <p className="text-gray-400 text-[11px]">{formatDateTime(n.createdAt)}</p>
+                      {href && <span className="text-indigo-500 text-[11px] font-medium">View →</span>}
+                    </div>
+                  </button>
+                )
+              })
             )}
           </div>
         </div>

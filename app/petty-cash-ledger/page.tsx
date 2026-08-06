@@ -24,6 +24,8 @@ interface ReadyToPayRow {
   currency: string; status: string; requestedById: string; requestType: string; category: string; createdAt: string
 }
 interface ReadyToPay { fundingSourceId: string; count: number; totalOutstanding: number; rows: ReadyToPayRow[] }
+interface PendingTopUpRow { id: string; purpose: string; amount: number; reference: string | null; currency: string; status: string; requestedById: string; createdAt: string }
+interface PendingTopUps { fundingSourceId: string; count: number; totalPending: number; rows: PendingTopUpRow[] }
 interface ExpenseReport {
   totals: { requested: number; paid: number; pending: number; approvedUnpaid: number; cashierPaid: number; fundBackedPaid: number }
   byOutlet: Group[]; byCategory: Group[]; byDepartment: Group[]; byRequester: Group[]; byFundingSource: Group[]; byRequestType: Group[]
@@ -110,6 +112,18 @@ function PettyCashLedgerPage() {
   }, [request, selected])
   useEffect(() => { if (view === 'queue') loadQueue() }, [view, loadQueue])
 
+  // §8: top-up requests awaiting approval for this fund. Their sibling list to
+  // the Ready-to-Pay queue — direction=IN requests never appear in "my expense
+  // requests", so without this an approver could only reach them via the
+  // notification. Loaded on the ledger view and refreshed after a new top-up.
+  const [pendingTopUps, setPendingTopUps] = useState<PendingTopUps | null>(null)
+  const loadPendingTopUps = useCallback(async () => {
+    if (!selected) { setPendingTopUps(null); return }
+    try { setPendingTopUps(await request(`/api/expense/funding-sources/${selected}/pending-top-ups`)) }
+    catch { /* non-blocking: the ledger itself must still render */ }
+  }, [request, selected])
+  useEffect(() => { if (view === 'ledger') loadPendingTopUps() }, [view, loadPendingTopUps])
+
   const source = sources.find((s) => s.id === selected)
   // §5/§8: only a fixed-allocation fund can be topped up. Derived from the
   // shared mapping (lib/expense-funds.ts) rather than a second list of source
@@ -131,7 +145,7 @@ function PettyCashLedgerPage() {
     try {
       const res = await request(`/api/expense/funding-sources/${selected}/top-up`, { method: 'POST', body: JSON.stringify({ amount: amt, reference: reference || undefined, note: note || undefined }) })
       toast.success(res?.status === 'CLOSED' ? 'Top-up allocated (below approval threshold)' : 'Top-up requested — awaiting approval')
-      clearForm(); loadLedger()
+      clearForm(); loadLedger(); loadPendingTopUps()
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not request top-up') }
     finally { setSubmitting(false) }
   }
@@ -365,6 +379,48 @@ function PettyCashLedgerPage() {
                     ? "This fund's balance always follows the cashier's current cash position — yesterday's closing cash plus what staff hand over today, less what has been paid out. There is nothing to allocate by hand."
                     : "This fund is funded by its linked bank/mobile-money account, so its balance is read live from that account. Top it up at the bank, not here."}
                 </p>
+              </div>
+            )}
+
+            {/* §8: top-up requests awaiting approval for this fund. Direction=IN
+                requests are hidden from "my expense requests" by design, so this
+                is the only list that surfaces them — each row links to the detail
+                page where Approve/Reject live. */}
+            {pendingTopUps && pendingTopUps.count > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-amber-200 overflow-hidden">
+                <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
+                  <h2 className="font-semibold text-amber-800">⏳ Top-ups awaiting approval</h2>
+                  <span className="text-sm font-bold text-amber-800">{pendingTopUps.count} · {formatCurrency(pendingTopUps.totalPending)}</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr className="text-left text-gray-600">
+                        <th className="px-4 py-3 font-semibold">Date</th>
+                        <th className="px-4 py-3 font-semibold">Requested By</th>
+                        <th className="px-4 py-3 font-semibold">Purpose</th>
+                        <th className="px-4 py-3 font-semibold">Reference</th>
+                        <th className="px-4 py-3 font-semibold text-right">Amount</th>
+                        <th className="px-4 py-3 font-semibold text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {pendingTopUps.rows.map((r) => (
+                        <tr key={r.id} className="hover:bg-amber-50/40">
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(r.createdAt)}</td>
+                          <td className="px-4 py-3 font-medium text-gray-800">{r.requestedById === user?.id ? 'You' : (names[r.requestedById] || '—')}</td>
+                          <td className="px-4 py-3 text-gray-700 max-w-[240px] truncate" title={r.purpose}>{r.purpose}</td>
+                          <td className="px-4 py-3 text-gray-500">{r.reference || '—'}</td>
+                          <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(r.amount)}</td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <Link href={`/expense-requests/${r.id}`}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700">Review →</Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
