@@ -19,6 +19,7 @@ interface FundingSource { id: string; name: string; code: string; sourceType: st
 interface LedgerRow {
   id: string; type: string; amount: number; reference: string | null; note: string | null; createdByName: string | null; createdAt: string; runningBalance?: number
   // Phase 5: linked-request context (present on PAYMENT + top-up REPLENISH rows).
+  expenseRequestId?: string | null
   requestNumber?: string | null; employeeName?: string | null; department?: string | null; paymentMethod?: string | null
   requestedAmount?: number | null; approvedAmount?: number | null; multiRequestCount?: number
 }
@@ -496,7 +497,11 @@ function PettyCashLedgerPage() {
                         <td className="px-4 py-3 text-gray-700">{TYPE_LABEL[r.type] || r.type}{r.note ? <span className="block text-[11px] text-gray-400">{r.note}</span> : null}</td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           {r.requestNumber ? (
-                            <span className="font-mono text-[12px] text-gray-700">{r.requestNumber}</span>
+                            r.expenseRequestId ? (
+                              <Link href={`/expense-requests/${r.expenseRequestId}`} className="font-mono text-[12px] text-indigo-600 hover:text-indigo-800 hover:underline">{r.requestNumber}</Link>
+                            ) : (
+                              <span className="font-mono text-[12px] text-gray-700">{r.requestNumber}</span>
+                            )
                           ) : <span className="text-gray-300">—</span>}
                           {(r.multiRequestCount ?? 0) > 1 && <span className="block text-[11px] text-gray-400">+{r.multiRequestCount! - 1} more</span>}
                         </td>

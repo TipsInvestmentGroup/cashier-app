@@ -155,6 +155,10 @@ export interface LedgerRow {
   // a PAYMENT row via its ExpensePayment → PaymentAllocation → request, and a
   // top-up REPLENISH row via the request id carried in expensePaymentId. Absent
   // (all null/undefined) on OPEN, ADJUST, and admin-override allocations.
+  // expenseRequestId backs the row's click-through link to the originating
+  // request (multi-request payments link to the first; the "+N more" hint says
+  // there are others).
+  expenseRequestId?: string | null
   requestNumber?: string | null
   employeeName?: string | null
   department?: string | null
@@ -171,6 +175,7 @@ export interface LedgerRow {
 }
 
 interface LedgerRequestContext {
+  expenseRequestId: string | null
   requestNumber: string | null
   employeeName: string | null
   department: string | null
@@ -239,7 +244,8 @@ export async function buildLedgerRequestContext(
   const userName = new Map(users.map((u) => [u.id, u.name]))
   const deptName = new Map(depts.map((d) => [d.id, d.name]))
 
-  const reqContext = (r: { requestNumber: string | null; requestedById: string; departmentId: string | null; amount: number; allocatedAmount: number | null }) => ({
+  const reqContext = (r: { id: string; requestNumber: string | null; requestedById: string; departmentId: string | null; amount: number; allocatedAmount: number | null }) => ({
+    expenseRequestId: r.id,
     requestNumber: r.requestNumber,
     employeeName: userName.get(r.requestedById) ?? null,
     department: r.departmentId ? deptName.get(r.departmentId) ?? null : null,
@@ -258,7 +264,7 @@ export async function buildLedgerRequestContext(
       const reqs = p.allocations.map((a) => a.expenseRequest)
       const first = reqs[0]
       out.set(t.id, {
-        ...(first ? reqContext(first) : { requestNumber: null, employeeName: null, department: null, requestedAmount: null, approvedAmount: null }),
+        ...(first ? reqContext(first) : { expenseRequestId: null, requestNumber: null, employeeName: null, department: null, requestedAmount: null, approvedAmount: null }),
         paymentMethod: p.paymentMethod,
         multiRequestCount: reqs.length,
       })
