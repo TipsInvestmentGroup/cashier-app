@@ -33,8 +33,8 @@ jobs:
       DATABASE_URL: ${{ secrets.PROD_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
       DATABASE_URL_UNPOOLED: ${{ secrets.PROD_DATABASE_URL_UNPOOLED || secrets.STAGING_DATABASE_URL_UNPOOLED }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
