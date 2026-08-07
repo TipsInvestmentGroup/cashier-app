@@ -644,7 +644,7 @@ function CategoriesTab() {
               {categories.map((c) => (
                 <tr key={c.id} className="border-b border-gray-50">
                   <td className="py-2 pr-3"><span className="font-medium text-gray-800">{c.name}</span><span className="block text-[11px] text-gray-400">{c.code}{c.legacyFunctionName ? ` · from ${c.legacyFunctionName}` : ''}</span></td>
-                  <td className="pr-3 text-gray-600">{c.budgetAccount ? `${c.budgetAccount.code} ${c.budgetAccount.name}` : <span className="text-gray-400">falls back to Petty Cash Expense</span>}</td>
+                  <td className="pr-3 text-gray-600">{c.budgetAccount ? `${c.budgetAccount.code} ${c.budgetAccount.name}` : <span className="text-amber-600" title="No GL account — spend lands in the Suspense bucket. Edit to assign one.">⚠ Unclassified — assign a GL account</span>}</td>
                   <td className="pr-3 text-gray-600">{c.spendingLimit > 0 ? formatCurrency(c.spendingLimit) : '—'}</td>
                   <td className="pr-3 text-gray-600">{c._count?.requests ?? 0}</td>
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${c.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{c.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
@@ -700,16 +700,16 @@ function CategoryEditor({ initial, accounts, onCancel, onSaved }: {
       <div className="grid sm:grid-cols-2 gap-3 mb-3">
         <label className="block"><span className="text-xs text-gray-500">Name</span><input className={inputCls} value={f.name} onChange={(e) => set({ name: e.target.value })} /></label>
         <label className="block"><span className="text-xs text-gray-500">Code {isEdit && '(fixed)'}</span><input className={inputCls} value={f.code} disabled={isEdit} onChange={(e) => set({ code: e.target.value })} placeholder="auto from name" /></label>
-        <label className="block"><span className="text-xs text-gray-500">GL account <span className="text-gray-400">(blank = Petty Cash Expense fallback)</span></span>
+        <label className="block"><span className="text-xs text-gray-500">GL account <span className="text-gray-400">(required — pick 9000 Suspense only for a deliberate uncategorized bucket)</span></span>
           <select className={inputCls} value={f.budgetAccountId} onChange={(e) => set({ budgetAccountId: e.target.value })}>
-            <option value="">— fallback —</option>
+            <option value="">— select an account —</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
           </select></label>
         <label className="block"><span className="text-xs text-gray-500">Spending limit (0 = none)</span><input type="number" className={inputCls} value={f.spendingLimit} onChange={(e) => set({ spendingLimit: Number(e.target.value) })} /></label>
         <label className="block"><span className="text-xs text-gray-500">Cost center <span className="text-gray-400">(free text)</span></span><input className={inputCls} value={f.costCenter} onChange={(e) => set({ costCenter: e.target.value })} /></label>
       </div>
       <div className="flex gap-2 mt-3">
-        <button onClick={save} disabled={saving || !f.name} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
+        <button onClick={save} disabled={saving || !f.name || !f.budgetAccountId} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
         <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200">Cancel</button>
       </div>
     </Card>

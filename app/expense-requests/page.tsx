@@ -14,7 +14,6 @@ import { ExpenseDynamicFields } from '@/components/ExpenseDynamicFields'
 import { FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
 import { waitingForText, type CurrentApproverView } from '@/lib/expense-approver'
 import { computeAging, type AgingTone } from '@/lib/expense-aging'
-import { EXPENSE_TYPES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
 
 interface RequestType { id: string; name: string; allowedCategoryIds: string | null; isActive: boolean }
@@ -66,7 +65,6 @@ export default function ExpenseRequestsPage() {
 
   const [fundingSourceId, setFundingSourceId] = useState('')
   const [requestedById, setRequestedById] = useState('')
-  const [expenseType, setExpenseType] = useState('')
   const [outletId, setOutletId] = useState('')
   const [requestTypeId, setRequestTypeId] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -126,15 +124,14 @@ export default function ExpenseRequestsPage() {
   const updItem = (i: number, patch: Partial<{ detail: string; unit: string; unitCost: string }>) => setLineItems(lineItems.map((r, x) => (x === i ? { ...r, ...patch } : r)))
   const rmItem = (i: number) => setLineItems(lineItems.filter((_, x) => x !== i))
 
-  const resetForm = () => { setFundingSourceId(''); setRequestedById(''); setExpenseType(''); setRequestTypeId(''); setCategoryId(''); setPurpose(''); setAmount(''); setLineItems([]); setFieldValues({}) }
+  const resetForm = () => { setFundingSourceId(''); setRequestedById(''); setRequestTypeId(''); setCategoryId(''); setPurpose(''); setAmount(''); setLineItems([]); setFieldValues({}) }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!fundingSourceId) return toast.error('Select where this will be paid from')
-    if (!expenseType) return toast.error('Select an expense type')
     if (!outletId) return toast.error('Select an outlet')
-    if (!requestTypeId) return toast.error('Select a request type')
-    if (!categoryId) return toast.error('Select a category')
+    if (!requestTypeId) return toast.error('Select a transaction type')
+    if (!categoryId) return toast.error('Select an expense category')
     if (!purpose.trim()) return toast.error('Purpose is required')
     const cleanItems = lineItems.filter((r) => r.detail.trim() || Number(r.unitCost) > 0)
       .map((r) => ({ detail: r.detail.trim() || 'Item', unit: Number(r.unit) || 1, unitCost: Number(r.unitCost) || 0, amount: itemRowAmount(r) }))
@@ -147,7 +144,7 @@ export default function ExpenseRequestsPage() {
         method: 'POST',
         body: JSON.stringify({
           fundingSourceId, requestTypeId, categoryId, purpose, amount: finalAmount, items: cleanItems, fieldValues,
-          expenseType, outletId,
+          outletId,
           ...(requestedById ? { requestedById } : {}),
         }),
       })
@@ -208,7 +205,7 @@ export default function ExpenseRequestsPage() {
                         <th className="px-4 py-3 font-semibold">Date</th>
                         <th className="px-4 py-3 font-semibold">Requested By</th>
                         <th className="px-4 py-3 font-semibold">Outlet</th>
-                        <th className="px-4 py-3 font-semibold">Type</th>
+                        <th className="px-4 py-3 font-semibold">Transaction Type</th>
                         <th className="px-4 py-3 font-semibold">Category</th>
                         <th className="px-4 py-3 font-semibold">Purpose</th>
                         <th className="px-4 py-3 font-semibold">Amount</th>
@@ -223,7 +220,7 @@ export default function ExpenseRequestsPage() {
                           <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(i.createdAt)}</td>
                           <td className="px-4 py-3 font-medium text-gray-800">{i.requestedById === user?.id ? 'You' : (names[i.requestedById] || '—')}</td>
                           <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{i.outlet?.name || '—'}</td>
-                          <td className="px-4 py-3 text-gray-700">{i.expenseType || <span className="text-gray-300">—</span>}<span className="block text-[11px] text-gray-400">{i.requestType.name}</span></td>
+                          <td className="px-4 py-3 text-gray-700">{i.requestType.name}{i.expenseType && <span className="block text-[11px] text-gray-400">{i.expenseType}</span>}</td>
                           <td className="px-4 py-3 text-gray-500">{i.category.name}</td>
                           <td className="px-4 py-3 text-gray-700 max-w-[220px] truncate" title={i.purpose}>
                             <Link href={`/expense-requests/${i.id}`} className="text-indigo-600 hover:text-indigo-800" onClick={(e) => e.stopPropagation()}>{i.purpose}</Link>
@@ -320,43 +317,40 @@ export default function ExpenseRequestsPage() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Expense Type *</label>
-                    <select value={expenseType} onChange={(e) => setExpenseType(e.target.value)}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white" required>
-                      <option value="">Select type…</option>
-                      {EXPENSE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <p className="text-[11px] text-gray-400 mt-1">What kind of transaction (distinct from cost centre / category).</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet *</label>
-                    <select value={outletId} onChange={(e) => setOutletId(e.target.value)} disabled={!isAdmin}
-                      className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500" required>
-                      <option value="">Select outlet…</option>
-                      {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </select>
-                    <p className="text-[11px] text-gray-400 mt-1">{isAdmin ? 'Defaults to the requester’s outlet; editable.' : 'Your assigned outlet (Admin can change).'}</p>
-                  </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet *</label>
+                  <select value={outletId} onChange={(e) => setOutletId(e.target.value)} disabled={!isAdmin}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-50 disabled:text-gray-500" required>
+                    <option value="">Select outlet…</option>
+                    {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">{isAdmin ? 'Defaults to the requester’s outlet; editable.' : 'Your assigned outlet (Admin can change).'}</p>
                 </div>
 
+                {/* Two-axis model: Transaction Type = HOW the money moves (drives the
+                    approval chain); Expense Category = WHAT it was spent on (the GL /
+                    reporting line). Keeping them separate is deliberate. */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Request Type *</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Transaction Type *</label>
                   <select value={requestTypeId} onChange={(e) => { setRequestTypeId(e.target.value); setCategoryId('') }}
                     className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white" required>
-                    <option value="">Select type…</option>
+                    <option value="">Select transaction type…</option>
                     {requestTypes.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
-                  {requestTypes.length === 0 && <p className="text-[11px] text-amber-600 mt-1">No request types configured yet — ask an admin to set one up in Expense Settings.</p>}
+                  <p className="text-[11px] text-gray-400 mt-1">How the money moves — sets the approval flow.</p>
+                  {requestTypes.length === 0 && <p className="text-[11px] text-amber-600 mt-1">No transaction types configured yet — ask an admin to set one up in Expense Settings.</p>}
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Category *</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Expense Category <span className="font-normal text-gray-400">(for reporting)</span> *</label>
                   <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
-                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white" required disabled={!requestTypeId}>
-                    <option value="">Select category…</option>
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white" required>
+                    <option value="">Select expense category…</option>
                     {availableCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  <p className="text-[11px] text-gray-400 mt-1">What it was spent on — maps to the GL account for reporting.</p>
+                  {requestTypeId && availableCategories.length === 0 && (
+                    <p className="text-[11px] text-amber-600 mt-1">This transaction type has no categories linked yet — add or link one in Expense Settings.</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-1">Purpose *</label>

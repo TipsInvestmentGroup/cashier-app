@@ -39,12 +39,14 @@ export async function POST(req: NextRequest) {
   const dupe = await prisma.expenseCategory.findUnique({ where: { companyId_code: { companyId, code } } })
   if (dupe) return NextResponse.json({ error: `A category with code ${code} already exists` }, { status: 409 })
 
-  let budgetAccountId: string | null = null
-  if (body.budgetAccountId) {
-    const account = await prisma.account.findUnique({ where: { id: String(body.budgetAccountId) } })
-    if (!account) return NextResponse.json({ error: 'budgetAccountId does not reference a known account' }, { status: 400 })
-    budgetAccountId = account.id
-  }
+  // A new category MUST point at a real GL account — no silent fallback to the
+  // suspense bucket. For a deliberate cleanup bucket the admin picks the
+  // '9000 Unclassified / Suspense Expense' account explicitly, which makes the
+  // choice visible rather than a default nobody sees.
+  if (!body.budgetAccountId) return NextResponse.json({ error: 'Pick a GL account for this category (choose "9000 Unclassified / Suspense" only for a deliberate uncategorized bucket)' }, { status: 400 })
+  const account = await prisma.account.findUnique({ where: { id: String(body.budgetAccountId) } })
+  if (!account) return NextResponse.json({ error: 'budgetAccountId does not reference a known account' }, { status: 400 })
+  const budgetAccountId: string = account.id
 
   const category = await prisma.expenseCategory.create({
     data: {

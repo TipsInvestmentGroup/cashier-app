@@ -9,6 +9,7 @@ import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { waitingForText, type CurrentApproverView } from '@/lib/expense-approver'
+import { downloadExpenseRequestPdf, type ExpensePdfSnapshot } from '@/lib/expense-request-pdf'
 import toast from 'react-hot-toast'
 
 const MAX_ATTACHMENT = 2 * 1024 * 1024 // 2MB, same cap as PayModal's receipt upload
@@ -205,6 +206,18 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
     finally { setBusy(null) }
   }
 
+  // Download the frozen snapshot as a PDF — 'audit' for the full request→
+  // payment→retirement trail, 'routing' for the not-yet-approved physical
+  // routing copy. Read-only: fetching the snapshot never touches the workflow.
+  const downloadPdf = async (variant: 'audit' | 'routing') => {
+    setBusy(`pdf-${variant}`)
+    try {
+      const snap: ExpensePdfSnapshot = await request(`/api/expense/requests/${id}/pdf-data`)
+      await downloadExpenseRequestPdf(snap, { variant, recordUrl: window.location.href })
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not generate PDF') }
+    finally { setBusy(null) }
+  }
+
   if (loading) return <AppShell><SectionTabs tabs={PETTY_TABS} /><div className="py-16 text-center text-gray-400">Loading…</div></AppShell>
   if (!data) return <AppShell><SectionTabs tabs={PETTY_TABS} /><div className="py-16 text-center text-gray-400">Request not found.</div></AppShell>
 
@@ -242,6 +255,14 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
             )}
           </div>
           <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" onClick={() => downloadPdf('audit')} disabled={!!busy}>
+              {busy === 'pdf-audit' ? 'Preparing…' : '⬇ Download PDF'}
+            </Button>
+            {['DRAFT', 'PENDING_APPROVAL'].includes(data.status) && (
+              <Button variant="outline" onClick={() => downloadPdf('routing')} disabled={!!busy}>
+                {busy === 'pdf-routing' ? 'Preparing…' : '⬇ Routing copy'}
+              </Button>
+            )}
             {data.status === 'DRAFT' && (isOwner || user?.role === 'ADMIN') && (
               <>
                 <Button onClick={submitDraft} disabled={!!busy}>{busy === 'submit' ? 'Working…' : 'Submit'}</Button>

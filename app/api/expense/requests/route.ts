@@ -75,8 +75,11 @@ export async function POST(req: NextRequest) {
   // callers, which have neither, keep working unchanged.
   const outletId = body.outletId ? String(body.outletId) : user.outletId || null
   if (direction === 'OUT') {
-    if (!body.expenseType || !String(body.expenseType).trim()) return NextResponse.json({ error: 'Expense type is required' }, { status: 400 })
-    if (!(EXPENSE_TYPES as readonly string[]).includes(String(body.expenseType))) {
+    // expenseType is no longer collected on the form (the field model was merged
+    // down to Transaction Type + Expense Category). It stays an optional column
+    // for historical rows and any legacy caller: validate the enum only when a
+    // value is actually supplied; never require it. Outlet stays required.
+    if (body.expenseType && String(body.expenseType).trim() && !(EXPENSE_TYPES as readonly string[]).includes(String(body.expenseType))) {
       return NextResponse.json({ error: `Expense type must be one of: ${EXPENSE_TYPES.join(', ')}` }, { status: 400 })
     }
     if (!outletId) return NextResponse.json({ error: 'Outlet is required — none provided and you have no assigned outlet' }, { status: 400 })

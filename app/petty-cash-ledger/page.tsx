@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { MoneyInput } from '@/components/MoneyInput'
 import { allowsManualAllocation, fundClassOf, isFundClass, sourceTypesFor, FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
+import { downloadCustodianLedgerPdf } from '@/lib/expense-ledger-pdf'
 import { useSearchParams } from 'next/navigation'
 import { format, subDays } from 'date-fns'
 import toast from 'react-hot-toast'
@@ -144,6 +145,26 @@ function PettyCashLedgerPage() {
   const fundClass = source ? fundClassOf(source.sourceType) : null
 
   const clearForm = () => { setAmount(''); setReference(''); setNote('') }
+
+  // §4: export this fund's running cashbook as a PDF. Only meaningful for a fund
+  // that accumulates a ledger (CASH/Petty Cash) — live-balance funds (drawer/
+  // bank) have no running balance, so the button is hidden for those.
+  const downloadLedgerPdf = () => {
+    if (!ledger || !source) return
+    downloadCustodianLedgerPdf({
+      fundName: source.name,
+      openingBalance: ledger.openingBalance,
+      closingBalance: ledger.closingBalance,
+      totalReceived: ledger.totalReceived,
+      totalPaid: ledger.totalPaid,
+      // The API returns rows newest-first (for the screen); the cashbook reads
+      // oldest-first so the running balance builds down the page.
+      rows: [...ledger.rows].reverse().map((r) => ({
+        createdAt: r.createdAt, type: r.type, amount: r.amount,
+        reference: r.reference, note: r.note, requestNumber: r.requestNumber, paymentMethod: r.paymentMethod,
+      })),
+    })
+  }
 
   // §8: the standard path — anyone with Petty Cash Custodian access requests a
   // top-up, which goes through the First → Second Approver chain (or is
@@ -470,6 +491,12 @@ function PettyCashLedgerPage() {
               </div>
             )}
 
+            {!ledger.live && ledger.rows.length > 0 && (
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-gray-800">Ledger — running cashbook</h2>
+                <Button variant="outline" onClick={downloadLedgerPdf}>⬇ Download PDF</Button>
+              </div>
+            )}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

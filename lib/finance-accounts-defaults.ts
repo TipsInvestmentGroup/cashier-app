@@ -42,8 +42,31 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   //   Petty-cash outflow and cash over/short finally get a GL home too.
   { code: '2200', name: 'Excess Payable (Third-Party Collections Clearing)', type: 'LIABILITY', mappingKey: 'EXCESS_PAYABLE' },
   { code: '2210', name: 'Customer Refunds Payable', type: 'LIABILITY', mappingKey: 'CUSTOMER_REFUND_PAYABLE' },
-  { code: '5940', name: 'Petty Cash Expense (unclassified)', type: 'EXPENSE', mappingKey: 'PETTY_CASH_EXPENSE' },
   { code: '5950', name: 'Cash Over / Short', type: 'EXPENSE', mappingKey: 'CASH_OVER_SHORT' },
+  // Fund-neutral suspense/cleanup bucket. Was '5940 Petty Cash Expense
+  // (unclassified)' — renamed because "Petty Cash" is a fund, not an expense
+  // nature, and mislabels spend from the other custodian funds. Moved to the
+  // 9000 band (standard suspense convention) so it sits apart from the 59xx
+  // control accounts and reads as a data-quality queue to drive toward zero.
+  // mappingKey stays PETTY_CASH_EXPENSE — the internal auto-post fallback key
+  // is referenced by key, never by code/name, so this rename breaks nothing.
+  // Existing companies are migrated in place by scripts/backfill-gl-suspense-rename.ts.
+  { code: '9000', name: 'Unclassified / Suspense Expense', type: 'EXPENSE', mappingKey: 'PETTY_CASH_EXPENSE' },
+  // Operating-cost accounts — Expense Category → GL targets so category-level
+  // reporting stops collapsing into the suspense bucket. No mappingKey: these
+  // are chosen explicitly on a category, not auto-post fallbacks.
+  { code: '5300', name: 'Rent Expense', type: 'EXPENSE' },
+  { code: '5310', name: 'Utilities (Electricity & Water)', type: 'EXPENSE' },
+  { code: '5320', name: 'Generator Fuel', type: 'EXPENSE' },
+  { code: '5400', name: 'Entertainment / Artist Fees', type: 'EXPENSE' },
+  { code: '5500', name: 'Marketing & Promotions', type: 'EXPENSE' },
+  { code: '5600', name: 'Repairs & Maintenance', type: 'EXPENSE' },
+  { code: '5700', name: 'IT & Software Subscriptions', type: 'EXPENSE' },
+  { code: '5710', name: 'Communication (Airtime & Data)', type: 'EXPENSE' },
+  { code: '5800', name: 'Professional & Consulting Fees', type: 'EXPENSE' },
+  { code: '5810', name: 'Licenses & Permits', type: 'EXPENSE' },
+  { code: '5820', name: 'Insurance', type: 'EXPENSE' },
+  { code: '5830', name: 'Staff Welfare & Meals', type: 'EXPENSE' },
   // Universal Payroll Framework (Phase 3) — GL targets a payroll run posts to.
   // Earnings debit expense; net + statutory/other deductions credit liabilities;
   // the staff-purchase deduction credits ACCOUNTS_RECEIVABLE (recovering the
