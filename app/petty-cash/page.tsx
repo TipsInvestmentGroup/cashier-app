@@ -171,82 +171,18 @@ function PettyCashPage() {
     } finally { setReconBusy(false) }
   }
 
-  // Digital payment reconciliation modal (per channel)
-  const [bankOpen, setBankOpen] = useState(false)
-  const [bankDate, setBankDate] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [bankOutletId, setBankOutletId] = useState('')
-  const [bankRows, setBankRows] = useState<{ code: string; label: string; reported: number }[]>([])
-  const [bankEntries, setBankEntries] = useState<Record<string, { paidBills: string; salesCollection: string; verifiedPaidBills: string; verifiedSalesCollection: string; reason: string }>>({})
-  const [bankCanVerify, setBankCanVerify] = useState(false)
-  const [bankBusy, setBankBusy] = useState(false)
+  // Digital Payment Reconciliation now lives on its own standalone page
+  // (/digital-payment-reconciliation, the same inline DigitalReconForm the
+  // Close-the-Day wizard renders) — the old per-channel modal that used to
+  // live here was removed to keep a single source of truth for that flow.
 
-  const loadBank = useCallback(async (date: string, outletId: string) => {
-    const params = new URLSearchParams({ date }); if (outletId) params.set('outletId', outletId)
-    const res = await request(`/api/bank-recon?${params}`)
-    const rows = res.rows || []
-    setBankRows(rows.map((r: { code: string; label: string; reported: number }) => ({ code: r.code, label: r.label, reported: r.reported })))
-    setBankCanVerify(!!res.canVerify)
-    const entries: Record<string, { paidBills: string; salesCollection: string; verifiedPaidBills: string; verifiedSalesCollection: string; reason: string }> = {}
-    for (const r of rows as { code: string; paidBills: number | null; salesCollection: number | null; verifiedPaidBills: number | null; verifiedSalesCollection: number | null; reason: string | null }[]) {
-      entries[r.code] = {
-        paidBills: r.paidBills != null ? String(r.paidBills) : '',
-        salesCollection: r.salesCollection != null ? String(r.salesCollection) : '',
-        verifiedPaidBills: r.verifiedPaidBills != null ? String(r.verifiedPaidBills) : '',
-        verifiedSalesCollection: r.verifiedSalesCollection != null ? String(r.verifiedSalesCollection) : '',
-        reason: r.reason || '',
-      }
-    }
-    setBankEntries(entries)
-  }, [request, setBankEntries])
-
-  const openBank = () => {
-    const oid = isCashier ? (outlets[0]?.id || '') : ''
-    setBankDate(format(new Date(), 'yyyy-MM-dd')); setBankOutletId(oid); setBankRows([]); setBankEntries({}); setBankOpen(true); loadBank(format(new Date(), 'yyyy-MM-dd'), oid)
-    if (isOwner) {
-      request('/api/cash-verifiers').then((r) => setVerifierEmail((r?.verifierEmail || '').toLowerCase())).catch(() => {})
-      request('/api/users').then((u) => setVerifierUsers(u || [])).catch(() => {})
-    }
-  }
-
-  // Deep-link from the Close-Day wizard: ?recon=cash | digital auto-opens the modal (once).
+  // Deep-link from the Close-Day wizard: ?recon=cash auto-opens the cash modal (once).
   const reconOpened = useRef(false)
   useEffect(() => {
     if (reconOpened.current) return
     const r = searchParams.get('recon')
     if (r === 'cash') { reconOpened.current = true; openRecon() }
-    else if (r === 'digital') { reconOpened.current = true; openBank() }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const saveBank = async () => {
-    // Every channel must have its required fields: cashier → paid bills & sales collection; officer → verified twins.
-    const missing = bankRows.filter((r) => {
-      const e = bankEntries[r.code] || {}
-      return bankCanVerify
-        ? ((e.verifiedPaidBills ?? '') === '' || (e.verifiedSalesCollection ?? '') === '')
-        : ((e.paidBills ?? '') === '' || (e.salesCollection ?? '') === '')
-    }).map((r) => r.label)
-    if (missing.length) {
-      return toast.error(`Fill ${bankCanVerify ? 'Verified Paid bills & Sales collection' : 'Paid bills & Sales collection'} for: ${missing.join(', ')}`)
-    }
-    setBankBusy(true)
-    try {
-      const channels = bankRows.map((r) => {
-        const e = bankEntries[r.code] || {}
-        return {
-          channel: r.code,
-          paidBills: e.paidBills ?? '',
-          salesCollection: e.salesCollection ?? '',
-          reason: e.reason || '',
-          ...(bankCanVerify ? { verifiedPaidBills: e.verifiedPaidBills ?? '', verifiedSalesCollection: e.verifiedSalesCollection ?? '' } : {}),
-        }
-      })
-      await request('/api/bank-recon', { method: 'POST', body: JSON.stringify({ date: bankDate, outletId: bankOutletId, channels }) })
-      toast.success('Digital payment reconciliation saved!')
-      setBankOpen(false)
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error saving reconciliation')
-    } finally { setBankBusy(false) }
-  }
 
   useEffect(() => { load() }, [load])
 
@@ -353,10 +289,10 @@ function PettyCashPage() {
               className="px-5 py-3 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition shadow">
               💰 Cash Reconciliation
             </button>
-            <button onClick={openBank}
+            <a href="/digital-payment-reconciliation"
               className="px-5 py-3 bg-sky-600 text-white rounded-xl font-medium hover:bg-sky-700 transition shadow">
               📲 Digital Payment Reconciliation
-            </button>
+            </a>
             {isOwner && (
               <button onClick={openReqAccess}
                 className="px-5 py-3 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-medium hover:border-gray-300 transition">
@@ -761,145 +697,6 @@ function PettyCashPage() {
           </div>
         )
       })()}
-
-      {/* Digital Payment Reconciliation modal (per channel) */}
-      {bankOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={() => setBankOpen(false)}>
-          <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-gray-100 sticky top-0 bg-white">
-              <h3 className="font-bold text-gray-900">📲 Digital Payment Reconciliation</h3>
-              <button onClick={() => setBankOpen(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">✕</button>
-            </div>
-            <div className="p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
-                  <input type="date" value={bankDate} onChange={(e) => { setBankDate(e.target.value); loadBank(e.target.value, bankOutletId) }}
-                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">Outlet</label>
-                  <select value={bankOutletId} onChange={(e) => { setBankOutletId(e.target.value); loadBank(bankDate, e.target.value) }}
-                    disabled={isCashier}
-                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:outline-none bg-white disabled:bg-gray-100">
-                    {!isCashier && <option value="">All Outlets</option>}
-                    {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <p className="text-xs text-gray-400">Each digital channel is reconciled separately. {bankCanVerify
-                ? <>You are an <strong>officer</strong>: enter the verified figures independently. The cashier&apos;s figures are locked and hidden.</>
-                : <><strong>Total Collection</strong> = Paid bills + Sales collection (you fill these). <strong>Reported</strong> is auto from collections + paid bills. Variance = Total − Reported.</>}</p>
-
-              {/* Per-channel cards */}
-              <div className="space-y-3">
-                {bankRows.length === 0 && <p className="text-sm text-gray-400 py-2">No digital channels configured.</p>}
-                {bankRows.map((r) => {
-                  const e = bankEntries[r.code] || { paidBills: '', salesCollection: '', verifiedPaidBills: '', verifiedSalesCollection: '', reason: '' }
-                  const upd = (patch: Partial<typeof e>) => setBankEntries((m) => ({ ...m, [r.code]: { ...e, ...patch } }))
-                  const hasReq = e.paidBills !== '' || e.salesCollection !== ''
-                  const total = (Number(e.paidBills) || 0) + (Number(e.salesCollection) || 0)
-                  const variance = hasReq ? total - r.reported : null // + excess, − loss
-                  return (
-                    <div key={r.code} className="border border-gray-100 rounded-xl p-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-gray-800">{r.label}</span>
-                        <span className="text-xs text-gray-500">Reported (system): <strong className="text-gray-700">{formatCurrency(r.reported)}</strong></span>
-                      </div>
-                      {/* Cashier side — only visible to non-verifiers. Once it reaches an
-                          officer, these figures are frozen and hidden for independent verification. */}
-                      {!bankCanVerify && (
-                        <>
-                          <div className="space-y-2">
-                            <div>
-                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Paid bills paid in {r.label} *</label>
-                              <MoneyInput value={e.paidBills} onChange={(v) => upd({ paidBills: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
-                            </div>
-                            <div>
-                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Total Sales Collection {r.label} *</label>
-                              <MoneyInput value={e.salesCollection} onChange={(v) => upd({ salesCollection: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
-                            <span className="text-gray-600">Total {r.label} Collection <span className="text-[11px] text-gray-400">(Paid bills + Sales collection)</span></span>
-                            <span className="font-semibold text-gray-800">{hasReq ? formatCurrency(total) : '—'}</span>
-                          </div>
-                          {variance != null && (
-                            <div className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 ${variance === 0 ? 'bg-green-50' : variance > 0 ? 'bg-amber-50' : 'bg-red-50'}`}>
-                              <span className={`font-semibold ${variance === 0 ? 'text-green-800' : variance > 0 ? 'text-amber-800' : 'text-red-800'}`}>
-                                {variance === 0 ? '✅ Total matches Reported' : variance > 0 ? '🔺 You have an Excess of' : '🔻 You have a Loss of'}
-                              </span>
-                              <span className={`font-bold ${variance === 0 ? 'text-green-700' : variance > 0 ? 'text-amber-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(variance))}</span>
-                            </div>
-                          )}
-                        </>
-                      )}
-                      {/* Officer verification — independent: no sight of the cashier's figures */}
-                      {bankCanVerify ? (
-                        <div className="border-t border-gray-100 pt-2">
-                          <p className="text-[11px] font-semibold text-indigo-600 mb-1">🔎 Officer verification — enter the actual figures independently</p>
-                          <div className="grid grid-cols-3 gap-2">
-                            <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified paid bills *</label>
-                              <MoneyInput value={e.verifiedPaidBills} onChange={(v) => upd({ verifiedPaidBills: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
-                            </div>
-                            <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified sales collection *</label>
-                              <MoneyInput value={e.verifiedSalesCollection} onChange={(v) => upd({ verifiedSalesCollection: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
-                            </div>
-                            <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified total <span className="text-gray-400 font-normal">(auto)</span></label>
-                              <div className="w-full px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm bg-gray-50 font-semibold text-gray-700">{formatCurrency((Number(e.verifiedPaidBills) || 0) + (Number(e.verifiedSalesCollection) || 0))}</div>
-                            </div>
-                          </div>
-                          {(e.verifiedPaidBills !== '' || e.verifiedSalesCollection !== '') && (() => {
-                            const vAmt = (Number(e.verifiedPaidBills) || 0) + (Number(e.verifiedSalesCollection) || 0)
-                            const vVar = vAmt - r.reported // verified vs system reported
-                            return (
-                              <div className={`mt-2 flex items-center justify-between text-sm rounded-lg px-3 py-2 ${vVar === 0 ? 'bg-green-50' : vVar > 0 ? 'bg-amber-50' : 'bg-red-50'}`}>
-                                <span className={`font-semibold ${vVar === 0 ? 'text-green-800' : vVar > 0 ? 'text-amber-800' : 'text-red-800'}`}>
-                                  {vVar === 0 ? '✅ Verified matches reported' : vVar > 0 ? '🔺 Verified Excess of' : '🔻 Verified Loss of'}
-                                </span>
-                                <span className={`font-bold ${vVar === 0 ? 'text-green-700' : vVar > 0 ? 'text-amber-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(vVar))}</span>
-                              </div>
-                            )
-                          })()}
-                          <p className="text-[10px] text-gray-400 mt-1">Verified total = Verified paid bills + Verified sales collection. Variance compares it to the system-reported amount. The cashier&apos;s figures are locked and not shown here.</p>
-                        </div>
-                      ) : (
-                        <p className="text-[11px] text-gray-400 border-t border-gray-100 pt-2">Verified figures: officer-only.</p>
-                      )}
-                      {((bankCanVerify) || (variance != null && variance !== 0)) && (
-                        <input value={e.reason} onChange={(ev) => upd({ reason: ev.target.value })} placeholder="Reason for variance…"
-                          className="w-full px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" />
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {isOwner && (
-                <div className="border-t border-gray-100 pt-3">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">🔐 Extra verifier (owner picks)</label>
-                  <select value={verifierEmail} onChange={(e) => saveVerifier(e.target.value)}
-                    className="w-full px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white">
-                    <option value="">— None —</option>
-                    {verifierUsers
-                      .filter((u) => ![...CASH_VERIFIERS_FIXED, ownerEmail].includes(u.email.toLowerCase()))
-                      .map((u) => <option key={u.id} value={u.email}>{u.name} ({u.email})</option>)}
-                  </select>
-                  <p className="text-[11px] text-gray-400 mt-1">Same officers as cash verification: owner, {CASH_VERIFIERS_FIXED.join(', ')}.</p>
-                </div>
-              )}
-
-              <button onClick={saveBank} disabled={bankBusy}
-                className="w-full py-3 bg-sky-600 text-white font-bold rounded-xl hover:bg-sky-700 transition disabled:opacity-60">
-                {bankBusy ? 'Saving…' : 'Save Digital Payment Reconciliation'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Owner: manage who can submit petty-cash requests */}
       {reqAccessOpen && isOwner && (

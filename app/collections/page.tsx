@@ -1274,7 +1274,7 @@ export default function CollectionsPage() {
                   <div className="grid grid-cols-1 gap-2">
                     <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💵 Cash Requests ↗</a>
                     <a href="/petty-cash?recon=cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💰 Cash Reconciliation ↗</a>
-                    <a href="/petty-cash?recon=digital" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📲 Digital Reconciliation ↗</a>
+                    <a href="/digital-payment-reconciliation" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📲 Digital Reconciliation ↗</a>
                     <a href="/signed-bills" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📋 Bills &amp; Transactions Review ↗</a>
                   </div>
                   <button onClick={() => { loadDayStatus(); setWizardStep(3) }} className="w-full py-3 mt-3 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Back to confirmation →</button>
