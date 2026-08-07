@@ -101,7 +101,9 @@ export async function sendDailySummary(opts: { date?: string | null; outletId?: 
       ${row('🏛️ Stanbic', fmt(col.stanbic))}
       ${row('📱 M-PESA', fmt(col.mpesa))}
       ${row('Total Collected', fmt(col.total), true)}
-      ${row('Variance (Collected − System)', `<span style="color:${variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#111'}">${fmt(variance)}</span>`)}
+      ${col.systemSales > 0
+        ? row('Variance (Collected − System)', `<span style="color:${variance < 0 ? '#dc2626' : variance > 0 ? '#16a34a' : '#111'}">${fmt(variance)}</span>`)
+        : row('Variance (Collected − System)', `<span style="color:#888">— (no system sales entered)</span>`)}
       ${row('🧾 Signed Bills (credit)', fmt(signedTotal))}
       ${row('✅ Paid Bills (recovered)', fmt(paidTotal))}
       ${row('🚫 Cancellations', fmt(cancelTotal))}

@@ -8,6 +8,8 @@ import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/
 import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
 import { primaryChannelFromAmounts } from '@/lib/collection-channels'
 import { generateBillReference } from '@/lib/bill-reference'
+import { reverseJournalEntry, type Db } from '@/lib/ledger'
+import { syncCreditForAccount, syncCreditForPerson } from '@/lib/credit-ledger'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -197,7 +199,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   return NextResponse.json({ ...updated, staffLoss })
 }
 
-/** Delete a collection and its auto staff-loss. */
+/** Reverse a posted GL entry if it exists and isn't already reversed. The
+ *  Finance Platform's rule is "never delete, only reverse" (see lib/ledger.ts),
+ *  so when a collection's auto bills / receipts are removed we post an
+ *  equal-and-opposite entry rather than deleting the JournalEntry row. */
+async function reverseIfPosted(tx: Db, journalEntryId: string | null | undefined, userId: string, reason: string): Promise<boolean> {
+  if (!journalEntryId) return false
+  const je = await tx.journalEntry.findUnique({ where: { id: journalEntryId }, select: { status: true } })
+  if (!je || je.status === 'REVERSED') return false
+  await reverseJournalEntry(tx, { journalEntryId, userId, reason })
+  return true
+}
+
+/**
+ * Delete a collection AND every record that collection created for that
+ * staff/day/session — atomically. A collection session owns:
+ *   • its channel breakdown + excess line items (DB cascade),
+ *   • its cancellations (FK collectionId),
+ *   • the auto staff-loss bill "SL-<id>" and the auto voucher bills
+ *     "VCH-<id>-N" it generated (matched by autoKey / autoSourceCollectionId),
+ *     together with their line items (DB cascade) and any write-offs, and
+ *   • the recovery paid bills it recorded ("COL-<id>", plus any payment sitting
+ *     on one of the auto bills).
+ * Deleting a recovery payment that was applied to a *pre-existing* unrelated
+ * bill un-applies it (that bill's status/balance is recomputed) but never
+ * deletes that bill. Every GL posting these bills/receipts made is reversed
+ * (not deleted), and every affected credit account/person balance is rebuilt
+ * from the now-reduced source data. Cash Requests (PettyCash) are deliberately
+ * left untouched — they have no ownership link to a collection.
+ */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -218,44 +248,139 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     return NextResponse.json({ error: 'This collection has a settled excess amount in Excess Recon — it cannot be deleted.' }, { status: 409 })
   }
 
-  // Remove linked auto staff-loss (and its payments) first
-  const sl = await prisma.signedBill.findUnique({ where: { autoKey: `SL-${id}` } })
-  if (sl) {
-    await prisma.paidBill.deleteMany({ where: { signedBillId: sl.id } })
-    await prisma.signedBill.delete({ where: { id: sl.id } })
-  }
-  // Remove linked cancellations (FK) before deleting the collection
-  await prisma.cancellation.deleteMany({ where: { collectionId: id } })
-  await prisma.dailyCollection.delete({ where: { id } })
+  const reason = `Collection ${id} deleted`
+  let summary: { autoBills: number; paidBills: number; writeOffs: number; externalBillsRecomputed: number; reversedEntries: number; removedStaffLoss: boolean }
+  try {
+    summary = await prisma.$transaction(async (tx) => {
+      const txAny = tx as unknown as typeof db
 
-  // The BI layer's BusinessSession row is denormalized from this collection
-  // (written by syncBusinessSession, one row per staff/outlet/day). Nothing
-  // re-syncs it on delete, so without this the dashboard's Staff Performance
-  // widget keeps showing the deleted collection's staff/days/dailyLoss.
-  // Target by sourceCollectionId so a session re-synced from a *different*
-  // surviving collection for the same staff/outlet/day is left intact.
-  await db.businessSession.deleteMany({ where: { sourceCollectionId: id } })
+      // 1) This collection's own auto-generated signed bills: the staff-loss
+      //    voucher (SL-<id>) and one voucher per signed-bill line (VCH-<id>-N),
+      //    plus anything explicitly tagged back to this collection.
+      const autoBills = await tx.signedBill.findMany({
+        where: { OR: [
+          { autoKey: `SL-${id}` },
+          { autoKey: { startsWith: `VCH-${id}-` } },
+          { autoSourceCollectionId: id },
+        ] },
+        select: { id: true, autoKey: true, journalEntryId: true, creditAccountId: true, personId: true },
+      })
+      const autoBillIds = autoBills.map((b) => b.id)
+      const removedStaffLoss = autoBills.some((b) => b.autoKey === `SL-${id}`)
 
-  // Full snapshot of the deleted record (not just its id) — once deleted,
-  // dailyCollection.findUnique(entityId) returns nothing, so this audit row
-  // is the ONLY place an admin can later see what the record actually
-  // contained (staff, amounts, outlet, date) alongside who deleted it, when,
-  // and why.
-  await prisma.auditLog.create({
-    data: {
-      userId: user.userId, action: 'DELETE', entity: 'DailyCollection', entityId: id,
-      details: JSON.stringify({
-        reason: body.reason || null,
-        removedStaffLoss: !!sl,
-        snapshot: {
-          date: existing.date.toISOString(), outletName: existing.outlet.name, staffName: existing.staffName,
-          total: existing.total, cash: existing.cash, crdb: existing.crdb, stanbic: existing.stanbic, mpesa: existing.mpesa,
-          systemSales: existing.systemSales, creditSales: existing.creditSales, paymentsReceived: existing.paymentsReceived,
-          discount: existing.discount, notes: existing.notes, createdAt: existing.createdAt.toISOString(),
+      // 2) Recovery paid bills this session recorded (billRef COL-<id>), plus
+      //    any payment attached to one of the auto bills above.
+      const paidBillOr: Record<string, unknown>[] = [{ billRef: `COL-${id}` }]
+      if (autoBillIds.length) paidBillOr.push({ signedBillId: { in: autoBillIds } })
+      const paidBills = await tx.paidBill.findMany({
+        where: { OR: paidBillOr },
+        select: { id: true, journalEntryId: true, signedBillId: true, personId: true },
+      })
+
+      // 3) Write-offs booked against the auto bills (no DB cascade on the FK,
+      //    so they must be cleared explicitly or the bill delete would fail).
+      const writeOffs = autoBillIds.length
+        ? await tx.signedBillWriteOff.findMany({ where: { signedBillId: { in: autoBillIds } }, select: { id: true, journalEntryId: true } })
+        : []
+
+      // Pre-existing bills (not this collection's own) that a removed recovery
+      // payment was applied to — their status/balance is recomputed afterwards.
+      const externalBillIds = [...new Set(
+        paidBills.map((p) => p.signedBillId).filter((sid): sid is string => !!sid && !autoBillIds.includes(sid))
+      )]
+
+      // The collection's OWN cash-in posting (Dr Cash/Bank per channel / Cr
+      // Sales Revenue [+ Cr Excess-Payable]) is posted at create time with
+      // sourceType='DailyCollection'/sourceId=<id> and its JE id is NOT stored
+      // on any row (DailyCollection has no journalEntryId column), so it can
+      // only be found by source. Without reversing it the GL would overstate
+      // cash and revenue by the deleted collection's total forever.
+      const collectionEntries = await tx.journalEntry.findMany({
+        where: { sourceType: 'DailyCollection', sourceId: id, status: { not: 'REVERSED' } },
+        select: { id: true },
+      })
+
+      // ── Reverse GL first (post equal-and-opposite; never delete a JE) ──
+      let reversedEntries = 0
+      for (const je of collectionEntries) if (await reverseIfPosted(tx, je.id, user.userId, reason)) reversedEntries++
+      for (const p of paidBills) if (await reverseIfPosted(tx, p.journalEntryId, user.userId, reason)) reversedEntries++
+      for (const w of writeOffs) if (await reverseIfPosted(tx, w.journalEntryId, user.userId, reason)) reversedEntries++
+      for (const b of autoBills) if (await reverseIfPosted(tx, b.journalEntryId, user.userId, reason)) reversedEntries++
+
+      // ── Delete records (children first) ──
+      if (paidBills.length) await tx.paidBill.deleteMany({ where: { id: { in: paidBills.map((p) => p.id) } } })
+      if (writeOffs.length) await tx.signedBillWriteOff.deleteMany({ where: { id: { in: writeOffs.map((w) => w.id) } } })
+      if (autoBillIds.length) await tx.signedBill.deleteMany({ where: { id: { in: autoBillIds } } }) // BillItems cascade
+      await tx.cancellation.deleteMany({ where: { collectionId: id } })
+      await tx.dailyCollection.delete({ where: { id } }) // channels + excess cascade
+
+      // The BI layer's BusinessSession row is denormalized from this collection
+      // (one row per staff/outlet/day). Nothing re-syncs it on delete, so
+      // without this the dashboard's Staff Performance widget keeps showing the
+      // deleted collection's staff/days/dailyLoss. Target by sourceCollectionId
+      // so a session re-synced from a *different* surviving collection for the
+      // same staff/outlet/day is left intact.
+      await txAny.businessSession.deleteMany({ where: { sourceCollectionId: id } })
+
+      // ── Un-apply removed payments from pre-existing bills (recompute status) ──
+      for (const bid of externalBillIds) {
+        const bill = await tx.signedBill.findUnique({ where: { id: bid }, select: { amount: true, status: true } })
+        if (!bill || bill.status === 'WRITTEN_OFF') continue
+        const [pay, wo] = await Promise.all([
+          tx.paidBill.aggregate({ where: { signedBillId: bid }, _sum: { amountPaid: true } }),
+          tx.signedBillWriteOff.aggregate({ where: { signedBillId: bid }, _sum: { amount: true } }),
+        ])
+        const tot = roundMoney((pay._sum.amountPaid || 0) + (wo._sum.amount || 0))
+        await tx.signedBill.update({ where: { id: bid }, data: { status: tot >= bill.amount ? 'PAID' : tot > 0 ? 'PARTIAL' : 'UNPAID' } })
+      }
+
+      // ── Rebuild affected credit ledgers/balances from the reduced source ──
+      const accountIds = new Set<string>()
+      const personIds = new Set<string>()
+      for (const b of autoBills) { if (b.creditAccountId) accountIds.add(b.creditAccountId); else if (b.personId) personIds.add(b.personId) }
+      for (const p of paidBills) if (p.personId) personIds.add(p.personId)
+      if (externalBillIds.length) {
+        const ext = await tx.signedBill.findMany({ where: { id: { in: externalBillIds } }, select: { creditAccountId: true, personId: true } })
+        for (const b of ext) { if (b.creditAccountId) accountIds.add(b.creditAccountId); else if (b.personId) personIds.add(b.personId) }
+      }
+      for (const accId of accountIds) await syncCreditForAccount(tx, accId)
+      for (const pid of personIds) await syncCreditForPerson(tx, pid)
+
+      // Full snapshot of the deleted record (not just its id) — once deleted,
+      // dailyCollection.findUnique(entityId) returns nothing, so this audit row
+      // is the ONLY place an admin can later see what the record contained
+      // (staff, amounts, outlet, date) alongside who deleted it, when, why, and
+      // exactly how much related data was cascaded away.
+      await tx.auditLog.create({
+        data: {
+          userId: user.userId, action: 'DELETE', entity: 'DailyCollection', entityId: id,
+          details: JSON.stringify({
+            reason: body.reason || null,
+            removedStaffLoss,
+            cascade: {
+              signedBills: autoBillIds.length, paidBills: paidBills.length, writeOffs: writeOffs.length,
+              reversedJournalEntries: reversedEntries, externalBillsRecomputed: externalBillIds.length,
+            },
+            snapshot: {
+              date: existing.date.toISOString(), outletName: existing.outlet.name, staffName: existing.staffName,
+              total: existing.total, cash: existing.cash, crdb: existing.crdb, stanbic: existing.stanbic, mpesa: existing.mpesa,
+              systemSales: existing.systemSales, creditSales: existing.creditSales, paymentsReceived: existing.paymentsReceived,
+              discount: existing.discount, notes: existing.notes, createdAt: existing.createdAt.toISOString(),
+            },
+          }),
         },
-      }),
-    },
-  })
+      })
 
-  return NextResponse.json({ ok: true, removedStaffLoss: !!sl })
+      return { autoBills: autoBillIds.length, paidBills: paidBills.length, writeOffs: writeOffs.length, externalBillsRecomputed: externalBillIds.length, reversedEntries, removedStaffLoss }
+    }, { timeout: 20000 })
+  } catch (e) {
+    // Reversals post-date to today (lib/ledger.ts reverseJournalEntry uses
+    // new Date()), so a locked *current* financial period will reject them and
+    // roll the whole delete back. Surface the message verbatim so the user
+    // knows to reopen that period rather than seeing a generic 500.
+    const message = e instanceof Error ? e.message : 'Failed to delete collection'
+    return NextResponse.json({ error: message }, { status: 409 })
+  }
+
+  return NextResponse.json({ ok: true, removedStaffLoss: summary.removedStaffLoss, cascade: summary })
 }

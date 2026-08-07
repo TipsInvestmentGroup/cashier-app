@@ -1350,8 +1350,10 @@ export default function CollectionsPage() {
       <Modal open={!!deleteTarget} onClose={() => { setDeleteTarget(null); setDeleteReason('') }} title="Delete Collection">
         <div className="space-y-3">
           <p className="text-sm text-gray-600">
-            Delete this collection{deleteTarget?.staffName ? ` for ${deleteTarget.staffName}` : ''}? Any auto staff-loss linked to it will also be removed.
-            A snapshot of the record and this reason are kept in the audit trail.
+            This permanently deletes the <b>entire session</b> for{deleteTarget?.staffName ? ` ${deleteTarget.staffName}` : ' this staff member'} on
+            this day — the collection figures, its signed bills, paid bills, discounts and cancellations, and any staff-loss
+            recorded with it. Linked ledger postings are reversed. This cannot be undone (a snapshot and your reason are kept
+            in the audit trail). Cash requests are not affected.
           </p>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">Reason</label>

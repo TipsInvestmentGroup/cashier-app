@@ -85,16 +85,10 @@ export async function runMissingDataDetection({ outletId, date }: { outletId: st
   const range = { gte: startOfDay(date), lte: endOfDay(date) }
   const missingItems: MissingItem[] = []
 
-  // SalesImportLine types are generated on deploy; assert to avoid local drift.
-  const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
-  const [cashRecon, digitalCount, dailyCollectionCount, salesMetricCount, importedSalesCount, shifts, counters] = await Promise.all([
+  const [cashRecon, digitalCount, dailyCollectionCount, shifts, counters] = await Promise.all([
     prisma.cashRecon.findFirst({ where: { outletId, date: range }, select: { id: true } }),
     prisma.bankRecon.count({ where: { outletId, date: range, channel: { not: null } } }),
     prisma.dailyCollection.count({ where: { outletId, date: range } }),
-    prisma.salesMetric.count({ where: { outletId, date: range } }),
-    // A committed Sales Import counts as sales figures even when the day has no
-    // SHISHA/FOOD line (e.g. a drinks-only day writes no SalesMetric row).
-    db.salesImportLine.count({ where: { outletId, date: range, superseded: false, import: { status: 'IMPORTED' } } }),
     prisma.posShift.findMany({ where: { outletId, date: range }, select: { name: true, closedAt: true } }),
     prisma.posCounter.findMany({ where: { outletId, isActive: true }, select: { code: true, label: true } }),
   ])
@@ -102,7 +96,10 @@ export async function runMissingDataDetection({ outletId, date }: { outletId: st
   if (!cashRecon) missingItems.push({ type: 'CASH_RECONCILIATION', label: 'Cash Reconciliation not completed' })
   if (digitalCount === 0) missingItems.push({ type: 'BILLS', label: 'Digital/Bank Reconciliation not completed' })
   if (dailyCollectionCount === 0) missingItems.push({ type: 'COLLECTIONS', label: 'No Daily Collection recorded' })
-  if (salesMetricCount === 0 && importedSalesCount === 0) missingItems.push({ type: 'SALES', label: 'No Sales figures recorded' })
+  // Sales Import is an independent task (its own sidebar feature) and no longer
+  // gates Close the Day — a day closes on its collection/recon data alone. The
+  // collection-vs-system variance reads DailyCollection.systemSales (a separate
+  // manual field), never the Sales Import, so nothing downstream needs it here.
 
   const templateSessions = await getCollectionSessionTotals({ outletId, dateRange: range })
   for (const s of templateSessions) {

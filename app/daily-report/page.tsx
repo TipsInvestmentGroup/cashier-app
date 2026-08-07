@@ -360,7 +360,11 @@ export default function DailyReportPage() {
             {/* Collection */}
             <section className="cdr-section">
               <h2 className="cdr-section-title"><span>Collection (sales)</span><span>TSh</span></h2>
-              <div className="cdr-ref-line"><span>System sales (per POS, for comparison only)</span><b>{money(data.collection.systemSales)}</b></div>
+              {/* System sales is a separate, optional manual figure (not the
+                  Sales Import). When it wasn't entered, show a dash and suppress
+                  the variance — a "variance" equal to the full collection is
+                  meaningless with no system figure to compare against. */}
+              <div className="cdr-ref-line"><span>System sales (per POS, for comparison only)</span><b>{data.collection.systemSales > 0 ? money(data.collection.systemSales) : '—'}</b></div>
               <div className="cdr-collection-grid">
                 <div className="cdr-cell"><div className="cdr-label">Cash</div><div className="cdr-amount">{money(data.collection.cash)}</div></div>
                 {data.collection.channels.map((c) => (
@@ -370,7 +374,9 @@ export default function DailyReportPage() {
               <div className="cdr-total-row"><span>Total collected</span><span>{money(data.collection.total)}</span></div>
               <div className="cdr-variance-row">
                 <span>Variance (collected − system sales)</span>
-                <span className={`cdr-amount ${data.collection.variance < 0 ? 'cdr-neg' : ''}`}>{money(data.collection.variance)}</span>
+                {data.collection.systemSales > 0
+                  ? <span className={`cdr-amount ${data.collection.variance < 0 ? 'cdr-neg' : ''}`}>{money(data.collection.variance)}</span>
+                  : <span className="cdr-amount">— <span style={{ fontWeight: 400, opacity: 0.7 }}>(no system sales entered)</span></span>}
               </div>
             </section>
 
