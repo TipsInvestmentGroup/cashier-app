@@ -2105,11 +2105,19 @@ model BankRecon {
   outletId        String?
   channel         String? // digital channel code (CRDB | STANBIC | MPESA | …); null = legacy total
   reportedAmount  Float    @default(0) // auto: collections + paid bills for this channel (system "collected")
-  openingBalance  Float? // account opening balance (cashier)
-  closingBalance  Float? // account closing balance (cashier) — required = closing − opening
-  verifiedAmount  Float? // verified collected amount by an officer (null = not yet verified)
-  verifiedOpening Float? // opening balance verified by an officer
-  verifiedClosing Float? // closing balance verified by an officer
+  // Current model (per digital-reconciliation-field-redesign): cashier tallies
+  // the two components of the channel by hand; Total Collection = paidBills +
+  // salesCollection is derived (not persisted) and reconciled against reportedAmount.
+  paidBills       Float? // cashier: bills settled/paid out through this channel
+  salesCollection Float? // cashier: sales collections received into this channel
+  verifiedAmount  Float? // verified collected amount by an officer = verifiedPaidBills + verifiedSalesCollection (null = not yet verified)
+  verifiedPaidBills       Float? // officer-verified paid bills for this channel
+  verifiedSalesCollection Float? // officer-verified sales collection for this channel
+  // Deprecated (pre-redesign) — kept for historical records; no longer written or rendered.
+  openingBalance  Float? // DEPRECATED account opening balance (cashier)
+  closingBalance  Float? // DEPRECATED account closing balance (cashier)
+  verifiedOpening Float? // DEPRECATED opening balance verified by an officer
+  verifiedClosing Float? // DEPRECATED closing balance verified by an officer
   reason          String? // reason for variance
   reportedBy      String?
   verifiedBy      String?

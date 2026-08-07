@@ -7,8 +7,8 @@ import { ExportBar } from '@/components/ExportBar'
 import toast from 'react-hot-toast'
 
 interface Outlet { id: string; name: string }
-interface Row { date: string; channel: string; opening: number | null; closing: number | null; required: number | null; reported: number; verified: number | null; verifiedSet: boolean; variance: number | null; verifiedVariance: number | null; reason: string; verifiedBy?: string }
-interface Resp { rows: Row[]; totals: { required: number; reported: number; verified: number; variance: number; verifiedVariance: number } }
+interface Row { date: string; channel: string; paidBills: number | null; salesCollection: number | null; total: number | null; reported: number; verified: number | null; verifiedSet: boolean; variance: number | null; verifiedVariance: number | null; reason: string; verifiedBy?: string }
+interface Resp { rows: Row[]; totals: { total: number; reported: number; verified: number; variance: number; verifiedVariance: number } }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function BankReconReport({ outlets, request }: { outlets: Outlet[]; request: (url: string, opts?: any) => Promise<any> }) {
@@ -39,8 +39,8 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
   const varLabel = (v: number) => (v > 0 ? 'Over' : v < 0 ? 'Short' : '—')
   const exportRows = (data?.rows || []).map((r) => ({
     Date: formatDate(r.date), Channel: r.channel,
-    Opening: r.opening ?? '', Closing: r.closing ?? '', Required: r.required ?? '',
-    'Reported (System)': r.reported, 'Variance (Reported−Required)': r.variance ?? '', 'Variance Type': r.variance == null ? '' : varLabel(r.variance),
+    'Paid Bills': r.paidBills ?? '', 'Sales Collection': r.salesCollection ?? '', 'Total Collection': r.total ?? '',
+    'Reported (System)': r.reported, 'Variance (Total−Reported)': r.variance ?? '', 'Variance Type': r.variance == null ? '' : varLabel(r.variance),
     Verified: r.verifiedSet ? r.verified : '', 'Verified Variance': r.verifiedVariance ?? '', 'Verified By': r.verifiedBy || '', Reason: r.reason,
   }))
 
@@ -85,9 +85,9 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
                 <tr className="text-left text-gray-600">
                   <th className="px-4 py-3 font-semibold">Date</th>
                   <th className="px-4 py-3 font-semibold">Channel</th>
-                  <th className="px-4 py-3 font-semibold text-right">Opening</th>
-                  <th className="px-4 py-3 font-semibold text-right">Closing</th>
-                  <th className="px-4 py-3 font-semibold text-right">Required</th>
+                  <th className="px-4 py-3 font-semibold text-right">Paid Bills</th>
+                  <th className="px-4 py-3 font-semibold text-right">Sales Collection</th>
+                  <th className="px-4 py-3 font-semibold text-right">Total Collection</th>
                   <th className="px-4 py-3 font-semibold text-right">Reported</th>
                   <th className="px-4 py-3 font-semibold text-right">Variance</th>
                   <th className="px-4 py-3 font-semibold text-right">Verified</th>
@@ -101,9 +101,9 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
                   <tr key={i} className={`hover:bg-gray-50 ${r.variance != null && r.variance !== 0 ? 'bg-red-50/40' : ''}`}>
                     <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(r.date)}</td>
                     <td className="px-4 py-3 font-medium text-gray-700">{r.channel}</td>
-                    <td className="px-4 py-3 text-right text-gray-600">{r.opening != null ? formatCurrency(r.opening) : '-'}</td>
-                    <td className="px-4 py-3 text-right text-gray-600">{r.closing != null ? formatCurrency(r.closing) : '-'}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{r.required != null ? formatCurrency(r.required) : '-'}</td>
+                    <td className="px-4 py-3 text-right text-gray-600">{r.paidBills != null ? formatCurrency(r.paidBills) : '-'}</td>
+                    <td className="px-4 py-3 text-right text-gray-600">{r.salesCollection != null ? formatCurrency(r.salesCollection) : '-'}</td>
+                    <td className="px-4 py-3 text-right text-gray-700 font-semibold">{r.total != null ? formatCurrency(r.total) : '-'}</td>
                     <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.reported)}</td>
                     <td className={`px-4 py-3 text-right font-bold ${r.variance == null ? 'text-gray-300' : r.variance === 0 ? 'text-green-600' : 'text-red-600'}`}>
                       {r.variance == null ? '-' : r.variance === 0 ? '✓' : `${r.variance > 0 ? '▲ ' : '▼ '}${formatCurrency(Math.abs(r.variance))} ${varLabel(r.variance)}`}
@@ -120,7 +120,7 @@ export function BankReconReport({ outlets, request }: { outlets: Outlet[]; reque
               <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold text-gray-900">
                 <tr>
                   <td className="px-4 py-3" colSpan={4}>TOTAL</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(data.totals.required)}</td>
+                  <td className="px-4 py-3 text-right">{formatCurrency(data.totals.total)}</td>
                   <td className="px-4 py-3 text-right">{formatCurrency(data.totals.reported)}</td>
                   <td className={`px-4 py-3 text-right ${data.totals.variance === 0 ? 'text-green-700' : 'text-red-700'}`}>{data.totals.variance === 0 ? '✓' : `${formatCurrency(Math.abs(data.totals.variance))} ${varLabel(data.totals.variance)}`}</td>
                   <td className="px-4 py-3 text-right">{formatCurrency(data.totals.verified)}</td>

@@ -176,7 +176,7 @@ function PettyCashPage() {
   const [bankDate, setBankDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [bankOutletId, setBankOutletId] = useState('')
   const [bankRows, setBankRows] = useState<{ code: string; label: string; reported: number }[]>([])
-  const [bankEntries, setBankEntries] = useState<Record<string, { opening: string; closing: string; verified: string; verifiedOpening: string; verifiedClosing: string; reason: string }>>({})
+  const [bankEntries, setBankEntries] = useState<Record<string, { paidBills: string; salesCollection: string; verifiedPaidBills: string; verifiedSalesCollection: string; reason: string }>>({})
   const [bankCanVerify, setBankCanVerify] = useState(false)
   const [bankBusy, setBankBusy] = useState(false)
 
@@ -186,14 +186,13 @@ function PettyCashPage() {
     const rows = res.rows || []
     setBankRows(rows.map((r: { code: string; label: string; reported: number }) => ({ code: r.code, label: r.label, reported: r.reported })))
     setBankCanVerify(!!res.canVerify)
-    const entries: Record<string, { opening: string; closing: string; verified: string; verifiedOpening: string; verifiedClosing: string; reason: string }> = {}
-    for (const r of rows as { code: string; openingBalance: number | null; closingBalance: number | null; verifiedAmount: number | null; verifiedOpening: number | null; verifiedClosing: number | null; reason: string | null }[]) {
+    const entries: Record<string, { paidBills: string; salesCollection: string; verifiedPaidBills: string; verifiedSalesCollection: string; reason: string }> = {}
+    for (const r of rows as { code: string; paidBills: number | null; salesCollection: number | null; verifiedPaidBills: number | null; verifiedSalesCollection: number | null; reason: string | null }[]) {
       entries[r.code] = {
-        opening: r.openingBalance != null ? String(r.openingBalance) : '',
-        closing: r.closingBalance != null ? String(r.closingBalance) : '',
-        verified: r.verifiedAmount != null ? String(r.verifiedAmount) : '',
-        verifiedOpening: r.verifiedOpening != null ? String(r.verifiedOpening) : '',
-        verifiedClosing: r.verifiedClosing != null ? String(r.verifiedClosing) : '',
+        paidBills: r.paidBills != null ? String(r.paidBills) : '',
+        salesCollection: r.salesCollection != null ? String(r.salesCollection) : '',
+        verifiedPaidBills: r.verifiedPaidBills != null ? String(r.verifiedPaidBills) : '',
+        verifiedSalesCollection: r.verifiedSalesCollection != null ? String(r.verifiedSalesCollection) : '',
         reason: r.reason || '',
       }
     }
@@ -219,15 +218,15 @@ function PettyCashPage() {
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveBank = async () => {
-    // Every channel must have its required fields: cashier → opening & closing; officer → verified opening & closing.
+    // Every channel must have its required fields: cashier → paid bills & sales collection; officer → verified twins.
     const missing = bankRows.filter((r) => {
       const e = bankEntries[r.code] || {}
       return bankCanVerify
-        ? ((e.verifiedOpening ?? '') === '' || (e.verifiedClosing ?? '') === '')
-        : ((e.opening ?? '') === '' || (e.closing ?? '') === '')
+        ? ((e.verifiedPaidBills ?? '') === '' || (e.verifiedSalesCollection ?? '') === '')
+        : ((e.paidBills ?? '') === '' || (e.salesCollection ?? '') === '')
     }).map((r) => r.label)
     if (missing.length) {
-      return toast.error(`Fill ${bankCanVerify ? 'Verified Opening & Closing' : 'Opening & Closing'} for: ${missing.join(', ')}`)
+      return toast.error(`Fill ${bankCanVerify ? 'Verified Paid bills & Sales collection' : 'Paid bills & Sales collection'} for: ${missing.join(', ')}`)
     }
     setBankBusy(true)
     try {
@@ -235,10 +234,10 @@ function PettyCashPage() {
         const e = bankEntries[r.code] || {}
         return {
           channel: r.code,
-          openingBalance: e.opening ?? '',
-          closingBalance: e.closing ?? '',
+          paidBills: e.paidBills ?? '',
+          salesCollection: e.salesCollection ?? '',
           reason: e.reason || '',
-          ...(bankCanVerify ? { verifiedOpening: e.verifiedOpening ?? '', verifiedClosing: e.verifiedClosing ?? '' } : {}),
+          ...(bankCanVerify ? { verifiedPaidBills: e.verifiedPaidBills ?? '', verifiedSalesCollection: e.verifiedSalesCollection ?? '' } : {}),
         }
       })
       await request('/api/bank-recon', { method: 'POST', body: JSON.stringify({ date: bankDate, outletId: bankOutletId, channels }) })
@@ -789,18 +788,18 @@ function PettyCashPage() {
                 </div>
               </div>
               <p className="text-xs text-gray-400">Each digital channel is reconciled separately. {bankCanVerify
-                ? <>You are an <strong>officer</strong>: enter the verified figures independently. The cashier&apos;s opening/closing are locked and hidden.</>
-                : <><strong>Required</strong> = Closing − Opening (you fill these). <strong>Reported</strong> is auto from collections + paid bills. Variance = Reported − Required.</>}</p>
+                ? <>You are an <strong>officer</strong>: enter the verified figures independently. The cashier&apos;s figures are locked and hidden.</>
+                : <><strong>Total Collection</strong> = Paid bills + Sales collection (you fill these). <strong>Reported</strong> is auto from collections + paid bills. Variance = Total − Reported.</>}</p>
 
               {/* Per-channel cards */}
               <div className="space-y-3">
                 {bankRows.length === 0 && <p className="text-sm text-gray-400 py-2">No digital channels configured.</p>}
                 {bankRows.map((r) => {
-                  const e = bankEntries[r.code] || { opening: '', closing: '', verified: '', verifiedOpening: '', verifiedClosing: '', reason: '' }
+                  const e = bankEntries[r.code] || { paidBills: '', salesCollection: '', verifiedPaidBills: '', verifiedSalesCollection: '', reason: '' }
                   const upd = (patch: Partial<typeof e>) => setBankEntries((m) => ({ ...m, [r.code]: { ...e, ...patch } }))
-                  const hasReq = e.opening !== '' || e.closing !== ''
-                  const required = (Number(e.closing) || 0) - (Number(e.opening) || 0)
-                  const variance = hasReq ? r.reported - required : null // + over, − short
+                  const hasReq = e.paidBills !== '' || e.salesCollection !== ''
+                  const total = (Number(e.paidBills) || 0) + (Number(e.salesCollection) || 0)
+                  const variance = hasReq ? total - r.reported : null // + excess, − loss
                   return (
                     <div key={r.code} className="border border-gray-100 rounded-xl p-3 space-y-2">
                       <div className="flex items-center justify-between">
@@ -811,50 +810,50 @@ function PettyCashPage() {
                           officer, these figures are frozen and hidden for independent verification. */}
                       {!bankCanVerify && (
                         <>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-2">
                             <div>
-                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Opening balance *</label>
-                              <MoneyInput value={e.opening} onChange={(v) => upd({ opening: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Paid bills paid in {r.label} *</label>
+                              <MoneyInput value={e.paidBills} onChange={(v) => upd({ paidBills: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
-                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Closing balance *</label>
-                              <MoneyInput value={e.closing} onChange={(v) => upd({ closing: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                              <label className="block text-[11px] font-semibold text-gray-500 mb-0.5">Total Sales Collection {r.label} *</label>
+                              <MoneyInput value={e.salesCollection} onChange={(v) => upd({ salesCollection: v })} className="w-full px-2 py-2 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                           </div>
                           <div className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
-                            <span className="text-gray-600">Required to collect <span className="text-[11px] text-gray-400">(Closing − Opening)</span></span>
-                            <span className="font-semibold text-gray-800">{hasReq ? formatCurrency(required) : '—'}</span>
+                            <span className="text-gray-600">Total {r.label} Collection <span className="text-[11px] text-gray-400">(Paid bills + Sales collection)</span></span>
+                            <span className="font-semibold text-gray-800">{hasReq ? formatCurrency(total) : '—'}</span>
                           </div>
                           {variance != null && (
                             <div className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 ${variance === 0 ? 'bg-green-50' : variance > 0 ? 'bg-amber-50' : 'bg-red-50'}`}>
                               <span className={`font-semibold ${variance === 0 ? 'text-green-800' : variance > 0 ? 'text-amber-800' : 'text-red-800'}`}>
-                                {variance === 0 ? '✅ Reported matches required' : variance > 0 ? '🔺 You have an Excess of' : '🔻 You have a Loss of'}
+                                {variance === 0 ? '✅ Total matches Reported' : variance > 0 ? '🔺 You have an Excess of' : '🔻 You have a Loss of'}
                               </span>
                               <span className={`font-bold ${variance === 0 ? 'text-green-700' : variance > 0 ? 'text-amber-700' : 'text-red-700'}`}>{formatCurrency(Math.abs(variance))}</span>
                             </div>
                           )}
                         </>
                       )}
-                      {/* Officer verification — independent: no sight of the cashier's opening/closing */}
+                      {/* Officer verification — independent: no sight of the cashier's figures */}
                       {bankCanVerify ? (
                         <div className="border-t border-gray-100 pt-2">
                           <p className="text-[11px] font-semibold text-indigo-600 mb-1">🔎 Officer verification — enter the actual figures independently</p>
                           <div className="grid grid-cols-3 gap-2">
                             <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified opening *</label>
-                              <MoneyInput value={e.verifiedOpening} onChange={(v) => upd({ verifiedOpening: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified paid bills *</label>
+                              <MoneyInput value={e.verifiedPaidBills} onChange={(v) => upd({ verifiedPaidBills: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified closing *</label>
-                              <MoneyInput value={e.verifiedClosing} onChange={(v) => upd({ verifiedClosing: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified sales collection *</label>
+                              <MoneyInput value={e.verifiedSalesCollection} onChange={(v) => upd({ verifiedSalesCollection: v })} className="w-full px-2 py-1.5 border-2 border-indigo-100 rounded-lg text-sm focus:border-indigo-500 focus:outline-none" placeholder="0" />
                             </div>
                             <div>
-                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified amount <span className="text-gray-400 font-normal">(auto)</span></label>
-                              <div className="w-full px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm bg-gray-50 font-semibold text-gray-700">{formatCurrency((Number(e.verifiedClosing) || 0) - (Number(e.verifiedOpening) || 0))}</div>
+                              <label className="block text-[11px] font-semibold text-indigo-600 mb-0.5">Verified total <span className="text-gray-400 font-normal">(auto)</span></label>
+                              <div className="w-full px-2 py-1.5 border-2 border-gray-100 rounded-lg text-sm bg-gray-50 font-semibold text-gray-700">{formatCurrency((Number(e.verifiedPaidBills) || 0) + (Number(e.verifiedSalesCollection) || 0))}</div>
                             </div>
                           </div>
-                          {(e.verifiedOpening !== '' || e.verifiedClosing !== '') && (() => {
-                            const vAmt = (Number(e.verifiedClosing) || 0) - (Number(e.verifiedOpening) || 0)
+                          {(e.verifiedPaidBills !== '' || e.verifiedSalesCollection !== '') && (() => {
+                            const vAmt = (Number(e.verifiedPaidBills) || 0) + (Number(e.verifiedSalesCollection) || 0)
                             const vVar = vAmt - r.reported // verified vs system reported
                             return (
                               <div className={`mt-2 flex items-center justify-between text-sm rounded-lg px-3 py-2 ${vVar === 0 ? 'bg-green-50' : vVar > 0 ? 'bg-amber-50' : 'bg-red-50'}`}>
@@ -865,7 +864,7 @@ function PettyCashPage() {
                               </div>
                             )
                           })()}
-                          <p className="text-[10px] text-gray-400 mt-1">Verified amount = Verified Closing − Verified Opening. Variance compares it to the system-reported amount. The cashier&apos;s figures are locked and not shown here.</p>
+                          <p className="text-[10px] text-gray-400 mt-1">Verified total = Verified paid bills + Verified sales collection. Variance compares it to the system-reported amount. The cashier&apos;s figures are locked and not shown here.</p>
                         </div>
                       ) : (
                         <p className="text-[11px] text-gray-400 border-t border-gray-100 pt-2">Verified figures: officer-only.</p>

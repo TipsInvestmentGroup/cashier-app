@@ -64,8 +64,9 @@ export async function GET(req: NextRequest) {
       const ex = byChannel.get(ch.code)
       return {
         code: ch.code, label: ch.label, reported,
-        openingBalance: ex?.openingBalance ?? null, closingBalance: ex?.closingBalance ?? null,
-        verifiedAmount: ex?.verifiedAmount ?? null, verifiedOpening: ex?.verifiedOpening ?? null, verifiedClosing: ex?.verifiedClosing ?? null,
+        paidBills: ex?.paidBills ?? null, salesCollection: ex?.salesCollection ?? null,
+        verifiedAmount: ex?.verifiedAmount ?? null,
+        verifiedPaidBills: ex?.verifiedPaidBills ?? null, verifiedSalesCollection: ex?.verifiedSalesCollection ?? null,
         reason: ex?.reason || '', verifiedBy: ex?.verifiedBy || '',
       }
     }))
@@ -103,18 +104,18 @@ export async function POST(req: NextRequest) {
       reportedAmount: reported, reason: entry.reason || null,
       reportedBy: user.name, cashierId: user.userId,
     }
-    // Cashier fields
-    if (num(entry.openingBalance) !== undefined) data.openingBalance = num(entry.openingBalance)
-    if (num(entry.closingBalance) !== undefined) data.closingBalance = num(entry.closingBalance)
-    // Officer-verified fields (gated). Verified amount is auto = verified closing − verified opening.
-    const wantsVerify = [entry.verifiedOpening, entry.verifiedClosing].some((v) => v !== undefined && v !== null && v !== '')
+    // Cashier fields — the two components the cashier tallies by hand.
+    if (num(entry.paidBills) !== undefined) data.paidBills = num(entry.paidBills)
+    if (num(entry.salesCollection) !== undefined) data.salesCollection = num(entry.salesCollection)
+    // Officer-verified fields (gated). Verified amount is auto = verified paid bills + verified sales collection.
+    const wantsVerify = [entry.verifiedPaidBills, entry.verifiedSalesCollection].some((v) => v !== undefined && v !== null && v !== '')
     if (wantsVerify) {
       if (!canVerify) return NextResponse.json({ error: 'Only an authorized officer can enter verified amounts' }, { status: 403 })
-      const vo = num(entry.verifiedOpening) ?? (existing?.verifiedOpening ?? 0)
-      const vc = num(entry.verifiedClosing) ?? (existing?.verifiedClosing ?? 0)
-      data.verifiedOpening = vo
-      data.verifiedClosing = vc
-      data.verifiedAmount = roundMoney(vc - vo)
+      const vp = num(entry.verifiedPaidBills) ?? (existing?.verifiedPaidBills ?? 0)
+      const vs = num(entry.verifiedSalesCollection) ?? (existing?.verifiedSalesCollection ?? 0)
+      data.verifiedPaidBills = vp
+      data.verifiedSalesCollection = vs
+      data.verifiedAmount = roundMoney(vp + vs)
       data.verifiedBy = user.name
     }
     const saved = existing
