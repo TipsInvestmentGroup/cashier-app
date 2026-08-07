@@ -4,8 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { getFundingSourceBalance } from '@/lib/expense-ledger'
 import { fundClassOf } from '@/lib/expense-funds'
-import { previousClosing, computeCash } from '@/lib/cash-recon'
-import { startOfDay, endOfDay } from 'date-fns'
+import { previousClosing, computeCash, businessTodayUtc } from '@/lib/cash-recon'
 
 const VIEWER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
@@ -60,10 +59,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   let ledgerBalance = computedBalance
 
   if (fundClass === 'CASHIER_CASH') {
-    const today = new Date()
+    const today = await businessTodayUtc(source.outletId)
     const [opening, cash] = await Promise.all([
       previousClosing(today, source.outletId),
-      computeCash(startOfDay(today), endOfDay(today), source.outletId),
+      computeCash(today, source.outletId),
     ])
     const latestRecon = await prisma.cashRecon.findFirst({
       where: { outletId: source.outletId ?? undefined },
