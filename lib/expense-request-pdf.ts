@@ -115,8 +115,13 @@ export async function downloadExpenseRequestPdf(
   doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, 12, 39)
   if (qr) { doc.addImage(qr, 'PNG', W - 12 - 20, 28, 20, 20); doc.text('Scan to open', W - 12 - 20, 51, { maxWidth: 20 }) }
 
-  // ── Routing banner (§7) ──
+  // Status stamp — a small colored badge in the header instead of a diagonal
+  // full-page watermark, so it reads at a glance without ever obscuring the
+  // tables (the routing variant already carries its own banner).
   let y = 46
+  if (!routing) { drawStatusStamp(doc, 12, 42, watermarkFor(snap)); y = 52 }
+
+  // ── Routing banner (§7) ──
   if (routing) {
     doc.setFillColor(180, 83, 9); doc.rect(12, y, W - 24 - 24, 10, 'F')
     doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(9)
@@ -173,16 +178,26 @@ export async function downloadExpenseRequestPdf(
     doc.text('Physical signature is for routing purposes only; the request must still be approved in Tips Cashier Manager to proceed to payment.', 12, H - 12, { maxWidth: W - 24 })
   }
 
-  // ── Watermark (every page) ──
-  const mark = routing ? 'ROUTING COPY' : watermarkFor(snap)
-  const pages = doc.getNumberOfPages()
-  for (let p = 1; p <= pages; p++) {
-    doc.setPage(p)
-    doc.setTextColor(230, 230, 230); doc.setFont('helvetica', 'bold'); doc.setFontSize(52)
-    doc.text(mark, W / 2, H / 2, { align: 'center', angle: 30 })
-  }
-
   doc.save(`${snap.reference || 'expense-request'}${routing ? '-routing' : ''}.pdf`)
+}
+
+/** Small colored status badge drawn in the header. Tone tracks the lifecycle so
+ *  a filed paper copy is unambiguous: green = settled, amber = in-flight, gray =
+ *  draft, red = dead. */
+function drawStatusStamp(doc: import('jspdf').jsPDF, x: number, y: number, label: string) {
+  const TONES: Record<string, [number, number, number]> = {
+    'FULLY RETIRED': [22, 101, 52], PAID: [22, 101, 52],
+    'PENDING RETIREMENT': [180, 83, 9], 'PART-PAID': [180, 83, 9], 'PENDING APPROVAL': [180, 83, 9], 'APPROVED — UNPAID': [180, 83, 9],
+    DRAFT: [107, 114, 128],
+    REJECTED: [185, 28, 28], CANCELLED: [185, 28, 28],
+  }
+  const c = TONES[label] || [107, 114, 128]
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10)
+  const w = doc.getTextWidth(label) + 8
+  doc.setFillColor(c[0], c[1], c[2])
+  doc.roundedRect(x, y, w, 7, 1.5, 1.5, 'F')
+  doc.setTextColor(255, 255, 255)
+  doc.text(label, x + 4, y + 5)
 }
 
 function renderApprovalTrail(doc: import('jspdf').jsPDF, autoTable: typeof import('jspdf-autotable').default, snap: ExpensePdfSnapshot, y: number, W: number): number {
