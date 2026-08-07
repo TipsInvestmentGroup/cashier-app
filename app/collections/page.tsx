@@ -123,6 +123,10 @@ export default function CollectionsPage() {
   const [closingDay, setClosingDay] = useState(false)
   const [closeWizard, setCloseWizard] = useState(false) // guided close-day flow
   const [wizardStep, setWizardStep] = useState(0)
+  // Step the wizard should reopen at after returning from a sub-page (e.g. Cash
+  // Requests). Seeded once from the URL on mount, then applied once collections
+  // have loaded so the forms have an outlet to work with. null = nothing pending.
+  const [pendingStep, setPendingStep] = useState<number | null>(null)
   const [dayStatus, setDayStatus] = useState({ cashDone: false, digitalDone: false, templateDone: false })
   // Soft-gate summary for Step 1 (§4.3): how many Cashier Cash requests remain
   // unpaid for the target day. Never blocks Continue — just warns.
@@ -505,6 +509,35 @@ export default function CollectionsPage() {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [closeWizard]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Returning from a wizard sub-page (Cash Requests etc.) lands here with
+  // ?closeWizard=1&step=N. Read it once on mount, remember the requested step,
+  // then strip the params so a later refresh doesn't force the wizard open again.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('closeWizard') !== '1') return
+    const raw = Number.parseInt(params.get('step') ?? '', 10)
+    // Only steps 0–4 are wizard steps (5 is the post-close report view). Anything
+    // missing or out of range safely falls back to Step 1.
+    const step = Number.isInteger(raw) && raw >= 0 && raw <= 4 ? raw : 0
+    setPendingStep(step)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('closeWizard')
+    url.searchParams.delete('step')
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+  }, [])
+
+  // Apply the pending step once collections have loaded and we know which outlet
+  // to reconcile — mirrors the guard in openCloseWizard. If there's nothing to
+  // close for the day, drop the request rather than opening an empty wizard.
+  useEffect(() => {
+    if (pendingStep === null || loading) return
+    if (targetOutletIds.length === 0) { setPendingStep(null); return }
+    setWizardStep(pendingStep)
+    setCloseWizard(true)
+    setPendingStep(null)
+  }, [pendingStep, loading, targetOutletIds])
 
   const closeDay = async () => {
     const label = format(targetCloseDate, 'dd MMM yyyy')
@@ -1217,7 +1250,7 @@ export default function CollectionsPage() {
                 <div>
                   <p className="text-sm font-semibold text-gray-800 mb-1">Step 1 of 4 · Cash Requests <span className="text-gray-400 font-normal">(optional)</span></p>
                   <p className="text-sm text-gray-500 mb-4">If there were any cash expenses today, pay them out first. If none, continue.</p>
-                  <a href={`/close-the-day/cash-requests?outletId=${targetOutletIds[0] || ''}&date=${targetDayStr}`} target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
+                  <a href={`/close-the-day/cash-requests?outletId=${targetOutletIds[0] || ''}&date=${targetDayStr}&step=${wizardStep}`} target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
                   {cashReq && cashReq.unpaidCount > 0 && (
                     <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       {cashReq.unpaidCount} cash request{cashReq.unpaidCount === 1 ? '' : 's'} still unpaid ({formatCurrency(cashReq.totalToPay)}) — reconciliation totals won&apos;t include {cashReq.unpaidCount === 1 ? 'it' : 'them'} until paid. You can still continue.
@@ -1290,7 +1323,7 @@ export default function CollectionsPage() {
                   <p className="text-sm font-semibold text-gray-800 mb-1">Complete or correct, then reconfirm</p>
                   <p className="text-sm text-gray-500 mb-3">Open the section that needs work (opens in a new tab), then come back and reconfirm.</p>
                   <div className="grid grid-cols-1 gap-2">
-                    <a href={`/close-the-day/cash-requests?outletId=${targetOutletIds[0] || ''}&date=${targetDayStr}`} target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💵 Cash Requests ↗</a>
+                    <a href={`/close-the-day/cash-requests?outletId=${targetOutletIds[0] || ''}&date=${targetDayStr}&step=${wizardStep}`} target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💵 Cash Requests ↗</a>
                     <a href="/petty-cash?recon=cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💰 Cash Reconciliation ↗</a>
                     <a href="/digital-payment-reconciliation" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📲 Digital Reconciliation ↗</a>
                     <a href="/signed-bills" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📋 Bills &amp; Transactions Review ↗</a>

@@ -44,6 +44,10 @@ function CashRequestsWorklist() {
   const searchParams = useSearchParams()
   const outletId = searchParams.get('outletId') || ''
   const date = searchParams.get('date') || ''
+  // The wizard step the cashier came from — echoed back so "Back to Close the
+  // Day" reopens the wizard on that same step instead of resetting to Step 1.
+  const step = searchParams.get('step')
+  const backHref = `/collections?closeWizard=1${step ? `&step=${encodeURIComponent(step)}` : ''}`
 
   const [data, setData] = useState<CashRequests | null>(null)
   const [loading, setLoading] = useState(true)
@@ -98,7 +102,7 @@ function CashRequestsWorklist() {
               {data?.date && <span className="ml-1 text-gray-400">· {formatDate(data.date)}</span>}
             </p>
           </div>
-          <Link href="/collections" className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">← Back to Close the Day</Link>
+          <Link href={backHref} className="text-sm text-indigo-600 hover:text-indigo-800 font-medium">← Back to Close the Day</Link>
         </div>
 
         {loading ? (
