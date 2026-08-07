@@ -81,8 +81,8 @@ export const EXPENSE_TABS: Tab[] = [
   { href: '/petty-cash-ledger?fund=CASHIER_CASH', label: 'Cashier Ledger', icon: BookOpen, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=PETTY_CASH', label: 'Petty Cash Ledger', icon: BookOpen, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=DIGITAL', label: 'Digital Expenses Ledger', icon: CreditCard, roles: CASHIER_ROLES },
-  { href: '/cash-reconciliation', label: 'Cash Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
-  { href: '/digital-payment-reconciliation', label: 'Digital Payment Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+  // Cash Reconciliation / Digital Payment Reconciliation moved out to their own
+  // top-level RECON_TABS section (see below) — they no longer live under Expenses.
   { href: '/digital-expenses', label: 'Digital Expense Form', icon: CreditCard, roles: CASHIER_ROLES },
   // Legacy flow — retained until cutover (see note above).
   { href: '/petty-cash', label: 'Petty Cash (legacy)', icon: Wallet, roles: CASHIER_ROLES },
@@ -93,6 +93,15 @@ export const EXPENSE_TABS: Tab[] = [
 // Back-compat alias: several pages import PETTY_TABS. Kept pointing at the same
 // list so the rename is one edit here, not a sweep across every screen.
 export const PETTY_TABS = EXPENSE_TABS
+
+// The Reconciliation section — promoted out of Expenses into its own top-level
+// nav group (spec §2). Same standalone pages/components, same role visibility as
+// the old Expenses tabs (CASHIER_ROLES); officer-only fields inside each screen
+// stay gated by their own logic, so no new permission tier is needed here.
+export const RECON_TABS: Tab[] = [
+  { href: '/cash-reconciliation', label: 'Cash Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+  { href: '/digital-payment-reconciliation', label: 'Digital Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+]
 
 export const FINANCE_TABS: Tab[] = [
   { href: '/analytics', label: 'Analytics', icon: LayoutDashboard, roles: MGMT },

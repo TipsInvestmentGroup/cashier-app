@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
-import { SectionTabs, EXPENSE_TABS } from '@/components/Layout/SectionTabs'
+import { SectionTabs, RECON_TABS } from '@/components/Layout/SectionTabs'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useApi } from '@/hooks/useApi'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -61,7 +61,7 @@ export function ReconciliationView({ fundClass, title, blurb }: { fundClass: Fun
 
   return (
     <AppShell>
-      <SectionTabs tabs={EXPENSE_TABS} />
+      <SectionTabs tabs={RECON_TABS} />
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{title}</h1>

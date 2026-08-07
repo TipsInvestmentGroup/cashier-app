@@ -9,13 +9,13 @@ import { SETUP_TABS } from '@/components/Layout/SetupTabs'
 import { cn } from '@/lib/utils'
 import { VALID_ROLES } from '@/lib/shared-constants'
 import toast from 'react-hot-toast'
-import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, Tag, Banknote, type LucideIcon } from 'lucide-react'
+import { UtensilsCrossed, LayoutDashboard, Receipt, Wallet, Landmark, Settings, KeyRound, LogOut, Target, Upload, Tag, Banknote, Scale, type LucideIcon } from 'lucide-react'
 
 const ALL = VALID_ROLES
 const MGMT = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
-const SECTIONS = ['MyPos', 'Daily', 'Targets', 'My Pay', 'Bills & Requests', 'Expenses', 'Finance', 'Setup'] as const
+const SECTIONS = ['MyPos', 'Daily', 'Targets', 'My Pay', 'Bills & Requests', 'Expenses', 'Reconciliation', 'Finance', 'Setup'] as const
 
 const navItems: { href: string; icon: LucideIcon; label: string; section: string; roles: string[]; match?: string[] }[] = [
   { href: '/mypos', icon: UtensilsCrossed, label: 'MyPos', section: 'MyPos', roles: ['WAITER', 'MANAGER', 'ADMIN', 'DIRECTOR'], match: ['/mypos', '/pos', '/schedule', '/events'] },
@@ -28,7 +28,14 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 
   { href: '/signed-bills', icon: Receipt, label: 'Bills & Requests', section: 'Bills & Requests', roles: CASHIER_ROLES, match: ['/signed-bills', '/admin-director-bills', '/paid-bills', '/customer-bills', '/tips-dj-bills', '/cancellations'] },
 
-  { href: '/expense-requests', icon: Wallet, label: 'Expenses', section: 'Expenses', roles: CASHIER_ROLES, match: ['/expense-requests', '/petty-cash-ledger', '/digital-expenses', '/cash-reconciliation', '/digital-payment-reconciliation', '/petty-cash', '/approvals', '/petty-payments'] },
+  { href: '/expense-requests', icon: Wallet, label: 'Expenses', section: 'Expenses', roles: CASHIER_ROLES, match: ['/expense-requests', '/petty-cash-ledger', '/digital-expenses', '/petty-cash', '/approvals', '/petty-payments'] },
+
+  // Reconciliation — promoted out of Expenses into its own top-level section
+  // (spec §2), with two items reusing the existing standalone pages. Same role
+  // visibility as the old Expenses tabs; officer-only fields stay gated inside
+  // each screen, so no new permission tier is needed here.
+  { href: '/cash-reconciliation', icon: Scale, label: 'Cash Reconciliation', section: 'Reconciliation', roles: CASHIER_ROLES, match: ['/cash-reconciliation'] },
+  { href: '/digital-payment-reconciliation', icon: Scale, label: 'Digital Reconciliation', section: 'Reconciliation', roles: CASHIER_ROLES, match: ['/digital-payment-reconciliation'] },
 
   { href: '/analytics', icon: Landmark, label: 'Finance', section: 'Finance', roles: MGMT, match: ['/analytics', '/receivables', '/admin-director-bills', '/month-end', '/staff-scorecard', '/outlet-comparison', '/peak-hours', '/trends', '/payroll', '/reports', '/audit', '/business-days', '/business-day-management', '/business-day-unlock-requests', '/business-day-exceptions-report'] },
 
