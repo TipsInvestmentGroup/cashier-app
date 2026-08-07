@@ -4617,6 +4617,12 @@ model RequestType {
   name        String // display, e.g. "Petty Cash Request"
   description String?
   isActive    Boolean @default(true)
+  // Archived = permanently retired but kept for historical integrity (it is
+  // still referenced by past requests). Distinct from isActive (a reversible
+  // deactivation): an archived row is hidden from EVERY live list and selector,
+  // cannot be reactivated, and is only ever chosen over a hard delete when
+  // linked requests make deletion impossible. See app/expense-settings.
+  archived    Boolean @default(false)
 
   requiredFields             String? // JSON array of field keys
   requiredAttachments        String? // JSON array of doc-type labels
@@ -4661,6 +4667,10 @@ model ExpenseCategory {
   departmentId       String?
   eventId            String?
   isActive           Boolean  @default(true)
+  // Archived — permanently retired but kept for historical integrity. Hidden
+  // from every live list/selector, not reactivatable; chosen over hard delete
+  // only when linked requests block deletion. See RequestType.archived.
+  archived           Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -4702,6 +4712,11 @@ model FundingSource {
   responsibleUserId       String? // no relation — mirrors CreditAccount.userId, keeps User untouched
   currency                String                 @default("TZS")
   isActive                Boolean                @default(true)
+  // Archived — permanently retired but kept for historical integrity (past
+  // payments still reference it). Hidden from every live list/selector, not
+  // reactivatable; chosen over hard delete only when a non-zero balance or
+  // linked payments block deletion. See RequestType.archived.
+  archived                Boolean                @default(false)
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
 

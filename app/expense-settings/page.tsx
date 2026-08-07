@@ -83,6 +83,60 @@ function ChipToggle({ options, value, onChange }: { options: string[]; value: st
 }
 const inputCls = 'px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white w-full'
 
+// ─── Reactivate / Delete shared plumbing (identical across all three tables) ──
+// A DeletePlan is the fully-resolved outcome of pressing Delete on one INACTIVE
+// row: the modal copy plus the server mode to fire. `mode: undefined` means the
+// action is BLOCKED (a funding source that still holds money) — the modal then
+// shows a single Close button and never calls the server. The server always
+// re-checks these gates; the plan only decides what to show.
+type DeletePlan = { name: string; title: string; message: string; confirmLabel?: string; danger?: boolean; mode?: 'hard' | 'archive'; endpoint: string }
+
+// Categories + Request Types gate purely on linked-request count.
+function planForRequestScoped(name: string, requests: number, endpoint: string): DeletePlan {
+  if (requests === 0) return { name, title: `Delete ${name}?`, message: "This can't be undone.", confirmLabel: 'Delete', danger: true, mode: 'hard', endpoint }
+  return { name, title: `Archive ${name}?`, message: `${name} has ${requests} linked request${requests === 1 ? '' : 's'} and can't be permanently deleted. Set it as Archived instead to hide it everywhere while preserving historical records?`, confirmLabel: 'Archive', mode: 'archive', endpoint }
+}
+
+// Funding sources gate first on a non-zero balance (blocked), then on payments.
+function planForFund(name: string, balance: number, payments: number, endpoint: string): DeletePlan {
+  if (Math.abs(balance) >= 0.01) return { name, title: `Can't delete ${name}`, message: `Can't delete — this funding source still holds ${formatCurrency(balance)}. Move or reconcile the balance to zero before deleting.`, endpoint }
+  if (payments > 0) return { name, title: `Archive ${name}?`, message: `${name} has ${payments} linked payment${payments === 1 ? '' : 's'} and can't be permanently deleted. Set it as Archived instead to hide it everywhere while preserving historical records?`, confirmLabel: 'Archive', mode: 'archive', endpoint }
+  return { name, title: `Delete ${name}?`, message: "This can't be undone.", confirmLabel: 'Delete', danger: true, mode: 'hard', endpoint }
+}
+
+function ConfirmModal({ plan, busy, onConfirm, onClose }: { plan: DeletePlan; busy: boolean; onConfirm: () => void; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold text-gray-900 mb-2">{plan.title}</h3>
+        <p className="text-sm text-gray-600 mb-4">{plan.message}</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} disabled={busy} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200 disabled:opacity-40">{plan.mode ? 'Cancel' : 'Close'}</button>
+          {plan.mode && (
+            <button onClick={onConfirm} disabled={busy}
+              className={`px-4 py-2 text-white text-sm font-semibold rounded-xl disabled:opacity-40 ${plan.danger ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+              {busy ? 'Working…' : (plan.confirmLabel || 'Confirm')}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// One row's inline "Reactivate  Delete" action group + its inline error slot,
+// shared so the three tables stay pixel-identical. Deactivate stays inline in
+// each table (its confirm copy differs per entity).
+function RowActions({ onReactivate, onDelete, error }: { onReactivate: () => void; onDelete: () => void; error?: string }) {
+  return (
+    <>
+      <button onClick={onReactivate} className="text-xs text-green-600 hover:text-green-800 mr-3">Reactivate</button>
+      <button onClick={onDelete} className="text-xs text-red-500 hover:text-red-700">Delete</button>
+      {error && <span className="block text-[11px] text-red-500 mt-1 font-normal normal-case whitespace-normal max-w-[240px] ml-auto text-right">{error}</span>}
+    </>
+  )
+}
+
 type Tab = 'module' | 'requestTypes' | 'categories' | 'fundingSources' | 'manageAccess'
 
 export default function ExpenseSettingsPage() {
@@ -305,10 +359,28 @@ function RequestTypesTab() {
   }, [request])
   useEffect(() => { load() }, [load])
 
+  const [plan, setPlan] = useState<DeletePlan | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [rowError, setRowError] = useState<{ id: string; msg: string } | null>(null)
+
   const deactivate = async (t: RequestType) => {
     if (!confirm(`Deactivate "${t.name}"? Existing requests keep their classification; no new requests can use it.`)) return
     try { await request(`/api/expense/request-types/${t.id}`, { method: 'DELETE' }); toast.success('Deactivated'); load() }
     catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not deactivate') }
+  }
+
+  const reactivate = async (t: RequestType) => {
+    setRowError(null)
+    try { await request(`/api/expense/request-types/${t.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: true }) }); toast.success('Reactivated'); load() }
+    catch (e: unknown) { const msg = e instanceof Error ? e.message : 'Could not reactivate'; setRowError({ id: t.id, msg }); toast.error(msg) }
+  }
+
+  const confirmDelete = async () => {
+    if (!plan?.mode) { setPlan(null); return }
+    setBusy(true)
+    try { await request(`${plan.endpoint}?mode=${plan.mode}`, { method: 'DELETE' }); toast.success(plan.mode === 'hard' ? 'Deleted' : 'Archived'); setPlan(null); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not complete') }
+    finally { setBusy(false) }
   }
 
   if (loading) return <div className="py-10 text-center text-gray-400">Loading…</div>
@@ -336,7 +408,9 @@ function RequestTypesTab() {
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${t.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{t.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="text-right whitespace-nowrap">
                     <button onClick={() => setEditing(editing === t.id ? null : t.id)} className="text-xs text-indigo-600 hover:text-indigo-800 mr-3">{editing === t.id ? 'Close' : 'Edit'}</button>
-                    {t.isActive && <button onClick={() => deactivate(t)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>}
+                    {t.isActive
+                      ? <button onClick={() => deactivate(t)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>
+                      : <RowActions onReactivate={() => reactivate(t)} onDelete={() => setPlan(planForRequestScoped(t.name, t._count?.requests ?? 0, `/api/expense/request-types/${t.id}`))} error={rowError?.id === t.id ? rowError.msg : undefined} />}
                   </td>
                 </tr>
               ))}
@@ -354,6 +428,8 @@ function RequestTypesTab() {
           requiredAttachments: parseArr(t.requiredAttachments), allowedCategoryIds: parseArr(t.allowedCategoryIds), allowedFundingSourceIds: parseArr(t.allowedFundingSourceIds),
         }} categories={categories} sources={sources} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       })()}
+
+      {plan && <ConfirmModal plan={plan} busy={busy} onConfirm={confirmDelete} onClose={() => setPlan(null)} />}
     </div>
   )
 }
@@ -525,10 +601,28 @@ function CategoriesTab() {
   }, [request])
   useEffect(() => { load() }, [load])
 
+  const [plan, setPlan] = useState<DeletePlan | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [rowError, setRowError] = useState<{ id: string; msg: string } | null>(null)
+
   const deactivate = async (c: Category) => {
     if (!confirm(`Deactivate "${c.name}"? Existing requests keep their classification.`)) return
     try { await request(`/api/expense/categories/${c.id}`, { method: 'DELETE' }); toast.success('Deactivated'); load() }
     catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not deactivate') }
+  }
+
+  const reactivate = async (c: Category) => {
+    setRowError(null)
+    try { await request(`/api/expense/categories/${c.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: true }) }); toast.success('Reactivated'); load() }
+    catch (e: unknown) { const msg = e instanceof Error ? e.message : 'Could not reactivate'; setRowError({ id: c.id, msg }); toast.error(msg) }
+  }
+
+  const confirmDelete = async () => {
+    if (!plan?.mode) { setPlan(null); return }
+    setBusy(true)
+    try { await request(`${plan.endpoint}?mode=${plan.mode}`, { method: 'DELETE' }); toast.success(plan.mode === 'hard' ? 'Deleted' : 'Archived'); setPlan(null); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not complete') }
+    finally { setBusy(false) }
   }
 
   if (loading) return <div className="py-10 text-center text-gray-400">Loading…</div>
@@ -556,7 +650,9 @@ function CategoriesTab() {
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${c.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{c.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="text-right whitespace-nowrap">
                     <button onClick={() => setEditing(editing === c.id ? null : c.id)} className="text-xs text-indigo-600 hover:text-indigo-800 mr-3">{editing === c.id ? 'Close' : 'Edit'}</button>
-                    {c.isActive && <button onClick={() => deactivate(c)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>}
+                    {c.isActive
+                      ? <button onClick={() => deactivate(c)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>
+                      : <RowActions onReactivate={() => reactivate(c)} onDelete={() => setPlan(planForRequestScoped(c.name, c._count?.requests ?? 0, `/api/expense/categories/${c.id}`))} error={rowError?.id === c.id ? rowError.msg : undefined} />}
                   </td>
                 </tr>
               ))}
@@ -571,6 +667,8 @@ function CategoriesTab() {
         return <CategoryEditor initial={{ id: c.id, name: c.name, code: c.code, budgetAccountId: c.budgetAccountId || '', spendingLimit: c.spendingLimit, costCenter: c.costCenter || '' }}
           accounts={accounts} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       })()}
+
+      {plan && <ConfirmModal plan={plan} busy={busy} onConfirm={confirmDelete} onClose={() => setPlan(null)} />}
     </div>
   )
 }
@@ -640,10 +738,30 @@ function FundingSourcesTab() {
   }, [request])
   useEffect(() => { load() }, [load])
 
+  const [plan, setPlan] = useState<DeletePlan | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [rowError, setRowError] = useState<{ id: string; msg: string } | null>(null)
+
   const deactivate = async (s: FundingSource) => {
     if (!confirm(`Deactivate "${s.name}"? Existing payments keep their history.`)) return
     try { await request(`/api/expense/funding-sources/${s.id}`, { method: 'DELETE' }); toast.success('Deactivated'); load() }
     catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not deactivate') }
+  }
+
+  // Funding sources have no reactivation dependency to validate (§spec) — flip
+  // straight back to active.
+  const reactivate = async (s: FundingSource) => {
+    setRowError(null)
+    try { await request(`/api/expense/funding-sources/${s.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: true }) }); toast.success('Reactivated'); load() }
+    catch (e: unknown) { const msg = e instanceof Error ? e.message : 'Could not reactivate'; setRowError({ id: s.id, msg }); toast.error(msg) }
+  }
+
+  const confirmDelete = async () => {
+    if (!plan?.mode) { setPlan(null); return }
+    setBusy(true)
+    try { await request(`${plan.endpoint}?mode=${plan.mode}`, { method: 'DELETE' }); toast.success(plan.mode === 'hard' ? 'Deleted' : 'Archived'); setPlan(null); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not complete') }
+    finally { setBusy(false) }
   }
 
   if (loading) return <div className="py-10 text-center text-gray-400">Loading…</div>
@@ -690,7 +808,9 @@ function FundingSourcesTab() {
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${s.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{s.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="text-right whitespace-nowrap">
                     <button onClick={() => setEditing(editing === s.id ? null : s.id)} className="text-xs text-indigo-600 hover:text-indigo-800 mr-3">{editing === s.id ? 'Close' : 'Edit'}</button>
-                    {s.isActive && <button onClick={() => deactivate(s)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>}
+                    {s.isActive
+                      ? <button onClick={() => deactivate(s)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>
+                      : <RowActions onReactivate={() => reactivate(s)} onDelete={() => setPlan(planForFund(s.name, s.availableBalance, s._count?.payments ?? 0, `/api/expense/funding-sources/${s.id}`))} error={rowError?.id === s.id ? rowError.msg : undefined} />}
                   </td>
                 </tr>
               ))}
@@ -709,6 +829,8 @@ function FundingSourcesTab() {
         }}
           accounts={accounts} isEditMode onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       })()}
+
+      {plan && <ConfirmModal plan={plan} busy={busy} onConfirm={confirmDelete} onClose={() => setPlan(null)} />}
     </div>
   )
 }

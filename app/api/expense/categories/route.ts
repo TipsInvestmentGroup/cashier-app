@@ -9,8 +9,12 @@ export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Archived rows are hidden from EVERY caller (admin included) — they exist
+  // only to keep historical requests readable, never to be picked again. ADMIN
+  // still sees inactive-but-not-archived rows so they can be managed in Expense
+  // Settings; everyone else only sees active ones.
   const categories = await prisma.expenseCategory.findMany({
-    where: user.role === 'ADMIN' ? {} : { isActive: true },
+    where: user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false },
     orderBy: [{ name: 'asc' }],
     include: { budgetAccount: { select: { id: true, code: true, name: true } }, _count: { select: { requests: true } } },
   })
