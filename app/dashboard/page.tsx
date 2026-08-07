@@ -147,7 +147,7 @@ export default function DashboardPage() {
               { href: '/collections', icon: '💰', label: 'Collections' },
               { href: '/signed-bills', icon: '📋', label: 'Bills' },
               { href: '/paid-bills', icon: '✅', label: 'Payments' },
-              { href: '/petty-cash', icon: '💵', label: 'Petty Cash' },
+              { href: '/petty-cash-ledger?fund=CASHIER_CASH', icon: '💵', label: 'Cashier Cash' },
               { href: '/daily-report', icon: '📄', label: 'Daily Report' },
               { href: '/collections', icon: '🔒', label: 'Close Day' },
             ]

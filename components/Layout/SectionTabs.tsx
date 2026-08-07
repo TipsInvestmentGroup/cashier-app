@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useApi } from '@/hooks/useApi'
+import { LEGACY_PETTY_CASH_ENABLED } from '@/lib/expense-cutover'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
@@ -70,13 +71,13 @@ export const BILLS_TABS: Tab[] = [
 // which keeps the per-custodian ledger views (§2) as one screen rather than
 // three near-identical pages.
 //
-// The legacy Petty Cash flow (/petty-cash, /approvals, /petty-payments) is
-// RETAINED below the new items, not removed: it is still the live production
-// flow under the side-by-side rollout (docs/expense-disbursement-framework-
-// design.md decision 1), and hiding it before the cash-drawer cutover
-// (CASHIER_CUTOVER_ENABLED, lib/expense-cutover.ts) would strand a working
-// screen. These drop off once that cutover lands.
-export const EXPENSE_TABS: Tab[] = [
+// The legacy Petty Cash flow (/petty-cash, /approvals, /petty-payments) is now
+// RETIRED from this nav (Close-the-Day Cash Requests redesign §3): those three
+// tabs are appended only while LEGACY_PETTY_CASH_ENABLED is true. The routes
+// and code are kept — reachable by direct URL for admin/debug and old audits,
+// and each shows a retirement banner — but they no longer appear here. Flip the
+// flag in lib/expense-cutover.ts to temporarily un-retire them.
+const EXPENSE_TABS_CORE: Tab[] = [
   { href: '/expense-requests', label: 'Expense Form', icon: Receipt, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=CASHIER_CASH', label: 'Cashier Ledger', icon: BookOpen, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=PETTY_CASH', label: 'Petty Cash Ledger', icon: BookOpen, roles: CASHIER_ROLES },
@@ -84,11 +85,18 @@ export const EXPENSE_TABS: Tab[] = [
   // Cash Reconciliation / Digital Payment Reconciliation moved out to their own
   // top-level RECON_TABS section (see below) — they no longer live under Expenses.
   { href: '/digital-expenses', label: 'Digital Expense Form', icon: CreditCard, roles: CASHIER_ROLES },
-  // Legacy flow — retained until cutover (see note above).
+]
+
+// Legacy flow — hidden from nav unless explicitly un-retired (see note above).
+const LEGACY_EXPENSE_TABS: Tab[] = [
   { href: '/petty-cash', label: 'Petty Cash (legacy)', icon: Wallet, roles: CASHIER_ROLES },
   { href: '/approvals', label: 'Approval Requests', icon: ClipboardCheck, roles: CASHIER_ROLES },
   { href: '/petty-payments', label: 'Payments', icon: CreditCard, roles: CASHIER_ROLES },
 ]
+
+export const EXPENSE_TABS: Tab[] = LEGACY_PETTY_CASH_ENABLED
+  ? [...EXPENSE_TABS_CORE, ...LEGACY_EXPENSE_TABS]
+  : EXPENSE_TABS_CORE
 
 // Back-compat alias: several pages import PETTY_TABS. Kept pointing at the same
 // list so the rename is one edit here, not a sweep across every screen.

@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
+import { LegacyRetirementBanner } from '@/components/LegacyRetirementBanner'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -278,6 +279,7 @@ function PettyCashPage() {
   return (
     <AppShell>
       <SectionTabs tabs={PETTY_TABS} />
+      <LegacyRetirementBanner />
       <div className="space-y-6">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>

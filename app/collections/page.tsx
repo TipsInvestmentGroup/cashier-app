@@ -124,6 +124,9 @@ export default function CollectionsPage() {
   const [closeWizard, setCloseWizard] = useState(false) // guided close-day flow
   const [wizardStep, setWizardStep] = useState(0)
   const [dayStatus, setDayStatus] = useState({ cashDone: false, digitalDone: false, templateDone: false })
+  // Soft-gate summary for Step 1 (§4.3): how many Cashier Cash requests remain
+  // unpaid for the target day. Never blocks Continue — just warns.
+  const [cashReq, setCashReq] = useState<{ unpaidCount: number; totalToPay: number } | null>(null)
 
   const [form, setForm] = useState({
     cash: '', channelAmounts: {} as Record<string, string>, notes: '', staffName: '', systemSales: '',
@@ -484,11 +487,21 @@ export default function CollectionsPage() {
     })
   }
 
+  // Unpaid Cashier Cash requests for the target day — drives Step 1's soft
+  // warning. Uses the first target outlet (the same one the wizard reconciles).
+  const loadCashReq = async () => {
+    const oid = targetOutletIds[0]
+    if (!oid) { setCashReq(null); return }
+    const r = await request(`/api/expense/cash-requests?outletId=${oid}&date=${targetDayStr}`).catch(() => null)
+    setCashReq(r ? { unpaidCount: r.unpaidCount ?? 0, totalToPay: r.totalToPay ?? 0 } : null)
+  }
+
   // Refresh status when the wizard opens and whenever the cashier returns to this tab.
   useEffect(() => {
     if (!closeWizard) return
     loadDayStatus()
-    const onFocus = () => loadDayStatus()
+    loadCashReq()
+    const onFocus = () => { loadDayStatus(); loadCashReq() }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [closeWizard]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1203,8 +1216,13 @@ export default function CollectionsPage() {
               {wizardStep === 0 && (
                 <div>
                   <p className="text-sm font-semibold text-gray-800 mb-1">Step 1 of 4 · Cash Requests <span className="text-gray-400 font-normal">(optional)</span></p>
-                  <p className="text-sm text-gray-500 mb-4">If there were any cash expenses today, record them first. If none, continue.</p>
-                  <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
+                  <p className="text-sm text-gray-500 mb-4">If there were any cash expenses today, pay them out first. If none, continue.</p>
+                  <a href={`/close-the-day/cash-requests?outletId=${targetOutletIds[0] || ''}&date=${targetDayStr}`} target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
+                  {cashReq && cashReq.unpaidCount > 0 && (
+                    <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      {cashReq.unpaidCount} cash request{cashReq.unpaidCount === 1 ? '' : 's'} still unpaid ({formatCurrency(cashReq.totalToPay)}) — reconciliation totals won&apos;t include {cashReq.unpaidCount === 1 ? 'it' : 'them'} until paid. You can still continue.
+                    </div>
+                  )}
                   <button onClick={() => setWizardStep(1)} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Continue to Cash Reconciliation →</button>
                 </div>
               )}
@@ -1272,7 +1290,7 @@ export default function CollectionsPage() {
                   <p className="text-sm font-semibold text-gray-800 mb-1">Complete or correct, then reconfirm</p>
                   <p className="text-sm text-gray-500 mb-3">Open the section that needs work (opens in a new tab), then come back and reconfirm.</p>
                   <div className="grid grid-cols-1 gap-2">
-                    <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💵 Cash Requests ↗</a>
+                    <a href={`/close-the-day/cash-requests?outletId=${targetOutletIds[0] || ''}&date=${targetDayStr}`} target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💵 Cash Requests ↗</a>
                     <a href="/petty-cash?recon=cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💰 Cash Reconciliation ↗</a>
                     <a href="/digital-payment-reconciliation" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📲 Digital Reconciliation ↗</a>
                     <a href="/signed-bills" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📋 Bills &amp; Transactions Review ↗</a>

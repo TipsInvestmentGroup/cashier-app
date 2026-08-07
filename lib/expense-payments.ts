@@ -33,10 +33,12 @@ function parseIdList(raw: string | null | undefined): string[] | null {
   }
 }
 
-/** Resolves the Cr (money-out) GL account for a funding source. CASH posts to
- *  the company's default Cash account (same account Daily Collections use);
- *  BANK/MOBILE_MONEY/CARD post to the wrapped CompanyPaymentAccount's own GL
- *  account — never a separately-materialized figure (Stage 16 decision 2).
+/** Resolves the Cr (money-out) GL account for a funding source. CASH and
+ *  CASHIER_DRAWER both post to the company's default Cash account (same account
+ *  Daily Collections use) — a cashier's till IS cash, so its disbursements move
+ *  the same Cash GL account, matching how getFundingSourceBalance treats the two
+ *  alike. BANK/MOBILE_MONEY/CARD post to the wrapped CompanyPaymentAccount's own
+ *  GL account — never a separately-materialized figure (Stage 16 decision 2).
  *  OTHER has no GL representation yet — an honest gap, not a silent wrong
  *  posting; see Stage 16 "deliberately deferred, not missing". */
 async function resolveFundingSourceAccountId(
@@ -45,7 +47,7 @@ async function resolveFundingSourceAccountId(
   companyId: string,
   outletId?: string | null,
 ): Promise<string> {
-  if (fundingSource.sourceType === 'CASH') {
+  if (fundingSource.sourceType === 'CASH' || fundingSource.sourceType === 'CASHIER_DRAWER') {
     return resolveChannelAccountId(db, { companyId, channelCode: 'CASH', outletId })
   }
   if (fundingSource.companyPaymentAccount) {

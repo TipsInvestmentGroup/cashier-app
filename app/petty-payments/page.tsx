@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
+import { LegacyRetirementBanner } from '@/components/LegacyRetirementBanner'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -109,6 +110,7 @@ export default function PettyPaymentsPage() {
   return (
     <AppShell>
       <SectionTabs tabs={PETTY_TABS} />
+      <LegacyRetirementBanner />
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Petty Cash Payments</h1>
