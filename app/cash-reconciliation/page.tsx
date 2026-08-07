@@ -1,16 +1,9 @@
 'use client'
-import { ReconciliationView } from '@/components/ReconciliationView'
+import { ReconStandalone } from '@/components/recon/ReconStandalone'
 
-// §1 nav item "Cash Reconciliation" — the custodian-facing view for Cashier
-// Cash funds. Read-only reconciliation of the drawer's ledger against its §5
-// computed position; physical-count entry stays in the existing Cash
-// Reconciliation flow on the Daily screen, which this links to.
+// Reconciliation section — standalone, editable Cash Reconciliation (spec §2).
+// Reuses the same CashReconForm the Close-the-Day wizard uses, with its own
+// date/outlet pickers, and stacks the read-only custodian view beneath it.
 export default function CashReconciliationPage() {
-  return (
-    <ReconciliationView
-      fundClass="CASHIER_CASH"
-      title="Cash Reconciliation"
-      blurb="Confirm each cashier fund's ledger agrees with its live cash position, and see the last physical count."
-    />
-  )
+  return <ReconStandalone kind="cash" />
 }

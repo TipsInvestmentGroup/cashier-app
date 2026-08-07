@@ -32,7 +32,20 @@ const STATUS_STYLE: Record<ReconStatus, { border: string; heading: string; icon:
   UNVERIFIABLE: { border: 'border-amber-200 bg-amber-50', heading: 'text-amber-700', icon: 'ℹ', label: 'Not independently verifiable' },
 }
 
+// Page wrapper: chrome (AppShell + section tabs) around the read-only body.
 export function ReconciliationView({ fundClass, title, blurb }: { fundClass: FundClass; title: string; blurb: string }) {
+  return (
+    <AppShell>
+      <SectionTabs tabs={RECON_TABS} />
+      <ReconciliationBody fundClass={fundClass} title={title} blurb={blurb} />
+    </AppShell>
+  )
+}
+
+// The read-only custodian view itself (no chrome), so it can be embedded under
+// the editable form on the standalone reconciliation pages as well as rendered
+// on its own by ReconciliationView above.
+export function ReconciliationBody({ fundClass, title, blurb }: { fundClass: FundClass; title: string; blurb: string }) {
   const { request } = useApi()
   const [sources, setSources] = useState<FundOption[]>([])
   const [selected, setSelected] = useState('')
@@ -60,9 +73,7 @@ export function ReconciliationView({ fundClass, title, blurb }: { fundClass: Fun
   useEffect(() => { loadRecon() }, [loadRecon])
 
   return (
-    <AppShell>
-      <SectionTabs tabs={RECON_TABS} />
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{title}</h1>
           <p className="text-gray-500 text-sm">{blurb}</p>
@@ -123,8 +134,7 @@ export function ReconciliationView({ fundClass, title, blurb }: { fundClass: Fun
             {(recon.fundClass === 'PETTY_CASH' || recon.fundClass === null) && <LedgerBreakdown recon={recon} />}
           </>
         )}
-      </div>
-    </AppShell>
+    </div>
   )
 }
 

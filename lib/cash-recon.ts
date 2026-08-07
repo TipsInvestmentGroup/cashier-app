@@ -6,13 +6,21 @@
 import { prisma } from '@/lib/prisma'
 import { startOfDay, endOfDay } from 'date-fns'
 
-/** Yesterday's (or the most recent prior) closing balance becomes today's opening. */
+/** Yesterday's (or the most recent prior) closing balance becomes today's opening.
+ *  Floored at 0: a physical cash drawer cannot open with negative cash. A prior
+ *  day whose closing went negative (e.g. a deposit recorded larger than the cash
+ *  actually collected — usually because that day's collection was never entered)
+ *  must NOT carry that impossible negative forward, or it compounds by another
+ *  −deposit every subsequent day. Any real shortfall is a receivable tracked in
+ *  Excess Recon, not negative cash in the till. The offending day still shows its
+ *  own negative closing (surfaced with a warning on the form) — it just doesn't
+ *  poison the next day's opening. */
 export async function previousClosing(day: Date, outletId?: string | null): Promise<number> {
   const prev = await prisma.cashRecon.findFirst({
     where: { date: { lt: startOfDay(day) }, outletId: outletId || null },
     orderBy: { date: 'desc' },
   })
-  return prev?.closingBalance || 0
+  return Math.max(0, prev?.closingBalance || 0)
 }
 
 /** Computed cash figures for a day+outlet (collected / paid-cash / expenses). */

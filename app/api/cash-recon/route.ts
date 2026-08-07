@@ -60,6 +60,20 @@ export async function POST(req: NextRequest) {
   // Cashiers always reconcile their own outlet.
   const usedOutletId = writeOutletId(user, outletId)
 
+  // A closed day is locked for cashiers — the standalone Cash Reconciliation
+  // page can open any past date, so without this a cashier could silently
+  // rewrite a finalized day and shift the next day's auto-opening. Officers keep
+  // the ability to correct (they hold the reopen authority). Mirrors the same
+  // guard on the collections write routes.
+  if (user.role === 'CASHIER' && usedOutletId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = prisma as any
+    const closed = await db.dayClosure.findUnique({
+      where: { outletId_date: { outletId: usedOutletId, date: startOfDay(day) } }, select: { id: true },
+    })
+    if (closed) return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before editing the reconciliation.' }, { status: 423 })
+  }
+
   const excessItems = rawExcessItems
     .map((it) => ({ id: it.id || null, amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
     .filter((it) => it.amount > 0)

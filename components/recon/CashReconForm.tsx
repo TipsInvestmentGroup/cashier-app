@@ -180,6 +180,12 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
         </div>
         <p className="text-[11px] text-indigo-400 mt-1">Closing = Yesterday&apos;s Closing + Collected + Paid-cash − Expenses − Excess Paid − Deposited</p>
       </div>
+      {closing < 0 && (
+        <div className="rounded-xl p-3 border-2 border-red-200 bg-red-50 text-sm text-red-800">
+          <p className="font-semibold">⚠️ Closing balance is negative</p>
+          <p className="text-xs mt-1">You&apos;ve deposited/paid out more cash than the drawer holds. This usually means the day&apos;s <strong>cash collection wasn&apos;t recorded</strong> — record it under Daily Collections so &quot;Cash collected from staff&quot; offsets the deposit. A drawer can&apos;t physically go below zero.</p>
+        </div>
+      )}
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Verified ({getCurrencyCode()}) {canVerify ? '*' : <span className="text-gray-400 font-normal">— officers only</span>}</label>
         {canVerify
