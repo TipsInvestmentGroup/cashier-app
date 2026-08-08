@@ -85,6 +85,11 @@ const EXPENSE_TABS_CORE: Tab[] = [
   // Cash Reconciliation / Digital Payment Reconciliation moved out to their own
   // top-level RECON_TABS section (see below) — they no longer live under Expenses.
   { href: '/digital-expenses', label: 'Digital Expense Form', icon: CreditCard, roles: CASHIER_ROLES },
+  // Spec v2 §2.2 — the Digital Expenses Custodian's queue of approved Petty Cash
+  // top-ups awaiting payment out of a digital account (the direction=IN sibling
+  // of a fund's Ready-to-Pay). Server scopes rows to the caller's DIGITAL
+  // custodian grant, so a non-custodian just sees an empty queue.
+  { href: '/topup-payments', label: 'Top-up Payments', icon: HandCoins, roles: CASHIER_ROLES },
   // Custodian Report (Spec v2) — the cross-fund, custodian-accountability view:
   // per custodian, for a date range, how much they received / spent / are
   // holding. Its own standalone page (not a per-fund ?fund= view) because it
