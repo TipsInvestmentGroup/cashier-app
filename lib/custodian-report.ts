@@ -35,7 +35,6 @@
 // transaction subtypes exist. Digital variance is UNVERIFIABLE until then.
 import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
-import { getFundingSourceBalance } from '@/lib/expense-ledger'
 import { FUND_CLASSES, fundClassOf, FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
 import { previousClosing, utcDayStart, utcDayRange } from '@/lib/cash-recon'
 
@@ -50,6 +49,24 @@ export interface CustodianVariance {
   recordedBalance: number | null
   /** recordedBalance − computed Closing, or null when unverifiable. */
   difference: number | null
+}
+
+/** §2.1 per-account movement breakdown for a Digital Expenses fund. Each digital
+ *  FundingSource wraps exactly one CompanyPaymentAccount, so one report row = one
+ *  bank/channel account, and this is that account's money movement for the
+ *  period, derived from the GL (the single source of truth) — deposits by
+ *  cashiers, internal transfers funding top-ups, withdrawals, disbursements. */
+export interface DigitalAccountDetail {
+  accountLabel: string
+  /** Masked account number (last 4), or null when none is on file. */
+  accountMasked: string | null
+  channel: string | null
+  depositsByCashiers: number
+  internalTransfersOut: number
+  withdrawals: number
+  disbursements: number
+  otherCredits: number
+  otherOut: number
 }
 
 export interface CustodianReportRow {
@@ -67,6 +84,8 @@ export interface CustodianReportRow {
   spent: number
   closing: number
   variance: CustodianVariance
+  /** Present only on Digital rows (§2.1 per-account expansion). */
+  accountDetail?: DigitalAccountDetail
 }
 
 export interface CustodianTotals {
@@ -99,12 +118,23 @@ export interface CustodianReportParams {
 
 const zeroTotals = (): CustodianTotals => ({ opening: 0, debited: 0, spent: 0, closing: 0 })
 
+/** Last-4 account masking. No such convention existed in the app before this
+ *  report, so this establishes it: exports and the UI show "••••1234", never a
+ *  full account number (Spec v2 §9.1 item 4). */
+export function maskAccountNumber(num: string | null | undefined): string | null {
+  if (!num) return null
+  const trimmed = num.trim()
+  if (trimmed.length <= 4) return trimmed
+  return `••••${trimmed.slice(-4)}`
+}
+
 interface FundPeriod {
   opening: number
   debited: number
   spent: number
   closing: number
   variance: CustodianVariance
+  accountDetail?: DigitalAccountDetail
 }
 
 /**
@@ -220,37 +250,106 @@ async function computeCashierDrawerPeriod(
   return { opening, debited, spent, closing, variance }
 }
 
+interface DigitalAccountInfo {
+  companyPaymentAccountId: string
+  glAccountId: string
+  accountName: string
+  bankName: string | null
+  accountNumber: string | null
+  channel: string | null
+}
+
 /**
- * Digital Expenses (BANK/MOBILE_MONEY/CARD): the balance reads live from the
- * wrapped account's GL. Phase A can therefore give an exact Closing and an exact
- * Spent (ExpensePayment sum for the period), but Opening is back-derived and
- * Debited is 0 — deposits-by-cashiers / internal top-up transfers / withdrawals
- * are not yet a tracked transaction type (Phase B, §9.1). Flagged UNVERIFIABLE
- * so the report never implies a verification that hasn't happened.
+ * Digital Expenses (BANK/MOBILE_MONEY/CARD) — Phase B (§2.1). The wrapped
+ * account's balance IS its GL account's ledger balance (companyAccountBalance),
+ * so everything is derived from JournalLines against that GL account — the
+ * single source of truth — never a parallel ledger:
+ *   opening  = Σ(debit − credit) for entries dated before `from`
+ *   closing  = opening + Σ(period net)   (identity holds exactly)
+ * Period movements are classified into the §9.1 buckets by the JournalEntry that
+ * produced them:
+ *   money IN  (debit): COLLECTIONS  → deposits by cashiers; else → other credits
+ *   money OUT (credit): EXPENSE (ExpensePayment) → disbursements;
+ *                       BankTransaction TRANSFER → internal transfer (top-up funding);
+ *                       BankTransaction WITHDRAWAL → withdrawal; else → other out
+ *   Debited = deposits + other credits;  Spent = disbursements + transfers +
+ *   withdrawals + other out.
+ * Variance (§6): the balance ties to the GL/bank by construction, so the
+ * meaningful gap is disbursements still lacking proof of payment (same test the
+ * §6 reconciliation route uses for digital funds).
  */
 async function computeDigitalPeriod(
-  source: { id: string; sourceType: string; currentBalance: number; companyPaymentAccountId: string | null; outletId: string | null },
+  source: { id: string },
+  account: DigitalAccountInfo | null,
   from: Date,
   to: Date,
 ): Promise<FundPeriod> {
-  const [closing, paymentsAgg] = await Promise.all([
-    getFundingSourceBalance(prisma, source),
-    prisma.expensePayment.aggregate({ where: { fundingSourceId: source.id, paidAt: { gte: from, lte: to } }, _sum: { amount: true } }),
+  // A digital fund with no wrapped account can't have a GL-derived balance —
+  // fall back to zeros rather than guessing (shouldn't happen for a live fund).
+  if (!account) {
+    return { opening: 0, debited: 0, spent: 0, closing: 0, variance: { status: 'UNVERIFIABLE', note: 'This digital fund has no linked payment account, so no GL balance can be derived.', recordedBalance: null, difference: null } }
+  }
+
+  const [openingLines, periodLines, unverifiedCount] = await Promise.all([
+    prisma.journalLine.findMany({ where: { accountId: account.glAccountId, journalEntry: { entryDate: { lt: from }, status: 'POSTED' } }, select: { debit: true, credit: true } }),
+    prisma.journalLine.findMany({
+      where: { accountId: account.glAccountId, journalEntry: { entryDate: { gte: from, lte: to }, status: 'POSTED' } },
+      select: { debit: true, credit: true, journalEntry: { select: { sourceModule: true, sourceType: true, sourceId: true } } },
+    }),
+    prisma.expensePayment.count({ where: { fundingSourceId: source.id, paidAt: { gte: from, lte: to }, verificationId: null } }),
   ])
-  const spent = roundMoney(paymentsAgg._sum.amount || 0)
-  const debited = 0 // Phase B: deposits by cashiers + internal top-up transfers + other credits.
-  const opening = roundMoney(closing - debited + spent) // back-derived so the identity holds.
+
+  const opening = roundMoney(openingLines.reduce((s, l) => s + l.debit - l.credit, 0))
+
+  // Resolve BankTransaction types for the period's manual-sourced lines, so a
+  // top-up transfer is told apart from a plain withdrawal.
+  const bankTxnIds = [...new Set(periodLines.filter((l) => l.journalEntry.sourceType === 'BankTransaction' && l.journalEntry.sourceId).map((l) => l.journalEntry.sourceId as string))]
+  const bankTxns = bankTxnIds.length
+    ? await prisma.bankTransaction.findMany({ where: { id: { in: bankTxnIds } }, select: { id: true, type: true } })
+    : []
+  const bankTxnType = new Map(bankTxns.map((b) => [b.id, b.type]))
+
+  let depositsByCashiers = 0, otherCredits = 0, disbursements = 0, internalTransfersOut = 0, withdrawals = 0, otherOut = 0
+  for (const l of periodLines) {
+    const je = l.journalEntry
+    if (l.debit > 0) {
+      if (je.sourceModule === 'COLLECTIONS') depositsByCashiers += l.debit
+      else otherCredits += l.debit
+    } else if (l.credit > 0) {
+      if (je.sourceModule === 'EXPENSE') disbursements += l.credit
+      else if (je.sourceType === 'BankTransaction') {
+        const t = je.sourceId ? bankTxnType.get(je.sourceId) : undefined
+        if (t === 'TRANSFER') internalTransfersOut += l.credit
+        else if (t === 'WITHDRAWAL') withdrawals += l.credit
+        else otherOut += l.credit
+      } else otherOut += l.credit
+    }
+  }
+
+  const debited = roundMoney(depositsByCashiers + otherCredits)
+  const spent = roundMoney(disbursements + internalTransfersOut + withdrawals + otherOut)
+  const closing = roundMoney(opening + debited - spent)
+
+  const variance: CustodianVariance = unverifiedCount > 0
+    ? { status: 'MISMATCH', note: `${unverifiedCount} digital disbursement(s) in the period still lack proof of payment.`, recordedBalance: closing, difference: 0 }
+    : { status: 'RECONCILED', note: 'Balance reads live from the linked account’s GL and every disbursement has proof of payment.', recordedBalance: closing, difference: 0 }
 
   return {
     opening,
     debited,
     spent,
-    closing: roundMoney(closing),
-    variance: {
-      status: 'UNVERIFIABLE',
-      note: 'Digital balance reads live from the linked account’s GL. Per-account deposits, internal top-up transfers and withdrawals arrive in Phase B — until then Opening is inferred and money-in isn’t itemised.',
-      recordedBalance: null,
-      difference: null,
+    closing,
+    variance,
+    accountDetail: {
+      accountLabel: account.bankName ? `${account.accountName} — ${account.bankName}` : account.accountName,
+      accountMasked: maskAccountNumber(account.accountNumber),
+      channel: account.channel,
+      depositsByCashiers: roundMoney(depositsByCashiers),
+      internalTransfersOut: roundMoney(internalTransfersOut),
+      withdrawals: roundMoney(withdrawals),
+      disbursements: roundMoney(disbursements),
+      otherCredits: roundMoney(otherCredits),
+      otherOut: roundMoney(otherOut),
     },
   }
 }
@@ -299,19 +398,32 @@ export async function buildCustodianReport(params: CustodianReportParams): Promi
   }
   const allUserIds = [...new Set([...custodianIdsBySource.values()].flat())]
   const allOutletIds = [...new Set(inScope.map((s) => s.outletId).filter((id): id is string => !!id))]
-  const [users, outlets] = await Promise.all([
+  // Wrapped payment accounts for the Digital funds in scope (§2.1 per-account
+  // detail) — batch-resolved once, with the channel label joined.
+  const digitalAccountIds = [...new Set(inScope.map((s) => s.companyPaymentAccountId).filter((id): id is string => !!id))]
+  const [users, outlets, accounts] = await Promise.all([
     allUserIds.length ? prisma.user.findMany({ where: { id: { in: allUserIds } }, select: { id: true, name: true } }) : Promise.resolve([]),
     allOutletIds.length ? prisma.outlet.findMany({ where: { id: { in: allOutletIds } }, select: { id: true, name: true } }) : Promise.resolve([]),
+    digitalAccountIds.length
+      ? prisma.companyPaymentAccount.findMany({ where: { id: { in: digitalAccountIds } }, select: { id: true, glAccountId: true, accountName: true, bankName: true, accountNumber: true, paymentChannel: { select: { label: true } } } })
+      : Promise.resolve([]),
   ])
   const userName = new Map(users.map((u) => [u.id, u.name]))
   const outletName = (id: string | null) => (id ? outlets.find((o) => o.id === id)?.name || 'Unknown outlet' : 'Unassigned')
+  const accountById = new Map(accounts.map((a) => [a.id, a]))
 
   const rows: CustodianReportRow[] = []
   for (const s of inScope) {
     const fundClass = fundClassOf(s.sourceType) as FundClass
     let period: FundPeriod
     if (fundClass === 'CASHIER_CASH') period = await computeCashierDrawerPeriod(s.outletId, from, to)
-    else if (fundClass === 'DIGITAL') period = await computeDigitalPeriod(s, from, to)
+    else if (fundClass === 'DIGITAL') {
+      const acc = s.companyPaymentAccountId ? accountById.get(s.companyPaymentAccountId) : null
+      period = await computeDigitalPeriod(s, acc ? {
+        companyPaymentAccountId: acc.id, glAccountId: acc.glAccountId, accountName: acc.accountName,
+        bankName: acc.bankName, accountNumber: acc.accountNumber, channel: acc.paymentChannel?.label ?? null,
+      } : null, from, to)
+    }
     else period = await computeCashLedgerPeriod(s, from, to)
 
     const custodianUserIds = custodianIdsBySource.get(s.id) || []
@@ -333,6 +445,7 @@ export async function buildCustodianReport(params: CustodianReportParams): Promi
       spent: period.spent,
       closing: period.closing,
       variance: period.variance,
+      accountDetail: period.accountDetail,
     })
   }
 

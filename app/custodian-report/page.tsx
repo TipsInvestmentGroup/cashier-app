@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback, useMemo, Suspense } from 'react'
+import { useEffect, useState, useCallback, useMemo, Suspense, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
@@ -16,10 +16,16 @@ type FundClass = 'CASHIER_CASH' | 'PETTY_CASH' | 'DIGITAL'
 type VarianceStatus = 'RECONCILED' | 'MISMATCH' | 'UNVERIFIABLE'
 
 interface Variance { status: VarianceStatus; note: string; recordedBalance: number | null; difference: number | null }
+interface AccountDetail {
+  accountLabel: string; accountMasked: string | null; channel: string | null
+  depositsByCashiers: number; internalTransfersOut: number; withdrawals: number
+  disbursements: number; otherCredits: number; otherOut: number
+}
 interface Row {
   fundingSourceId: string; fundName: string; fundClass: FundClass; fundClassLabel: string
   outletId: string | null; outletName: string; custodianName: string; custodianUserIds: string[]
   opening: number; debited: number; spent: number; closing: number; variance: Variance
+  accountDetail?: AccountDetail
 }
 interface Totals { opening: number; debited: number; spent: number; closing: number }
 interface FundClassCard { fundClass: FundClass; label: string; totals: Totals; flagged: number }
@@ -62,6 +68,13 @@ function CustodianReportPage() {
 
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
+  // Which Digital rows have their §2.1 per-account breakdown expanded.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggleExpand = (id: string) => setExpanded((prev) => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -102,14 +115,22 @@ function CustodianReportPage() {
     return [...map.values()]
   }, [report, groupByOutlet])
 
+  // §2.1: the per-account digital breakdown must always be available in exports,
+  // not just the UI expansion — so the digital buckets ride along as columns
+  // (blank for non-digital rows).
   const exportRows = useMemo(() => displayRows.map((r) => ({
     Custodian: r.custodianName,
     Fund: r.fundClassLabel,
     Outlet: r.outletName,
+    Account: r.accountDetail ? `${r.accountDetail.accountLabel}${r.accountDetail.accountMasked ? ` (${r.accountDetail.accountMasked})` : ''}` : '',
     Opening: r.opening,
     Debited: r.debited,
     Spent: r.spent,
     Closing: r.closing,
+    'Deposits by cashiers': r.accountDetail?.depositsByCashiers ?? '',
+    'Internal transfers out': r.accountDetail?.internalTransfersOut ?? '',
+    Withdrawals: r.accountDetail?.withdrawals ?? '',
+    Disbursements: r.accountDetail?.disbursements ?? '',
     Flag: r.variance.status === 'MISMATCH' ? `MISMATCH (${r.variance.difference})` : r.variance.status === 'RECONCILED' ? 'OK' : '—',
   })), [displayRows])
 
@@ -216,12 +237,28 @@ function CustodianReportPage() {
                         if (groupByOutlet) qs.set('source', r.fundingSourceId)
                         router.push(`/petty-cash-ledger?${qs.toString()}`)
                       }
+                      const canExpand = !!r.accountDetail
+                      const isOpen = expanded.has(r.fundingSourceId)
+                      const d = r.accountDetail
                       return (
-                        <tr key={`${r.fundingSourceId}-${r.custodianName}`} onClick={drill} className="hover:bg-indigo-50/40 cursor-pointer">
+                        <Fragment key={`${r.fundingSourceId}-${r.custodianName}`}>
+                        <tr onClick={drill} className="hover:bg-indigo-50/40 cursor-pointer">
                           <td className="px-4 py-3 font-medium text-gray-800">{r.custodianName}
                             {groupByOutlet && r.fundName !== r.fundClassLabel && <span className="block text-[11px] text-gray-400">{r.fundName}</span>}
                           </td>
-                          <td className="px-4 py-3 text-gray-600">{r.fundClassLabel}</td>
+                          <td className="px-4 py-3 text-gray-600">
+                            <span className="inline-flex items-center gap-1.5">
+                              {r.fundClassLabel}
+                              {canExpand && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); toggleExpand(r.fundingSourceId) }}
+                                  className="text-[11px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 hover:bg-violet-200"
+                                  title="Show per-account movement">
+                                  {isOpen ? '▾ account' : '▸ account'}
+                                </button>
+                              )}
+                            </span>
+                          </td>
                           <td className="px-4 py-3 text-gray-600">{r.outletName}</td>
                           <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.opening)}</td>
                           <td className="px-4 py-3 text-right text-green-600 font-medium">+{formatCurrency(r.debited)}</td>
@@ -237,6 +274,31 @@ function CustodianReportPage() {
                             )}
                           </td>
                         </tr>
+                        {canExpand && isOpen && d && (
+                          <tr className="bg-violet-50/40">
+                            <td colSpan={8} className="px-6 py-3">
+                              <div className="text-[11px] text-gray-500 mb-1">
+                                {d.accountLabel}{d.channel ? ` · ${d.channel}` : ''}{d.accountMasked ? ` · ${d.accountMasked}` : ''}
+                              </div>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
+                                {([
+                                  ['Deposits by cashiers', d.depositsByCashiers, 'text-green-700'],
+                                  ['Other credits', d.otherCredits, 'text-green-700'],
+                                  ['Internal transfers out (top-ups)', d.internalTransfersOut, 'text-red-700'],
+                                  ['Withdrawals', d.withdrawals, 'text-red-700'],
+                                  ['Disbursements', d.disbursements, 'text-red-700'],
+                                  ['Other out', d.otherOut, 'text-red-700'],
+                                ] as [string, number, string][]).map(([label, val, cls]) => (
+                                  <div key={label} className="bg-white rounded-lg border border-violet-100 px-2.5 py-1.5">
+                                    <p className="text-gray-400 leading-tight">{label}</p>
+                                    <p className={`font-semibold ${cls}`}>{formatCurrency(val)}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       )
                     })}
                   </tbody>
@@ -254,7 +316,7 @@ function CustodianReportPage() {
               </div>
             </div>
             <p className="text-[11px] text-gray-400">
-              Closing = Opening + Debited − Spent. Click any row to open that fund&apos;s ledger. Digital Expenses money-in and per-account detail arrive in Phase B.
+              Closing = Opening + Debited − Spent. Click any row to open that fund&apos;s ledger. Expand a Digital row (▸ account) for its per-account deposits, transfers, withdrawals and disbursements.
             </p>
           </>
         )}
