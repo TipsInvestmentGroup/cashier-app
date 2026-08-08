@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
 import { formatCurrency } from '@/lib/utils'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
@@ -40,6 +41,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 export default function DailyReportPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const { config } = useCompanyConfig()
   const [date, setDate] = useState(() => format(new Date(), 'yyyy-MM-dd'))
   const [outletId, setOutletId] = useState('')
   const [outlets, setOutlets] = useState<Outlet[]>([])
@@ -339,9 +341,16 @@ export default function DailyReportPage() {
             {/* Header */}
             <div className="cdr-header">
               <div className="cdr-header-top" style={{ justifyContent: 'center', textAlign: 'center', flexDirection: 'column' }}>
-                <div className="cdr-logo-badge">tips</div>
+                <div className="cdr-logo-badge">
+                  {config.logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- admin-configured logo (data URI or path); html2canvas snapshots it into the PDF
+                    <img src={config.logoUrl} alt={config.companyName} crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
+                  ) : (
+                    config.logoText
+                  )}
+                </div>
                 <div>
-                  <div className="cdr-company-name">Tips Investment Limited</div>
+                  <div className="cdr-company-name">{config.companyName}</div>
                   <div className="cdr-company-addr">{data.outletName}</div>
                 </div>
               </div>
