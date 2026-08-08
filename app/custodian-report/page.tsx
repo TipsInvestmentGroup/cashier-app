@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback, useMemo, Suspense, Fragment } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, PETTY_TABS } from '@/components/Layout/SectionTabs'
@@ -140,9 +141,12 @@ function CustodianReportPage() {
     <AppShell>
       <SectionTabs tabs={PETTY_TABS} />
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Custodian Report</h1>
-          <p className="text-gray-500 text-sm">For the selected period: how much each custodian received (Debited), spent, and is holding now (Closing) — across Cashier Cash, Petty Cash and Digital Expenses.</p>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Custodian Report</h1>
+            <p className="text-gray-500 text-sm">For the selected period: how much each custodian received (Debited), spent, and is holding now (Closing) — across Cashier Cash, Petty Cash and Digital Expenses.</p>
+          </div>
+          <Link href="/daily-custodian-report" className="whitespace-nowrap px-3 py-2 rounded-xl text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700">📤 Daily Report →</Link>
         </div>
 
         {/* Header controls — same pattern as the ledger Report tab. */}

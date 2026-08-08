@@ -477,3 +477,111 @@ export async function buildCustodianReport(params: CustodianReportParams): Promi
     flaggedCount: rows.filter((r) => r.variance.status === 'MISMATCH').length,
   }
 }
+
+// ─── Daily Custodian Movement Report (Spec v2 §7 / §9.2) ────────────────────
+// A single-day, distributable snapshot built to be emailed to directors. It is
+// the Custodian Report's numbers (reused verbatim via buildCustodianReport with
+// from=to=the day) PLUS a compact list of the day's actual transactions, so a
+// director sees not just the totals but what moved and to whom.
+
+export interface DailyTxn {
+  time: string // ISO timestamp
+  fundClass: FundClass
+  fundClassLabel: string
+  fundName: string
+  description: string
+  amount: number // signed: + received into custody, − paid out
+  party: string // payee (disbursement) or the person who actioned it (top-up)
+  kind: 'disbursement' | 'topup'
+}
+
+export interface DailyCustodianMovement {
+  date: Date
+  report: CustodianReport
+  transactions: DailyTxn[]
+}
+
+/**
+ * Assembles the daily report. Numbers come from buildCustodianReport (no
+ * duplicated balance logic — §9.2 item 5). The transaction list is the day's
+ * ExpensePayments (money out) and top-up REPLENISH ledger rows (money into a
+ * fund), scoped to the same outlet, newest first.
+ */
+export async function buildDailyCustodianMovement(date: Date, outletId?: string | null): Promise<DailyCustodianMovement> {
+  // Window the day in UTC, matching how the date columns are stored and how the
+  // cashier path (lib/cash-recon.ts) windows — using local setHours() here would
+  // shift a non-UTC host's day and, combined with cash-recon's UTC windowing,
+  // silently widen a single day into two. Deriving the UTC bounds from the
+  // date's *local* y/m/d (which is the calendar date the user picked, however
+  // the string was parsed) is host-independent.
+  const y = date.getFullYear(), m = date.getMonth(), d = date.getDate()
+  const from = new Date(Date.UTC(y, m, d, 0, 0, 0, 0))
+  const to = new Date(Date.UTC(y, m, d, 23, 59, 59, 999))
+
+  const report = await buildCustodianReport({ from, to, outletId })
+
+  const range = { gte: from, lte: to }
+  const paymentWhere: Record<string, unknown> = { paidAt: range }
+  if (outletId) paymentWhere.fundingSource = { outletId }
+
+  const [payments, topupTxns] = await Promise.all([
+    prisma.expensePayment.findMany({
+      where: paymentWhere,
+      select: {
+        amount: true, paidAt: true, payeeName: true,
+        fundingSource: { select: { name: true, sourceType: true, outletId: true } },
+        allocations: { select: { expenseRequest: { select: { purpose: true, requestedById: true } } } },
+      },
+      orderBy: { paidAt: 'desc' },
+    }),
+    prisma.fundingSourceTxn.findMany({
+      where: { type: 'REPLENISH', createdAt: range },
+      select: {
+        amount: true, createdAt: true, note: true, reference: true, createdByName: true,
+        fundingSource: { select: { name: true, sourceType: true, outletId: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ])
+
+  // Resolve requester names for payments that carry no explicit payee.
+  const reqIds = [...new Set(payments.flatMap((p) => p.allocations.map((a) => a.expenseRequest.requestedById)))]
+  const reqUsers = reqIds.length ? await prisma.user.findMany({ where: { id: { in: reqIds } }, select: { id: true, name: true } }) : []
+  const reqName = new Map(reqUsers.map((u) => [u.id, u.name]))
+
+  const transactions: DailyTxn[] = []
+  for (const p of payments) {
+    const fc = fundClassOf(p.fundingSource.sourceType)
+    if (!fc) continue
+    if (outletId && p.fundingSource.outletId !== outletId) continue
+    const first = p.allocations[0]?.expenseRequest
+    transactions.push({
+      time: p.paidAt.toISOString(),
+      fundClass: fc,
+      fundClassLabel: FUND_CLASS_LABELS[fc],
+      fundName: p.fundingSource.name,
+      description: first?.purpose || 'Expense payment',
+      amount: roundMoney(-p.amount),
+      party: p.payeeName || (first ? reqName.get(first.requestedById) || '—' : '—'),
+      kind: 'disbursement',
+    })
+  }
+  for (const t of topupTxns) {
+    const fc = fundClassOf(t.fundingSource.sourceType)
+    if (!fc) continue
+    if (outletId && t.fundingSource.outletId !== outletId) continue
+    transactions.push({
+      time: t.createdAt.toISOString(),
+      fundClass: fc,
+      fundClassLabel: FUND_CLASS_LABELS[fc],
+      fundName: t.fundingSource.name,
+      description: t.note || t.reference || 'Top-up / replenishment',
+      amount: roundMoney(t.amount),
+      party: t.createdByName || '—',
+      kind: 'topup',
+    })
+  }
+  transactions.sort((a, b) => (a.time < b.time ? 1 : -1))
+
+  return { date, report, transactions }
+}
