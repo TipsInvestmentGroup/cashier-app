@@ -3235,9 +3235,17 @@ model BankTransaction {
   note            String?
   createdById     String
   journalEntryId  String?
+  /// Loose ref (no FK — mirrors FundingSourceTxn.expensePaymentId /
+  /// CreditAccount.userId) to the ExpenseRequest a movement settles. Set only on
+  /// a Petty Cash top-up's paying leg (a TRANSFER out of a digital account,
+  /// posted by execute-topup) so the cross-custodian reconciliation in
+  /// lib/custodian-report.ts can pair it with that request's Petty Cash REPLENISH
+  /// FundingSourceTxn (which carries the same request id in expensePaymentId).
+  expenseRequestId String?
   createdAt       DateTime               @default(now())
 
   @@index([companyId, transactionDate])
+  @@index([expenseRequestId])
 }
 
 // ─── Finance Platform (Stage 4 — Budgeting & Forecasting) ──────────────────

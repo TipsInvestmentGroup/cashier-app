@@ -34,6 +34,12 @@ export type NotificationType =
   // sees "awaiting approval"; the purpose text says it is a top-up); only the
   // terminal "funds are now in the fund" confirmation is top-up-specific.
   | 'EXPENSE_TOPUP_ALLOCATED'
+  // Custodian Report Phase B2 (§2.2). A fully-approved Petty Cash top-up no
+  // longer credits the fund on the spot: it waits for the Digital Expenses
+  // Custodian to pay it out of a chosen digital account. This is the "action
+  // needed" routed to that custodian (usersWithGrant CUSTODIAN/DIGITAL), NOT to
+  // the requester or the cashier.
+  | 'EXPENSE_TOPUP_PAYMENT_NEEDED'
 
 /**
  * Create one notification. Pass `db` (a transaction client) when calling from

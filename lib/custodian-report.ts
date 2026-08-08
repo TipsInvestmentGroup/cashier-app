@@ -355,6 +355,124 @@ async function computeDigitalPeriod(
 }
 
 /**
+ * §2.1 / §9.1 item 3 — cross-custodian top-up reconciliation. The Digital-
+ * Custodian top-up flow (lib/expense-workflow.ts executeTopUpPayment) posts TWO
+ * sides atomically, linked by the ExpenseRequest id: an internal_transfer_topup
+ * BankTransaction (money out of a digital account) and a Petty Cash REPLENISH
+ * (money into the fund). This checks that every such pair actually matches —
+ * both present, same amount — and flags a MISMATCH on the fund(s) involved when
+ * it doesn't, so a hand-edited GL or a half-applied top-up can't hide.
+ *
+ * Direction handling (deliberately asymmetric to avoid false positives):
+ *   • a TRANSFER with no/mismatched REPLENISH is always a fault — transfers of
+ *     this kind only exist in the digital-custodian flow;
+ *   • a REPLENISH with no TRANSFER is a fault ONLY when the request went through
+ *     approval (it has WorkflowApproval rows). A below-threshold top-up is
+ *     allocated immediately with no transfer by design (submitExpenseRequest →
+ *     executeTopUpAllocation) and skips approval, so it has none and is not
+ *     flagged.
+ *
+ * Returns one entry per in-scope fund that is implicated, so the caller can turn
+ * a RECONCILED row MISMATCH. Amounts are matched on the request id; the digital
+ * side is attributed to the in-scope fund whose account the transfer left.
+ */
+async function checkTopUpReconciliation(
+  inScope: { id: string; sourceType: string; companyPaymentAccountId: string | null }[],
+  from: Date,
+  to: Date,
+): Promise<Map<string, { note: string; difference: number }>> {
+  const flags = new Map<string, { note: string; difference: number }>()
+
+  const cpaToFund = new Map<string, string>()
+  for (const s of inScope) if (s.companyPaymentAccountId) cpaToFund.set(s.companyPaymentAccountId, s.id)
+  const pettyInScope = new Set(inScope.filter((s) => fundClassOf(s.sourceType) === 'PETTY_CASH').map((s) => s.id))
+
+  const [transfers, replenishes] = await Promise.all([
+    prisma.bankTransaction.findMany({
+      where: { type: 'TRANSFER', expenseRequestId: { not: null }, transactionDate: { gte: from, lte: to } },
+      select: { expenseRequestId: true, amount: true, fromAccountId: true },
+    }),
+    prisma.fundingSourceTxn.findMany({
+      where: { type: 'REPLENISH', expensePaymentId: { not: null }, createdAt: { gte: from, lte: to } },
+      select: { expensePaymentId: true, amount: true, fundingSourceId: true },
+    }),
+  ])
+
+  const byReqTransfer = new Map<string, { amount: number; fromAccountIds: (string | null)[] }>()
+  for (const t of transfers) {
+    const rid = t.expenseRequestId as string
+    const g = byReqTransfer.get(rid) ?? { amount: 0, fromAccountIds: [] }
+    g.amount = roundMoney(g.amount + t.amount)
+    g.fromAccountIds.push(t.fromAccountId)
+    byReqTransfer.set(rid, g)
+  }
+  const byReqReplenish = new Map<string, { amount: number; fundIds: string[] }>()
+  for (const r of replenishes) {
+    const rid = r.expensePaymentId as string
+    const g = byReqReplenish.get(rid) ?? { amount: 0, fundIds: [] }
+    g.amount = roundMoney(g.amount + r.amount)
+    g.fundIds.push(r.fundingSourceId)
+    byReqReplenish.set(rid, g)
+  }
+
+  const reqIds = [...new Set([...byReqTransfer.keys(), ...byReqReplenish.keys()])]
+  if (!reqIds.length) return flags
+
+  // Resolve each request's fund + whether it was routed through approval (the
+  // signal that a REPLENISH-without-TRANSFER is genuinely a fault, not a
+  // below-threshold immediate allocation).
+  const requests = await prisma.expenseRequest.findMany({
+    where: { id: { in: reqIds } },
+    select: { id: true, fundingSourceId: true, _count: { select: { workflowApprovals: true } } },
+  })
+  const reqById = new Map(requests.map((r) => [r.id, r]))
+
+  const addFlag = (fundId: string, note: string, difference: number) => {
+    if (!fundId) return
+    const existing = flags.get(fundId)
+    if (existing) { existing.note = `${existing.note} ${note}`; return }
+    flags.set(fundId, { note, difference })
+  }
+
+  for (const rid of reqIds) {
+    const t = byReqTransfer.get(rid)
+    const r = byReqReplenish.get(rid)
+    const req = reqById.get(rid)
+    const pettyFundId = r?.fundIds[0] ?? req?.fundingSourceId ?? null
+    const digitalFundIds = [...new Set((t?.fromAccountIds ?? []).map((cpa) => (cpa ? cpaToFund.get(cpa) : undefined)).filter((id): id is string => !!id))]
+
+    let mismatch = false
+    let note = ''
+    let difference = 0
+    if (t && r) {
+      difference = roundMoney(t.amount - r.amount)
+      if (Math.abs(difference) > 0.005) {
+        mismatch = true
+        note = `A top-up transfer of ${t.amount.toLocaleString()} out of the digital account does not equal the ${r.amount.toLocaleString()} credited to the fund (same request).`
+      }
+    } else if (t && !r) {
+      mismatch = true
+      difference = roundMoney(t.amount)
+      note = `A top-up transfer of ${t.amount.toLocaleString()} left a digital account but no matching fund credit was recorded.`
+    } else if (!t && r) {
+      // Only a fault when the request was routed through approval (below-
+      // threshold immediate allocations have no transfer by design).
+      if ((req?._count.workflowApprovals ?? 0) > 0) {
+        mismatch = true
+        difference = roundMoney(-r.amount)
+        note = `The fund was credited ${r.amount.toLocaleString()} for an approved top-up, but no matching digital-account transfer was recorded.`
+      }
+    }
+
+    if (!mismatch) continue
+    if (pettyFundId && pettyInScope.has(pettyFundId)) addFlag(pettyFundId, note, difference)
+    for (const dId of digitalFundIds) addFlag(dId, note, difference)
+  }
+
+  return flags
+}
+
+/**
  * The whole Custodian Report for a period. One row per in-scope FundingSource
  * (the actual custodial unit — each fund row has one outlet, one fund class and
  * its own custodian(s)), plus the §4 per-fund-class summaries and combined card.
@@ -412,6 +530,14 @@ export async function buildCustodianReport(params: CustodianReportParams): Promi
   const outletName = (id: string | null) => (id ? outlets.find((o) => o.id === id)?.name || 'Unknown outlet' : 'Unassigned')
   const accountById = new Map(accounts.map((a) => [a.id, a]))
 
+  // §2.1 item 3 — cross-custodian top-up pairing check. One extra query pair,
+  // applied over the rows below: a fund implicated in an unmatched top-up is
+  // flagged MISMATCH regardless of what its own period reconciliation said.
+  const reconByFund = await checkTopUpReconciliation(
+    inScope.map((s) => ({ id: s.id, sourceType: s.sourceType, companyPaymentAccountId: s.companyPaymentAccountId })),
+    from, to,
+  )
+
   const rows: CustodianReportRow[] = []
   for (const s of inScope) {
     const fundClass = fundClassOf(s.sourceType) as FundClass
@@ -431,6 +557,20 @@ export async function buildCustodianReport(params: CustodianReportParams): Promi
       ? custodianUserIds.map((id) => userName.get(id) || 'Unknown').join(', ')
       : 'Unassigned'
 
+    // Fold in any cross-custodian top-up mismatch: a broken pairing forces
+    // MISMATCH even on a fund whose own period reconciled. When the fund already
+    // has a MISMATCH (e.g. ledger drift), the recon note is appended rather than
+    // replacing it, so neither problem is hidden.
+    const recon = reconByFund.get(s.id)
+    const variance: CustodianVariance = recon
+      ? {
+          status: 'MISMATCH',
+          note: period.variance.status === 'MISMATCH' ? `${period.variance.note} ${recon.note}` : recon.note,
+          recordedBalance: period.variance.recordedBalance,
+          difference: period.variance.status === 'MISMATCH' ? period.variance.difference : recon.difference,
+        }
+      : period.variance
+
     rows.push({
       fundingSourceId: s.id,
       fundName: s.name,
@@ -444,7 +584,7 @@ export async function buildCustodianReport(params: CustodianReportParams): Promi
       debited: period.debited,
       spent: period.spent,
       closing: period.closing,
-      variance: period.variance,
+      variance,
       accountDetail: period.accountDetail,
     })
   }

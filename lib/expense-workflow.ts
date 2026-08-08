@@ -17,9 +17,11 @@ import { prisma } from '@/lib/prisma'
 import type { ExpenseRequestStatus } from '@/lib/expense-config'
 import { createNotification } from '@/lib/notifications'
 import { listCustodiansForRequestType, listFundingSourceCustodians } from '@/lib/expense-access'
-import { fundClassOf, type FundClass } from '@/lib/expense-funds'
+import { fundClassOf, payableAmount, type FundClass } from '@/lib/expense-funds'
 import { chainIsStaffed, usersWithGrant } from '@/lib/expense-grants'
 import { creditFundingSource } from '@/lib/expense-ledger'
+import { postBankTransactionTx } from '@/lib/finance-banking'
+import { resolveAccountId } from '@/lib/finance-mapping'
 import { roundMoney } from '@/lib/utils'
 import { EXPENSE_GRANT_FLAGS } from '@/lib/shared-constants'
 
@@ -306,6 +308,116 @@ export async function executeTopUpAllocation(
 }
 
 /**
+ * §2.2 — a fully-approved PETTY CASH top-up is NOT credited on the spot. It is
+ * moved to APPROVED (awaiting payment) and the "action needed" is routed to the
+ * Digital Expenses Custodian(s) for the fund's outlet — the people who hold a
+ * CUSTODIAN grant over the DIGITAL fund class, NOT the requester and NOT the
+ * cashier — who then pay it out of a chosen digital account via executeTopUpPayment.
+ *
+ * Runs on the passed `db` (inside the approval-decide transaction). The
+ * notification write uses the same `db`, per the createNotification comment about
+ * not awaiting the global client mid-transaction.
+ */
+export async function routeTopUpToDigitalCustodian(
+  db: Db,
+  request: { id: string; purpose: string; amount: number; allocatedAmount: number | null; currency: string; outletId: string | null; requestType: { name: string } },
+  fundOutletId: string | null,
+): Promise<void> {
+  await db.expenseRequest.update({
+    where: { id: request.id },
+    // APPROVED, not CLOSED: the money has NOT moved yet. execute-topup is what
+    // finally credits the fund and closes the request.
+    data: { status: 'APPROVED', stageEnteredAt: new Date() },
+  })
+
+  const outletId = fundOutletId ?? request.outletId ?? null
+  const payable = payableAmount(request)
+  const custodians = await usersWithGrant('CUSTODIAN', { fundClass: 'DIGITAL', outletId }, db).catch(() => [])
+  await Promise.all(custodians.map((c) => createNotification({
+    userId: c.id, type: 'EXPENSE_TOPUP_PAYMENT_NEEDED',
+    title: `Top-up awaiting payment`,
+    message: `An approved top-up "${request.purpose}" for ${payable} ${request.currency} needs to be paid from a digital account into the fund.`,
+    entityType: 'ExpenseRequest', entityId: request.id,
+  }, db)))
+}
+
+/**
+ * §2.2 — the Digital Expenses Custodian pays an approved Petty Cash top-up. In
+ * ONE transaction (owned by the caller — the execute-topup route — so both sides
+ * commit or neither does) this posts BOTH money-flow sides, linked by the
+ * ExpenseRequest id:
+ *
+ *   • Paying side: a BankTransaction of type TRANSFER OUT of the chosen digital
+ *     CompanyPaymentAccount (Cr the digital account's GL) and INTO the company's
+ *     Cash-on-Hand GL (Dr — a petty cash CASH fund has no CompanyPaymentAccount
+ *     of its own). This is exactly what lib/custodian-report.ts computeDigitalPeriod
+ *     classifies as internal_transfer_topup.
+ *   • Receiving side: the fund's REPLENISH (creditFundingSource) + currentBalance
+ *     bump, reached via executeTopUpAllocation so the CLOSED transition and the
+ *     requester's EXPENSE_TOPUP_ALLOCATED confirmation are the identical ones a
+ *     direct allocation produces.
+ *
+ * The transfer and the REPLENISH carry the SAME request id and the SAME amount,
+ * which is what makes the cross-custodian reconciliation (§2.1 item 3) pair them.
+ *
+ * Idempotent: a request already CLOSED returns without posting again, so a double
+ * click can't pay twice.
+ */
+export async function executeTopUpPayment(
+  db: Db,
+  opts: { expenseRequestId: string; companyPaymentAccountId: string; actorId: string; actorName?: string | null; transactionDate?: Date },
+): Promise<{ status: ExpenseRequestStatus; allocated: number; bankTransactionId: string | null }> {
+  const request = await db.expenseRequest.findUniqueOrThrow({ where: { id: opts.expenseRequestId } })
+  if (request.direction !== 'IN') throw new Error('Not a top-up request')
+  if (!request.fundingSourceId) throw new Error('Top-up request has no fund to credit')
+  if (request.status === 'CLOSED') {
+    return { status: 'CLOSED', allocated: request.allocatedAmount ?? request.amount, bankTransactionId: null }
+  }
+  if (request.status !== 'APPROVED') throw new Error(`This top-up is ${request.status}, not awaiting payment`)
+
+  const fund = await db.fundingSource.findUniqueOrThrow({ where: { id: request.fundingSourceId } })
+  if (fundClassOf(fund.sourceType) !== 'PETTY_CASH') {
+    throw new Error('Only Petty Cash top-ups are paid from a digital account')
+  }
+
+  const digital = await db.companyPaymentAccount.findUnique({ where: { id: opts.companyPaymentAccountId } })
+  if (!digital || !digital.isActive) throw new Error('Digital account not found or inactive')
+  if (digital.companyId !== fund.companyId) throw new Error('The chosen digital account belongs to a different company than the fund')
+
+  const companyId = digital.companyId
+  const outletId = fund.outletId ?? request.outletId ?? null
+  // Where the money lands in the GL — the company's Cash-on-Hand account (the
+  // petty cash float is physical cash), resolved via the mapping layer, never a
+  // hardcoded account id.
+  const cashGlAccountId = await resolveAccountId(db, { companyId, key: 'CASH', outletId })
+
+  const amount = roundMoney(request.allocatedAmount && request.allocatedAmount > 0 ? request.allocatedAmount : request.amount)
+  const transactionDate = opts.transactionDate ?? new Date()
+
+  const { id: bankTransactionId } = await postBankTransactionTx(db, {
+    companyId,
+    type: 'TRANSFER',
+    fromAccountId: digital.id,
+    toGlAccountId: cashGlAccountId,
+    amount,
+    transactionDate,
+    reference: request.reference,
+    note: `Petty cash top-up: ${request.purpose}`,
+    createdById: opts.actorId,
+    expenseRequestId: request.id,
+  })
+
+  // Receiving side + CLOSED + requester confirmation. Passing allocatedAmount
+  // pins the credit to the same figure the transfer moved (honours an
+  // approver-adjusted amount and keeps both sides equal for reconciliation).
+  const { status, allocated } = await executeTopUpAllocation(db, request.id, {
+    allocatedAmount: amount, actorId: opts.actorId, actorName: opts.actorName,
+  })
+
+  return { status, allocated, bankTransactionId }
+}
+
+/**
  * Cascades a decision that has ALREADY been written onto its WorkflowApproval
  * row (the caller — the shared /api/collection-approvals decide route —
  * updates the row generically for every approval kind) onto the
@@ -336,10 +448,26 @@ export async function advanceExpenseApproval(
   const next = await openNextApprovalStep(db, expenseRequestId)
   if (next) return { status: 'PENDING_APPROVAL' }
 
-  // Final approval reached. A top-up is executed here and now (the approver's
-  // approval IS the allocation, per §8's decision) rather than being handed to a
-  // separate allocator.
+  // Final approval reached.
   if (isTopUp) {
+    // Which fund this top-up credits decides how it finalizes.
+    const fund = request.fundingSourceId
+      ? await db.fundingSource.findUnique({ where: { id: request.fundingSourceId }, select: { sourceType: true, outletId: true } })
+      : null
+    const fundClass = fund ? fundClassOf(fund.sourceType) : null
+
+    // §2.2 — a PETTY CASH top-up is NOT credited on approval. It waits in
+    // APPROVED (awaiting payment) for the Digital Expenses Custodian to pay it
+    // out of a chosen digital account (executeTopUpPayment). Only Petty Cash uses
+    // this route — Cashier Cash is never topped up this way (locked decision).
+    if (fundClass === 'PETTY_CASH') {
+      await routeTopUpToDigitalCustodian(db, request, fund!.outletId)
+      return { status: 'APPROVED' }
+    }
+
+    // Any other IN top-up (an OTHER cash float with no digital-custodian route)
+    // keeps the original behavior: the approver's approval IS the allocation
+    // (§8), executed here and now.
     const { status } = await executeTopUpAllocation(db, expenseRequestId, opts)
     return { status }
   }
