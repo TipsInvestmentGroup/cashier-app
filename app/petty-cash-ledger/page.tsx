@@ -57,6 +57,9 @@ function PettyCashLedgerPage() {
   // param falls back to Petty Cash — the historical home of this route.
   const fundParam = searchParams.get('fund')
   const activeFundClass: FundClass = isFundClass(fundParam) ? fundParam : 'PETTY_CASH'
+  // Optional deep-link target (e.g. from the Custodian Report drill-through):
+  // preselect this exact fund instead of the class's first fund.
+  const sourceParam = searchParams.get('source')
 
   const { user } = useAuth()
   const isAdmin = user?.role === 'ADMIN'
@@ -91,10 +94,13 @@ function PettyCashLedgerPage() {
       setSources(active)
       // Reselect within the new class rather than keeping a fund from the
       // previous view — otherwise switching Cashier→Petty Cash would show the
-      // wrong fund's ledger until the user touches the dropdown.
-      setSelected(active.length ? active[0].id : '')
+      // wrong fund's ledger until the user touches the dropdown. A ?source=
+      // deep-link (Custodian Report drill-through) wins when it names a fund in
+      // this class; otherwise fall back to the first fund.
+      const deepLinked = sourceParam && active.some((x) => x.id === sourceParam) ? sourceParam : ''
+      setSelected(deepLinked || (active.length ? active[0].id : ''))
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load funding sources') }
-  }, [request, activeFundClass])
+  }, [request, activeFundClass, sourceParam])
   useEffect(() => { loadSources() }, [loadSources])
 
   const loadLedger = useCallback(async () => {

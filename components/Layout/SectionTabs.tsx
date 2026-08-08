@@ -8,7 +8,7 @@ import { LEGACY_PETTY_CASH_ENABLED } from '@/lib/expense-cutover'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
-  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, BookOpen, Landmark, Lock, Unlock, AlertTriangle, Banknote, type LucideIcon,
+  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, BookOpen, Landmark, Lock, Unlock, AlertTriangle, Banknote, Users, type LucideIcon,
 } from 'lucide-react'
 
 // A tab with modeGate is hidden for the roles listed in `forRoles` unless the
@@ -85,6 +85,11 @@ const EXPENSE_TABS_CORE: Tab[] = [
   // Cash Reconciliation / Digital Payment Reconciliation moved out to their own
   // top-level RECON_TABS section (see below) — they no longer live under Expenses.
   { href: '/digital-expenses', label: 'Digital Expense Form', icon: CreditCard, roles: CASHIER_ROLES },
+  // Custodian Report (Spec v2) — the cross-fund, custodian-accountability view:
+  // per custodian, for a date range, how much they received / spent / are
+  // holding. Its own standalone page (not a per-fund ?fund= view) because it
+  // summarises across all three funds at once.
+  { href: '/custodian-report', label: 'Custodian Report', icon: Users, roles: CASHIER_ROLES },
 ]
 
 // Legacy flow — hidden from nav unless explicitly un-retired (see note above).
