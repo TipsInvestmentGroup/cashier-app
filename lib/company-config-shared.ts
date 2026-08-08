@@ -23,7 +23,7 @@ export interface CompanyConfig {
 }
 
 export const DEFAULT_COMPANY_CONFIG: CompanyConfig = {
-  companyName: 'TIPS Lounge',
+  companyName: 'Tips Investments Ltd',
   appName: 'Cashier Manager',
   logoUrl: '/tips-logo.png',
   logoText: 'tips',

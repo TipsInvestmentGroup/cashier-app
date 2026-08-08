@@ -4,7 +4,7 @@
 // frozen snapshot from GET /api/expense/requests/[id]/pdf-data. The routing
 // variant is a pure rendering of fetched state — it never writes back to the
 // approval workflow (spec §7 hard constraint).
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, getClientCompanyConfig } from '@/lib/utils'
 
 export interface ExpensePdfSnapshot {
   id: string
@@ -86,6 +86,10 @@ export async function downloadExpenseRequestPdf(
   const W = doc.internal.pageSize.getWidth()
   const H = doc.internal.pageSize.getHeight()
   const routing = opts.variant === 'routing'
+  // Single display-name source: the company preferences config (same as the
+  // sidebar and the reward/warning letters), so every PDF prints one consistent
+  // business name regardless of the internal Company table record.
+  const company = getClientCompanyConfig().companyName || snap.company || 'TIPS'
 
   const [logo, qr] = await Promise.all([
     loadLogo(),
@@ -99,12 +103,12 @@ export async function downloadExpenseRequestPdf(
     doc.addImage(logo.data, 'PNG', 12, 5, w, h)
   } else {
     doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(16)
-    doc.text(snap.company || 'TIPS', 12, 15)
+    doc.text(company, 12, 15)
   }
   doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
   doc.text(routing ? 'EXPENSE REQUEST — ROUTING COPY' : 'EXPENSE REQUEST — AUDIT TRAIL', W - 12, 11, { align: 'right' })
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9)
-  doc.text(snap.company || '', W - 12, 17, { align: 'right' })
+  doc.text(company, W - 12, 17, { align: 'right' })
   if (snap.outlet) doc.text(snap.outlet, W - 12, 21, { align: 'right' })
 
   // Reference + generated time + QR
