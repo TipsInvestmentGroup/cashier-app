@@ -57,6 +57,7 @@ export const DAILY_TABS: Tab[] = [
 ]
 
 export const BILLS_TABS: Tab[] = [
+  { href: '/receivable-summary', label: 'Receivable Summary', icon: FileBarChart, roles: CASHIER_ROLES },
   { href: '/signed-bills', label: 'Signed Bills', icon: FileSignature, roles: CASHIER_ROLES },
   { href: '/admin-director-bills', label: 'Admin & Director Bills', icon: Briefcase, roles: MGMT },
   { href: '/paid-bills', label: 'Paid Bills', icon: CheckCircle2, roles: CASHIER_ROLES },
