@@ -8,6 +8,10 @@ import { nextFreePersonCode } from '@/lib/person-code'
 
 const CODE_MODES: readonly string[] = PERSON_NUMBERING_MODES
 
+// Roles that may see a person's full record (phone, email, credit limit).
+// Cashiers/waiters need the list to pick a person on a bill, but not the PII.
+const FULL_DETAIL_ROLES = ['ADMIN', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR']
+
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -20,7 +24,12 @@ export async function GET(req: NextRequest) {
     orderBy: { name: 'asc' },
   })
 
-  return NextResponse.json(persons)
+  const canSeeFull = FULL_DETAIL_ROLES.includes(user.role) || (await hasPermission(user.email, user.userId, RESOURCES.PERSONS, 'edit'))
+  if (canSeeFull) return NextResponse.json(persons)
+
+  // Low-privilege roles get only what a person-picker needs — no PII.
+  const safe = persons.map((p) => ({ id: p.id, name: p.name, type: p.type, code: p.code, isActive: p.isActive }))
+  return NextResponse.json(safe)
 }
 
 export async function POST(req: NextRequest) {
