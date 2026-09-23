@@ -4,7 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { canRequestPetty } from '@/lib/petty-access'
 import { roundMoney } from '@/lib/utils'
 import { postJournalEntry } from '@/lib/ledger'
-import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { resolveExpenseDebitAccount, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
       const outlet = outletIdVal ? await tx.outlet.findUnique({ where: { id: outletIdVal }, select: { companyId: true } }) : null
       const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
       if (companyId) {
-        const expenseAccountId = await resolveAccountId(tx, { companyId, key: 'PETTY_CASH_EXPENSE' })
+        const expenseAccountId = await resolveExpenseDebitAccount(tx, { companyId, outletId: outletIdVal || undefined, functionName })
         const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: method, outletId: outletIdVal || undefined })
         await postJournalEntry(tx, {
           companyId, entryDate: created.date, sourceModule: 'MANUAL', sourceType: 'PettyCash', sourceId: created.id,

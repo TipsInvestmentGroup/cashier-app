@@ -64,6 +64,47 @@ export async function resolveAccountId(db: Db, opts: { companyId: string; outlet
   return account.id
 }
 
+/**
+ * The GL expense account a disbursement should DEBIT, given how it's classified.
+ * Prefers the ExpenseCategory's chosen budgetAccountId so category-level cost
+ * reporting lands on a real operating-cost account (Rent, Utilities, …); falls
+ * back to the PETTY_CASH_EXPENSE suspense bucket (9000) only when the category
+ * is unknown or still unmapped, so posting never blocks on setup.
+ *
+ * Petty-cash records classify via a free-text functionName that bridges to
+ * ExpenseCategory.legacyFunctionName (matched trimmed, case-insensitively);
+ * the structured expense-request engine passes categoryId directly. Either
+ * identifier resolves through the same category → account rule here.
+ */
+export async function resolveExpenseDebitAccount(
+  db: Db,
+  opts: { companyId: string; outletId?: string | null; categoryId?: string | null; functionName?: string | null },
+): Promise<string> {
+  let budgetAccountId: string | null = null
+  if (opts.categoryId) {
+    const cat = await db.expenseCategory.findFirst({
+      where: { id: opts.categoryId, companyId: opts.companyId },
+      select: { budgetAccountId: true },
+    })
+    budgetAccountId = cat?.budgetAccountId ?? null
+  }
+  const fn = (opts.functionName ?? '').trim()
+  if (!budgetAccountId && fn) {
+    // SQLite has no case-insensitive equals in Prisma; match in JS over this
+    // company's categories (a handful of rows) so "Gas Refill" == "gas refill".
+    const cats = await db.expenseCategory.findMany({
+      where: { companyId: opts.companyId, budgetAccountId: { not: null } },
+      select: { legacyFunctionName: true, name: true, budgetAccountId: true },
+    })
+    const lc = fn.toLowerCase()
+    const hit = cats.find((c) => (c.legacyFunctionName ?? '').trim().toLowerCase() === lc)
+      || cats.find((c) => (c.name ?? '').trim().toLowerCase() === lc)
+    budgetAccountId = hit?.budgetAccountId ?? null
+  }
+  if (budgetAccountId) return budgetAccountId
+  return resolveAccountId(db, { companyId: opts.companyId, outletId: opts.outletId, key: 'PETTY_CASH_EXPENSE' })
+}
+
 /** Falls back to the single/first Company row — matches today's
  *  single-company reality, and keeps working unmodified once a second
  *  Company is added (whichever record needs a real company id, e.g. a
