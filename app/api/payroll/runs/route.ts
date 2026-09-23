@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { createPayrollRun, calculateRun } from '@/lib/payroll-run'
+import { createPayrollRun, calculateRun, DuplicateRunError } from '@/lib/payroll-run'
 
 // Payroll runs (Phase 3). Supervisor-gated. Creating a run requires the module
 // to be enabled (enforced in createPayrollRun); posting writes real GL entries.
@@ -45,6 +45,8 @@ export async function POST(req: NextRequest) {
     const calculated = await calculateRun(prisma, run.id, runUser)
     return NextResponse.json({ run: calculated }, { status: 201 })
   } catch (e) {
+    // A duplicate live run for the same period + scope is a conflict, not a bad request.
+    if (e instanceof DuplicateRunError) return NextResponse.json({ error: e.message }, { status: 409 })
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to create run' }, { status: 400 })
   }
 }
