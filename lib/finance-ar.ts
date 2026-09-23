@@ -60,9 +60,51 @@ export async function postCreditSale(db: Db, bill: SignedBillForPosting, created
     ],
   })
   await db.signedBill.update({ where: { id: bill.id }, data: { journalEntryId } })
+  // Any cash collected while this bill was still pending was parked in Customer
+  // Deposits; now that the receivable is recognized, move it onto A/R.
+  await applyPriorDeposits(db, { billId: bill.id, outletId: bill.outletId, companyId, createdById })
   // Credit ledger (Phase 4): a credit sale just became real — refresh the
   // account's ledger + materialized balance.
   await syncCreditForBill(db, bill.id)
+}
+
+/**
+ * When a bill's receivable is first recognized, apply any receipts that were
+ * taken against it while it was still pending — those were booked Dr Cash / Cr
+ * Customer Deposits (see postReceipt), so move each onto A/R with Dr Customer
+ * Deposits / Cr Accounts Receivable, reducing the open balance by what's already
+ * been paid. Dated at the receipt's own date (the credit sale is dated at the
+ * bill date, on/before it, so A/R never goes negative in the gap).
+ *
+ * Precise + re-entrant: only a receipt whose GL actually credited the deposit
+ * account and has NOT already been applied is moved, so re-posting a bill (e.g.
+ * an amount edit, which reverses+re-posts the sale) never touches A/R receipts
+ * and never double-applies a deposit.
+ */
+async function applyPriorDeposits(db: Db, opts: { billId: string; outletId: string; companyId: string; createdById: string }): Promise<void> {
+  const [depositAccountId, arAccountId] = await Promise.all([
+    resolveAccountId(db, { companyId: opts.companyId, key: 'CUSTOMER_DEPOSITS' }),
+    resolveAccountId(db, { companyId: opts.companyId, key: 'ACCOUNTS_RECEIVABLE' }),
+  ])
+  const receipts = await db.paidBill.findMany({ where: { signedBillId: opts.billId, journalEntryId: { not: null } }, select: { id: true, amountPaid: true, date: true } })
+  for (const r of receipts) {
+    const jes = await db.journalEntry.findMany({ where: { sourceType: 'PaidBill', sourceId: r.id, status: { not: 'REVERSED' } }, select: { lines: { select: { accountId: true, debit: true, credit: true } } } })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyLine = (pred: (l: any) => boolean) => jes.some((je: { lines: any[] }) => je.lines.some(pred))
+    const wasDeposit = anyLine((l) => l.accountId === depositAccountId && (l.credit || 0) > 0)
+    const alreadyApplied = anyLine((l) => l.accountId === depositAccountId && (l.debit || 0) > 0)
+    if (!wasDeposit || alreadyApplied) continue
+    const amount = roundMoney(r.amountPaid)
+    if (amount <= 0) continue
+    await postJournalEntry(db, {
+      companyId: opts.companyId, entryDate: r.date, sourceModule: 'SALES', sourceType: 'PaidBill', sourceId: r.id,
+      description: 'Apply customer deposit to recognized receivable', createdById: opts.createdById,
+      lines: [
+        { accountId: depositAccountId, debit: amount, outletId: opts.outletId, description: 'Deposit applied' },
+        { accountId: arAccountId, credit: amount, outletId: opts.outletId, description: 'Deposit applied' },
+      ],
+    })
+  }
 }
 
 interface PaidBillForPosting {
@@ -76,35 +118,50 @@ interface PaidBillForPosting {
 }
 
 /**
- * Posts a receipt against a credit sale — Dr Cash/Bank (per paymentMethod's
- * mapped GL account) / Cr Accounts Receivable. No-ops for unlinked/
- * unallocated credits (signedBillId null — nothing to clear yet) and for a
- * SignedBill whose credit sale was never itself posted (its journalEntryId
- * is null — e.g. a request bill still pending approval), since there is no
- * recognized receivable to draw down against.
+ * Posts a receipt — always Dr Cash/Bank (the paymentMethod's mapped GL
+ * account); the credit side depends on whether there is a recognized receivable
+ * to draw down yet:
+ *   • linked bill whose credit sale IS posted → Cr Accounts Receivable (settles
+ *     the debt);
+ *   • linked bill of a credit type whose sale is NOT posted yet (a pending
+ *     request bill), OR an unlinked advance/overpayment (no bill) → Cr Customer
+ *     Deposits, a liability, so the cash is never off the books. The deposit is
+ *     applied to A/R later, when the sale is recognized (see applyPriorDeposits
+ *     via postCreditSale).
+ * The only no-op is a receipt against a STAFF_LOSS bill — an internal shortage
+ * marker that is not a GL receivable (unchanged).
  */
 export async function postReceipt(db: Db, paidBill: PaidBillForPosting, createdById: string): Promise<void> {
   if (paidBill.journalEntryId) return
-  if (!paidBill.signedBillId) return
   const amount = roundMoney(paidBill.amountPaid)
   if (amount <= 0) return
 
-  const signedBill = await db.signedBill.findUnique({ where: { id: paidBill.signedBillId }, select: { journalEntryId: true } })
-  if (!signedBill?.journalEntryId) return
+  // Decide the credit side.
+  let creditKey: 'ACCOUNTS_RECEIVABLE' | 'CUSTOMER_DEPOSITS'
+  if (paidBill.signedBillId) {
+    const bill = await db.signedBill.findUnique({ where: { id: paidBill.signedBillId }, select: { journalEntryId: true, billType: true } })
+    if (!bill) return
+    if (bill.journalEntryId) creditKey = 'ACCOUNTS_RECEIVABLE'
+    else if ((CREDIT_BILL_TYPES as readonly string[]).includes(bill.billType)) creditKey = 'CUSTOMER_DEPOSITS'
+    else return // STAFF_LOSS / non-credit — no GL receivable to draw down
+  } else {
+    creditKey = 'CUSTOMER_DEPOSITS' // unlinked advance / overpayment
+  }
 
   const companyId = await resolveCompanyIdForOutlet(db, paidBill.outletId)
   if (!companyId) return
 
-  const [cashAccountId, arAccountId] = await Promise.all([
+  const isDeposit = creditKey === 'CUSTOMER_DEPOSITS'
+  const [cashAccountId, creditAccountId] = await Promise.all([
     resolveChannelAccountId(db, { companyId, channelCode: paidBill.paymentMethod, outletId: paidBill.outletId }),
-    resolveAccountId(db, { companyId, key: 'ACCOUNTS_RECEIVABLE' }),
+    resolveAccountId(db, { companyId, key: creditKey }),
   ])
   const { id: journalEntryId } = await postJournalEntry(db, {
     companyId, entryDate: paidBill.date, sourceModule: 'SALES', sourceType: 'PaidBill', sourceId: paidBill.id,
-    description: `Receipt via ${paidBill.paymentMethod}`, createdById,
+    description: isDeposit ? `Receipt held as customer deposit via ${paidBill.paymentMethod}` : `Receipt via ${paidBill.paymentMethod}`, createdById,
     lines: [
       { accountId: cashAccountId, debit: amount, outletId: paidBill.outletId, description: 'Receipt' },
-      { accountId: arAccountId, credit: amount, outletId: paidBill.outletId, description: 'Receipt' },
+      { accountId: creditAccountId, credit: amount, outletId: paidBill.outletId, description: isDeposit ? 'Customer deposit' : 'Receipt' },
     ],
   })
   await db.paidBill.update({ where: { id: paidBill.id }, data: { journalEntryId } })
