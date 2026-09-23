@@ -40,8 +40,29 @@ export interface PostJournalEntryInput {
   lines: JournalLineInput[]
 }
 
+/**
+ * Race-safe monotonic sequence value for a scope, via the BillSequenceCounter
+ * atomic counter. Replaces `count()+1`, where two concurrent writers could read
+ * the same count and collide on a unique number — a real hazard on Postgres
+ * (SQLite serialises writes, so it never reproduces there). On first use the
+ * counter is seeded to the current row count so numbers already issued are
+ * never re-used; thereafter each caller gets a distinct, ever-increasing value
+ * (the atomic increment row-locks the counter for the caller's transaction).
+ * No migration needed — the seed-if-absent makes it self-initialising.
+ */
+export async function nextScopedNumber(db: Db, scopeKey: string, seedCount: () => Promise<number>): Promise<number> {
+  const existing = await db.billSequenceCounter.findUnique({ where: { scopeKey } })
+  if (!existing) {
+    const seed = await seedCount()
+    // A concurrent first-use may create it first — fall through to the increment.
+    try { await db.billSequenceCounter.create({ data: { scopeKey, lastValue: seed } }) } catch { /* already created */ }
+  }
+  const updated = await db.billSequenceCounter.update({ where: { scopeKey }, data: { lastValue: { increment: 1 } } })
+  return updated.lastValue
+}
+
 async function nextEntryNumber(db: Db, prefix: string): Promise<string> {
-  const n = (await db.journalEntry.count()) + 1
+  const n = await nextScopedNumber(db, 'JOURNAL_ENTRY', () => db.journalEntry.count())
   return `${prefix}-${String(n).padStart(6, '0')}`
 }
 

@@ -194,7 +194,10 @@ export async function createExpensePayment(input: CreateExpensePaymentInput): Pr
     }
 
     if (fundingSource.sourceType === 'CASH') {
-      await tx.fundingSource.update({ where: { id: fundingSource.id }, data: { currentBalance: roundMoney(fundingSource.currentBalance - amount) } })
+      // Atomic decrement (SET currentBalance = currentBalance - amount) rather
+      // than writing a value read earlier — two concurrent payments must not
+      // both write `staleBalance - amount` and lose one debit.
+      await tx.fundingSource.update({ where: { id: fundingSource.id }, data: { currentBalance: { decrement: roundMoney(amount) } } })
     }
     // Every CASH/CASHIER_DRAWER payment gets a Petty Cash Ledger row — CASH
     // also updates its materialized currentBalance above; CASHIER_DRAWER's

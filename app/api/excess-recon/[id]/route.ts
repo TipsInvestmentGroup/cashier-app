@@ -111,19 +111,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const amount = roundMoney(body.amount)
   if (amount <= 0) return NextResponse.json({ error: 'Payment amount must be greater than zero' }, { status: 400 })
 
-  const balance = roundMoney(existing.amount - existing.paidAmount)
-  if (amount > balance) {
-    return NextResponse.json({ error: `Payment ${amount} exceeds the remaining balance of ${balance}` }, { status: 400 })
+  // Fast pre-check; the authoritative check + claim happen inside the transaction.
+  const preBalance = roundMoney(existing.amount - existing.paidAmount)
+  if (amount > preBalance) {
+    return NextResponse.json({ error: `Payment ${amount} exceeds the remaining balance of ${preBalance}` }, { status: 400 })
   }
 
-  // Only COLLECTION-source rows reach here (cash-recon excess is blocked above).
-  const newPaid = roundMoney(existing.paidAmount + amount)
   // A COLLECTION-source PAYABLE over-collection accrued to Excess-Payable at
   // collection time; paying it out now relieves that liability against cash:
   //   Dr Excess-Payable  Cr Cash/channel. Non-PAYABLE rows keep prior non-GL behavior.
   const postGl = classForReason(existing.reason, existing.category) === 'PAYABLE'
-  const updated = await prisma.$transaction(async (tx) => {
-    const upd = await tx.collectionExcess.update({ where: { id }, data: { paidAmount: newPaid, paidAt: new Date() } })
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+    // Re-read paidAmount inside the tx and claim this payment with an optimistic
+    // guard (updateMany WHERE paidAmount == the value we just read). A concurrent
+    // double-submit that already settled will have moved paidAmount, so the claim
+    // matches 0 rows and we abort — no second GL payout for the same over-collection.
+    // The row-locked UPDATE re-checks its WHERE at lock time, so this holds under
+    // Postgres READ COMMITTED as well as SQLite's serialised writes.
+    const fresh = await tx.collectionExcess.findUnique({ where: { id }, select: { paidAmount: true, amount: true } })
+    if (!fresh) throw new Error('Record not found')
+    const balance = roundMoney(fresh.amount - fresh.paidAmount)
+    if (amount > balance) throw new Error(`Payment ${amount} exceeds the remaining balance of ${balance}`)
+    const newPaid = roundMoney(fresh.paidAmount + amount)
+    const claim = await tx.collectionExcess.updateMany({ where: { id, paidAmount: fresh.paidAmount }, data: { paidAmount: newPaid, paidAt: new Date() } })
+    if (claim.count !== 1) throw new Error('This excess was just settled by another request — refresh and try again.')
     if (postGl) {
       const coll = await tx.collectionExcess.findUnique({ where: { id }, include: { collection: { include: { outlet: true } } } })
       const outletId = coll?.collection.outletId
@@ -154,10 +166,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         details: `Excess payment ${amount} recorded (paid ${newPaid} of ${existing.amount})${postGl ? ' — posted Dr Excess-Payable / Cr Cash' : ''}`,
       },
     })
-    return upd
-  })
+    return (await tx.collectionExcess.findUnique({ where: { id } }))!
+    })
 
-  return NextResponse.json({ ...updated, balance: roundMoney(updated.amount - updated.paidAmount) })
+    return NextResponse.json({ ...updated, balance: roundMoney(updated.amount - updated.paidAmount) })
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to settle excess' }, { status: 409 })
+  }
 }
 
 /** Edit an excess record's amount/reason/staff/person. */
