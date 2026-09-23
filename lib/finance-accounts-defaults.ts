@@ -29,6 +29,12 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   // Stage 2 — Accounts Receivable
   { code: '1300', name: 'Accounts Receivable', type: 'ASSET', mappingKey: 'ACCOUNTS_RECEIVABLE' },
   { code: '5910', name: 'Bad Debt Expense', type: 'EXPENSE', mappingKey: 'BAD_DEBT_EXPENSE' },
+  // Cash received before it can draw down a recognized receivable — a payment on
+  // a still-pending request bill, or an unallocated advance/overpayment — is held
+  // here (a liability) instead of sitting off the books. When the receivable is
+  // recognized (bill approved/posted), the deposit is applied against it. See
+  // postReceipt / postCreditSale in lib/finance-ar.ts.
+  { code: '2400', name: 'Customer Deposits (Unapplied Receipts)', type: 'LIABILITY', mappingKey: 'CUSTOMER_DEPOSITS' },
   // Stage 3 — Banking & Cash Management
   { code: '5920', name: 'Bank Charges Expense', type: 'EXPENSE', mappingKey: 'BANK_CHARGES_EXPENSE' },
   { code: '4900', name: 'Interest Income', type: 'INCOME', mappingKey: 'INTEREST_INCOME' },
