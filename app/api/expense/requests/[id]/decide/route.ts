@@ -28,7 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const existing = await prisma.expenseRequest.findUnique({
     where: { id },
-    select: { id: true, outletId: true, fundingSource: { select: { sourceType: true, outletId: true } } },
+    select: { id: true, outletId: true, requestedById: true, fundingSource: { select: { sourceType: true, outletId: true } } },
   })
   if (!existing) return NextResponse.json({ error: 'Request not found' }, { status: 404 })
 
@@ -52,6 +52,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const body = await req.json().catch(() => ({}))
   if (typeof body.approve !== 'boolean') return NextResponse.json({ error: 'approve (boolean) is required' }, { status: 400 })
+
+  // Segregation of duties: the person who raised a request can never approve it
+  // (rejecting/withdrawing your own is still allowed). This also covers the
+  // top-up flow, where the custodian sits in the requester's seat.
+  if (body.approve && existing.requestedById === user.userId) {
+    return NextResponse.json({ error: 'You cannot approve your own expense request — it must be approved by someone else.' }, { status: 403 })
+  }
 
   // Optional approver-adjusted amount (a partial approval, or a top-up rounded
   // to a whole cheque). Only meaningful on approve, and only when the final

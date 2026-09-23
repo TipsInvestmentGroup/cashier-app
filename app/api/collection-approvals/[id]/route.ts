@@ -40,6 +40,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { decision, comment, allocatedAmount } = await req.json().catch(() => ({}))
   if (decision !== 'APPROVED' && decision !== 'REJECTED') return NextResponse.json({ error: 'decision must be APPROVED or REJECTED' }, { status: 400 })
 
+  // Segregation of duties: an expense request's raiser can never approve it
+  // (rejecting is fine). Covers the top-up flow, where the custodian is the
+  // requester. Decided here too so the shared inbox is gated like the direct route.
+  if (approval.expenseRequestId && decision === 'APPROVED') {
+    const reqRow = await prisma.expenseRequest.findUnique({ where: { id: approval.expenseRequestId }, select: { requestedById: true } })
+    if (reqRow && reqRow.requestedById === user.userId) {
+      return NextResponse.json({ error: 'You cannot approve your own expense request — it must be approved by someone else.' }, { status: 403 })
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.workflowApproval.update({ where: { id }, data: { status: decision, resolvedAt: new Date(), comment: comment ? String(comment) : approval.comment } })
     if (approval.stageRecordId) {
