@@ -33,10 +33,14 @@ const prisma = new PrismaClient({ adapter } as any)
 
 const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-/** Net GL balance for an account (non-reversed lines): debit - credit. */
+/**
+ * Net GL balance for an account: debit - credit. Counts ALL journal lines with
+ * no status filter — a reversed original and its reversal both remain in the
+ * ledger and cancel — matching the canonical trial balance (lib/finance-statements.ts).
+ */
 async function glNet(accountId: string): Promise<number> {
   const a = await prisma.journalLine.aggregate({
-    where: { accountId, journalEntry: { status: { not: 'REVERSED' } } },
+    where: { accountId },
     _sum: { debit: true, credit: true },
   })
   return roundMoney((a._sum.debit || 0) - (a._sum.credit || 0))
@@ -55,7 +59,7 @@ async function main() {
 
     // 1. Trial balance
     const tb = await prisma.journalLine.aggregate({
-      where: { journalEntry: { companyId: company.id, status: { not: 'REVERSED' } } },
+      where: { journalEntry: { companyId: company.id } },
       _sum: { debit: true, credit: true },
     })
     const tbDr = roundMoney(tb._sum.debit || 0), tbCr = roundMoney(tb._sum.credit || 0)
@@ -68,19 +72,21 @@ async function main() {
     })
     const outstanding = (b: (typeof bills)[number]) => roundMoney(b.amount - b.payments.reduce((s, p) => s + p.amountPaid, 0))
 
-    // 2. Accounts Receivable — outstanding on POSTED credit-bearing bills.
+    // 2. Accounts Receivable — outstanding on every POSTED bill (a bill carries
+    //    a journalEntryId once it debited A/R: a credit sale OR a staff loss,
+    //    both of which post to 1300 and are recovered against it).
     const arAccountId = await resolveAccountId(prisma as never, { companyId: company.id, key: 'ACCOUNTS_RECEIVABLE' })
     const arSub = roundMoney(bills
-      .filter((b) => b.journalEntryId && b.status !== 'WRITTEN_OFF' && CREDIT_BILL_TYPES.includes(b.billType as (typeof CREDIT_BILL_TYPES)[number]))
+      .filter((b) => b.journalEntryId && b.status !== 'WRITTEN_OFF')
       .reduce((s, b) => s + outstanding(b), 0))
     line('Accounts Receivable (1300)', arSub, await glNet(arAccountId))
 
-    // 3. Staff-loss receivable — outstanding STAFF_LOSS bills. These never post
-    //    to the GL, so their GL representation is 0: the whole balance is the gap.
-    const staffSub = roundMoney(bills
-      .filter((b) => b.billType === 'STAFF_LOSS' && b.status !== 'WRITTEN_OFF')
+    // 3. Unposted staff loss — STAFF_LOSS bills that never reached the GL (the
+    //    residual gap this work closes; 0 once every loss is posted to A/R).
+    const staffGap = roundMoney(bills
+      .filter((b) => b.billType === 'STAFF_LOSS' && !b.journalEntryId && b.status !== 'WRITTEN_OFF')
       .reduce((s, b) => s + outstanding(b), 0))
-    line('Staff-loss receivable', staffSub, 0, staffSub > 0.01 ? '<- unrepresented in GL' : '')
+    line('Staff loss not yet on GL', staffGap, 0, staffGap > 0.01 ? '<- run backfill-staff-loss-gl' : '')
 
     // 4. Excess Payable — outstanding PAYABLE-class collection excess.
     const excessAccountId = await resolveAccountId(prisma as never, { companyId: company.id, key: 'EXCESS_PAYABLE' })
