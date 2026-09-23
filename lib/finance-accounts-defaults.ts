@@ -64,6 +64,8 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   { code: '5300', name: 'Rent Expense', type: 'EXPENSE' },
   { code: '5310', name: 'Utilities (Electricity & Water)', type: 'EXPENSE' },
   { code: '5320', name: 'Generator Fuel', type: 'EXPENSE' },
+  { code: '5340', name: 'Cleaning & Consumables', type: 'EXPENSE' },
+  { code: '5350', name: 'Transport & Delivery', type: 'EXPENSE' },
   { code: '5400', name: 'Entertainment / Artist Fees', type: 'EXPENSE' },
   { code: '5500', name: 'Marketing & Promotions', type: 'EXPENSE' },
   { code: '5600', name: 'Repairs & Maintenance', type: 'EXPENSE' },
