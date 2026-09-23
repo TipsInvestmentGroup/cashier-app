@@ -115,6 +115,49 @@ export async function restockCounter(opts: {
  * the actual order/counter action, same principle as lib/push.ts's
  * notification calls never blocking the order flow.
  */
+/**
+ * Relieve inventory to Cost of Goods Sold when a tracked item is sold —
+ * Dr COGS / Cr Inventory Asset at the product's standard cost (buyingPrice),
+ * the same basis GRN debits inventory and the stock-valuation report uses, so
+ * the inventory asset stays consistent. Idempotent per POS order item; skips a
+ * zero-cost product (a data gap, not an error). Must run inside the caller's
+ * transaction so it's atomic with the stock relief. Exported for the historical
+ * backfill (scripts/backfill-cogs.ts).
+ */
+export async function postCogsForSale(tx: Tx, opts: {
+  itemId: string; productId: string; productName: string; quantity: number; outletId: string; userId: string; entryDate?: Date
+}): Promise<{ posted: boolean }> {
+  const product = await tx.product.findUnique({ where: { id: opts.productId }, select: { buyingPrice: true } })
+  const cost = roundMoney((opts.quantity || 0) * (product?.buyingPrice || 0))
+  if (cost <= 0) return { posted: false }
+
+  // Idempotent: one COGS entry per sold item (distinguished by sourceModule so a
+  // per-item SALES revenue entry, if any, is never mistaken for this one).
+  const already = await tx.journalEntry.findFirst({
+    where: { sourceModule: 'INVENTORY', sourceType: 'PosOrderItem', sourceId: opts.itemId, status: { not: 'REVERSED' } },
+    select: { id: true },
+  })
+  if (already) return { posted: false }
+
+  const outlet = await tx.outlet.findUnique({ where: { id: opts.outletId }, select: { companyId: true } })
+  const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
+  if (!companyId) return { posted: false }
+
+  const [cogsAccountId, inventoryAccountId] = await Promise.all([
+    resolveAccountId(tx, { companyId, key: 'COGS' }),
+    resolveAccountId(tx, { companyId, key: 'INVENTORY_ASSET' }),
+  ])
+  await postJournalEntry(tx, {
+    companyId, entryDate: opts.entryDate ?? new Date(), sourceModule: 'INVENTORY', sourceType: 'PosOrderItem', sourceId: opts.itemId,
+    description: `COGS — ${opts.productName} x${opts.quantity}`, createdById: opts.userId,
+    lines: [
+      { accountId: cogsAccountId, debit: cost, outletId: opts.outletId, description: 'Cost of goods sold' },
+      { accountId: inventoryAccountId, credit: cost, outletId: opts.outletId, description: 'Inventory relief' },
+    ],
+  })
+  return { posted: true }
+}
+
 export async function recordItemPrepared(opts: {
   itemId: string
   productId: string
@@ -140,6 +183,12 @@ export async function recordItemPrepared(opts: {
           type: 'SALE', quantity: -opts.quantity, balanceAfter: roundMoney(level.quantity),
           refType: 'PosOrderItem', refId: opts.itemId, createdById: opts.userId,
         },
+      })
+      // Relieve inventory to COGS in the same transaction as the stock decrement,
+      // so the ledger asset and the GL inventory balance move together.
+      await postCogsForSale(tx, {
+        itemId: opts.itemId, productId: opts.productId, productName: opts.productName,
+        quantity: opts.quantity, outletId: opts.outletId, userId: opts.userId,
       })
       return { tracked: true, quantity: level.quantity }
     })
