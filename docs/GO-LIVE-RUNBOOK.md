@@ -30,7 +30,7 @@ Neon keeps continuous history; enable/confirm it:
 
 ## 4. Seed / team setup (one time, in production)
 1. Sign in as owner → set access pickers (Persons manager, Petty requesters, Cash verifier).
-2. If starting empty: `…/api/admin/seed?secret=<CRON_SECRET>` (outlets + persons), then create staff accounts in **Users** (or `…/api/admin/setup-team?...` if used). Share temp passwords privately.
+2. If starting empty, bootstrap via **POST** with the secret in a header (never in the URL): `curl -X POST …/api/admin/seed -H "x-cron-secret: <CRON_SECRET>"` (outlets + persons). Then create staff accounts in **Users**. Share temp passwords privately. **Rotate `CRON_SECRET` and `JWT_SECRET` in Vercel env before go-live, and force a password/PIN change for every seeded account.**
 3. Verify Products, Categories, Payment Channels, Departments.
 
 ## 5. Deploy procedure
