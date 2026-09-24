@@ -5,6 +5,7 @@ import { generateBillReference, resolveBillTypeCodeFromLegacy } from './bill-ref
 import { syncBusinessSession } from './business-session'
 import { resolveCreditTags } from './credit-config'
 import { syncCreditForPerson, syncCreditForAccount } from './credit-ledger'
+import { syncStaffLossReceivable } from './staff-loss-gl'
 
 // Loose type — works with both the prisma singleton and a transaction client,
 // and avoids depending on generated Prisma types (regenerated on deploy).
@@ -107,6 +108,11 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
         },
       })
     }
+    // GL: keep the Dr A/R (1300) / Cr Sales Revenue posting in step with the
+    // recomputed gross (reverses+reposts if the amount changed). The bill id is
+    // recordId on first create, sl.id on update — reload to get whichever exists.
+    const glBill = await db.signedBill.findUnique({ where: { autoKey: voucher }, select: { id: true } })
+    if (glBill) await syncStaffLossReceivable(db, glBill.id)
     await syncBusinessSession(db, collectionId)
     // Credit ledger (Phase 4): refresh the staff member's balance.
     await syncCreditForPerson(db, person?.id ?? null)
@@ -117,6 +123,9 @@ export async function recomputeStaffLoss(db: DB, collectionId: string): Promise<
   if (sl) {
     await db.paidBill.deleteMany({ where: { signedBillId: sl.id } })
     await db.signedBill.delete({ where: { id: sl.id } })
+    // GL: with the bill gone, this reverses its staff-loss receivable posting
+    // (the entry survives the bill delete; sync finds it by sourceId).
+    await syncStaffLossReceivable(db, sl.id)
     // Credit ledger (Phase 4): the loss (and its payments) are gone — recompute.
     if (sl.creditAccountId) await syncCreditForAccount(db, sl.creditAccountId)
     else if (sl.personId) await syncCreditForPerson(db, sl.personId)

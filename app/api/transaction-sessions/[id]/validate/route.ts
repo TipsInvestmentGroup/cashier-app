@@ -9,6 +9,7 @@ import { allocatePayment } from '@/lib/payment-alloc'
 import { syncBusinessSession } from '@/lib/business-session'
 import { resolveCreditTags } from '@/lib/credit-config'
 import { syncCreditForBill } from '@/lib/credit-ledger'
+import { syncStaffLossReceivable } from '@/lib/staff-loss-gl'
 
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
 
@@ -215,6 +216,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           autoSourceCollectionId: created.id,
         },
       })
+      await syncStaffLossReceivable(tx, recordId) // GL: Dr A/R (1300) / Cr Sales Revenue for the shortfall
       await syncCreditForBill(tx, recordId) // credit ledger: STAFF_LOSS owed by staff
     } else if (lossAmount < 0) {
       const excessAmount = roundMoney(Math.abs(lossAmount))
