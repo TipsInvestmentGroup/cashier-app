@@ -7,6 +7,23 @@ This is the largest and highest-risk item in Phase 1. It is deliberately planned
 
 ---
 
+## 0. Spike results (2026-09-24) — **Option A is GO**, with one new caveat
+
+Ran the §4 spike on SQLite (converted `Product.buyingPrice`/`sellingPrice` to `Decimal`, `db push`, exercised a result extension; all reverted afterward — no lasting change).
+
+**✅ Decisive question answered — the result extension overrides an existing scalar field.** A sentinel `compute: () => -999` replaced the stored `0.3` on read. Result extensions run in the Prisma Client layer *after* the adapter, so this is adapter-independent — the extension will coerce `Decimal` → `number` on Postgres too. **The §3 architecture (Option A) is viable; Option B fallback is not needed.**
+
+**✅ Also confirmed on SQLite:** JS-number writes round-trip; `where{gt}` + `orderBy` work on a `Decimal` column; `aggregate {_sum}` works; `NextResponse.json` serializes the extended field as a JSON number; `db push` cast `Float`→`Decimal` preserving all 5 existing values; and `Decimal` stored `0.1 + 0.2` as exactly `0.3`.
+
+**⚠️ NEW CRITICAL FINDING — the dev and prod adapters disagree on the runtime type.** The **better-sqlite3 adapter returns `Decimal` columns as plain `number`** (`instanceof Prisma.Decimal === false`), whereas **adapter-pg returns `Decimal.js` objects** (standard Prisma behavior). Consequences that change the plan:
+- The result extension is **mandatory, not a convenience** — it is what normalizes prod's `Decimal.js` back to `number` so the ~712 call sites keep working. Without it, dev is fine and **prod breaks**.
+- **A green dev (SQLite) run does NOT prove prod safety.** SQLite can't reproduce the `Decimal.js` runtime, so every cutover tranche must be validated against **Postgres** (a prod copy), not just dev.
+- This makes the extension worth landing and testing on Postgres **first** (plan step P1), before any column flips.
+
+**❌ Still unproven — needs a Postgres instance (none available locally):** the extension coercion + `_sum` + JSON serialization end-to-end under adapter-pg, and `db push` / migration converting `DOUBLE PRECISION` → `DECIMAL` on a populated Postgres table. **This is the remaining gate item** — see §4.
+
+---
+
 ## 1. Why this is hard (two independent problems)
 
 ### 1a. Runtime: Prisma returns `Decimal` as objects, not numbers
@@ -57,16 +74,17 @@ Consequences:
 
 ## 4. GATE — proof-of-concept spike (do this first, alone)
 
-Do **not** start the bulk migration until this spike passes on a throwaway branch. Migrate **one** model with a couple of money fields (e.g. `PaidBill.amountPaid`, or a synthetic table) and prove, on **both** adapters:
+Do **not** start the bulk migration until this spike passes. Progress (see §0 for detail):
 
-- [ ] The result extension **overrides** the scalar field so `typeof row.amount === 'number'` (the critical unknown).
-- [ ] `prisma.model.aggregate({ _sum })` returns correct exact totals for `Decimal` on SQLite **and** Postgres.
-- [ ] Writing a JS `number` to a `Decimal` column works and round-trips exactly.
-- [ ] `NextResponse.json(row)` serializes the money field as a JSON number (not a string), so client components/`formatCurrency` are unaffected.
-- [ ] `prisma db push` applies `DOUBLE PRECISION → DECIMAL` on a **Postgres copy** with existing rows, values preserved.
-- [ ] `orderBy` and `where` numeric filters behave on `Decimal` on both adapters.
+- [x] The result extension **overrides** the scalar field so `typeof row.amount === 'number'` — **PASSED** (sentinel-proven; adapter-independent).
+- [x] Writing a JS `number` to a `Decimal` column round-trips exactly — PASSED (SQLite).
+- [x] `NextResponse.json(row)` serializes the extended money field as a JSON number — PASSED (SQLite).
+- [x] `orderBy` / `where` numeric filters behave on `Decimal` — PASSED (SQLite).
+- [x] `db push` applies `Float → Decimal` preserving existing values — PASSED (SQLite).
+- [ ] **On Postgres (adapter-pg):** the extension coerces the real `Decimal.js` → number end-to-end; `aggregate {_sum}` returns a usable total; `NextResponse.json` still a number; **REMAINING — needs a Postgres instance.**
+- [ ] **On a Postgres copy with data:** `db push` / migration converts `DOUBLE PRECISION → DECIMAL`, values preserved; `reconcile-subledgers-to-gl.ts` balances unchanged. **REMAINING.**
 
-If the extension cannot override same-named fields → switch to §7 Option B before proceeding.
+The decisive unknown (override) is resolved. The remaining gate is purely the Postgres validation, which the §0 finding (dev/prod adapter divergence) makes **mandatory** before any column flips. To close it I need a throwaway Postgres URL (a prod copy is ideal) — locally there is none.
 
 ---
 
@@ -110,4 +128,8 @@ Each tranche: change columns → `db push` to dev SQLite → run [`scripts/recon
 - **Full migration (§5):** large — spread across ~7 tranche PRs, each independently verifiable.
 - **Risk:** high (touches every money-bearing table and the ledger) but **contained by** the result-extension mitigation, per-tranche PRs, and the reconciliation diagnostic as an objective before/after gate.
 
-**Recommendation:** approve the **spike only** as the next step. Its result (does the extension override scalars on both adapters?) determines whether the full plan proceeds as written (Option A) or pivots to Option B — and that answer is cheap to get before committing to the large migration.
+**Recommendation (updated after §0 spike):** the decisive unknown is resolved — **Option A is GO.** Two things gate the bulk work:
+1. **A Postgres validation pass** (the §4 remaining item) — mandatory because SQLite masks the `Decimal.js` behavior that only prod exhibits. Needs a throwaway/prod-copy Postgres URL.
+2. **Land the result extension first (P1)** while columns are still `Float`, tested on Postgres, so the coercion layer is proven before any column flips.
+
+Once the Postgres pass is green, proceed with the P2 tranches. Until then, do not flip any column.
