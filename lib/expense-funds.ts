@@ -100,3 +100,18 @@ export const FUND_CLASS_LABELS: Record<FundClass, string> = {
 export function isFundClass(value: string | null | undefined): value is FundClass {
   return !!value && (FUND_CLASSES as readonly string[]).includes(value)
 }
+
+/**
+ * The PAYABLE amount of an ExpenseRequest — the approved figure when an approver
+ * adjusted it (a partial approval, or a top-up rounded to a whole cheque),
+ * otherwise the requested amount. This, NOT `amount`, is the ceiling every
+ * money-movement path must respect: outstanding balance, the PARTIALLY_PAID→PAID
+ * transition, reserved funds, and the Ready-to-Pay queue. Defined once here so
+ * those sites can never drift on which figure is authoritative.
+ *
+ * `allocatedAmount` is only meaningful once set (> 0); null or 0 means "not
+ * adjusted — pay as requested", so requested `amount` stands.
+ */
+export function payableAmount(req: { amount: number; allocatedAmount?: number | null }): number {
+  return req.allocatedAmount != null && req.allocatedAmount > 0 ? req.allocatedAmount : req.amount
+}

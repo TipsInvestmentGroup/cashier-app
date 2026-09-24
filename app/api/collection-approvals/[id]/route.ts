@@ -40,6 +40,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { decision, comment, allocatedAmount } = await req.json().catch(() => ({}))
   if (decision !== 'APPROVED' && decision !== 'REJECTED') return NextResponse.json({ error: 'decision must be APPROVED or REJECTED' }, { status: 400 })
 
+  // Segregation of duties: an expense request's raiser can never approve it
+  // (rejecting is fine). Covers the top-up flow, where the custodian is the
+  // requester. Decided here too so the shared inbox is gated like the direct route.
+  if (approval.expenseRequestId && decision === 'APPROVED') {
+    const reqRow = await prisma.expenseRequest.findUnique({ where: { id: approval.expenseRequestId }, select: { requestedById: true } })
+    if (reqRow && reqRow.requestedById === user.userId) {
+      return NextResponse.json({ error: 'You cannot approve your own expense request — it must be approved by someone else.' }, { status: 403 })
+    }
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.workflowApproval.update({ where: { id }, data: { status: decision, resolvedAt: new Date(), comment: comment ? String(comment) : approval.comment } })
     if (approval.stageRecordId) {
@@ -59,9 +69,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // the ExpenseRequest — opening the next sequential approval level, or
     // finalizing APPROVED/REJECTED. See lib/expense-workflow.ts.
     if (approval.expenseRequestId) {
-      // allocatedAmount only bites when this decision finalizes an IN top-up
-      // (advanceExpenseApproval applies it at the execution point); for every
-      // other case it is harmlessly ignored.
+      // allocatedAmount bites only when this decision FINALIZES the chain —
+      // executing an IN top-up's allocation, or storing an OUT request's approved
+      // (partial) amount. At an intermediate level advanceExpenseApproval opens
+      // the next step and ignores it.
       await advanceExpenseApproval(tx, approval.expenseRequestId, decision, {
         allocatedAmount: allocatedAmount != null ? Number(allocatedAmount) : null,
         actorId: user.userId, actorName: user.name,

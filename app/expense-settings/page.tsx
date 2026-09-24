@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
@@ -82,6 +82,60 @@ function ChipToggle({ options, value, onChange }: { options: string[]; value: st
   )
 }
 const inputCls = 'px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-500 focus:outline-none bg-white w-full'
+
+// ─── Reactivate / Delete shared plumbing (identical across all three tables) ──
+// A DeletePlan is the fully-resolved outcome of pressing Delete on one INACTIVE
+// row: the modal copy plus the server mode to fire. `mode: undefined` means the
+// action is BLOCKED (a funding source that still holds money) — the modal then
+// shows a single Close button and never calls the server. The server always
+// re-checks these gates; the plan only decides what to show.
+type DeletePlan = { name: string; title: string; message: string; confirmLabel?: string; danger?: boolean; mode?: 'hard' | 'archive'; endpoint: string }
+
+// Categories + Request Types gate purely on linked-request count.
+function planForRequestScoped(name: string, requests: number, endpoint: string): DeletePlan {
+  if (requests === 0) return { name, title: `Delete ${name}?`, message: "This can't be undone.", confirmLabel: 'Delete', danger: true, mode: 'hard', endpoint }
+  return { name, title: `Archive ${name}?`, message: `${name} has ${requests} linked request${requests === 1 ? '' : 's'} and can't be permanently deleted. Set it as Archived instead to hide it everywhere while preserving historical records?`, confirmLabel: 'Archive', mode: 'archive', endpoint }
+}
+
+// Funding sources gate first on a non-zero balance (blocked), then on payments.
+function planForFund(name: string, balance: number, payments: number, endpoint: string): DeletePlan {
+  if (Math.abs(balance) >= 0.01) return { name, title: `Can't delete ${name}`, message: `Can't delete — this funding source still holds ${formatCurrency(balance)}. Move or reconcile the balance to zero before deleting.`, endpoint }
+  if (payments > 0) return { name, title: `Archive ${name}?`, message: `${name} has ${payments} linked payment${payments === 1 ? '' : 's'} and can't be permanently deleted. Set it as Archived instead to hide it everywhere while preserving historical records?`, confirmLabel: 'Archive', mode: 'archive', endpoint }
+  return { name, title: `Delete ${name}?`, message: "This can't be undone.", confirmLabel: 'Delete', danger: true, mode: 'hard', endpoint }
+}
+
+function ConfirmModal({ plan, busy, onConfirm, onClose }: { plan: DeletePlan; busy: boolean; onConfirm: () => void; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-5 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold text-gray-900 mb-2">{plan.title}</h3>
+        <p className="text-sm text-gray-600 mb-4">{plan.message}</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} disabled={busy} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200 disabled:opacity-40">{plan.mode ? 'Cancel' : 'Close'}</button>
+          {plan.mode && (
+            <button onClick={onConfirm} disabled={busy}
+              className={`px-4 py-2 text-white text-sm font-semibold rounded-xl disabled:opacity-40 ${plan.danger ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+              {busy ? 'Working…' : (plan.confirmLabel || 'Confirm')}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// One row's inline "Reactivate  Delete" action group + its inline error slot,
+// shared so the three tables stay pixel-identical. Deactivate stays inline in
+// each table (its confirm copy differs per entity).
+function RowActions({ onReactivate, onDelete, error }: { onReactivate: () => void; onDelete: () => void; error?: string }) {
+  return (
+    <>
+      <button onClick={onReactivate} className="text-xs text-green-600 hover:text-green-800 mr-3">Reactivate</button>
+      <button onClick={onDelete} className="text-xs text-red-500 hover:text-red-700">Delete</button>
+      {error && <span className="block text-[11px] text-red-500 mt-1 font-normal normal-case whitespace-normal max-w-[240px] ml-auto text-right">{error}</span>}
+    </>
+  )
+}
 
 type Tab = 'module' | 'requestTypes' | 'categories' | 'fundingSources' | 'manageAccess'
 
@@ -176,7 +230,110 @@ function ModuleTab() {
       <button onClick={save} disabled={saving} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">
         {saving ? 'Saving…' : 'Save changes'}
       </button>
+
+      <PaymentMethodsCard />
     </div>
+  )
+}
+
+// Per-scope payment methods — the options offered on the Record-payment screen.
+// A specific outlet may override the global default; leaving an outlet's list
+// empty makes it inherit (Outlet → Company → Global → built-in default), which
+// is exactly how the server resolves it at pay time.
+function PaymentMethodsCard() {
+  const { request } = useApi()
+  const [outlets, setOutlets] = useState<OutletOption[]>([])
+  const [scopeId, setScopeId] = useState<string>('') // '' = GLOBAL, else an outlet id
+  const [methods, setMethods] = useState<string[]>([])
+  const [resolved, setResolved] = useState<string[]>([])
+  const [newMethod, setNewMethod] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const scope = scopeId ? 'OUTLET' : 'GLOBAL'
+
+  useEffect(() => {
+    request('/api/outlets').then((o) => setOutlets(o || [])).catch(() => setOutlets([]))
+  }, [request])
+
+  const loadScope = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ scope })
+      if (scopeId) params.set('scopeId', scopeId)
+      const r = await request(`/api/expense/config/payment-methods?${params.toString()}`)
+      setMethods(r.stored || [])
+      setResolved(r.resolved || [])
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load payment methods') }
+    finally { setLoading(false) }
+  }, [request, scope, scopeId])
+  useEffect(() => { loadScope() }, [loadScope])
+
+  const addMethod = () => {
+    const v = newMethod.trim()
+    if (!v) return
+    if (methods.some((m) => m.toLowerCase() === v.toLowerCase())) { setNewMethod(''); return }
+    setMethods([...methods, v]); setNewMethod('')
+  }
+  const removeMethod = (m: string) => setMethods(methods.filter((x) => x !== m))
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const body = { scope, scopeId: scopeId || undefined, paymentMethods: methods }
+      const r = await request('/api/expense/config/payment-methods', { method: 'PUT', body: JSON.stringify(body) })
+      setMethods(r.stored || []); setResolved(r.resolved || [])
+      toast.success(scopeId ? 'Saved for this outlet' : 'Saved global default')
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not save') }
+    finally { setSaving(false) }
+  }
+
+  const inheriting = methods.length === 0
+
+  return (
+    <Card>
+      <h2 className="font-semibold text-gray-800 mb-1">Payment methods</h2>
+      <p className="text-xs text-gray-400 mb-3">The options shown when recording a payment. Set a global default, and optionally override it per outlet. An empty outlet list inherits the global default.</p>
+
+      <label className="block mb-3 max-w-sm"><span className="text-xs text-gray-500">Configure for</span>
+        <select className={inputCls} value={scopeId} onChange={(e) => setScopeId(e.target.value)}>
+          <option value="">All outlets (global default)</option>
+          {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select></label>
+
+      {loading ? <p className="text-sm text-gray-400 py-3">Loading…</p> : (
+        <>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {methods.map((m) => (
+              <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border-2 border-indigo-500 bg-indigo-50 text-indigo-700">
+                {m}
+                <button type="button" onClick={() => removeMethod(m)} className="text-indigo-400 hover:text-indigo-700" aria-label={`Remove ${m}`}>✕</button>
+              </span>
+            ))}
+            {inheriting && (
+              <span className="text-xs text-gray-400 py-1.5">
+                {scopeId ? 'No override — this outlet inherits: ' : 'No global list set — using the built-in default: '}
+                <span className="text-gray-500">{resolved.join(', ')}</span>
+              </span>
+            )}
+          </div>
+
+          <div className="flex gap-2 mb-4 max-w-sm">
+            <input value={newMethod} onChange={(e) => setNewMethod(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMethod() } }}
+              placeholder="e.g. HALOPESA, EQUITY, CHEQUE" className={inputCls} />
+            <button type="button" onClick={addMethod} className="shrink-0 px-4 py-2 bg-indigo-50 text-indigo-700 text-sm font-semibold rounded-xl hover:bg-indigo-100">+ Add</button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button onClick={save} disabled={saving} className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">
+              {saving ? 'Saving…' : 'Save payment methods'}
+            </button>
+            {!inheriting && scopeId && <button onClick={() => setMethods([])} className="text-xs text-gray-500 hover:text-gray-700">Clear override (inherit global)</button>}
+          </div>
+        </>
+      )}
+    </Card>
   )
 }
 
@@ -202,10 +359,28 @@ function RequestTypesTab() {
   }, [request])
   useEffect(() => { load() }, [load])
 
+  const [plan, setPlan] = useState<DeletePlan | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [rowError, setRowError] = useState<{ id: string; msg: string } | null>(null)
+
   const deactivate = async (t: RequestType) => {
     if (!confirm(`Deactivate "${t.name}"? Existing requests keep their classification; no new requests can use it.`)) return
     try { await request(`/api/expense/request-types/${t.id}`, { method: 'DELETE' }); toast.success('Deactivated'); load() }
     catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not deactivate') }
+  }
+
+  const reactivate = async (t: RequestType) => {
+    setRowError(null)
+    try { await request(`/api/expense/request-types/${t.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: true }) }); toast.success('Reactivated'); load() }
+    catch (e: unknown) { const msg = e instanceof Error ? e.message : 'Could not reactivate'; setRowError({ id: t.id, msg }); toast.error(msg) }
+  }
+
+  const confirmDelete = async () => {
+    if (!plan?.mode) { setPlan(null); return }
+    setBusy(true)
+    try { await request(`${plan.endpoint}?mode=${plan.mode}`, { method: 'DELETE' }); toast.success(plan.mode === 'hard' ? 'Deleted' : 'Archived'); setPlan(null); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not complete') }
+    finally { setBusy(false) }
   }
 
   if (loading) return <div className="py-10 text-center text-gray-400">Loading…</div>
@@ -233,7 +408,9 @@ function RequestTypesTab() {
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${t.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{t.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="text-right whitespace-nowrap">
                     <button onClick={() => setEditing(editing === t.id ? null : t.id)} className="text-xs text-indigo-600 hover:text-indigo-800 mr-3">{editing === t.id ? 'Close' : 'Edit'}</button>
-                    {t.isActive && <button onClick={() => deactivate(t)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>}
+                    {t.isActive
+                      ? <button onClick={() => deactivate(t)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>
+                      : <RowActions onReactivate={() => reactivate(t)} onDelete={() => setPlan(planForRequestScoped(t.name, t._count?.requests ?? 0, `/api/expense/request-types/${t.id}`))} error={rowError?.id === t.id ? rowError.msg : undefined} />}
                   </td>
                 </tr>
               ))}
@@ -251,6 +428,8 @@ function RequestTypesTab() {
           requiredAttachments: parseArr(t.requiredAttachments), allowedCategoryIds: parseArr(t.allowedCategoryIds), allowedFundingSourceIds: parseArr(t.allowedFundingSourceIds),
         }} categories={categories} sources={sources} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       })()}
+
+      {plan && <ConfirmModal plan={plan} busy={busy} onConfirm={confirmDelete} onClose={() => setPlan(null)} />}
     </div>
   )
 }
@@ -422,10 +601,28 @@ function CategoriesTab() {
   }, [request])
   useEffect(() => { load() }, [load])
 
+  const [plan, setPlan] = useState<DeletePlan | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [rowError, setRowError] = useState<{ id: string; msg: string } | null>(null)
+
   const deactivate = async (c: Category) => {
     if (!confirm(`Deactivate "${c.name}"? Existing requests keep their classification.`)) return
     try { await request(`/api/expense/categories/${c.id}`, { method: 'DELETE' }); toast.success('Deactivated'); load() }
     catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not deactivate') }
+  }
+
+  const reactivate = async (c: Category) => {
+    setRowError(null)
+    try { await request(`/api/expense/categories/${c.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: true }) }); toast.success('Reactivated'); load() }
+    catch (e: unknown) { const msg = e instanceof Error ? e.message : 'Could not reactivate'; setRowError({ id: c.id, msg }); toast.error(msg) }
+  }
+
+  const confirmDelete = async () => {
+    if (!plan?.mode) { setPlan(null); return }
+    setBusy(true)
+    try { await request(`${plan.endpoint}?mode=${plan.mode}`, { method: 'DELETE' }); toast.success(plan.mode === 'hard' ? 'Deleted' : 'Archived'); setPlan(null); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not complete') }
+    finally { setBusy(false) }
   }
 
   if (loading) return <div className="py-10 text-center text-gray-400">Loading…</div>
@@ -447,13 +644,15 @@ function CategoriesTab() {
               {categories.map((c) => (
                 <tr key={c.id} className="border-b border-gray-50">
                   <td className="py-2 pr-3"><span className="font-medium text-gray-800">{c.name}</span><span className="block text-[11px] text-gray-400">{c.code}{c.legacyFunctionName ? ` · from ${c.legacyFunctionName}` : ''}</span></td>
-                  <td className="pr-3 text-gray-600">{c.budgetAccount ? `${c.budgetAccount.code} ${c.budgetAccount.name}` : <span className="text-gray-400">falls back to Petty Cash Expense</span>}</td>
+                  <td className="pr-3 text-gray-600">{c.budgetAccount ? `${c.budgetAccount.code} ${c.budgetAccount.name}` : <span className="text-amber-600" title="No GL account — spend lands in the Suspense bucket. Edit to assign one.">⚠ Unclassified — assign a GL account</span>}</td>
                   <td className="pr-3 text-gray-600">{c.spendingLimit > 0 ? formatCurrency(c.spendingLimit) : '—'}</td>
                   <td className="pr-3 text-gray-600">{c._count?.requests ?? 0}</td>
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${c.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{c.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="text-right whitespace-nowrap">
                     <button onClick={() => setEditing(editing === c.id ? null : c.id)} className="text-xs text-indigo-600 hover:text-indigo-800 mr-3">{editing === c.id ? 'Close' : 'Edit'}</button>
-                    {c.isActive && <button onClick={() => deactivate(c)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>}
+                    {c.isActive
+                      ? <button onClick={() => deactivate(c)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>
+                      : <RowActions onReactivate={() => reactivate(c)} onDelete={() => setPlan(planForRequestScoped(c.name, c._count?.requests ?? 0, `/api/expense/categories/${c.id}`))} error={rowError?.id === c.id ? rowError.msg : undefined} />}
                   </td>
                 </tr>
               ))}
@@ -468,6 +667,8 @@ function CategoriesTab() {
         return <CategoryEditor initial={{ id: c.id, name: c.name, code: c.code, budgetAccountId: c.budgetAccountId || '', spendingLimit: c.spendingLimit, costCenter: c.costCenter || '' }}
           accounts={accounts} onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       })()}
+
+      {plan && <ConfirmModal plan={plan} busy={busy} onConfirm={confirmDelete} onClose={() => setPlan(null)} />}
     </div>
   )
 }
@@ -499,16 +700,16 @@ function CategoryEditor({ initial, accounts, onCancel, onSaved }: {
       <div className="grid sm:grid-cols-2 gap-3 mb-3">
         <label className="block"><span className="text-xs text-gray-500">Name</span><input className={inputCls} value={f.name} onChange={(e) => set({ name: e.target.value })} /></label>
         <label className="block"><span className="text-xs text-gray-500">Code {isEdit && '(fixed)'}</span><input className={inputCls} value={f.code} disabled={isEdit} onChange={(e) => set({ code: e.target.value })} placeholder="auto from name" /></label>
-        <label className="block"><span className="text-xs text-gray-500">GL account <span className="text-gray-400">(blank = Petty Cash Expense fallback)</span></span>
+        <label className="block"><span className="text-xs text-gray-500">GL account <span className="text-gray-400">(required — pick 9000 Suspense only for a deliberate uncategorized bucket)</span></span>
           <select className={inputCls} value={f.budgetAccountId} onChange={(e) => set({ budgetAccountId: e.target.value })}>
-            <option value="">— fallback —</option>
+            <option value="">— select an account —</option>
             {accounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
           </select></label>
         <label className="block"><span className="text-xs text-gray-500">Spending limit (0 = none)</span><input type="number" className={inputCls} value={f.spendingLimit} onChange={(e) => set({ spendingLimit: Number(e.target.value) })} /></label>
         <label className="block"><span className="text-xs text-gray-500">Cost center <span className="text-gray-400">(free text)</span></span><input className={inputCls} value={f.costCenter} onChange={(e) => set({ costCenter: e.target.value })} /></label>
       </div>
       <div className="flex gap-2 mt-3">
-        <button onClick={save} disabled={saving || !f.name} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
+        <button onClick={save} disabled={saving || !f.name || !f.budgetAccountId} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
         <button onClick={onCancel} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-200">Cancel</button>
       </div>
     </Card>
@@ -537,10 +738,30 @@ function FundingSourcesTab() {
   }, [request])
   useEffect(() => { load() }, [load])
 
+  const [plan, setPlan] = useState<DeletePlan | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [rowError, setRowError] = useState<{ id: string; msg: string } | null>(null)
+
   const deactivate = async (s: FundingSource) => {
     if (!confirm(`Deactivate "${s.name}"? Existing payments keep their history.`)) return
     try { await request(`/api/expense/funding-sources/${s.id}`, { method: 'DELETE' }); toast.success('Deactivated'); load() }
     catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not deactivate') }
+  }
+
+  // Funding sources have no reactivation dependency to validate (§spec) — flip
+  // straight back to active.
+  const reactivate = async (s: FundingSource) => {
+    setRowError(null)
+    try { await request(`/api/expense/funding-sources/${s.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: true }) }); toast.success('Reactivated'); load() }
+    catch (e: unknown) { const msg = e instanceof Error ? e.message : 'Could not reactivate'; setRowError({ id: s.id, msg }); toast.error(msg) }
+  }
+
+  const confirmDelete = async () => {
+    if (!plan?.mode) { setPlan(null); return }
+    setBusy(true)
+    try { await request(`${plan.endpoint}?mode=${plan.mode}`, { method: 'DELETE' }); toast.success(plan.mode === 'hard' ? 'Deleted' : 'Archived'); setPlan(null); load() }
+    catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not complete') }
+    finally { setBusy(false) }
   }
 
   if (loading) return <div className="py-10 text-center text-gray-400">Loading…</div>
@@ -587,7 +808,9 @@ function FundingSourcesTab() {
                   <td className="pr-3"><span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${s.isActive ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{s.isActive ? 'ACTIVE' : 'INACTIVE'}</span></td>
                   <td className="text-right whitespace-nowrap">
                     <button onClick={() => setEditing(editing === s.id ? null : s.id)} className="text-xs text-indigo-600 hover:text-indigo-800 mr-3">{editing === s.id ? 'Close' : 'Edit'}</button>
-                    {s.isActive && <button onClick={() => deactivate(s)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>}
+                    {s.isActive
+                      ? <button onClick={() => deactivate(s)} className="text-xs text-red-500 hover:text-red-700">Deactivate</button>
+                      : <RowActions onReactivate={() => reactivate(s)} onDelete={() => setPlan(planForFund(s.name, s.availableBalance, s._count?.payments ?? 0, `/api/expense/funding-sources/${s.id}`))} error={rowError?.id === s.id ? rowError.msg : undefined} />}
                   </td>
                 </tr>
               ))}
@@ -606,6 +829,8 @@ function FundingSourcesTab() {
         }}
           accounts={accounts} isEditMode onCancel={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       })()}
+
+      {plan && <ConfirmModal plan={plan} busy={busy} onConfirm={confirmDelete} onClose={() => setPlan(null)} />}
     </div>
   )
 }
@@ -777,6 +1002,10 @@ interface AccessGrant {
   outlet: { id: string; name: string } | null
 }
 
+/** The fund fields the "Assign to funds" shortcut needs — the /funding-sources
+ *  GET returns more, but the shortcut only matches on class + outlet + active. */
+interface FundOption { id: string; name: string; fundClass: string | null; outletId: string | null; isActive: boolean }
+
 /** Stable key for one flag, so a (grantType, fundClass) pair round-trips through
  *  checkbox state without a nested structure. */
 const flagKey = (grantType: string, fundClass: string | null) => `${grantType}:${fundClass || ''}`
@@ -791,24 +1020,101 @@ function labelForGrant(grantType: string, fundClass: string | null): string {
   return fundLabel ? `${base} · ${fundLabel}` : base
 }
 
+/**
+ * The eligibility→assignment shortcut, shown inline under a CUSTODIAN grant row.
+ * A grant only says "this person MAY hold a <class> fund" (ExpenseAccessGrant);
+ * the actual "holds THIS fund" record is FundingSourceCustodian, written per
+ * fund. This lists the funds the grant covers — same fund class, and either the
+ * grant's outlet or (for a business-wide grant) every outlet — and toggles the
+ * assignment straight against the same endpoint the Funding Sources → Edit
+ * picker uses, so the two entry points can never disagree. The server still
+ * enforces the eligibility grant on POST (lib/expense-access.ts), which sitting
+ * on the grant row already satisfies.
+ */
+function AssignToFunds({ grant, sources }: { grant: AccessGrant; sources: FundOption[] }) {
+  const { request } = useApi()
+  const matching = useMemo(
+    () => sources.filter((s) => s.isActive && s.fundClass === grant.fundClass && (!grant.outletId || s.outletId === grant.outletId)),
+    [sources, grant.fundClass, grant.outletId],
+  )
+  const [assigned, setAssigned] = useState<Set<string> | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    const entries = await Promise.all(
+      matching.map(async (f) => {
+        const rows = await request(`/api/expense/funding-sources/${f.id}/custodians`).catch(() => [])
+        return [f.id, (rows as { userId: string }[]).some((r) => r.userId === grant.userId)] as const
+      }),
+    )
+    setAssigned(new Set(entries.filter(([, has]) => has).map(([id]) => id)))
+  }, [request, matching, grant.userId])
+  useEffect(() => { load() }, [load])
+
+  const toggle = async (fundId: string) => {
+    setBusy(fundId)
+    try {
+      if (assigned?.has(fundId)) {
+        await request(`/api/expense/funding-sources/${fundId}/custodians?userId=${grant.userId}`, { method: 'DELETE' })
+      } else {
+        await request(`/api/expense/funding-sources/${fundId}/custodians`, { method: 'POST', body: JSON.stringify({ userId: grant.userId }) })
+      }
+      await load()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not update assignment') }
+    finally { setBusy(null) }
+  }
+
+  const classLabel = grant.fundClass ? FUND_CLASS_LABELS[grant.fundClass as FundClass] || grant.fundClass : ''
+  return (
+    <div className="mt-2 p-2 rounded-lg bg-gray-50 border border-gray-100">
+      <span className="text-[11px] text-gray-500 block mb-1.5">Assign to a {classLabel} fund <span className="text-gray-400">(who actually holds and pays it)</span></span>
+      {matching.length === 0 ? (
+        <p className="text-[11px] text-gray-400">No {classLabel} funds{grant.outletId ? ' at this outlet' : ''} exist yet — create one under Funding Sources first.</p>
+      ) : assigned === null ? (
+        <p className="text-[11px] text-gray-400">Loading funds…</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {matching.map((f) => {
+            const on = assigned.has(f.id)
+            return (
+              <button key={f.id} type="button" disabled={busy === f.id} onClick={() => toggle(f.id)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border-2 transition ${on ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'} ${busy === f.id ? 'opacity-50' : ''}`}>
+                {on ? '✓ ' : '+ '}{f.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ManageAccessTab() {
   const { request } = useApi()
   const [grants, setGrants] = useState<AccessGrant[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
   const [outlets, setOutlets] = useState<OutletOption[]>([])
+  // Funds are pulled here purely so the per-row "Assign to funds" shortcut can
+  // list the funds a CUSTODIAN grant covers without a second screen. Only the
+  // handful of fields the shortcut filters on are kept (see FundOption).
+  const [sources, setSources] = useState<FundOption[]>([])
   const [loading, setLoading] = useState(true)
   const [showRevoked, setShowRevoked] = useState(false)
   const [adding, setAdding] = useState(false)
+  // Which CUSTODIAN grant row has its fund-assignment panel open (grant id).
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [g, u, o] = await Promise.all([
+      const [g, u, o, s] = await Promise.all([
         request(`/api/expense/access-grants${showRevoked ? '?includeRevoked=true' : ''}`),
         request('/api/users').catch(() => []),
         request('/api/outlets').catch(() => []),
+        request('/api/expense/funding-sources').catch(() => []),
       ])
       setGrants(g || []); setUsers(u || []); setOutlets(o || [])
+      setSources((s || []).map((f: FundOption) => ({ id: f.id, name: f.name, fundClass: f.fundClass, outletId: f.outletId, isActive: f.isActive })))
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load access grants') }
     finally { setLoading(false) }
   }, [request, showRevoked])
@@ -839,9 +1145,11 @@ function ManageAccessTab() {
           It is the only thing those checks read — a user&apos;s role no longer grants expense access by itself.
         </p>
         <p className="text-xs text-gray-400 mt-2">
-          Each fund gets its own approval chain: a request against Petty Cash is routed to whoever holds First or
-          Second Approver for Petty Cash at that outlet. Leave the fund as &ldquo;All funds&rdquo; to have someone
-          approve for all three. Grants are revoked, never deleted, so past approvals stay explainable.
+          Each fund gets its own approval chain. Grant a <strong>Single Approver</strong> for a one-stage
+          workflow — one approval finalizes the request. Otherwise use <strong>First</strong> and{' '}
+          <strong>Second Approver</strong> for the two-stage chain; a Single Approver, where set, replaces
+          that chain for the fund. Leave the fund as &ldquo;All funds&rdquo; to have someone approve for all
+          three. Grants are revoked, never deleted, so past approvals stay explainable.
         </p>
       </Card>
 
@@ -875,8 +1183,16 @@ function ManageAccessTab() {
                       <span className={`px-2 py-0.5 text-[11px] font-semibold rounded-full ${g.revokedAt ? 'bg-gray-100 text-gray-500 line-through' : 'bg-indigo-50 text-indigo-700'}`}>
                         {labelForGrant(g.grantType, g.fundClass)}
                       </span>
-                      {!g.fundClass && (g.grantType === 'FIRST_APPROVER' || g.grantType === 'SECOND_APPROVER') && (
+                      {!g.fundClass && (g.grantType === 'SINGLE_APPROVER' || g.grantType === 'FIRST_APPROVER' || g.grantType === 'SECOND_APPROVER') && (
                         <span className="block text-[10px] text-gray-400">all funds</span>
+                      )}
+                      {/* The eligibility→assignment shortcut: a CUSTODIAN grant
+                          only makes this person *eligible* to hold a fund; the
+                          panel below writes the actual FundingSourceCustodian
+                          assignment (what clears the "No custodian assigned"
+                          banner) without leaving for the Funding Sources tab. */}
+                      {expandedId === g.id && g.grantType === 'CUSTODIAN' && !g.revokedAt && (
+                        <AssignToFunds grant={g} sources={sources} />
                       )}
                     </td>
                     <td className="pr-3 text-gray-600">{g.outlet?.name || <span className="text-gray-400">All outlets</span>}</td>
@@ -885,6 +1201,11 @@ function ManageAccessTab() {
                       {g.revokedAt && <span className="block text-red-500">revoked {new Date(g.revokedAt).toLocaleDateString()}</span>}
                     </td>
                     <td className="text-right whitespace-nowrap">
+                      {!g.revokedAt && g.grantType === 'CUSTODIAN' && (
+                        <button onClick={() => setExpandedId(expandedId === g.id ? null : g.id)} className="text-xs text-indigo-600 hover:text-indigo-800 mr-3">
+                          {expandedId === g.id ? 'Close' : 'Assign to funds'}
+                        </button>
+                      )}
                       {!g.revokedAt && <button onClick={() => revoke(g)} className="text-xs text-red-500 hover:text-red-700">Revoke</button>}
                     </td>
                   </tr>
@@ -959,7 +1280,7 @@ function GrantEditor({ users, outlets, onCancel, onSaved }: {
       <div className="space-y-2">
         {EXPENSE_GRANT_FLAGS.map((f) => {
           const key = flagKey(f.grantType, f.fundClass)
-          const isApprover = f.grantType === 'FIRST_APPROVER' || f.grantType === 'SECOND_APPROVER'
+          const isApprover = f.grantType === 'SINGLE_APPROVER' || f.grantType === 'FIRST_APPROVER' || f.grantType === 'SECOND_APPROVER'
           return (
             <div key={key} className="border-2 border-gray-100 rounded-xl p-3">
               <label className="flex items-start gap-3 cursor-pointer">

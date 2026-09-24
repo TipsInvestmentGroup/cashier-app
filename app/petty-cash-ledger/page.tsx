@@ -11,19 +11,33 @@ import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { MoneyInput } from '@/components/MoneyInput'
 import { allowsManualAllocation, fundClassOf, isFundClass, sourceTypesFor, FUND_CLASS_LABELS, type FundClass } from '@/lib/expense-funds'
+import { downloadCustodianLedgerPdf } from '@/lib/expense-ledger-pdf'
 import { useSearchParams } from 'next/navigation'
 import { format, subDays } from 'date-fns'
 import toast from 'react-hot-toast'
 
 interface FundingSource { id: string; name: string; code: string; sourceType: string; isActive: boolean }
-interface LedgerRow { id: string; type: string; amount: number; reference: string | null; note: string | null; createdByName: string | null; createdAt: string; runningBalance?: number }
-interface Ledger { fundingSourceId: string; openingBalance: number; totalReceived: number; totalPaid: number; closingBalance: number; rows: LedgerRow[]; live?: boolean }
+interface LedgerRow {
+  id: string; type: string; amount: number; reference: string | null; note: string | null; createdByName: string | null; createdAt: string; runningBalance?: number
+  // Phase 5: linked-request context (present on PAYMENT + top-up REPLENISH rows).
+  expenseRequestId?: string | null
+  requestNumber?: string | null; employeeName?: string | null; department?: string | null; paymentMethod?: string | null
+  requestedAmount?: number | null; approvedAmount?: number | null; multiRequestCount?: number
+}
+interface Ledger {
+  fundingSourceId: string; openingBalance: number; totalReceived: number; totalPaid: number; closingBalance: number; rows: LedgerRow[]; live?: boolean
+  // Phase 4 metrics (always present from the API).
+  reserved?: number; available?: number; lowBalanceThreshold?: number; topUpRequired?: boolean
+  avgDailySpend?: number; historyDays?: number; daysUntilEmpty?: number | null
+}
 interface Group { label: string; count: number; amount: number }
 interface ReadyToPayRow {
   id: string; purpose: string; amount: number; paid: number; outstanding: number
   currency: string; status: string; requestedById: string; requestType: string; category: string; createdAt: string
 }
 interface ReadyToPay { fundingSourceId: string; count: number; totalOutstanding: number; rows: ReadyToPayRow[] }
+interface PendingTopUpRow { id: string; purpose: string; amount: number; reference: string | null; currency: string; status: string; requestedById: string; createdAt: string }
+interface PendingTopUps { fundingSourceId: string; count: number; totalPending: number; rows: PendingTopUpRow[] }
 interface ExpenseReport {
   totals: { requested: number; paid: number; pending: number; approvedUnpaid: number; cashierPaid: number; fundBackedPaid: number }
   byOutlet: Group[]; byCategory: Group[]; byDepartment: Group[]; byRequester: Group[]; byFundingSource: Group[]; byRequestType: Group[]
@@ -43,6 +57,9 @@ function PettyCashLedgerPage() {
   // param falls back to Petty Cash — the historical home of this route.
   const fundParam = searchParams.get('fund')
   const activeFundClass: FundClass = isFundClass(fundParam) ? fundParam : 'PETTY_CASH'
+  // Optional deep-link target (e.g. from the Custodian Report drill-through):
+  // preselect this exact fund instead of the class's first fund.
+  const sourceParam = searchParams.get('source')
 
   const { user } = useAuth()
   const isAdmin = user?.role === 'ADMIN'
@@ -77,10 +94,13 @@ function PettyCashLedgerPage() {
       setSources(active)
       // Reselect within the new class rather than keeping a fund from the
       // previous view — otherwise switching Cashier→Petty Cash would show the
-      // wrong fund's ledger until the user touches the dropdown.
-      setSelected(active.length ? active[0].id : '')
+      // wrong fund's ledger until the user touches the dropdown. A ?source=
+      // deep-link (Custodian Report drill-through) wins when it names a fund in
+      // this class; otherwise fall back to the first fund.
+      const deepLinked = sourceParam && active.some((x) => x.id === sourceParam) ? sourceParam : ''
+      setSelected(deepLinked || (active.length ? active[0].id : ''))
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load funding sources') }
-  }, [request, activeFundClass])
+  }, [request, activeFundClass, sourceParam])
   useEffect(() => { loadSources() }, [loadSources])
 
   const loadLedger = useCallback(async () => {
@@ -110,6 +130,18 @@ function PettyCashLedgerPage() {
   }, [request, selected])
   useEffect(() => { if (view === 'queue') loadQueue() }, [view, loadQueue])
 
+  // §8: top-up requests awaiting approval for this fund. Their sibling list to
+  // the Ready-to-Pay queue — direction=IN requests never appear in "my expense
+  // requests", so without this an approver could only reach them via the
+  // notification. Loaded on the ledger view and refreshed after a new top-up.
+  const [pendingTopUps, setPendingTopUps] = useState<PendingTopUps | null>(null)
+  const loadPendingTopUps = useCallback(async () => {
+    if (!selected) { setPendingTopUps(null); return }
+    try { setPendingTopUps(await request(`/api/expense/funding-sources/${selected}/pending-top-ups`)) }
+    catch { /* non-blocking: the ledger itself must still render */ }
+  }, [request, selected])
+  useEffect(() => { if (view === 'ledger') loadPendingTopUps() }, [view, loadPendingTopUps])
+
   const source = sources.find((s) => s.id === selected)
   // §5/§8: only a fixed-allocation fund can be topped up. Derived from the
   // shared mapping (lib/expense-funds.ts) rather than a second list of source
@@ -119,6 +151,26 @@ function PettyCashLedgerPage() {
   const fundClass = source ? fundClassOf(source.sourceType) : null
 
   const clearForm = () => { setAmount(''); setReference(''); setNote('') }
+
+  // §4: export this fund's running cashbook as a PDF. Only meaningful for a fund
+  // that accumulates a ledger (CASH/Petty Cash) — live-balance funds (drawer/
+  // bank) have no running balance, so the button is hidden for those.
+  const downloadLedgerPdf = () => {
+    if (!ledger || !source) return
+    downloadCustodianLedgerPdf({
+      fundName: source.name,
+      openingBalance: ledger.openingBalance,
+      closingBalance: ledger.closingBalance,
+      totalReceived: ledger.totalReceived,
+      totalPaid: ledger.totalPaid,
+      // The API returns rows newest-first (for the screen); the cashbook reads
+      // oldest-first so the running balance builds down the page.
+      rows: [...ledger.rows].reverse().map((r) => ({
+        createdAt: r.createdAt, type: r.type, amount: r.amount,
+        reference: r.reference, note: r.note, requestNumber: r.requestNumber, paymentMethod: r.paymentMethod,
+      })),
+    })
+  }
 
   // §8: the standard path — anyone with Petty Cash Custodian access requests a
   // top-up, which goes through the First → Second Approver chain (or is
@@ -131,7 +183,7 @@ function PettyCashLedgerPage() {
     try {
       const res = await request(`/api/expense/funding-sources/${selected}/top-up`, { method: 'POST', body: JSON.stringify({ amount: amt, reference: reference || undefined, note: note || undefined }) })
       toast.success(res?.status === 'CLOSED' ? 'Top-up allocated (below approval threshold)' : 'Top-up requested — awaiting approval')
-      clearForm(); loadLedger()
+      clearForm(); loadLedger(); loadPendingTopUps()
     } catch (err: unknown) { toast.error(err instanceof Error ? err.message : 'Could not request top-up') }
     finally { setSubmitting(false) }
   }
@@ -314,8 +366,43 @@ function PettyCashLedgerPage() {
                 <p className="text-lg font-bold mt-1 text-red-600">{formatCurrency(ledger.totalPaid)}</p>
               </div>
               <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-2xl p-4 shadow">
-                <p className="text-indigo-100 text-xs">Closing Balance{ledger.live ? ' (live)' : ''}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-indigo-100 text-xs">Closing Balance{ledger.live ? ' (live)' : ''}</p>
+                  {ledger.topUpRequired && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-300 text-amber-900 whitespace-nowrap">⚠ Top-up Required</span>
+                  )}
+                </div>
                 <p className="text-lg font-bold mt-1">{formatCurrency(ledger.closingBalance)}</p>
+              </div>
+            </div>
+
+            {/* Phase 4: Reserved (approved but unpaid) → Available, plus burn rate.
+                Available is the number that actually matters before approving more
+                spend; Reserved explains the gap from the closing balance. */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                <p className="text-gray-500 text-xs">Reserved (approved, unpaid)</p>
+                <p className="text-lg font-bold mt-1 text-amber-600">{formatCurrency(ledger.reserved ?? 0)}</p>
+              </div>
+              <div className={`rounded-2xl p-4 shadow-sm border ${(ledger.available ?? 0) < 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-100'}`}>
+                <p className="text-gray-500 text-xs">Available</p>
+                <p className={`text-lg font-bold mt-1 ${(ledger.available ?? 0) < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{formatCurrency(ledger.available ?? 0)}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">Closing − Reserved</p>
+              </div>
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                <p className="text-gray-500 text-xs">Avg daily spend</p>
+                <p className="text-lg font-bold mt-1 text-gray-800">{(ledger.avgDailySpend ?? 0) > 0 ? formatCurrency(ledger.avgDailySpend!) : '—'}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">rolling 14 days</p>
+              </div>
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                <p className="text-gray-500 text-xs">Days until empty</p>
+                {/* Suppressed (server sends null) when spend is 0 or there is under
+                    5 days of history — avoids a nonsense "∞ days" / early noise. */}
+                {ledger.daysUntilEmpty != null ? (
+                  <p className={`text-lg font-bold mt-1 ${ledger.daysUntilEmpty <= 5 ? 'text-red-600' : ledger.daysUntilEmpty <= 14 ? 'text-amber-600' : 'text-gray-800'}`}>{ledger.daysUntilEmpty} {ledger.daysUntilEmpty === 1 ? 'day' : 'days'}</p>
+                ) : (
+                  <p className="text-lg font-bold mt-1 text-gray-300" title={(ledger.historyDays ?? 0) < 5 ? 'Needs at least 5 days of history' : 'No recent spend to project from'}>—</p>
+                )}
               </div>
             </div>
 
@@ -368,6 +455,54 @@ function PettyCashLedgerPage() {
               </div>
             )}
 
+            {/* §8: top-up requests awaiting approval for this fund. Direction=IN
+                requests are hidden from "my expense requests" by design, so this
+                is the only list that surfaces them — each row links to the detail
+                page where Approve/Reject live. */}
+            {pendingTopUps && pendingTopUps.count > 0 && (
+              <div className="bg-white rounded-2xl shadow-sm border border-amber-200 overflow-hidden">
+                <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
+                  <h2 className="font-semibold text-amber-800">⏳ Top-ups awaiting approval</h2>
+                  <span className="text-sm font-bold text-amber-800">{pendingTopUps.count} · {formatCurrency(pendingTopUps.totalPending)}</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr className="text-left text-gray-600">
+                        <th className="px-4 py-3 font-semibold">Date</th>
+                        <th className="px-4 py-3 font-semibold">Requested By</th>
+                        <th className="px-4 py-3 font-semibold">Purpose</th>
+                        <th className="px-4 py-3 font-semibold">Reference</th>
+                        <th className="px-4 py-3 font-semibold text-right">Amount</th>
+                        <th className="px-4 py-3 font-semibold text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {pendingTopUps.rows.map((r) => (
+                        <tr key={r.id} className="hover:bg-amber-50/40">
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(r.createdAt)}</td>
+                          <td className="px-4 py-3 font-medium text-gray-800">{r.requestedById === user?.id ? 'You' : (names[r.requestedById] || '—')}</td>
+                          <td className="px-4 py-3 text-gray-700 max-w-[240px] truncate" title={r.purpose}>{r.purpose}</td>
+                          <td className="px-4 py-3 text-gray-500">{r.reference || '—'}</td>
+                          <td className="px-4 py-3 text-right font-bold text-gray-900">{formatCurrency(r.amount)}</td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <Link href={`/expense-requests/${r.id}`}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700">Review →</Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {!ledger.live && ledger.rows.length > 0 && (
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-gray-800">Ledger — running cashbook</h2>
+                <Button variant="outline" onClick={downloadLedgerPdf}>⬇ Download PDF</Button>
+              </div>
+            )}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -375,6 +510,9 @@ function PettyCashLedgerPage() {
                     <tr className="text-left text-gray-600">
                       <th className="px-4 py-3 font-semibold">Date</th>
                       <th className="px-4 py-3 font-semibold">Type</th>
+                      <th className="px-4 py-3 font-semibold">Request</th>
+                      <th className="px-4 py-3 font-semibold">Employee / Dept</th>
+                      <th className="px-4 py-3 font-semibold">Method</th>
                       <th className="px-4 py-3 font-semibold">Reference</th>
                       <th className="px-4 py-3 font-semibold">By</th>
                       <th className="px-4 py-3 font-semibold text-right">Amount</th>
@@ -382,18 +520,45 @@ function PettyCashLedgerPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {ledger.rows.map((r) => (
+                    {ledger.rows.map((r) => {
+                      // A partial approval — the approver signed off less than was
+                      // requested — is the case where the two figures diverge.
+                      const partialApproval = r.requestedAmount != null && r.approvedAmount != null && r.approvedAmount !== r.requestedAmount
+                      return (
                       <tr key={r.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatDate(r.createdAt)}</td>
                         <td className="px-4 py-3 text-gray-700">{TYPE_LABEL[r.type] || r.type}{r.note ? <span className="block text-[11px] text-gray-400">{r.note}</span> : null}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {r.requestNumber ? (
+                            r.expenseRequestId ? (
+                              <Link href={`/expense-requests/${r.expenseRequestId}`} className="font-mono text-[12px] text-indigo-600 hover:text-indigo-800 hover:underline">{r.requestNumber}</Link>
+                            ) : (
+                              <span className="font-mono text-[12px] text-gray-700">{r.requestNumber}</span>
+                            )
+                          ) : <span className="text-gray-300">—</span>}
+                          {(r.multiRequestCount ?? 0) > 1 && <span className="block text-[11px] text-gray-400">+{r.multiRequestCount! - 1} more</span>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">
+                          {r.employeeName || <span className="text-gray-300">—</span>}
+                          {r.department && <span className="block text-[11px] text-gray-400">{r.department}</span>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{r.paymentMethod || <span className="text-gray-300">—</span>}</td>
                         <td className="px-4 py-3 text-gray-500">{r.reference || '—'}</td>
                         <td className="px-4 py-3 text-gray-500">{r.createdByName || '—'}</td>
-                        <td className={`px-4 py-3 text-right font-bold ${r.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>{r.amount >= 0 ? '+' : ''}{formatCurrency(r.amount)}</td>
+                        <td className={`px-4 py-3 text-right font-bold ${r.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {r.amount >= 0 ? '+' : ''}{formatCurrency(r.amount)}
+                          {partialApproval && (
+                            <span className="block text-[11px] font-normal text-amber-600" title="Approved amount differs from the requested amount">
+                              approved {formatCurrency(r.approvedAmount!)} of {formatCurrency(r.requestedAmount!)}
+                            </span>
+                          )}
+                        </td>
                         {!ledger.live && <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(r.runningBalance ?? 0)}</td>}
                       </tr>
-                    ))}
+                      )
+                    })}
                     {!ledger.rows.length && (
-                      <tr><td colSpan={ledger.live ? 5 : 6}><EmptyState icon="📒" title="No transactions yet" hint="Allocations and expense payments will appear here." /></td></tr>
+                      <tr><td colSpan={ledger.live ? 8 : 9}><EmptyState icon="📒" title="No transactions yet" hint="Allocations and expense payments will appear here." /></td></tr>
                     )}
                   </tbody>
                 </table>

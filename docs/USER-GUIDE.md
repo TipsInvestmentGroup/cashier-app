@@ -40,6 +40,7 @@ Everything a cashier does, plus:
 - **Payroll Deductions** — over‑limit Admin/Director bills + staff losses; **Run Deduction**, **Email Directors**, monthly auto‑email.
 - **Reports** — Financial Summary, **Daily Cashier Report** (per staff/outlet/customer), **Cash Reconciliation**, **Digital Payment Reconciliation**. All export to CSV / Excel / PDF.
 - **Cash Reconciliation** (Petty Cash → 💰) — Opening auto‑fills from yesterday's closing; enter **Cash Deposited**; closing computes. *(Cash Verified is officer‑only.)*
+- **Digital Payment Reconciliation** (its own **📲 Digital Reconciliation** page, also Close‑the‑Day Step 3) — per channel enter **Paid bills paid in [channel]** + **Total Sales Collection [channel]**; **Total [channel] Collection** computes automatically and is compared against the system **Reported** figure.
 - **Approvals** — you can **Approve / Reject** Cancellations, Tips & DJ Bills, and Customer Bills. **Rejected items drop out of all financial totals.**
 
 ---
@@ -49,7 +50,7 @@ Everything a cashier does, plus:
 - **Approval Requests** — approve/reject **petty cash** (only the two designated approvers).
 - **Cancellations / Tips & DJ Bills / Customer Bills** — review by **Staff / Product / Person** and **Approve / Reject**.
 - **Departments & Categories / Payment Channels** — add or edit (if you're an authorized manager).
-- **Cash & Digital Reconciliation verification** — if you're a verification officer, enter the **Verified** figures. You verify independently — the cashier's opening/closing are hidden and locked; the report compares both sides.
+- **Cash & Digital Reconciliation verification** — if you're a verification officer, enter the **Verified** figures. You verify independently — the cashier's figures are hidden and locked; the report compares both sides. *(Digital: verify **Paid bills** + **Sales collection** per channel; the verified total compares to Reported.)*
 - **Reports & Dashboard** — all outlets, outlet‑performance widget, trends.
 
 > Approvers: **r.mlay@tips.co.tz**, **siyer.mkama@tips.co.tz** · Verification officers: **owner, shabinam@tips.co.tz, siyer.mkama@tips.co.tz** (+ owner‑picked).
@@ -63,7 +64,7 @@ Everything above, plus **one‑time access setup** (do these once):
 - **Users** (⚙️) — create/edit/delete accounts, reset passwords (owner only). Edit/Delete is owner‑restricted.
 - **Persons → 🔐 Manage Access** — pick the 3rd person manager (owner + r.mlay + your pick).
 - **Petty Cash → 🔐 Manage Request Access** — tick who can submit cash requests.
-- **Petty Cash → Cash/Digital Reconciliation → 🔐 Extra verifier** — pick the extra verification officer.
+- **Petty Cash → Cash Reconciliation → 🔐 Extra verifier** — pick the extra verification officer (this setting is shared by both cash and digital verification).
 - **Departments / Categories / Payment Channels** — owner + authorized managers can add/edit.
 - **Products** — maintain the catalogue (code, prices, unit measure).
 
@@ -73,7 +74,7 @@ Everything above, plus **one‑time access setup** (do these once):
 
 ## Key rules everyone should know
 - **Staff Loss = System Sales − Collection − Signed Bills − Paid Bills (Staff‑Loss category only).**
-- **Required to collect (digital) = Closing − Opening; Variance = Reported − Required.**
+- **Total Collection (digital) = Paid bills + Sales collection (per channel); Variance = Total − Reported.**
 - **Rejected** cancellations/bills are void and **excluded from totals** (Pending still counts until decided).
 - A payment auto‑applies to the **same person + same category** bills, **oldest first**; leftover is recorded as a credit.
 - Reconciliation **opening balance carries from the previous day's closing** automatically.

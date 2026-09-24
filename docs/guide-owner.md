@@ -13,9 +13,9 @@ You have everything plus full configuration. **Log in with the owner email** (`j
 
 ## First‑time production setup (run once)
 1. Set Vercel env: strong `JWT_SECRET`, `CRON_SECRET`, `NEXT_PUBLIC_OWNER_EMAIL`, `SMTP_*`.
-2. `…/api/admin/seed?secret=CRON_SECRET` — outlets + persons.
-3. `…/api/admin/setup-team?secret=CRON_SECRET&password=<TEMP>` — creates the real staff accounts.
-4. Share temp passwords privately; everyone changes theirs on first login.
+2. **POST** `…/api/admin/seed` with the secret in a header (never the URL): `curl -X POST …/api/admin/seed -H "x-cron-secret: <CRON_SECRET>"` — outlets + persons.
+3. **POST** `…/api/admin/setup-team` with the secret in a header and the temp password in the JSON body (never the URL): `curl -X POST …/api/admin/setup-team -H "x-cron-secret: <CRON_SECRET>" -H "content-type: application/json" -d '{"password":"<TEMP>"}'` — creates the real staff accounts.
+4. Share temp passwords privately; everyone changes theirs on first login. **Rotate `CRON_SECRET` after go-live.**
 
 ## Watch
 - **Dashboard** — live totals, per‑outlet performance, top debtors.

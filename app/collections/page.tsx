@@ -123,7 +123,14 @@ export default function CollectionsPage() {
   const [closingDay, setClosingDay] = useState(false)
   const [closeWizard, setCloseWizard] = useState(false) // guided close-day flow
   const [wizardStep, setWizardStep] = useState(0)
+  // Step the wizard should reopen at after returning from a sub-page (e.g. Cash
+  // Requests). Seeded once from the URL on mount, then applied once collections
+  // have loaded so the forms have an outlet to work with. null = nothing pending.
+  const [pendingStep, setPendingStep] = useState<number | null>(null)
   const [dayStatus, setDayStatus] = useState({ cashDone: false, digitalDone: false, templateDone: false })
+  // Soft-gate summary for Step 1 (§4.3): how many Cashier Cash requests remain
+  // unpaid for the target day. Never blocks Continue — just warns.
+  const [cashReq, setCashReq] = useState<{ unpaidCount: number; totalToPay: number } | null>(null)
 
   const [form, setForm] = useState({
     cash: '', channelAmounts: {} as Record<string, string>, notes: '', staffName: '', systemSales: '',
@@ -484,14 +491,53 @@ export default function CollectionsPage() {
     })
   }
 
+  // Unpaid Cashier Cash requests for the target day — drives Step 1's soft
+  // warning. Uses the first target outlet (the same one the wizard reconciles).
+  const loadCashReq = async () => {
+    const oid = targetOutletIds[0]
+    if (!oid) { setCashReq(null); return }
+    const r = await request(`/api/expense/cash-requests?outletId=${oid}&date=${targetDayStr}`).catch(() => null)
+    setCashReq(r ? { unpaidCount: r.unpaidCount ?? 0, totalToPay: r.totalToPay ?? 0 } : null)
+  }
+
   // Refresh status when the wizard opens and whenever the cashier returns to this tab.
   useEffect(() => {
     if (!closeWizard) return
     loadDayStatus()
-    const onFocus = () => loadDayStatus()
+    loadCashReq()
+    const onFocus = () => { loadDayStatus(); loadCashReq() }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [closeWizard]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Returning from a wizard sub-page (Cash Requests etc.) lands here with
+  // ?closeWizard=1&step=N. Read it once on mount, remember the requested step,
+  // then strip the params so a later refresh doesn't force the wizard open again.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('closeWizard') !== '1') return
+    const raw = Number.parseInt(params.get('step') ?? '', 10)
+    // Only steps 0–4 are wizard steps (5 is the post-close report view). Anything
+    // missing or out of range safely falls back to Step 1.
+    const step = Number.isInteger(raw) && raw >= 0 && raw <= 4 ? raw : 0
+    setPendingStep(step)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('closeWizard')
+    url.searchParams.delete('step')
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+  }, [])
+
+  // Apply the pending step once collections have loaded and we know which outlet
+  // to reconcile — mirrors the guard in openCloseWizard. If there's nothing to
+  // close for the day, drop the request rather than opening an empty wizard.
+  useEffect(() => {
+    if (pendingStep === null || loading) return
+    if (targetOutletIds.length === 0) { setPendingStep(null); return }
+    setWizardStep(pendingStep)
+    setCloseWizard(true)
+    setPendingStep(null)
+  }, [pendingStep, loading, targetOutletIds])
 
   const closeDay = async () => {
     const label = format(targetCloseDate, 'dd MMM yyyy')
@@ -1203,8 +1249,13 @@ export default function CollectionsPage() {
               {wizardStep === 0 && (
                 <div>
                   <p className="text-sm font-semibold text-gray-800 mb-1">Step 1 of 4 · Cash Requests <span className="text-gray-400 font-normal">(optional)</span></p>
-                  <p className="text-sm text-gray-500 mb-4">If there were any cash expenses today, record them first. If none, continue.</p>
-                  <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
+                  <p className="text-sm text-gray-500 mb-4">If there were any cash expenses today, pay them out first. If none, continue.</p>
+                  <a href={`/close-the-day/cash-requests?outletId=${targetOutletIds[0] || ''}&date=${targetDayStr}&step=${wizardStep}`} target="_blank" rel="noopener noreferrer" className="block text-center w-full py-2.5 mb-2 rounded-xl bg-indigo-50 text-indigo-700 font-semibold text-sm hover:bg-indigo-100">Open Cash Requests ↗</a>
+                  {cashReq && cashReq.unpaidCount > 0 && (
+                    <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      {cashReq.unpaidCount} cash request{cashReq.unpaidCount === 1 ? '' : 's'} still unpaid ({formatCurrency(cashReq.totalToPay)}) — reconciliation totals won&apos;t include {cashReq.unpaidCount === 1 ? 'it' : 'them'} until paid. You can still continue.
+                    </div>
+                  )}
                   <button onClick={() => setWizardStep(1)} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Continue to Cash Reconciliation →</button>
                 </div>
               )}
@@ -1272,9 +1323,9 @@ export default function CollectionsPage() {
                   <p className="text-sm font-semibold text-gray-800 mb-1">Complete or correct, then reconfirm</p>
                   <p className="text-sm text-gray-500 mb-3">Open the section that needs work (opens in a new tab), then come back and reconfirm.</p>
                   <div className="grid grid-cols-1 gap-2">
-                    <a href="/petty-cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💵 Cash Requests ↗</a>
+                    <a href={`/close-the-day/cash-requests?outletId=${targetOutletIds[0] || ''}&date=${targetDayStr}&step=${wizardStep}`} target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💵 Cash Requests ↗</a>
                     <a href="/petty-cash?recon=cash" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">💰 Cash Reconciliation ↗</a>
-                    <a href="/petty-cash?recon=digital" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📲 Digital Reconciliation ↗</a>
+                    <a href="/digital-payment-reconciliation" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📲 Digital Reconciliation ↗</a>
                     <a href="/signed-bills" target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-sm font-medium text-gray-700">📋 Bills &amp; Transactions Review ↗</a>
                   </div>
                   <button onClick={() => { loadDayStatus(); setWizardStep(3) }} className="w-full py-3 mt-3 rounded-xl bg-indigo-600 text-white font-bold text-sm hover:bg-indigo-700">Back to confirmation →</button>
@@ -1299,8 +1350,10 @@ export default function CollectionsPage() {
       <Modal open={!!deleteTarget} onClose={() => { setDeleteTarget(null); setDeleteReason('') }} title="Delete Collection">
         <div className="space-y-3">
           <p className="text-sm text-gray-600">
-            Delete this collection{deleteTarget?.staffName ? ` for ${deleteTarget.staffName}` : ''}? Any auto staff-loss linked to it will also be removed.
-            A snapshot of the record and this reason are kept in the audit trail.
+            This permanently deletes the <b>entire session</b> for{deleteTarget?.staffName ? ` ${deleteTarget.staffName}` : ' this staff member'} on
+            this day — the collection figures, its signed bills, paid bills, discounts and cancellations, and any staff-loss
+            recorded with it. Linked ledger postings are reversed. This cannot be undone (a snapshot and your reason are kept
+            in the audit trail). Cash requests are not affected.
           </p>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">Reason</label>

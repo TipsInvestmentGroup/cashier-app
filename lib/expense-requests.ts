@@ -13,8 +13,9 @@ import { resolveExpenseModuleConfig } from '@/lib/expense-config'
 import { openNextApprovalStep, cancelPendingExpenseApproval, resolveApprovalPlan, executeTopUpAllocation } from '@/lib/expense-workflow'
 import { getFundingSourceBalance } from '@/lib/expense-ledger'
 import { listFundingSourceCustodians } from '@/lib/expense-access'
-import { allowsManualAllocation } from '@/lib/expense-funds'
+import { allowsManualAllocation, payableAmount } from '@/lib/expense-funds'
 import { createNotification } from '@/lib/notifications'
+import { resolveOutletCode } from '@/lib/bill-reference'
 
 function parseIdList(raw: string | null | undefined): string[] | null {
   if (!raw) return null // null = no restriction
@@ -45,6 +46,9 @@ export interface CreateExpenseRequestInput {
   departmentId?: string | null
   eventId?: string | null
   dueDate?: Date | null
+  /** Phase 3 — the transaction kind (EXPENSE_TYPES). Optional here so top-up and
+   *  cutover callers keep working; the OUT Expense Form requires it at the API. */
+  expenseType?: string | null
   items?: ExpenseItemInput[]
   fieldValues?: Record<string, string>
   /** §3 — the fund this will be paid from. Required on the Expense Form; still
@@ -183,10 +187,12 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
       currency: input.currency || 'TZS',
       purpose,
       status: 'DRAFT',
+      stageEnteredAt: new Date(),
       outletId: input.outletId || null,
       departmentId: input.departmentId || null,
       eventId: input.eventId || null,
       dueDate: input.dueDate || null,
+      expenseType: input.expenseType?.trim() || null,
       fundingSourceId,
       direction: input.direction ?? 'OUT',
       reference: input.reference?.trim() || null,
@@ -204,22 +210,67 @@ export async function createExpenseRequest(db: Db, input: CreateExpenseRequestIn
  * amount is at/below the fund's approvalThreshold — §3's small-request
  * shortcut).
  *
- * Refuses to submit when approval IS required but nobody holds FIRST_APPROVER
- * for the fund. Auto-approving in that case would let a forgotten access grant
- * silently turn into unapproved money going out; leaving it PENDING with no
- * approver would strand it invisibly. An explicit error is the only honest
- * outcome, and it names the fix.
+ * Refuses to submit when approval IS required but nobody holds an approver
+ * grant for the fund (neither a Single Approver nor a First Approver).
+ * Auto-approving in that case would let a forgotten access grant silently turn
+ * into unapproved money going out; leaving it PENDING with no approver would
+ * strand it invisibly. An explicit error is the only honest outcome, and it
+ * names the fix.
  */
+// Per-outlet numbering with the branch code embedded: EXP-YYYYMMDD-<BRANCH>-NNNN
+// (e.g. EXP-20260806-MIK-0001). The branch segment is what makes per-outlet
+// numbering collision-free — the spec's plain EXP-YYYYMMDD-NNNN could not carry
+// two outlets' independent counters without them colliding on the same day.
+// The counter is scoped BY THE RESOLVED BRANCH CODE (not the outlet id) so that
+// even if two outlets ever slugged to the same code they'd share one continuous
+// counter rather than mint a duplicate number. Branch code resolution reuses the
+// bill engine's resolveOutletCode (Outlet.branchCode, else a slug of the name),
+// so bills and expense numbers speak the same outlet vocabulary.
+const NO_OUTLET_BRANCH = 'GEN' // OUT requests always carry an outlet; defensive only.
+
+/**
+ * Allocates the next EXP-YYYYMMDD-<BRANCH>-NNNN request number. The date is a
+ * submit-time stamp; NNNN is the branch's CONTINUOUS counter (never resets).
+ * Runs on the caller's `db` so the upsert-increment is atomic inside the submit
+ * transaction — two concurrent submits for the same branch can't draw the same
+ * number.
+ *
+ * The date is taken in UTC (toISOString) so it is deterministic and never shifts
+ * with server locale; near midnight the stamp may differ from local calendar
+ * date by the TZ offset, which is immaterial for an identifier whose uniqueness
+ * comes from the branch + counter, not the date.
+ */
+export async function allocateRequestNumber(db: Db, outlet: { branchCode: string | null; name: string } | null): Promise<string> {
+  const branch = resolveOutletCode(null, outlet) || NO_OUTLET_BRANCH
+  const seq = await db.expenseRequestSequence.upsert({
+    where: { scopeKey: branch },
+    create: { scopeKey: branch, lastNumber: 1 },
+    update: { lastNumber: { increment: 1 } },
+  })
+  const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  return `EXP-${ymd}-${branch}-${String(seq.lastNumber).padStart(4, '0')}`
+}
+
 export async function submitExpenseRequest(db: Db, requestId: string): Promise<{ status: ExpenseRequestStatus; skipReason: string | null }> {
-  const request = await db.expenseRequest.findUnique({ where: { id: requestId }, include: { requestType: true } })
+  const request = await db.expenseRequest.findUnique({ where: { id: requestId }, include: { requestType: true, outlet: { select: { branchCode: true, name: true } } } })
   if (!request) throw new Error('Expense request not found')
   if (request.status !== 'DRAFT') throw new Error(`Cannot submit a request in status ${request.status}`)
+
+  // Assign the human-readable number now, at submit — not at draft creation, so
+  // abandoned drafts leave no gaps. OUT disbursements only: top-ups (direction
+  // IN) live on the custodian ledger screen, not the Expense Requests table, and
+  // are not numbered. Idempotent (only when still null) so a re-submit can't
+  // consume a second number.
+  if (request.direction === 'OUT' && !request.requestNumber) {
+    const requestNumber = await allocateRequestNumber(db, request.outlet)
+    await db.expenseRequest.update({ where: { id: requestId }, data: { requestNumber } })
+  }
 
   const plan = await resolveApprovalPlan(db, request)
   if (!plan.skip && !plan.stages.length) {
     throw new Error(
-      'This request needs approval, but nobody has First Approver access for this fund and outlet. ' +
-      'Grant it under Setup → Expense Settings → Manage Access, then submit again.'
+      'This request needs approval, but nobody has approver access (Single Approver, or First Approver) ' +
+      'for this fund and outlet. Grant it under Setup → Expense Settings → Manage Access, then submit again.'
     )
   }
 
@@ -231,11 +282,11 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
       plan.skip ? ` and needs no approval (${plan.reason})` : ' and is awaiting approval'
     }.`,
     entityType: 'ExpenseRequest', entityId: request.id,
-  }).catch(() => {})
+  }, db)
 
   // Needs approval: open the first stage and wait.
   if (!plan.skip) {
-    await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'PENDING_APPROVAL' } })
+    await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'PENDING_APPROVAL', stageEnteredAt: new Date() } })
     await openNextApprovalStep(db, requestId)
     await submittedNote()
     return { status: 'PENDING_APPROVAL', skipReason: null }
@@ -252,17 +303,17 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
     return { status, skipReason: plan.reason }
   }
 
-  await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'APPROVED' } })
+  await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'APPROVED', stageEnteredAt: new Date() } })
   await submittedNote()
   if (request.fundingSourceId) {
-    const custodians = await listFundingSourceCustodians(request.fundingSourceId).catch(() => [])
+    const custodians = await listFundingSourceCustodians(request.fundingSourceId, db).catch(() => [])
     await Promise.all(custodians.map((c) => createNotification({
       userId: c.userId,
       type: 'EXPENSE_REQUEST_READY_FOR_PAYMENT',
       title: `${request.requestType.name} ready for payment`,
       message: `"${request.purpose}" for ${request.amount} ${request.currency} needs no approval and is ready to be paid.`,
       entityType: 'ExpenseRequest', entityId: request.id,
-    }).catch(() => {})))
+    }, db)))
   }
   return { status: 'APPROVED', skipReason: plan.reason }
 }
@@ -282,7 +333,7 @@ export async function cancelExpenseRequest(db: Db, requestId: string): Promise<{
   if (request._count.paymentAllocations > 0) throw new Error('Cannot cancel a request that already has payments — reverse the payment instead')
   if (request.status !== 'DRAFT' && request.status !== 'PENDING_APPROVAL') throw new Error(`Cannot cancel a request in status ${request.status}`)
 
-  await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'CANCELLED' } })
+  await db.expenseRequest.update({ where: { id: requestId }, data: { status: 'CANCELLED', stageEnteredAt: new Date() } })
   await cancelPendingExpenseApproval(db, requestId)
   return { status: 'CANCELLED' }
 }
@@ -300,7 +351,9 @@ export async function recalcExpenseRequestPaymentStatus(db: Db, requestId: strin
   if (request.status !== 'APPROVED' && request.status !== 'PARTIALLY_PAID') return request.status as ExpenseRequestStatus
 
   const paid = roundMoney(request.paymentAllocations.reduce((s, a) => s + a.amount, 0))
-  const status: ExpenseRequestStatus = paid + 0.001 >= request.amount ? 'PAID' : 'PARTIALLY_PAID'
-  if (status !== request.status) await db.expenseRequest.update({ where: { id: requestId }, data: { status } })
+  // Fully paid = paid up to the APPROVED figure, not the requested one — a
+  // partially-approved request is PAID once its approved amount is disbursed.
+  const status: ExpenseRequestStatus = paid + 0.001 >= payableAmount(request) ? 'PAID' : 'PARTIALLY_PAID'
+  if (status !== request.status) await db.expenseRequest.update({ where: { id: requestId }, data: { status, stageEnteredAt: new Date() } })
   return status
 }

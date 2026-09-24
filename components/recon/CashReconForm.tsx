@@ -68,7 +68,11 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
   }
 
   const excess = excessItems.reduce((s, it) => s + (Number(it.amount) || 0), 0)
-  const closing = autoOpening + computed.cashCollected + computed.paidBillsCash - computed.cashExpenses - (Number(cashDeposited) || 0) - excess
+  // Closing = Yesterday's Closing + Collected + Paid-cash − Expenses − Excess Paid − Deposited.
+  // autoOpening is yesterday's *persisted* closingBalance (lib/cash-recon.ts →
+  // previousClosing reads the stored record, not a live recompute), so this
+  // opening figure is stable and auditable rather than shifting under retroactive edits.
+  const closing = autoOpening + computed.cashCollected + computed.paidBillsCash - computed.cashExpenses - excess - (Number(cashDeposited) || 0)
   const verified = verifiedAmount !== '' ? Number(verifiedAmount) || 0 : null
   const vVar = verified != null ? verified - closing : null
 
@@ -110,7 +114,11 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
         <div className="flex justify-between"><span className="text-gray-600">💵 Cash collected from staff</span><span className="font-semibold">{formatCurrency(computed.cashCollected)}</span></div>
         <div className="flex justify-between"><span className="text-gray-600">✅ Paid bills (cash)</span><span className="font-semibold">{formatCurrency(computed.paidBillsCash)}</span></div>
         <div className="flex justify-between"><span className="text-gray-600">🧾 Cash expenses (requests)</span><span className="font-semibold text-red-600">−{formatCurrency(computed.cashExpenses)}</span></div>
-        <div className="flex justify-between border-t border-gray-200 pt-1"><span className="text-gray-600">Opening (auto)</span><span className="font-semibold">{formatCurrency(autoOpening)}</span></div>
+        <div className="flex justify-between border-t border-gray-200 pt-1">
+          <span className="text-gray-600">📅 Closing Cash Balance (Yesterday)<span className="block text-[11px] text-gray-400 font-normal">auto · yesterday&apos;s closing</span></span>
+          <span className="font-semibold">{formatCurrency(autoOpening)}</span>
+        </div>
+        <div className="flex justify-between"><span className="text-gray-600">⚠️ Excess Amount Paid</span><span className="font-semibold text-red-600">−{formatCurrency(excess)}</span></div>
       </div>
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Deposited to Bank ({getCurrencyCode()}) *</label>
@@ -165,10 +173,19 @@ export function CashReconForm({ outletId, date, onSaved }: { outletId: string; d
           + Add Excess Amount
         </button>
       </div>
-      <div className="bg-indigo-50 rounded-xl p-3 flex items-center justify-between">
-        <span className="font-semibold text-indigo-800">Closing Cash Balance</span>
-        <span className={`text-xl font-bold ${closing < 0 ? 'text-red-700' : 'text-indigo-700'}`}>{formatCurrency(closing)}</span>
+      <div className="bg-indigo-50 rounded-xl p-3">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold text-indigo-800">Closing Cash Balance</span>
+          <span className={`text-xl font-bold ${closing < 0 ? 'text-red-700' : 'text-indigo-700'}`}>{formatCurrency(closing)}</span>
+        </div>
+        <p className="text-[11px] text-indigo-400 mt-1">Closing = Yesterday&apos;s Closing + Collected + Paid-cash − Expenses − Excess Paid − Deposited</p>
       </div>
+      {closing < 0 && (
+        <div className="rounded-xl p-3 border-2 border-red-200 bg-red-50 text-sm text-red-800">
+          <p className="font-semibold">⚠️ Closing balance is negative</p>
+          <p className="text-xs mt-1">You&apos;ve deposited/paid out more cash than the drawer holds. This usually means the day&apos;s <strong>cash collection wasn&apos;t recorded</strong> — record it under Daily Collections so &quot;Cash collected from staff&quot; offsets the deposit. A drawer can&apos;t physically go below zero.</p>
+        </div>
+      )}
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-1">Cash Verified ({getCurrencyCode()}) {canVerify ? '*' : <span className="text-gray-400 font-normal">— officers only</span>}</label>
         {canVerify

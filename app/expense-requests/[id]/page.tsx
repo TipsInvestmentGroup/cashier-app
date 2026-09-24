@@ -8,9 +8,16 @@ import { Button } from '@/components/ui/Button'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { waitingForText, type CurrentApproverView } from '@/lib/expense-approver'
+import { downloadExpenseRequestPdf, type ExpensePdfSnapshot } from '@/lib/expense-request-pdf'
 import toast from 'react-hot-toast'
 
 const MAX_ATTACHMENT = 2 * 1024 * 1024 // 2MB, same cap as PayModal's receipt upload
+
+// Last-resort fallback only if the per-outlet payment-methods config can't be
+// fetched — the effective list is resolved server-side (Outlet → Company →
+// Global → built-in default) and configured under Expense Settings.
+const FALLBACK_PAYMENT_METHODS = ['CASH', 'CRDB', 'M-PESA', 'BANK TRANSFER']
 
 interface ExpenseItem { id: string; detail: string; unit: number; unitCost: number; amount: number }
 interface ExpensePayment {
@@ -21,12 +28,18 @@ interface PaymentAllocation { id: string; amount: number; expensePayment: Expens
 interface VerificationRecord { id: string; stage: string; verifiedById: string | null; verifiedAt: string; note: string | null }
 interface ExpenseRequestDetail {
   id: string; purpose: string; amount: number; currency: string; status: string; createdAt: string
+  // allocatedAmount = the approver-adjusted (approved) figure; null until an
+  // approver sets a partial amount. direction OUT = disbursement, IN = top-up.
+  allocatedAmount: number | null; direction: string
   requestedById: string; outletId: string | null
+  requestNumber: string | null; expenseType: string | null; stageEnteredAt: string | null
+  outlet: { id: string; name: string } | null
   requestType: { id: string; name: string; approverRoles: string | null; requiredVerificationStages: string | null; requiredAttachments: string | null }
   category: { id: string; name: string }
   items: ExpenseItem[]
   paymentAllocations: PaymentAllocation[]
   verifications: VerificationRecord[]
+  currentApprover?: CurrentApproverView | null
 }
 interface FundingSource { id: string; name: string; sourceType: string; isActive: boolean }
 interface Attachment { id: string; url: string; docType: string; createdAt: string; uploadedById: string | null }
@@ -56,8 +69,11 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   const [sources, setSources] = useState<FundingSource[]>([])
   const [names, setNames] = useState<Record<string, string>>({})
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [paymentMethods, setPaymentMethods] = useState<string[]>(FALLBACK_PAYMENT_METHODS)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
+  // Approver-adjusted amount (partial approval); blank = approve as requested.
+  const [approveAmount, setApproveAmount] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -72,6 +88,10 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
       setSources((srcs || []).filter((s: FundingSource) => s.isActive))
       setNames(Object.fromEntries((users || []).map((u: { id: string; name: string }) => [u.id, u.name])))
       setAttachments(atts || [])
+      // Payment methods are resolved for this request's outlet (Expense Settings
+      // → per-outlet override → company → global → default).
+      const pm = await request(`/api/expense/config/payment-methods?outletId=${d?.outletId || ''}`).catch(() => null)
+      if (pm?.paymentMethods?.length) setPaymentMethods(pm.paymentMethods)
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not load request') }
     finally { setLoading(false) }
   }, [request, id])
@@ -82,7 +102,12 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   const isOwner = data?.requestedById === user?.id
   const canDisburse = DISBURSER_ROLES.includes(user?.role || '')
   const canClose = CLOSER_ROLES.includes(user?.role || '')
-  const outstanding = data ? data.amount - data.paymentAllocations.reduce((s, a) => s + a.amount, 0) : 0
+  // The payable figure is the approved amount once an approver adjusted it,
+  // otherwise the requested amount (mirrors lib/expense-funds.ts payableAmount).
+  // Every "how much is left" figure on this page is against it, not `amount`.
+  const approvedAmt = data ? (data.allocatedAmount != null && data.allocatedAmount > 0 ? data.allocatedAmount : data.amount) : 0
+  const isPartialApproval = !!data && data.allocatedAmount != null && data.allocatedAmount > 0 && data.allocatedAmount !== data.amount
+  const outstanding = data ? approvedAmt - data.paymentAllocations.reduce((s, a) => s + a.amount, 0) : 0
 
   const submitDraft = async () => {
     setBusy('submit')
@@ -92,7 +117,15 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   }
   const decide = async (approve: boolean) => {
     setBusy(approve ? 'approve' : 'reject')
-    try { const r = await request(`/api/expense/requests/${id}/decide`, { method: 'POST', body: JSON.stringify({ approve }) }); toast.success(`Now ${r.status.replace('_', ' ')}`); load() }
+    // On approve, an approver may sign off a different (usually smaller) amount
+    // than requested — sent only when they entered one and it actually differs.
+    // The server applies it at the FINAL approval level (lib/expense-workflow.ts).
+    const adj = approveAmount.trim() ? Number(approveAmount) : null
+    const allocatedAmount = approve && adj != null && adj > 0 && data && adj !== data.amount ? adj : undefined
+    try {
+      const r = await request(`/api/expense/requests/${id}/decide`, { method: 'POST', body: JSON.stringify({ approve, ...(allocatedAmount != null ? { allocatedAmount } : {}) }) })
+      toast.success(`Now ${r.status.replace('_', ' ')}`); setApproveAmount(''); load()
+    }
     catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not decide') }
     finally { setBusy(null) }
   }
@@ -111,9 +144,18 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
   }
 
   // ── Pay panel ──
+  // Keep the raw numeric string in state (so Number(amount) works on submit),
+  // but show it with thousand separators. e.g. "1500000" -> "1,500,000".
+  const displayAmount = (raw: string) => {
+    if (!raw) return ''
+    const [int, dec] = raw.split('.')
+    const withCommas = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+    return dec !== undefined ? `${withCommas}.${dec}` : withCommas
+  }
+  const parseAmount = (formatted: string) => formatted.replace(/[^\d.]/g, '')
   const [payOpen, setPayOpen] = useState(false)
   const [payForm, setPayForm] = useState({ fundingSourceId: '', amount: '', paymentMethod: 'CASH', payeeName: '', payeeAccount: '', reference: '' })
-  const openPay = () => { setPayForm({ fundingSourceId: sources[0]?.id || '', amount: String(outstanding), paymentMethod: sources[0]?.sourceType || 'CASH', payeeName: '', payeeAccount: '', reference: '' }); setPayOpen(true) }
+  const openPay = () => { setPayForm({ fundingSourceId: sources[0]?.id || '', amount: String(outstanding), paymentMethod: paymentMethods[0] || 'CASH', payeeName: '', payeeAccount: '', reference: '' }); setPayOpen(true) }
   const submitPay = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!payForm.fundingSourceId) return toast.error('Select a funding source')
@@ -164,6 +206,18 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
     finally { setBusy(null) }
   }
 
+  // Download the frozen snapshot as a PDF — 'audit' for the full request→
+  // payment→retirement trail, 'routing' for the not-yet-approved physical
+  // routing copy. Read-only: fetching the snapshot never touches the workflow.
+  const downloadPdf = async (variant: 'audit' | 'routing') => {
+    setBusy(`pdf-${variant}`)
+    try {
+      const snap: ExpensePdfSnapshot = await request(`/api/expense/requests/${id}/pdf-data`)
+      await downloadExpenseRequestPdf(snap, { variant, recordUrl: window.location.href })
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Could not generate PDF') }
+    finally { setBusy(null) }
+  }
+
   if (loading) return <AppShell><SectionTabs tabs={PETTY_TABS} /><div className="py-16 text-center text-gray-400">Loading…</div></AppShell>
   if (!data) return <AppShell><SectionTabs tabs={PETTY_TABS} /><div className="py-16 text-center text-gray-400">Request not found.</div></AppShell>
 
@@ -184,13 +238,31 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">{data.purpose}</h1>
-              <Badge tone={STATUS_TONE[data.status] || 'gray'}>{data.status.replace('_', ' ')}</Badge>
+              {data.status === 'PENDING_APPROVAL' && data.currentApprover
+                ? <Badge tone="amber">Waiting for approval</Badge>
+                : <Badge tone={STATUS_TONE[data.status] || 'gray'}>{data.status.replace('_', ' ')}</Badge>}
             </div>
             <p className="text-gray-500 text-sm mt-1">
-              {data.requestType.name} · {data.category.name} · requested by {nameOf(data.requestedById)} on {formatDate(data.createdAt)}
+              {data.requestNumber && <span className="font-mono text-gray-700">{data.requestNumber}</span>}
+              {data.requestNumber && ' · '}
+              {data.expenseType ? `${data.expenseType} · ` : ''}{data.category.name}
+              {data.outlet ? ` · ${data.outlet.name}` : ''} · {data.requestType.name} · requested by {nameOf(data.requestedById)} on {formatDate(data.createdAt)}
             </p>
+            {data.status === 'PENDING_APPROVAL' && data.currentApprover && (
+              <p className="text-sm mt-1.5 font-medium text-amber-700">
+                ⏳ Waiting for: {waitingForText(data.currentApprover, user?.id)}
+              </p>
+            )}
           </div>
           <div className="flex gap-2 flex-wrap">
+            <Button variant="outline" onClick={() => downloadPdf('audit')} disabled={!!busy}>
+              {busy === 'pdf-audit' ? 'Preparing…' : '⬇ Download PDF'}
+            </Button>
+            {['DRAFT', 'PENDING_APPROVAL'].includes(data.status) && (
+              <Button variant="outline" onClick={() => downloadPdf('routing')} disabled={!!busy}>
+                {busy === 'pdf-routing' ? 'Preparing…' : '⬇ Routing copy'}
+              </Button>
+            )}
             {data.status === 'DRAFT' && (isOwner || user?.role === 'ADMIN') && (
               <>
                 <Button onClick={submitDraft} disabled={!!busy}>{busy === 'submit' ? 'Working…' : 'Submit'}</Button>
@@ -199,6 +271,18 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
             )}
             {data.status === 'PENDING_APPROVAL' && (
               <>
+                {/* Optional partial approval: approve for less than requested. Only
+                    for OUT disbursements (an IN top-up's amount is set in its own
+                    flow). Applied when the FINAL level clears; blank = as requested. */}
+                {data.direction === 'OUT' && (
+                  <label className="flex flex-col">
+                    <span className="text-[10px] text-gray-400 leading-tight">Approve for (optional)</span>
+                    <input type="text" inputMode="decimal"
+                      className="w-32 px-2 py-1.5 border-2 border-gray-200 rounded-lg text-sm focus:border-indigo-500 focus:outline-none"
+                      value={displayAmount(approveAmount)} onChange={(e) => setApproveAmount(parseAmount(e.target.value))}
+                      placeholder={formatCurrency(data.amount)} />
+                  </label>
+                )}
                 <Button variant="success" onClick={() => decide(true)} disabled={!!busy}>{busy === 'approve' ? 'Working…' : 'Approve'}</Button>
                 <Button variant="danger" onClick={() => decide(false)} disabled={!!busy}>{busy === 'reject' ? 'Working…' : 'Reject'}</Button>
                 {(isOwner || user?.role === 'ADMIN') && <Button variant="outline" onClick={cancelRequest} disabled={!!busy}>Cancel</Button>}
@@ -210,8 +294,12 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card><p className="text-xs text-gray-500">Amount</p><p className="text-xl font-bold mt-1 text-gray-800">{formatCurrency(data.amount)}</p></Card>
-          <Card><p className="text-xs text-gray-500">Paid</p><p className="text-xl font-bold mt-1 text-gray-800">{formatCurrency(data.amount - outstanding)}</p></Card>
+          <Card>
+            <p className="text-xs text-gray-500">{isPartialApproval ? 'Approved' : 'Amount'}</p>
+            <p className="text-xl font-bold mt-1 text-gray-800">{formatCurrency(approvedAmt)}</p>
+            {isPartialApproval && <p className="text-[11px] text-amber-600 mt-0.5">of {formatCurrency(data.amount)} requested</p>}
+          </Card>
+          <Card><p className="text-xs text-gray-500">Paid</p><p className="text-xl font-bold mt-1 text-gray-800">{formatCurrency(data.paymentAllocations.reduce((s, a) => s + a.amount, 0))}</p></Card>
           <Card><p className="text-xs text-gray-500">Outstanding</p><p className={`text-xl font-bold mt-1 ${outstanding > 0 ? 'text-orange-600' : 'text-gray-800'}`}>{formatCurrency(outstanding)}</p></Card>
           <Card><p className="text-xs text-gray-500">Payments</p><p className="text-xl font-bold mt-1 text-gray-800">{data.paymentAllocations.length}</p></Card>
         </div>
@@ -243,9 +331,13 @@ function ExpenseRequestDetailPage({ params }: { params: Promise<{ id: string }> 
                   {sources.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.sourceType})</option>)}
                 </select></label>
               <label className="block"><span className="text-xs text-gray-500">Payment method</span>
-                <input className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full" value={payForm.paymentMethod} onChange={(e) => setPayForm({ ...payForm, paymentMethod: e.target.value })} placeholder="CASH, CRDB, MPESA…" /></label>
+                <select className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full bg-white" value={payForm.paymentMethod} onChange={(e) => setPayForm({ ...payForm, paymentMethod: e.target.value })}>
+                  {/* Guard: if the stored value isn't in the resolved list (e.g. an
+                      older payment or a since-removed method), still show it. */}
+                  {(paymentMethods.includes(payForm.paymentMethod) ? paymentMethods : [payForm.paymentMethod, ...paymentMethods].filter(Boolean)).map((m) => <option key={m} value={m}>{m}</option>)}
+                </select></label>
               <label className="block"><span className="text-xs text-gray-500">Amount <span className="text-gray-400">(defaults to outstanding {formatCurrency(outstanding)})</span></span>
-                <input type="number" className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} /></label>
+                <input type="text" inputMode="decimal" className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full" value={displayAmount(payForm.amount)} onChange={(e) => setPayForm({ ...payForm, amount: parseAmount(e.target.value) })} /></label>
               <label className="block"><span className="text-xs text-gray-500">Reference</span>
                 <input className="px-3 py-2 border-2 border-gray-200 rounded-xl text-sm w-full" value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })} placeholder="Bank/MoMo txn id, cheque no." /></label>
               <label className="block"><span className="text-xs text-gray-500">Payee name</span>

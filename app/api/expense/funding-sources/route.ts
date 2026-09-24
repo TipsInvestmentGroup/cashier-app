@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { FUNDING_SOURCE_TYPES, type FundingSourceType } from '@/lib/expense-config'
-import { getFundingSourceBalance } from '@/lib/expense-ledger'
+import { getFundingSourceBalance, writeFundingSourceTxn } from '@/lib/expense-ledger'
 import { fundClassOf, allocationModeFor, supportsManualAllocation } from '@/lib/expense-funds'
 
 // Same audience as PETTY_TABS/the Expense Requests screens — everyone who
@@ -20,8 +20,11 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!VIEWER_ROLES.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  // Archived rows are hidden from EVERY caller (admin included) — kept only so
+  // historical payments stay readable, never re-selectable. ADMIN still sees
+  // inactive-but-not-archived rows to manage them in Expense Settings.
   const sources = await prisma.fundingSource.findMany({
-    where: user.role === 'ADMIN' ? {} : { isActive: true },
+    where: user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false },
     orderBy: [{ name: 'asc' }],
     include: { companyPaymentAccount: { select: { id: true, accountName: true, bankName: true } }, _count: { select: { payments: true } } },
   })
@@ -111,8 +114,9 @@ export async function POST(req: NextRequest) {
     },
   })
   if (sourceType === 'CASH' && openingBalance > 0) {
-    await prisma.fundingSourceTxn.create({
-      data: { fundingSourceId: source.id, type: 'OPEN', amount: openingBalance, note: 'Opening balance', createdById: user.userId, createdByName: user.name },
+    await writeFundingSourceTxn(prisma, {
+      fundingSourceId: source.id, type: 'OPEN', amount: openingBalance, note: 'Opening balance',
+      createdById: user.userId, createdByName: user.name,
     })
   }
   await prisma.auditLog.create({

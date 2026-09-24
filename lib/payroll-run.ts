@@ -37,6 +37,23 @@ async function emitGlobalAudit(db: Db, user: RunUser, action: string, details: s
   await db.auditLog.create({ data: { userId: user.userId, action, entity: 'PayrollRun', details } })
 }
 
+/**
+ * Thrown when a non-reversed run already exists for the same period + scope.
+ * The route maps this to HTTP 409 (see app/api/payroll/runs/route.ts). Reverse
+ * the existing run (→ REVERSED) before creating a correction — that's the only
+ * safe way to re-run a period, since two live runs would double-post salary,
+ * statutory liabilities and the payout batch.
+ */
+export class DuplicateRunError extends Error {
+  constructor(public existingRunId: string, public periodKey: string, public existingStatus: string) {
+    super(
+      `A payroll run already exists for period ${periodKey} and this scope ` +
+      `(run ${existingRunId}, status ${existingStatus}). Reverse it before creating another run.`,
+    )
+    this.name = 'DuplicateRunError'
+  }
+}
+
 /** Create a DRAFT run for a period + scope. Gated on the module being enabled. */
 export async function createPayrollRun(db: Db, opts: { outletId?: string | null; payGroupId?: string | null; runType?: string; date?: Date; user: RunUser }) {
   const cfg = await resolvePayrollConfig(db, { outletId: opts.outletId })
@@ -50,23 +67,48 @@ export async function createPayrollRun(db: Db, opts: { outletId?: string | null;
   const pp = payrollPeriodForDate(date, fields)
   const periodKey = `${pp.end.getFullYear()}-${String(pp.end.getMonth() + 1).padStart(2, '0')}`
 
-  const run = await db.payrollRun.create({
-    data: {
+  // Guard against a duplicate live run for the same period + scope. Only one
+  // non-reversed run may exist per (company, outlet, pay group, period); a
+  // REVERSED run may coexist with the correction that replaces it. This is the
+  // primary defence on SQLite (single-writer, no race); on Postgres the partial
+  // unique index PayrollRun_active_period_scope_key closes the check-then-create
+  // race, surfacing as P2002 which we normalise to the same error below.
+  const existing = await db.payrollRun.findFirst({
+    where: {
       companyId,
       outletId: opts.outletId ?? null,
       payGroupId: opts.payGroupId ?? null,
-      runType: opts.runType ?? 'REGULAR',
-      status: 'DRAFT',
       periodKey,
-      periodStart: pp.start,
-      periodEnd: pp.end,
-      processingDate: pp.processingDate,
-      paymentDate: pp.paymentDate,
-      lockDate: pp.lockDate,
-      currency: cfg.defaultCurrency,
-      createdById: opts.user.userId,
+      status: { not: 'REVERSED' },
     },
+    select: { id: true, status: true },
   })
+  if (existing) throw new DuplicateRunError(existing.id, periodKey, existing.status)
+
+  let run
+  try {
+    run = await db.payrollRun.create({
+      data: {
+        companyId,
+        outletId: opts.outletId ?? null,
+        payGroupId: opts.payGroupId ?? null,
+        runType: opts.runType ?? 'REGULAR',
+        status: 'DRAFT',
+        periodKey,
+        periodStart: pp.start,
+        periodEnd: pp.end,
+        processingDate: pp.processingDate,
+        paymentDate: pp.paymentDate,
+        lockDate: pp.lockDate,
+        currency: cfg.defaultCurrency,
+        createdById: opts.user.userId,
+      },
+    })
+  } catch (e) {
+    // Lost the race to a concurrent create on Postgres (partial unique index).
+    if ((e as { code?: string }).code === 'P2002') throw new DuplicateRunError('(concurrent)', periodKey, 'active')
+    throw e
+  }
   await writeAudit(db, run.id, 'CREATE', opts.user, { newValue: periodKey })
   await emitGlobalAudit(db, opts.user, 'CREATE_PAYROLL_RUN', `Run ${run.id} for ${periodKey}${opts.payGroupId ? ` (payGroup ${opts.payGroupId})` : ''}`)
   return run

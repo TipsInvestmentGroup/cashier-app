@@ -96,7 +96,7 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
     const ref = await generateBillReference(db, {
       recordId, sourceModel: 'PaidBill', billTypeCode, date: a.date, personId: a.personId || null, outletId: a.outletId,
     })
-    await db.paidBill.create({
+    const unlinked = await db.paidBill.create({
       data: {
         id: recordId,
         signedBillId: null, personId: a.personId || null, payerCategory: a.category || null, payerName: a.payerName,
@@ -106,6 +106,9 @@ export async function allocatePayment(db: Db, a: AllocArgs) {
         internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
       },
     })
+    // An unallocated advance is still real cash in hand — hold it in Customer
+    // Deposits (Dr Cash / Cr Customer Deposits) rather than leaving it off-book.
+    await postReceipt(db, unlinked, a.cashierId)
   }
 
   // Refresh the credit ledger + balance for every account this payment moved,

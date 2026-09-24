@@ -52,8 +52,9 @@ Legend: ✅ pass · ❌ fail (log issue) · ⬜ not tested
 ## 5. Reconciliation
 - ⬜ **Cash Recon:** opening auto = yesterday's closing; deposited entered; closing computes correctly.
 - ⬜ **Cash Verified** is officer‑only; variance (verified − closing) correct.
-- ⬜ **Digital Recon:** per channel, Reported auto‑fills; Required = Closing − Opening; Variance = Reported − Required (Loss/Excess wording correct).
-- ⬜ Officer verifies opening/closing **independently** (can't see/edit cashier figures); Verified Amount = Verified Closing − Verified Opening.
+- ⬜ **Digital Recon** (standalone 📲 page + Close‑the‑Day Step 3): per channel, Reported auto‑fills; enter Paid bills + Sales collection; Total Collection = Paid bills + Sales collection; Variance = Total − Reported (Loss/Excess wording correct).
+- ⬜ Officer verifies Paid bills + Sales collection **independently** (can't see/edit cashier figures); Verified Amount = Verified Paid bills + Verified Sales collection.
+- ⬜ Old Opening/Closing inputs no longer shown; historical records with Opening/Closing still readable.
 - ⬜ Reports show Verified + Variance + Verified By.
 
 ## 6. Reports, payroll & exports

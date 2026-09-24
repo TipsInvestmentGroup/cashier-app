@@ -16,15 +16,16 @@ Over‑limit Admin/Director bills + staff losses for the month. Pick a month →
 - **Daily Cashier Report** — per staff / outlet / customer; clickable day‑by‑day detail.
 - **Cash Reconciliation** & **Digital Payment Reconciliation**.
 
-## Reconciliation (Petty Cash screen)
-- **💰 Cash Reconciliation** — Opening auto‑fills from yesterday's closing; enter **Cash Deposited**; closing computes. *(Cash Verified is officer‑only.)*
+## Reconciliation
+- **💰 Cash Reconciliation** (Petty Cash screen) — Opening auto‑fills from yesterday's closing; enter **Cash Deposited**; closing computes. *(Cash Verified is officer‑only.)*
+- **📲 Digital Payment Reconciliation** (its own page, also Close‑the‑Day Step 3) — per channel enter **Paid bills** + **Sales collection**; **Total Collection** computes and is compared to the system **Reported** figure.
 
 ## Approvals
 Approve / Reject **Cancellations**, **Tips & DJ Bills**, **Customer Bills**.
 **Rejected items are excluded from all financial totals; Pending still counts.**
 
 ## Remember
-- **Required to collect (digital) = Closing − Opening; Variance = Reported − Required.**
+- **Total Collection (digital) = Paid bills + Sales collection (per channel); Variance = Total − Reported.**
 - Reconciliation **opening carries from the previous day's closing** automatically.
 
 *Help or changes → contact the system owner.*

@@ -4,10 +4,11 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/contexts/AuthContext'
 import { useApi } from '@/hooks/useApi'
+import { LEGACY_PETTY_CASH_ENABLED } from '@/lib/expense-cutover'
 import {
   LayoutDashboard, Wallet, FileText, TrendingUp, UtensilsCrossed, Printer, ClipboardList,
   Ban, BarChart3, FileSignature, CheckCircle2, User, Gift, ClipboardCheck, CalendarDays,
-  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, BookOpen, Landmark, Lock, Unlock, AlertTriangle, Banknote, type LucideIcon,
+  Receipt, FileBarChart, ShieldCheck, Building2, Clock, CreditCard, CalendarClock, PartyPopper, Package, Warehouse, Briefcase, ListChecks, Workflow, HandCoins, BookOpen, Landmark, Lock, Unlock, AlertTriangle, Banknote, Users, type LucideIcon,
 } from 'lucide-react'
 
 // A tab with modeGate is hidden for the roles listed in `forRoles` unless the
@@ -56,6 +57,7 @@ export const DAILY_TABS: Tab[] = [
 ]
 
 export const BILLS_TABS: Tab[] = [
+  { href: '/receivable-summary', label: 'Receivable Summary', icon: FileBarChart, roles: CASHIER_ROLES },
   { href: '/signed-bills', label: 'Signed Bills', icon: FileSignature, roles: CASHIER_ROLES },
   { href: '/admin-director-bills', label: 'Admin & Director Bills', icon: Briefcase, roles: MGMT },
   { href: '/paid-bills', label: 'Paid Bills', icon: CheckCircle2, roles: CASHIER_ROLES },
@@ -70,29 +72,55 @@ export const BILLS_TABS: Tab[] = [
 // which keeps the per-custodian ledger views (§2) as one screen rather than
 // three near-identical pages.
 //
-// The legacy Petty Cash flow (/petty-cash, /approvals, /petty-payments) is
-// RETAINED below the new items, not removed: it is still the live production
-// flow under the side-by-side rollout (docs/expense-disbursement-framework-
-// design.md decision 1), and hiding it before the cash-drawer cutover
-// (CASHIER_CUTOVER_ENABLED, lib/expense-cutover.ts) would strand a working
-// screen. These drop off once that cutover lands.
-export const EXPENSE_TABS: Tab[] = [
+// The legacy Petty Cash flow (/petty-cash, /approvals, /petty-payments) is now
+// RETIRED from this nav (Close-the-Day Cash Requests redesign §3): those three
+// tabs are appended only while LEGACY_PETTY_CASH_ENABLED is true. The routes
+// and code are kept — reachable by direct URL for admin/debug and old audits,
+// and each shows a retirement banner — but they no longer appear here. Flip the
+// flag in lib/expense-cutover.ts to temporarily un-retire them.
+const EXPENSE_TABS_CORE: Tab[] = [
   { href: '/expense-requests', label: 'Expense Form', icon: Receipt, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=CASHIER_CASH', label: 'Cashier Ledger', icon: BookOpen, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=PETTY_CASH', label: 'Petty Cash Ledger', icon: BookOpen, roles: CASHIER_ROLES },
   { href: '/petty-cash-ledger?fund=DIGITAL', label: 'Digital Expenses Ledger', icon: CreditCard, roles: CASHIER_ROLES },
-  { href: '/cash-reconciliation', label: 'Cash Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
-  { href: '/digital-payment-reconciliation', label: 'Digital Payment Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+  // Cash Reconciliation / Digital Payment Reconciliation moved out to their own
+  // top-level RECON_TABS section (see below) — they no longer live under Expenses.
   { href: '/digital-expenses', label: 'Digital Expense Form', icon: CreditCard, roles: CASHIER_ROLES },
-  // Legacy flow — retained until cutover (see note above).
+  // Spec v2 §2.2 — the Digital Expenses Custodian's queue of approved Petty Cash
+  // top-ups awaiting payment out of a digital account (the direction=IN sibling
+  // of a fund's Ready-to-Pay). Server scopes rows to the caller's DIGITAL
+  // custodian grant, so a non-custodian just sees an empty queue.
+  { href: '/topup-payments', label: 'Top-up Payments', icon: HandCoins, roles: CASHIER_ROLES },
+  // Custodian Report (Spec v2) — the cross-fund, custodian-accountability view:
+  // per custodian, for a date range, how much they received / spent / are
+  // holding. Its own standalone page (not a per-fund ?fund= view) because it
+  // summarises across all three funds at once.
+  { href: '/custodian-report', label: 'Custodian Report', icon: Users, roles: CASHIER_ROLES },
+]
+
+// Legacy flow — hidden from nav unless explicitly un-retired (see note above).
+const LEGACY_EXPENSE_TABS: Tab[] = [
   { href: '/petty-cash', label: 'Petty Cash (legacy)', icon: Wallet, roles: CASHIER_ROLES },
   { href: '/approvals', label: 'Approval Requests', icon: ClipboardCheck, roles: CASHIER_ROLES },
   { href: '/petty-payments', label: 'Payments', icon: CreditCard, roles: CASHIER_ROLES },
 ]
 
+export const EXPENSE_TABS: Tab[] = LEGACY_PETTY_CASH_ENABLED
+  ? [...EXPENSE_TABS_CORE, ...LEGACY_EXPENSE_TABS]
+  : EXPENSE_TABS_CORE
+
 // Back-compat alias: several pages import PETTY_TABS. Kept pointing at the same
 // list so the rename is one edit here, not a sweep across every screen.
 export const PETTY_TABS = EXPENSE_TABS
+
+// The Reconciliation section — promoted out of Expenses into its own top-level
+// nav group (spec §2). Same standalone pages/components, same role visibility as
+// the old Expenses tabs (CASHIER_ROLES); officer-only fields inside each screen
+// stay gated by their own logic, so no new permission tier is needed here.
+export const RECON_TABS: Tab[] = [
+  { href: '/cash-reconciliation', label: 'Cash Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+  { href: '/digital-payment-reconciliation', label: 'Digital Reconciliation', icon: ListChecks, roles: CASHIER_ROLES },
+]
 
 export const FINANCE_TABS: Tab[] = [
   { href: '/analytics', label: 'Analytics', icon: LayoutDashboard, roles: MGMT },

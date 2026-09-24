@@ -9,8 +9,12 @@ export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Archived rows are hidden from EVERY caller (admin included) — they exist
+  // only to keep historical requests readable, never to be picked again. ADMIN
+  // still sees inactive-but-not-archived rows so they can be managed in Expense
+  // Settings; everyone else only sees active ones.
   const categories = await prisma.expenseCategory.findMany({
-    where: user.role === 'ADMIN' ? {} : { isActive: true },
+    where: user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false },
     orderBy: [{ name: 'asc' }],
     include: { budgetAccount: { select: { id: true, code: true, name: true } }, _count: { select: { requests: true } } },
   })
@@ -35,12 +39,14 @@ export async function POST(req: NextRequest) {
   const dupe = await prisma.expenseCategory.findUnique({ where: { companyId_code: { companyId, code } } })
   if (dupe) return NextResponse.json({ error: `A category with code ${code} already exists` }, { status: 409 })
 
-  let budgetAccountId: string | null = null
-  if (body.budgetAccountId) {
-    const account = await prisma.account.findUnique({ where: { id: String(body.budgetAccountId) } })
-    if (!account) return NextResponse.json({ error: 'budgetAccountId does not reference a known account' }, { status: 400 })
-    budgetAccountId = account.id
-  }
+  // A new category MUST point at a real GL account — no silent fallback to the
+  // suspense bucket. For a deliberate cleanup bucket the admin picks the
+  // '9000 Unclassified / Suspense Expense' account explicitly, which makes the
+  // choice visible rather than a default nobody sees.
+  if (!body.budgetAccountId) return NextResponse.json({ error: 'Pick a GL account for this category (choose "9000 Unclassified / Suspense" only for a deliberate uncategorized bucket)' }, { status: 400 })
+  const account = await prisma.account.findUnique({ where: { id: String(body.budgetAccountId) } })
+  if (!account) return NextResponse.json({ error: 'budgetAccountId does not reference a known account' }, { status: 400 })
+  const budgetAccountId: string = account.id
 
   const category = await prisma.expenseCategory.create({
     data: {

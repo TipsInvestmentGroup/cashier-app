@@ -58,7 +58,7 @@ const DATE_FORMAT_TOKENS: Record<string, string> = {
 
 const MAX_ATTEMPTS = 5
 
-function slugifyOutletName(name: string): string {
+export function slugifyOutletName(name: string): string {
   return name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '').slice(0, 6)
 }
 
@@ -170,7 +170,7 @@ function formatConfiguredDate(config: { dateFormat: string; customDateFormat: st
   return format(date, DATE_FORMAT_TOKENS[config.dateFormat] || DATE_FORMAT_TOKENS.YYMMDD)
 }
 
-function resolveOutletCode(explicitBranchCode: string | null | undefined, outlet: { branchCode: string | null; name: string } | null): string {
+export function resolveOutletCode(explicitBranchCode: string | null | undefined, outlet: { branchCode: string | null; name: string } | null): string {
   if (explicitBranchCode) return explicitBranchCode
   if (outlet?.branchCode) return outlet.branchCode
   if (outlet?.name) return slugifyOutletName(outlet.name)

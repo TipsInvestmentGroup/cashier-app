@@ -77,86 +77,137 @@ export interface BankTransactionInput {
   type: BankTransactionType
   fromAccountId?: string | null
   toAccountId?: string | null
+  // A leg that is NOT a CompanyPaymentAccount — a raw GL account id used for the
+  // counter-leg when there is no account instance to name. The Petty Cash top-up
+  // (execute-topup) transfers money OUT of a digital CompanyPaymentAccount and
+  // INTO the company's Cash-on-Hand GL (a petty cash CASH fund has no CPA
+  // wrapper), so it passes fromAccountId = the digital account and
+  // toGlAccountId = the resolved cash GL. Ignored when the matching CPA id is
+  // also given (the CPA wins, so existing callers are unaffected).
+  fromGlAccountId?: string | null
+  toGlAccountId?: string | null
   amount: number
   transactionDate: Date
   reference?: string | null
   note?: string | null
   createdById: string
+  // Loose ref stamped onto the BankTransaction — see the model doc. Only the
+  // top-up paying leg sets it; every existing caller leaves it undefined.
+  expenseRequestId?: string | null
+}
+
+/** One side of a movement, resolved from either a CompanyPaymentAccount (the
+ *  common case) or a raw GL account id (the top-up cash leg). `cpaId` is null
+ *  for a raw-GL leg, so the BankTransaction records only the CPA side(s). */
+interface MovementLeg {
+  glAccountId: string
+  label: string
+  cpaId: string | null
+}
+
+async function resolveLeg(db: Db, cpaId: string | null | undefined, rawGlId: string | null | undefined): Promise<MovementLeg | null> {
+  if (cpaId) {
+    const cpa = await db.companyPaymentAccount.findUniqueOrThrow({ where: { id: cpaId } })
+    return { glAccountId: cpa.glAccountId, label: cpa.accountName, cpaId: cpa.id }
+  }
+  if (rawGlId) {
+    const acct = await db.account.findUniqueOrThrow({ where: { id: rawGlId } })
+    return { glAccountId: acct.id, label: acct.name, cpaId: null }
+  }
+  return null
 }
 
 /**
  * Posts one of the five cash-management movement types and records a
  * BankTransaction. See the BankTransaction model comment in
  * prisma/schema.prisma for the Dr/Cr rule per type.
+ *
+ * Owns its own transaction. Callers that must post a bank movement AND other
+ * ledger writes atomically (the Petty Cash top-up posts this TRANSFER and the
+ * receiving fund's REPLENISH in one go) call the tx-aware core
+ * postBankTransactionTx directly on their own `db` instead — this wrapper is the
+ * standalone entry point, mirroring replenishFundingSource/creditFundingSource.
  */
 export async function postBankTransaction(input: BankTransactionInput): Promise<{ id: string }> {
+  return prisma.$transaction((tx) => postBankTransactionTx(tx, input))
+}
+
+/**
+ * The tx-aware core of postBankTransaction — runs on the passed `db` so it
+ * composes inside a caller's transaction (no nested prisma.$transaction). Each
+ * of the two-account movement types (TRANSFER/DEPOSIT/WITHDRAWAL) resolves each
+ * leg from either a CompanyPaymentAccount or a raw GL account id (see
+ * BankTransactionInput.fromGlAccountId/toGlAccountId).
+ */
+export async function postBankTransactionTx(db: Db, input: BankTransactionInput): Promise<{ id: string }> {
   const amount = roundMoney(input.amount)
   if (amount <= 0) throw new Error('Amount must be positive')
   if (!BANK_TRANSACTION_TYPES.includes(input.type)) throw new Error('Invalid transaction type')
 
-  return prisma.$transaction(async (tx) => {
-    const [fromAccount, toAccount] = await Promise.all([
-      input.fromAccountId ? tx.companyPaymentAccount.findUniqueOrThrow({ where: { id: input.fromAccountId } }) : null,
-      input.toAccountId ? tx.companyPaymentAccount.findUniqueOrThrow({ where: { id: input.toAccountId } }) : null,
-    ])
+  const [fromLeg, toLeg] = await Promise.all([
+    resolveLeg(db, input.fromAccountId, input.fromGlAccountId),
+    resolveLeg(db, input.toAccountId, input.toGlAccountId),
+  ])
 
-    let lines: { accountId: string; debit?: number; credit?: number; description: string }[]
-    switch (input.type) {
-      case 'TRANSFER':
-        if (!fromAccount || !toAccount) throw new Error('A transfer needs both a from-account and a to-account')
-        lines = [
-          { accountId: toAccount.glAccountId, debit: amount, description: `Transfer from ${fromAccount.accountName}` },
-          { accountId: fromAccount.glAccountId, credit: amount, description: `Transfer to ${toAccount.accountName}` },
-        ]
-        break
-      case 'DEPOSIT':
-        if (!fromAccount || !toAccount) throw new Error('A deposit needs both a from-account (e.g. Cash) and a to-account (bank)')
-        lines = [
-          { accountId: toAccount.glAccountId, debit: amount, description: `Deposit from ${fromAccount.accountName}` },
-          { accountId: fromAccount.glAccountId, credit: amount, description: `Deposit to ${toAccount.accountName}` },
-        ]
-        break
-      case 'WITHDRAWAL':
-        if (!fromAccount || !toAccount) throw new Error('A withdrawal needs both a from-account (bank) and a to-account (e.g. Cash)')
-        lines = [
-          { accountId: toAccount.glAccountId, debit: amount, description: `Withdrawal from ${fromAccount.accountName}` },
-          { accountId: fromAccount.glAccountId, credit: amount, description: `Withdrawal to ${toAccount.accountName}` },
-        ]
-        break
-      case 'BANK_CHARGE': {
-        if (!fromAccount) throw new Error('A bank charge needs the account it was deducted from')
-        const chargesAccountId = await resolveAccountId(tx, { companyId: input.companyId, key: 'BANK_CHARGES_EXPENSE' })
-        lines = [
-          { accountId: chargesAccountId, debit: amount, description: `Bank charge on ${fromAccount.accountName}` },
-          { accountId: fromAccount.glAccountId, credit: amount, description: 'Bank charge' },
-        ]
-        break
-      }
-      case 'INTEREST': {
-        if (!toAccount) throw new Error('Interest needs the account it was credited to')
-        const interestAccountId = await resolveAccountId(tx, { companyId: input.companyId, key: 'INTEREST_INCOME' })
-        lines = [
-          { accountId: toAccount.glAccountId, debit: amount, description: `Interest credited to ${toAccount.accountName}` },
-          { accountId: interestAccountId, credit: amount, description: 'Interest income' },
-        ]
-        break
-      }
+  let lines: { accountId: string; debit?: number; credit?: number; description: string }[]
+  switch (input.type) {
+    case 'TRANSFER':
+      if (!fromLeg || !toLeg) throw new Error('A transfer needs both a from-account and a to-account')
+      lines = [
+        { accountId: toLeg.glAccountId, debit: amount, description: `Transfer from ${fromLeg.label}` },
+        { accountId: fromLeg.glAccountId, credit: amount, description: `Transfer to ${toLeg.label}` },
+      ]
+      break
+    case 'DEPOSIT':
+      if (!fromLeg || !toLeg) throw new Error('A deposit needs both a from-account (e.g. Cash) and a to-account (bank)')
+      lines = [
+        { accountId: toLeg.glAccountId, debit: amount, description: `Deposit from ${fromLeg.label}` },
+        { accountId: fromLeg.glAccountId, credit: amount, description: `Deposit to ${toLeg.label}` },
+      ]
+      break
+    case 'WITHDRAWAL':
+      if (!fromLeg || !toLeg) throw new Error('A withdrawal needs both a from-account (bank) and a to-account (e.g. Cash)')
+      lines = [
+        { accountId: toLeg.glAccountId, debit: amount, description: `Withdrawal from ${fromLeg.label}` },
+        { accountId: fromLeg.glAccountId, credit: amount, description: `Withdrawal to ${toLeg.label}` },
+      ]
+      break
+    case 'BANK_CHARGE': {
+      if (!fromLeg) throw new Error('A bank charge needs the account it was deducted from')
+      const chargesAccountId = await resolveAccountId(db, { companyId: input.companyId, key: 'BANK_CHARGES_EXPENSE' })
+      lines = [
+        { accountId: chargesAccountId, debit: amount, description: `Bank charge on ${fromLeg.label}` },
+        { accountId: fromLeg.glAccountId, credit: amount, description: 'Bank charge' },
+      ]
+      break
     }
+    case 'INTEREST': {
+      if (!toLeg) throw new Error('Interest needs the account it was credited to')
+      const interestAccountId = await resolveAccountId(db, { companyId: input.companyId, key: 'INTEREST_INCOME' })
+      lines = [
+        { accountId: toLeg.glAccountId, debit: amount, description: `Interest credited to ${toLeg.label}` },
+        { accountId: interestAccountId, credit: amount, description: 'Interest income' },
+      ]
+      break
+    }
+  }
 
-    const { id: journalEntryId } = await postJournalEntry(tx, {
-      companyId: input.companyId, entryDate: input.transactionDate, sourceModule: 'MANUAL', sourceType: 'BankTransaction', sourceId: null,
-      description: input.note || `${input.type} — ${input.reference || ''}`.trim(), createdById: input.createdById, lines,
-    })
-
-    const txn = await tx.bankTransaction.create({
-      data: {
-        companyId: input.companyId, type: input.type, fromAccountId: input.fromAccountId || null, toAccountId: input.toAccountId || null,
-        amount, transactionDate: input.transactionDate, reference: input.reference || null, note: input.note || null,
-        createdById: input.createdById, journalEntryId,
-      },
-    })
-    await tx.journalEntry.update({ where: { id: journalEntryId }, data: { sourceId: txn.id } })
-
-    return { id: txn.id }
+  const { id: journalEntryId } = await postJournalEntry(db, {
+    companyId: input.companyId, entryDate: input.transactionDate, sourceModule: 'MANUAL', sourceType: 'BankTransaction', sourceId: null,
+    description: input.note || `${input.type} — ${input.reference || ''}`.trim(), createdById: input.createdById, lines,
   })
+
+  const txn = await db.bankTransaction.create({
+    data: {
+      companyId: input.companyId, type: input.type,
+      // Only real CompanyPaymentAccount legs are recorded here; a raw-GL leg
+      // leaves its side null (the GL entry still carries it).
+      fromAccountId: fromLeg?.cpaId ?? null, toAccountId: toLeg?.cpaId ?? null,
+      amount, transactionDate: input.transactionDate, reference: input.reference || null, note: input.note || null,
+      createdById: input.createdById, journalEntryId, expenseRequestId: input.expenseRequestId || null,
+    },
+  })
+  await db.journalEntry.update({ where: { id: journalEntryId }, data: { sourceId: txn.id } })
+
+  return { id: txn.id }
 }

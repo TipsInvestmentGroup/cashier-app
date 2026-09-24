@@ -3,13 +3,14 @@
 // join table (a FundingSource may have more than one responsible user, unlike the
 // single optional FundingSource.responsibleUserId field).
 import { prisma } from '@/lib/prisma'
+import type { Db } from '@/lib/ledger'
 import { fundClassOf, FUND_CLASS_LABELS } from '@/lib/expense-funds'
 import { hasGrant } from '@/lib/expense-grants'
 
-export async function listFundingSourceCustodians(fundingSourceId: string) {
-  const rows = await prisma.fundingSourceCustodian.findMany({ where: { fundingSourceId } })
+export async function listFundingSourceCustodians(fundingSourceId: string, db: Db = prisma) {
+  const rows = await db.fundingSourceCustodian.findMany({ where: { fundingSourceId } })
   if (!rows.length) return []
-  const users = await prisma.user.findMany({ where: { id: { in: rows.map((r) => r.userId) } }, select: { id: true, name: true, email: true, role: true } })
+  const users = await db.user.findMany({ where: { id: { in: rows.map((r) => r.userId) } }, select: { id: true, name: true, email: true, role: true } })
   return rows.map((r) => ({ id: r.id, userId: r.userId, user: users.find((u) => u.id === r.userId) || null }))
 }
 
@@ -82,12 +83,12 @@ function parseIdList(raw: string | null | undefined): string[] | null {
  *  request type (or every active custodian, when the request type doesn't
  *  restrict funding sources) — used to notify custodians once a request is
  *  ready for payment (lib/expense-workflow.ts). Deduplicated by user id. */
-export async function listCustodiansForRequestType(allowedFundingSourceIds: string | null): Promise<{ id: string; name: string; email: string | null }[]> {
+export async function listCustodiansForRequestType(allowedFundingSourceIds: string | null, db: Db = prisma): Promise<{ id: string; name: string; email: string | null }[]> {
   const restrictTo = parseIdList(allowedFundingSourceIds)
-  const rows = await prisma.fundingSourceCustodian.findMany({
+  const rows = await db.fundingSourceCustodian.findMany({
     where: restrictTo ? { fundingSourceId: { in: restrictTo } } : undefined,
   })
   if (!rows.length) return []
   const userIds = [...new Set(rows.map((r) => r.userId))]
-  return prisma.user.findMany({ where: { id: { in: userIds }, isActive: true }, select: { id: true, name: true, email: true } })
+  return db.user.findMany({ where: { id: { in: userIds }, isActive: true }, select: { id: true, name: true, email: true } })
 }

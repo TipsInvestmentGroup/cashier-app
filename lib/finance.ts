@@ -4,11 +4,12 @@
 // stays owned by lib/stock.ts.
 import { prisma } from './prisma'
 import { roundMoney } from './utils'
-import { postJournalEntry, type Db } from './ledger'
+import { postJournalEntry, nextScopedNumber, type Db } from './ledger'
 import { resolveAccountId, resolveChannelAccountId } from './finance-mapping'
 
 async function nextSequenceNumber(db: Db, prefix: string, count: () => Promise<number>): Promise<string> {
-  const n = (await count()) + 1
+  // Race-safe (BillSequenceCounter) instead of count()+1 — see nextScopedNumber.
+  const n = await nextScopedNumber(db, `SEQ:${prefix}`, count)
   return `${prefix}-${String(n).padStart(6, '0')}`
 }
 

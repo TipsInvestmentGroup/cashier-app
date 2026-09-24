@@ -3,10 +3,9 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveCompanyId } from '@/lib/expense-config'
 import { createExpensePayment } from '@/lib/expense-payments'
+import { hasGrant } from '@/lib/expense-grants'
+import { fundClassOf } from '@/lib/expense-funds'
 import { roundMoney } from '@/lib/utils'
-
-// Mirrors lib/petty-access.ts canDisbursePetty()'s role list.
-const DISBURSER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
 /**
  * POST — disburse against this one request. Body: { fundingSourceId,
@@ -19,7 +18,6 @@ const DISBURSER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!DISBURSER_ROLES.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
   const request = await prisma.expenseRequest.findUnique({ where: { id }, include: { paymentAllocations: true } })
@@ -28,6 +26,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json().catch(() => ({}))
   if (!body.fundingSourceId) return NextResponse.json({ error: 'fundingSourceId is required' }, { status: 400 })
   if (!body.paymentMethod || !String(body.paymentMethod).trim()) return NextResponse.json({ error: 'paymentMethod is required' }, { status: 400 })
+
+  // The paying fund must be the one the request was filed/approved against — its
+  // approval chain and thresholds were resolved for THAT fund (EXP-7).
+  if (request.fundingSourceId && String(body.fundingSourceId) !== request.fundingSourceId) {
+    return NextResponse.json({ error: 'This request must be paid from the funding source it was approved against.' }, { status: 400 })
+  }
+
+  // Segregation of duties on money-out: only a CUSTODIAN of this fund (for its
+  // class + outlet) may disburse — a job title is not enough. Mirrors the top-up
+  // routes (funding-sources/[id]/top-up, execute-topup); ADMIN keeps an override.
+  const fundingSource = await prisma.fundingSource.findUnique({ where: { id: String(body.fundingSourceId) }, select: { sourceType: true, outletId: true } })
+  if (!fundingSource) return NextResponse.json({ error: 'Funding source not found' }, { status: 404 })
+  const isCustodian = user.role === 'ADMIN' || (await hasGrant(user.userId, 'CUSTODIAN', { fundClass: fundClassOf(fundingSource.sourceType), outletId: fundingSource.outletId }))
+  if (!isCustodian) return NextResponse.json({ error: 'You are not a custodian of this fund — only a fund custodian (or an admin) may disburse from it.' }, { status: 403 })
 
   const alreadyPaid = roundMoney(request.paymentAllocations.reduce((s, a) => s + a.amount, 0))
   const outstanding = roundMoney(request.amount - alreadyPaid)
@@ -48,6 +60,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       reference: body.reference ? String(body.reference) : null,
       paidAt: body.paidAt ? new Date(body.paidAt) : undefined,
       paidById: user.userId,
+      paidByName: user.name,
       outletId: request.outletId,
       allocations: [{ expenseRequestId: id, amount }],
     })

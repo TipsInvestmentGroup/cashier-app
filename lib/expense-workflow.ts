@@ -17,10 +17,13 @@ import { prisma } from '@/lib/prisma'
 import type { ExpenseRequestStatus } from '@/lib/expense-config'
 import { createNotification } from '@/lib/notifications'
 import { listCustodiansForRequestType, listFundingSourceCustodians } from '@/lib/expense-access'
-import { fundClassOf, type FundClass } from '@/lib/expense-funds'
+import { fundClassOf, payableAmount, type FundClass } from '@/lib/expense-funds'
 import { chainIsStaffed, usersWithGrant } from '@/lib/expense-grants'
 import { creditFundingSource } from '@/lib/expense-ledger'
+import { postBankTransactionTx } from '@/lib/finance-banking'
+import { resolveAccountId } from '@/lib/finance-mapping'
 import { roundMoney } from '@/lib/utils'
+import { EXPENSE_GRANT_FLAGS } from '@/lib/shared-constants'
 
 function parseApproverRoles(raw: string | null | undefined): string[] {
   if (!raw) return []
@@ -32,12 +35,27 @@ function parseApproverRoles(raw: string | null | undefined): string[] {
   }
 }
 
-/** The two approval stages, in order. §4 defines exactly First then Second
- *  Approver, so the chain is two-tier by design rather than an arbitrary-length
- *  role list — but stage 2 only applies when someone actually holds
- *  SECOND_APPROVER for the fund (see resolveApprovalPlan). */
-const STAGE_GRANTS = ['FIRST_APPROVER', 'SECOND_APPROVER'] as const
+/** The grants that can address an approval stage. Two shapes are possible:
+ *  a single-stage SINGLE_APPROVER chain, or the two-tier FIRST → SECOND chain
+ *  (each stage applying only when someone holds it for the fund — see
+ *  resolveApprovalPlan). A given fund uses one shape or the other, never both:
+ *  a configured Single Approver replaces the two-stage chain entirely. */
+const STAGE_GRANTS = ['SINGLE_APPROVER', 'FIRST_APPROVER', 'SECOND_APPROVER'] as const
 export type ApprovalStageGrant = (typeof STAGE_GRANTS)[number]
+
+/** Turns "who is staffed" into the ordered stages that will actually run.
+ *  A Single Approver takes precedence: when one is configured for the fund the
+ *  request is finalized by that one approval and never enters the First/Second
+ *  chain. Otherwise the chain is FIRST → SECOND, each stage included only when
+ *  it is staffed (an empty second tier is dropped rather than stranding the
+ *  request in PENDING_APPROVAL forever). */
+function stagesFromStaffed(staffed: { single: boolean; first: boolean; second: boolean }): ApprovalStageGrant[] {
+  if (staffed.single) return ['SINGLE_APPROVER']
+  return [
+    ...(staffed.first ? (['FIRST_APPROVER'] as const) : []),
+    ...(staffed.second ? (['SECOND_APPROVER'] as const) : []),
+  ]
+}
 
 /** WorkflowApproval.approverRole holds a User.role for collection-stage and
  *  staff-transaction approvals, but a GRANT TYPE for expense approvals — the
@@ -46,6 +64,67 @@ export type ApprovalStageGrant = (typeof STAGE_GRANTS)[number]
  *  shared approvals inbox, the decide endpoint) use this. */
 export function isStageGrant(value: string | null | undefined): value is ApprovalStageGrant {
   return !!value && (STAGE_GRANTS as readonly string[]).includes(value)
+}
+
+/** Human-readable role labels for the stage grants, taken from the same §4
+ *  access-flag definitions the Manage Access screen shows — so "Waiting for:
+ *  … (First Approver)" uses the exact wording an admin granted, never a second
+ *  hand-maintained copy. */
+const STAGE_GRANT_LABELS: Record<ApprovalStageGrant, string> = Object.fromEntries(
+  STAGE_GRANTS.map((g) => [g, EXPENSE_GRANT_FLAGS.find((f) => f.grantType === g)?.label ?? g]),
+) as Record<ApprovalStageGrant, string>
+
+/** The specific person(s) a PENDING_APPROVAL request is currently waiting on,
+ *  resolved from the live grant chain rather than a stored field — the read
+ *  model behind the UI's "Waiting for: [Name] ([Role])" (replacing the generic
+ *  "PENDING APPROVAL"). */
+export interface CurrentApprover {
+  stageGrant: ApprovalStageGrant
+  /** e.g. "First Approver" — the grant's own §4 label. */
+  roleLabel: string
+  /** 1-based position in the chain, and the chain length, for "level 1 of 2". */
+  stageNumber: number
+  stageCount: number
+  /** Everyone holding the stage grant for this fund/outlet. Empty = the stage is
+   *  unstaffed (an admin must grant it before anyone can act — surfaced so the
+   *  UI can say "unassigned" instead of a misleading blank). */
+  approvers: { id: string; name: string }[]
+}
+
+/**
+ * Resolves who a request is waiting on right now. Returns null when the request
+ * is not actually awaiting approval (any status other than PENDING_APPROVAL, or
+ * no open WorkflowApproval row / a non-stage approverRole), so callers can fall
+ * back to the plain status label.
+ *
+ * Deliberately a pure read over existing data — the PENDING WorkflowApproval
+ * row's stage grant, the approvals already granted, and the live grant holders
+ * for the fund/outlet the chain was resolved against. No schema, no stored
+ * "current approver" to keep in sync (the 2026-08-05 build-on-grants decision).
+ */
+export async function resolveCurrentApprover(db: Db, expenseRequestId: string): Promise<CurrentApprover | null> {
+  const request = await db.expenseRequest.findUnique({
+    where: { id: expenseRequestId },
+    select: { status: true, amount: true, outletId: true, fundingSourceId: true, requestType: { select: { approverRoles: true } } },
+  })
+  if (!request || request.status !== 'PENDING_APPROVAL') return null
+
+  const pending = await db.workflowApproval.findFirst({ where: { expenseRequestId, status: 'PENDING' } })
+  if (!pending || !isStageGrant(pending.approverRole)) return null
+
+  const plan = await resolveApprovalPlan(db, request)
+  const approvedCount = await db.workflowApproval.count({ where: { expenseRequestId, status: 'APPROVED' } })
+  const approvers = await usersWithGrant(pending.approverRole, { fundClass: plan.fundClass, outletId: plan.outletId }, db).catch(() => [])
+
+  return {
+    stageGrant: pending.approverRole,
+    roleLabel: STAGE_GRANT_LABELS[pending.approverRole],
+    stageNumber: approvedCount + 1,
+    // Guard against a chain that has since shrunk (a grant revoked mid-flight):
+    // never report a level below the one actually open.
+    stageCount: Math.max(plan.stages.length, approvedCount + 1),
+    approvers: approvers.map((a) => ({ id: a.id, name: a.name })),
+  }
 }
 
 export interface ApprovalPlan {
@@ -70,12 +149,14 @@ export interface ApprovalPlan {
  *   • it has no funding source, in which case there is no fund whose chain or
  *     threshold could apply and the pre-upgrade role behavior stands.
  *
- * Otherwise the chain is FIRST_APPROVER → SECOND_APPROVER, narrowed to the
- * stages that are actually staffed for this fund class and outlet. Stage 2 is
- * dropped when nobody holds SECOND_APPROVER — a two-tier chain with an empty
- * second tier would strand every request in PENDING_APPROVAL forever.
+ * Otherwise the chain is resolved from the grants staffed for this fund class
+ * and outlet (see stagesFromStaffed): a configured SINGLE_APPROVER yields a
+ * one-stage chain that finalizes on a single approval; failing that, the
+ * two-tier FIRST_APPROVER → SECOND_APPROVER chain, with stage 2 dropped when
+ * nobody holds SECOND_APPROVER — a two-tier chain with an empty second tier
+ * would strand every request in PENDING_APPROVAL forever.
  *
- * Deliberately does NOT auto-approve when stage 1 is unstaffed: silently
+ * Deliberately does NOT auto-approve when no stage is staffed: silently
  * approving money-out because an admin forgot to grant approver access is the
  * worst possible failure here. submitExpenseRequest surfaces that as an error.
  */
@@ -94,7 +175,7 @@ export async function resolveApprovalPlan(
     const staffed = await chainIsStaffed({ outletId: request.outletId })
     return {
       skip: false, reason: null,
-      stages: [...(staffed.first ? (['FIRST_APPROVER'] as const) : []), ...(staffed.second ? (['SECOND_APPROVER'] as const) : [])],
+      stages: stagesFromStaffed(staffed),
       fundClass: null, outletId: request.outletId,
     }
   }
@@ -122,7 +203,7 @@ export async function resolveApprovalPlan(
   const staffed = await chainIsStaffed({ fundClass, outletId })
   return {
     skip: false, reason: null,
-    stages: [...(staffed.first ? (['FIRST_APPROVER'] as const) : []), ...(staffed.second ? (['SECOND_APPROVER'] as const) : [])],
+    stages: stagesFromStaffed(staffed),
     fundClass, outletId,
   }
 }
@@ -158,14 +239,14 @@ export async function openNextApprovalStep(db: Db, expenseRequestId: string): Pr
     },
   })
 
-  const approvers = await usersWithGrant(approverRole, { fundClass: plan.fundClass, outletId: plan.outletId }).catch(() => [])
+  const approvers = await usersWithGrant(approverRole, { fundClass: plan.fundClass, outletId: plan.outletId }, db).catch(() => [])
   await Promise.all(approvers.map((a) => createNotification({
     userId: a.id,
     type: 'EXPENSE_REQUEST_APPROVAL_NEEDED',
     title: `${request.requestType.name} awaiting your approval`,
     message: `"${request.purpose}" for ${request.amount} ${request.currency} needs your approval.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
-  }).catch(() => {})))
+  }, db)))
 
   return { approverRole }
 }
@@ -211,7 +292,7 @@ export async function executeTopUpAllocation(
     where: { id: expenseRequestId },
     // CLOSED, not PAID: a top-up brings money IN, so "paid" (money out) would
     // misread. CLOSED = allocation recorded, nothing further to do.
-    data: { status: 'CLOSED', allocatedAmount: allocated },
+    data: { status: 'CLOSED', allocatedAmount: allocated, stageEnteredAt: new Date() },
   })
 
   await createNotification({
@@ -221,9 +302,119 @@ export async function executeTopUpAllocation(
       allocated !== request.amount ? ` (requested ${request.amount})` : ''
     }.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
-  }).catch(() => {})
+  }, db)
 
   return { status: 'CLOSED', allocated }
+}
+
+/**
+ * §2.2 — a fully-approved PETTY CASH top-up is NOT credited on the spot. It is
+ * moved to APPROVED (awaiting payment) and the "action needed" is routed to the
+ * Digital Expenses Custodian(s) for the fund's outlet — the people who hold a
+ * CUSTODIAN grant over the DIGITAL fund class, NOT the requester and NOT the
+ * cashier — who then pay it out of a chosen digital account via executeTopUpPayment.
+ *
+ * Runs on the passed `db` (inside the approval-decide transaction). The
+ * notification write uses the same `db`, per the createNotification comment about
+ * not awaiting the global client mid-transaction.
+ */
+export async function routeTopUpToDigitalCustodian(
+  db: Db,
+  request: { id: string; purpose: string; amount: number; allocatedAmount: number | null; currency: string; outletId: string | null; requestType: { name: string } },
+  fundOutletId: string | null,
+): Promise<void> {
+  await db.expenseRequest.update({
+    where: { id: request.id },
+    // APPROVED, not CLOSED: the money has NOT moved yet. execute-topup is what
+    // finally credits the fund and closes the request.
+    data: { status: 'APPROVED', stageEnteredAt: new Date() },
+  })
+
+  const outletId = fundOutletId ?? request.outletId ?? null
+  const payable = payableAmount(request)
+  const custodians = await usersWithGrant('CUSTODIAN', { fundClass: 'DIGITAL', outletId }, db).catch(() => [])
+  await Promise.all(custodians.map((c) => createNotification({
+    userId: c.id, type: 'EXPENSE_TOPUP_PAYMENT_NEEDED',
+    title: `Top-up awaiting payment`,
+    message: `An approved top-up "${request.purpose}" for ${payable} ${request.currency} needs to be paid from a digital account into the fund.`,
+    entityType: 'ExpenseRequest', entityId: request.id,
+  }, db)))
+}
+
+/**
+ * §2.2 — the Digital Expenses Custodian pays an approved Petty Cash top-up. In
+ * ONE transaction (owned by the caller — the execute-topup route — so both sides
+ * commit or neither does) this posts BOTH money-flow sides, linked by the
+ * ExpenseRequest id:
+ *
+ *   • Paying side: a BankTransaction of type TRANSFER OUT of the chosen digital
+ *     CompanyPaymentAccount (Cr the digital account's GL) and INTO the company's
+ *     Cash-on-Hand GL (Dr — a petty cash CASH fund has no CompanyPaymentAccount
+ *     of its own). This is exactly what lib/custodian-report.ts computeDigitalPeriod
+ *     classifies as internal_transfer_topup.
+ *   • Receiving side: the fund's REPLENISH (creditFundingSource) + currentBalance
+ *     bump, reached via executeTopUpAllocation so the CLOSED transition and the
+ *     requester's EXPENSE_TOPUP_ALLOCATED confirmation are the identical ones a
+ *     direct allocation produces.
+ *
+ * The transfer and the REPLENISH carry the SAME request id and the SAME amount,
+ * which is what makes the cross-custodian reconciliation (§2.1 item 3) pair them.
+ *
+ * Idempotent: a request already CLOSED returns without posting again, so a double
+ * click can't pay twice.
+ */
+export async function executeTopUpPayment(
+  db: Db,
+  opts: { expenseRequestId: string; companyPaymentAccountId: string; actorId: string; actorName?: string | null; transactionDate?: Date },
+): Promise<{ status: ExpenseRequestStatus; allocated: number; bankTransactionId: string | null }> {
+  const request = await db.expenseRequest.findUniqueOrThrow({ where: { id: opts.expenseRequestId } })
+  if (request.direction !== 'IN') throw new Error('Not a top-up request')
+  if (!request.fundingSourceId) throw new Error('Top-up request has no fund to credit')
+  if (request.status === 'CLOSED') {
+    return { status: 'CLOSED', allocated: request.allocatedAmount ?? request.amount, bankTransactionId: null }
+  }
+  if (request.status !== 'APPROVED') throw new Error(`This top-up is ${request.status}, not awaiting payment`)
+
+  const fund = await db.fundingSource.findUniqueOrThrow({ where: { id: request.fundingSourceId } })
+  if (fundClassOf(fund.sourceType) !== 'PETTY_CASH') {
+    throw new Error('Only Petty Cash top-ups are paid from a digital account')
+  }
+
+  const digital = await db.companyPaymentAccount.findUnique({ where: { id: opts.companyPaymentAccountId } })
+  if (!digital || !digital.isActive) throw new Error('Digital account not found or inactive')
+  if (digital.companyId !== fund.companyId) throw new Error('The chosen digital account belongs to a different company than the fund')
+
+  const companyId = digital.companyId
+  const outletId = fund.outletId ?? request.outletId ?? null
+  // Where the money lands in the GL — the company's Cash-on-Hand account (the
+  // petty cash float is physical cash), resolved via the mapping layer, never a
+  // hardcoded account id.
+  const cashGlAccountId = await resolveAccountId(db, { companyId, key: 'CASH', outletId })
+
+  const amount = roundMoney(request.allocatedAmount && request.allocatedAmount > 0 ? request.allocatedAmount : request.amount)
+  const transactionDate = opts.transactionDate ?? new Date()
+
+  const { id: bankTransactionId } = await postBankTransactionTx(db, {
+    companyId,
+    type: 'TRANSFER',
+    fromAccountId: digital.id,
+    toGlAccountId: cashGlAccountId,
+    amount,
+    transactionDate,
+    reference: request.reference,
+    note: `Petty cash top-up: ${request.purpose}`,
+    createdById: opts.actorId,
+    expenseRequestId: request.id,
+  })
+
+  // Receiving side + CLOSED + requester confirmation. Passing allocatedAmount
+  // pins the credit to the same figure the transfer moved (honours an
+  // approver-adjusted amount and keeps both sides equal for reconciliation).
+  const { status, allocated } = await executeTopUpAllocation(db, request.id, {
+    allocatedAmount: amount, actorId: opts.actorId, actorName: opts.actorName,
+  })
+
+  return { status, allocated, bankTransactionId }
 }
 
 /**
@@ -244,35 +435,66 @@ export async function advanceExpenseApproval(
   const isTopUp = request.direction === 'IN'
 
   if (decision === 'REJECTED') {
-    await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'REJECTED' } })
+    await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'REJECTED', stageEnteredAt: new Date() } })
     await createNotification({
       userId: request.requestedById, type: 'EXPENSE_REQUEST_REJECTED',
       title: `${request.requestType.name} rejected`,
       message: `${isTopUp ? 'Your top-up' : 'Request'} "${request.purpose}" for ${request.amount} ${request.currency} was rejected.`,
       entityType: 'ExpenseRequest', entityId: expenseRequestId,
-    }).catch(() => {})
+    }, db)
     return { status: 'REJECTED' }
   }
 
   const next = await openNextApprovalStep(db, expenseRequestId)
   if (next) return { status: 'PENDING_APPROVAL' }
 
-  // Final approval reached. A top-up is executed here and now (the approver's
-  // approval IS the allocation, per §8's decision) rather than being handed to a
-  // separate allocator.
+  // Final approval reached.
   if (isTopUp) {
+    // Which fund this top-up credits decides how it finalizes.
+    const fund = request.fundingSourceId
+      ? await db.fundingSource.findUnique({ where: { id: request.fundingSourceId }, select: { sourceType: true, outletId: true } })
+      : null
+    const fundClass = fund ? fundClassOf(fund.sourceType) : null
+
+    // §2.2 — a PETTY CASH top-up is NOT credited on approval. It waits in
+    // APPROVED (awaiting payment) for the Digital Expenses Custodian to pay it
+    // out of a chosen digital account (executeTopUpPayment). Only Petty Cash uses
+    // this route — Cashier Cash is never topped up this way (locked decision).
+    if (fundClass === 'PETTY_CASH') {
+      await routeTopUpToDigitalCustodian(db, request, fund!.outletId)
+      return { status: 'APPROVED' }
+    }
+
+    // Any other IN top-up (an OTHER cash float with no digital-custodian route)
+    // keeps the original behavior: the approver's approval IS the allocation
+    // (§8), executed here and now.
     const { status } = await executeTopUpAllocation(db, expenseRequestId, opts)
     return { status }
   }
 
-  await db.expenseRequest.update({ where: { id: expenseRequestId }, data: { status: 'APPROVED' } })
+  // A partial approval on an OUT disbursement: the final approver may sign off a
+  // different figure than requested (approve 80k of a 100k request), stored as
+  // allocatedAmount so the requested amount stays auditable and every downstream
+  // money path (lib/expense-funds.ts payableAmount) pays against the approved
+  // figure, not the requested one. Only applied at final approval and only when
+  // it actually differs — matching how an IN top-up's allocation is captured.
+  const approved = opts.allocatedAmount && opts.allocatedAmount > 0 ? roundMoney(opts.allocatedAmount) : null
+  await db.expenseRequest.update({
+    where: { id: expenseRequestId },
+    data: {
+      status: 'APPROVED', stageEnteredAt: new Date(),
+      ...(approved != null && approved !== request.amount ? { allocatedAmount: approved } : {}),
+    },
+  })
 
   await createNotification({
     userId: request.requestedById, type: 'EXPENSE_REQUEST_APPROVED',
     title: `${request.requestType.name} approved`,
-    message: `"${request.purpose}" for ${request.amount} ${request.currency} has been approved.`,
+    message: approved != null && approved !== request.amount
+      ? `"${request.purpose}" was approved for ${approved} ${request.currency} (requested ${request.amount}).`
+      : `"${request.purpose}" for ${request.amount} ${request.currency} has been approved.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
-  }).catch(() => {})
+  }, db)
 
   // Notify whoever can now disburse this request. When the request names a fund
   // (§3), that fund's own assigned custodians are the exact audience — far
@@ -280,16 +502,17 @@ export async function advanceExpenseApproval(
   // best available proxy before a request carried a funding source at all. Falls
   // back to that proxy for requests created before the upgrade.
   const custodians = request.fundingSourceId
-    ? await listFundingSourceCustodians(request.fundingSourceId)
+    ? await listFundingSourceCustodians(request.fundingSourceId, db)
       .then((rows) => rows.map((r) => ({ id: r.userId })))
       .catch(() => [])
-    : await listCustodiansForRequestType(request.requestType.allowedFundingSourceIds).catch(() => [])
+    : await listCustodiansForRequestType(request.requestType.allowedFundingSourceIds, db).catch(() => [])
+  const payableForMsg = approved != null && approved !== request.amount ? approved : request.amount
   await Promise.all(custodians.map((c) => createNotification({
     userId: c.id, type: 'EXPENSE_REQUEST_READY_FOR_PAYMENT',
     title: `${request.requestType.name} ready for payment`,
-    message: `"${request.purpose}" for ${request.amount} ${request.currency} is approved and ready to be paid.`,
+    message: `"${request.purpose}" for ${payableForMsg} ${request.currency} is approved and ready to be paid.`,
     entityType: 'ExpenseRequest', entityId: expenseRequestId,
-  }).catch(() => {})))
+  }, db)))
 
   return { status: 'APPROVED' }
 }

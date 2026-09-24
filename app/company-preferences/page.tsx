@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AppShell } from '@/components/Layout/AppShell'
 import { SetupTabs } from '@/components/Layout/SetupTabs'
 import { useApi } from '@/hooks/useApi'
@@ -68,6 +68,51 @@ export default function CompanyPreferencesPage() {
   const set = (k: keyof CompanyConfig) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }))
 
+  const logoInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+
+  // Read the chosen image, downscale it to a small square (max 256px) and store
+  // it as a PNG data URI directly in logoUrl. No upload endpoint or file storage
+  // is needed — the data URI travels with companyConfig and renders wherever
+  // logoUrl is already used (sidebar, MyPos header, PDF reports). Downscaling
+  // keeps the config blob small (~a few KB) regardless of the source file size.
+  const onPickLogo = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-picking the same file
+    if (!file) return
+    if (!file.type.startsWith('image/')) return toast.error('Please choose an image file')
+    if (file.size > 5 * 1024 * 1024) return toast.error('Image is too large — please use one under 5MB')
+    setUploadingLogo(true)
+    try {
+      const dataUri = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = () => reject(new Error('Could not read the image'))
+        reader.onload = () => {
+          const img = new Image()
+          img.onerror = () => reject(new Error('That file is not a valid image'))
+          img.onload = () => {
+            const MAX = 256
+            const scale = Math.min(1, MAX / Math.max(img.width, img.height))
+            const w = Math.max(1, Math.round(img.width * scale))
+            const h = Math.max(1, Math.round(img.height * scale))
+            const canvas = document.createElement('canvas')
+            canvas.width = w; canvas.height = h
+            const ctx = canvas.getContext('2d')
+            if (!ctx) return reject(new Error('Canvas not supported'))
+            ctx.drawImage(img, 0, 0, w, h)
+            resolve(canvas.toDataURL('image/png'))
+          }
+          img.src = reader.result as string
+        }
+        reader.readAsDataURL(file)
+      })
+      setForm((f) => ({ ...f, logoUrl: dataUri }))
+      toast.success('Logo loaded — click “Save Preferences” to apply it')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not process that image')
+    } finally { setUploadingLogo(false) }
+  }
+
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     const vat = Number(vatPct)
@@ -116,9 +161,36 @@ export default function CompanyPreferencesPage() {
                 <Field label="App name" hint="The title shown in the sidebar">
                   <input value={form.appName} onChange={set('appName')} disabled={!isAdmin} className={inputCls} />
                 </Field>
-                <Field label="Logo URL" hint="A /public path (e.g. /tips-logo.png) or full image URL">
-                  <input value={form.logoUrl} onChange={set('logoUrl')} disabled={!isAdmin} className={inputCls} />
-                </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Company logo" hint="Used in the sidebar, MyPos header and PDF reports. Upload an image, or paste a /public path (e.g. /tips-logo.png) or full image URL.">
+                    <div className="flex items-center gap-3">
+                      <div className="w-14 h-14 flex-shrink-0 rounded-xl border-2 border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
+                        {form.logoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- admin-configured/arbitrary source (data URI or path)
+                          <img src={form.logoUrl} alt="Logo preview" className="w-full h-full object-contain p-1" />
+                        ) : (
+                          <span className="text-[10px] text-gray-400">No logo</span>
+                        )}
+                      </div>
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={onPickLogo} disabled={!isAdmin || uploadingLogo} />
+                          <button type="button" onClick={() => logoInputRef.current?.click()} disabled={!isAdmin || uploadingLogo}
+                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-60 whitespace-nowrap">
+                            {uploadingLogo ? 'Loading…' : '⬆ Upload logo'}
+                          </button>
+                          {isAdmin && form.logoUrl && (
+                            <button type="button" onClick={() => setForm((f) => ({ ...f, logoUrl: '' }))}
+                              className="px-3 py-2 bg-red-50 text-red-700 text-sm font-semibold rounded-xl hover:bg-red-100">
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <input value={form.logoUrl} onChange={set('logoUrl')} disabled={!isAdmin} placeholder="/tips-logo.png or https://…" className={inputCls} />
+                      </div>
+                    </div>
+                  </Field>
+                </div>
                 <Field label="Letterhead logo text" hint="Short word drawn on PDF letter headers">
                   <input value={form.logoText} onChange={set('logoText')} disabled={!isAdmin} className={inputCls} />
                 </Field>

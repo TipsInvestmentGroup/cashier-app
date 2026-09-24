@@ -11,9 +11,10 @@ import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill
 import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
 import { resolvePerson } from '@/lib/resolve-person'
 import { syncBusinessSession } from '@/lib/business-session'
-import { postJournalEntry } from '@/lib/ledger'
-import { resolveAccountId, resolveDefaultCompanyId, resolveChannelAccountId } from '@/lib/finance-mapping'
+import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { postCollectionCashIn } from '@/lib/collection-gl'
 import { postCreditSale } from '@/lib/finance-ar'
+import { syncStaffLossReceivable } from '@/lib/staff-loss-gl'
 import { resolveCreditTags } from '@/lib/credit-config'
 import { syncCreditForBill } from '@/lib/credit-ledger'
 import { startOfDay, endOfDay, format } from 'date-fns'
@@ -316,6 +317,7 @@ export async function POST(req: NextRequest) {
           data: { userId: user.userId, action: 'CREATE', entity: 'SignedBill', entityId: bill.id, details: `Auto staff loss ${staffLossAmount} for ${staffName}` },
         })
         await postCreditSale(tx, bill, user.userId) // no-op: STAFF_LOSS isn't a CREDIT_BILL_TYPES receivable
+        await syncStaffLossReceivable(tx, bill.id) // GL: Dr A/R (1300) / Cr Sales Revenue for the shortfall
         await syncCreditForBill(tx, bill.id) // credit ledger: STAFF_LOSS still owed by the staff
         staffLoss = { amount: staffLossAmount, voucher: ref.displayReference, staffName }
       }
@@ -324,43 +326,16 @@ export async function POST(req: NextRequest) {
     await syncBusinessSession(tx, collection.id)
 
     // Finance Platform (Phase 1): post the cash-in side of this collection —
-    // Dr Cash/Bank/Mobile-Money (per channel) / Cr Sales Revenue. A channel
-    // with its own glAccountId set posts there; otherwise it falls back to
-    // the company's default Cash/Mobile-Money account via
-    // resolveAccountId(), so an unconfigured company still posts correctly.
+    // Dr Cash/Bank/Mobile-Money (per channel) / Cr Sales Revenue (+ Cr
+    // Excess-Payable for the payable portion of an over-collection). Shared with
+    // the historical backfill (scripts/backfill-collections-to-gl.ts) via
+    // lib/collection-gl.ts so both paths post identically.
     const companyId = collection.outlet.companyId || (await resolveDefaultCompanyId(tx))
-    if (companyId && total > 0) {
-      const amountsByCode: Record<string, number> = { CASH: roundMoney(Number(cash) || 0), ...channelAmounts }
-      const debitLines: { accountId: string; debit: number; outletId: string }[] = []
-      const accountTotals = new Map<string, number>()
-      for (const [code, rawAmount] of Object.entries(amountsByCode)) {
-        const channelAmount = roundMoney(Number(rawAmount) || 0)
-        if (channelAmount <= 0) continue
-        const accountId = await resolveChannelAccountId(tx, { companyId, channelCode: code, outletId: usedOutletId })
-        accountTotals.set(accountId, roundMoney((accountTotals.get(accountId) || 0) + channelAmount))
-      }
-      for (const [accountId, amount] of accountTotals) debitLines.push({ accountId, debit: amount, outletId: usedOutletId })
-
-      if (debitLines.length) {
-        // Split the credit: the third-party payable portion of an over-collection
-        // goes to the Excess-Payable liability, the rest to Sales Revenue.
-        // (debits already sum to `total`, so credits must too — they do:
-        //  revenueCredit + payableGl = total.)
-        const payableGl = roundMoney(Math.min(Math.max(0, payableExcessForGl), total))
-        const revenueCredit = roundMoney(total - payableGl)
-        const salesRevenueAccountId = await resolveAccountId(tx, { companyId, key: 'SALES_REVENUE' })
-        const creditLines: { accountId: string; credit: number; outletId: string }[] = []
-        if (revenueCredit > 0) creditLines.push({ accountId: salesRevenueAccountId, credit: revenueCredit, outletId: usedOutletId })
-        if (payableGl > 0) {
-          const excessPayableAccountId = await resolveAccountId(tx, { companyId, key: 'EXCESS_PAYABLE' })
-          creditLines.push({ accountId: excessPayableAccountId, credit: payableGl, outletId: usedOutletId })
-        }
-        await postJournalEntry(tx, {
-          companyId, entryDate: collDate, sourceModule: 'COLLECTIONS', sourceType: 'DailyCollection', sourceId: collection.id,
-          description: `Daily collection ${collection.id}`, createdById: user.userId,
-          lines: [...debitLines, ...creditLines],
-        })
-      }
+    if (companyId) {
+      await postCollectionCashIn(tx, {
+        companyId, collectionId: collection.id, outletId: usedOutletId, entryDate: collDate, createdById: user.userId,
+        amountsByCode: { CASH: roundMoney(Number(cash) || 0), ...channelAmounts }, total, payableExcessForGl,
+      })
     }
 
     return { collection, signedTotal, paidTotal, paidStaffLoss, signedCreated, paidCreated, staffLoss, excess }

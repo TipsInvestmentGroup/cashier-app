@@ -4,6 +4,7 @@ import { AppShell } from '@/components/Layout/AppShell'
 import { SectionTabs, DAILY_TABS } from '@/components/Layout/SectionTabs'
 import { useApi } from '@/hooks/useApi'
 import { useAuth } from '@/contexts/AuthContext'
+import { useCompanyConfig } from '@/contexts/CompanyConfigContext'
 import { formatCurrency } from '@/lib/utils'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
@@ -40,6 +41,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 export default function DailyReportPage() {
   const { request } = useApi()
   const { user } = useAuth()
+  const { config } = useCompanyConfig()
   const [date, setDate] = useState(() => format(new Date(), 'yyyy-MM-dd'))
   const [outletId, setOutletId] = useState('')
   const [outlets, setOutlets] = useState<Outlet[]>([])
@@ -339,9 +341,16 @@ export default function DailyReportPage() {
             {/* Header */}
             <div className="cdr-header">
               <div className="cdr-header-top" style={{ justifyContent: 'center', textAlign: 'center', flexDirection: 'column' }}>
-                <div className="cdr-logo-badge">tips</div>
+                <div className="cdr-logo-badge">
+                  {config.logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- admin-configured logo (data URI or path); html2canvas snapshots it into the PDF
+                    <img src={config.logoUrl} alt={config.companyName} crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
+                  ) : (
+                    config.logoText
+                  )}
+                </div>
                 <div>
-                  <div className="cdr-company-name">Tips Investment Limited</div>
+                  <div className="cdr-company-name">{config.companyName}</div>
                   <div className="cdr-company-addr">{data.outletName}</div>
                 </div>
               </div>
@@ -360,7 +369,11 @@ export default function DailyReportPage() {
             {/* Collection */}
             <section className="cdr-section">
               <h2 className="cdr-section-title"><span>Collection (sales)</span><span>TSh</span></h2>
-              <div className="cdr-ref-line"><span>System sales (per POS, for comparison only)</span><b>{money(data.collection.systemSales)}</b></div>
+              {/* System sales is a separate, optional manual figure (not the
+                  Sales Import). When it wasn't entered, show a dash and suppress
+                  the variance — a "variance" equal to the full collection is
+                  meaningless with no system figure to compare against. */}
+              <div className="cdr-ref-line"><span>System sales (per POS, for comparison only)</span><b>{data.collection.systemSales > 0 ? money(data.collection.systemSales) : '—'}</b></div>
               <div className="cdr-collection-grid">
                 <div className="cdr-cell"><div className="cdr-label">Cash</div><div className="cdr-amount">{money(data.collection.cash)}</div></div>
                 {data.collection.channels.map((c) => (
@@ -370,7 +383,9 @@ export default function DailyReportPage() {
               <div className="cdr-total-row"><span>Total collected</span><span>{money(data.collection.total)}</span></div>
               <div className="cdr-variance-row">
                 <span>Variance (collected − system sales)</span>
-                <span className={`cdr-amount ${data.collection.variance < 0 ? 'cdr-neg' : ''}`}>{money(data.collection.variance)}</span>
+                {data.collection.systemSales > 0
+                  ? <span className={`cdr-amount ${data.collection.variance < 0 ? 'cdr-neg' : ''}`}>{money(data.collection.variance)}</span>
+                  : <span className="cdr-amount">— <span style={{ fontWeight: 400, opacity: 0.7 }}>(no system sales entered)</span></span>}
               </div>
             </section>
 

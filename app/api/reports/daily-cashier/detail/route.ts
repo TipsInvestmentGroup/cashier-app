@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, readOutletScope, isSingleOutletRole } from '@/lib/auth'
 import { CREDIT_BILL_TYPES } from '@/lib/bill-types'
 import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
 
@@ -18,7 +18,10 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const key = searchParams.get('key') || ''
   const byOutlet = searchParams.get('groupBy') === 'outlet'
-  const outletId = searchParams.get('outletId')
+  // Cashiers/waiters are locked to their own outlet — a requested outletId (or
+  // an outlet-name group) from them is ignored in favour of their own.
+  const outletId = readOutletScope(user, searchParams.get('outletId'))
+  const locked = isSingleOutletRole(user.role)
   const parseD = (s: string | null) => { if (!s) return null; const p = parse(s, 'yyyy-MM-dd', new Date()); return isValid(p) ? p : null }
   let start = parseD(searchParams.get('from'))
   let end = parseD(searchParams.get('to'))
@@ -75,8 +78,14 @@ export async function GET(req: NextRequest) {
   let paidWhere: any = { date: range }
 
   if (byOutlet) {
-    const outlet = await prisma.outlet.findFirst({ where: { name: key }, select: { id: true } })
-    const oid = outlet?.id || '__none__'
+    // A single-outlet user can only see their own outlet, whatever name was asked for.
+    let oid: string
+    if (locked) {
+      oid = outletId || '__none__'
+    } else {
+      const outlet = await prisma.outlet.findFirst({ where: { name: key }, select: { id: true } })
+      oid = outlet?.id || '__none__'
+    }
     collWhere.outletId = oid
     signedWhere.outletId = oid
     paidWhere.outletId = oid

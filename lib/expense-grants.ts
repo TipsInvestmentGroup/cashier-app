@@ -34,6 +34,7 @@
 // See docs/expense-module-upgrade-brief.md §4 and prisma/schema.prisma
 // (ExpenseAccessGrant).
 import { prisma } from '@/lib/prisma'
+import type { Db } from '@/lib/ledger'
 import { FUND_CLASSES, fundClassOf, isFundClass, type FundClass } from '@/lib/expense-funds'
 import { EXPENSE_GRANT_TYPES, EXPENSE_GRANT_FLAGS, EXPENSE_RESERVED_GRANT_TYPES } from '@/lib/shared-constants'
 
@@ -184,8 +185,9 @@ export async function hasGrant(userId: string, grantType: GrantType, scope: Gran
 export async function usersWithGrant(
   grantType: GrantType,
   scope: GrantScope = {},
+  db: Db = prisma,
 ): Promise<{ id: string; name: string; email: string | null; role: string }[]> {
-  const grants = await prisma.expenseAccessGrant.findMany({
+  const grants = await db.expenseAccessGrant.findMany({
     where: { grantType, ...scopeWhere(scope) },
     select: { userId: true },
   })
@@ -194,7 +196,7 @@ export async function usersWithGrant(
   // isActive filters out a grant left standing on a deactivated account — the
   // grant is deliberately not auto-revoked (that would lose the audit trail),
   // so the liveness test belongs here at read time.
-  return prisma.user.findMany({
+  return db.user.findMany({
     where: { id: { in: userIds }, isActive: true },
     select: { id: true, name: true, email: true, role: true },
     orderBy: { name: 'asc' },
@@ -264,12 +266,20 @@ export async function approversForStage(stage: 1 | 2, scope: GrantScope) {
   return usersWithGrant(stage === 1 ? 'FIRST_APPROVER' : 'SECOND_APPROVER', scope)
 }
 
-/** True when a fund's chain has nobody to route to at either stage — the
- *  condition that would otherwise leave a submitted request silently stuck with
- *  no pending approver. Callers should surface this at submit time. */
-export async function chainIsStaffed(scope: GrantScope): Promise<{ first: boolean; second: boolean }> {
-  const [first, second] = await Promise.all([approversForStage(1, scope), approversForStage(2, scope)])
-  return { first: first.length > 0, second: second.length > 0 }
+/** Who is available to approve for a fund, per model:
+ *   • single — a Single Approver, whose lone approval finalizes the request;
+ *   • first / second — the two-stage chain.
+ *  Used to (a) drop unstaffed stages from the plan and (b) surface at submit
+ *  time the case where a request needs approval but has nobody to route to,
+ *  which would otherwise leave it silently stuck with no pending approver.
+ *  resolveApprovalPlan gives `single` precedence — see there. */
+export async function chainIsStaffed(scope: GrantScope): Promise<{ single: boolean; first: boolean; second: boolean }> {
+  const [single, first, second] = await Promise.all([
+    usersWithGrant('SINGLE_APPROVER', scope),
+    approversForStage(1, scope),
+    approversForStage(2, scope),
+  ])
+  return { single: single.length > 0, first: first.length > 0, second: second.length > 0 }
 }
 
 /**

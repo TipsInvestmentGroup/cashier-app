@@ -64,6 +64,68 @@ export async function resolveAccountId(db: Db, opts: { companyId: string; outlet
   return account.id
 }
 
+// Reserved categories that are NOT P&L expenses — they move money between the
+// company's own funds/accounts (e.g. topping up a petty-cash float). If recorded
+// through a disbursement they must post as a balance-sheet transfer (Dr Cash),
+// never to an expense or the suspense account. The real top-up flow is a
+// direction=IN ExpenseRequest (lib/expense-workflow.ts executeTopUpPayment,
+// which likewise lands the money in Cash-on-Hand); this guard only stops a
+// legacy "Fund Top-Up" category from inflating expenses if it is used directly.
+const FUND_TRANSFER_CATEGORY_CODES = new Set(['FUND_TOPUP'])
+const FUND_TRANSFER_CATEGORY_NAMES = new Set(['fund top-up', 'fund topup', 'fund top up'])
+function isFundTransferCategory(code?: string | null, name?: string | null): boolean {
+  if (code && FUND_TRANSFER_CATEGORY_CODES.has(code)) return true
+  return FUND_TRANSFER_CATEGORY_NAMES.has((name ?? '').trim().toLowerCase())
+}
+
+/**
+ * The GL account a disbursement should DEBIT, given how it's classified.
+ * - A fund-transfer category (e.g. "Fund Top-Up") is NOT an expense — it debits
+ *   Cash so the entry is a balance-sheet transfer, never the P&L.
+ * - Otherwise prefers the ExpenseCategory's chosen budgetAccountId so
+ *   category-level cost reporting lands on a real operating-cost account (Rent,
+ *   Utilities, …); falls back to the PETTY_CASH_EXPENSE suspense bucket (9000)
+ *   only when the category is unknown or still unmapped, so posting never blocks
+ *   on setup.
+ *
+ * Petty-cash records classify via a free-text functionName that bridges to
+ * ExpenseCategory.legacyFunctionName (matched trimmed, case-insensitively);
+ * the structured expense-request engine passes categoryId directly. Either
+ * identifier resolves through the same category → account rule here.
+ */
+export async function resolveExpenseDebitAccount(
+  db: Db,
+  opts: { companyId: string; outletId?: string | null; categoryId?: string | null; functionName?: string | null },
+): Promise<string> {
+  let category: { code: string | null; name: string | null; budgetAccountId: string | null } | null = null
+  if (opts.categoryId) {
+    category = await db.expenseCategory.findFirst({
+      where: { id: opts.categoryId, companyId: opts.companyId },
+      select: { code: true, name: true, budgetAccountId: true },
+    })
+  }
+  const fn = (opts.functionName ?? '').trim()
+  if (!category && fn) {
+    // SQLite has no case-insensitive equals in Prisma; match in JS over this
+    // company's categories (a handful of rows) so "Gas Refill" == "gas refill".
+    const cats = await db.expenseCategory.findMany({
+      where: { companyId: opts.companyId },
+      select: { code: true, name: true, legacyFunctionName: true, budgetAccountId: true },
+    })
+    const lc = fn.toLowerCase()
+    category = cats.find((c) => (c.legacyFunctionName ?? '').trim().toLowerCase() === lc)
+      || cats.find((c) => (c.name ?? '').trim().toLowerCase() === lc)
+      || null
+  }
+
+  // Fund transfer (top-up) → Cash, so the disbursement is a transfer, not a cost.
+  if (isFundTransferCategory(category?.code, category?.name) || (!category && isFundTransferCategory(null, fn))) {
+    return resolveAccountId(db, { companyId: opts.companyId, outletId: opts.outletId, key: 'CASH' })
+  }
+  if (category?.budgetAccountId) return category.budgetAccountId
+  return resolveAccountId(db, { companyId: opts.companyId, outletId: opts.outletId, key: 'PETTY_CASH_EXPENSE' })
+}
+
 /** Falls back to the single/first Company row — matches today's
  *  single-company reality, and keeps working unmodified once a second
  *  Company is added (whichever record needs a real company id, e.g. a

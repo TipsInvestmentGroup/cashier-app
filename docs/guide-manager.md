@@ -9,8 +9,8 @@
 - **Rejected items drop out of all financial totals.**
 
 ## Reconciliation verification (if you're an officer)
-On **Petty Cash → Cash / Digital Payment Reconciliation**, enter the **Verified** figures.
-You verify **independently** — the cashier's opening/closing are hidden and locked; the **report** compares both sides.
+Enter the **Verified** figures on **💰 Cash Reconciliation** (Petty Cash screen) and **📲 Digital Payment Reconciliation** (its own page).
+You verify **independently** — the cashier's figures are hidden and locked; the **report** compares both sides. *(Digital: verify Paid bills + Sales collection per channel.)*
 *Officers: owner, shabinam@tips.co.tz, siyer.mkama@tips.co.tz (+ owner‑picked).*
 
 ## Setup you can manage (if authorized)

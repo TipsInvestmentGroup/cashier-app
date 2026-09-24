@@ -18,6 +18,13 @@ export type OverBudgetBehavior = (typeof OVER_BUDGET_BEHAVIORS)[number]
 export const FUNDING_SOURCE_TYPES = ['CASH', 'BANK', 'MOBILE_MONEY', 'CARD', 'CASHIER_DRAWER', 'OTHER'] as const
 export type FundingSourceType = (typeof FUNDING_SOURCE_TYPES)[number]
 
+// The fallback payment-method list — used when no scope (OUTLET → COMPANY →
+// GLOBAL) has configured its own. Admin-editable per scope in Expense Settings,
+// so this is only what a fresh deployment sees. Tanzania-centric defaults.
+export const DEFAULT_PAYMENT_METHODS = [
+  'CASH', 'CRDB', 'NMB', 'NBC', 'M-PESA', 'TIGO PESA', 'AIRTEL MONEY', 'HALOPESA', 'CHEQUE', 'BANK TRANSFER',
+] as const
+
 export const BUDGET_VALIDATION_MODES = ['NONE', 'WARN', 'BLOCK'] as const
 export type BudgetValidationMode = (typeof BUDGET_VALIDATION_MODES)[number]
 
@@ -53,6 +60,7 @@ export interface ResolvedExpenseModuleConfig {
   requireReceiptDefault: boolean
   allowMixedPayment: boolean
   allowOverBudget: OverBudgetBehavior
+  paymentMethods: string[]
   terminology: ExpenseTerminology
 }
 
@@ -73,6 +81,7 @@ const DEFAULT_MODULE_CONFIG: ResolvedExpenseModuleConfig = {
   requireReceiptDefault: true,
   allowMixedPayment: true,
   allowOverBudget: 'WARN',
+  paymentMethods: [...DEFAULT_PAYMENT_METHODS],
   terminology: DEFAULT_TERMINOLOGY,
 }
 
@@ -85,6 +94,26 @@ export async function resolveCompanyId(db: Db, outletId?: string | null): Promis
     if (outlet?.companyId) return outlet.companyId
   }
   return resolveDefaultCompanyId(db)
+}
+
+/** Parse a stored paymentMethods JSON string into a clean, de-duplicated,
+ *  trimmed list. Returns [] for null/blank/invalid so callers can fall back to
+ *  a wider scope. */
+function parsePaymentMethods(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const m of parsed) {
+      const s = String(m).trim()
+      if (s && !seen.has(s)) { seen.add(s); out.push(s) }
+    }
+    return out
+  } catch {
+    return []
+  }
 }
 
 function parseTerminology(raw: string | null | undefined): ExpenseTerminology {
@@ -127,6 +156,15 @@ export async function resolveExpenseModuleConfig(
   const rows = await db.expenseModuleConfig.findMany({
     where: { OR: priority.map((p) => ({ scope: p.scope, scopeId: p.scopeId })) },
   })
+  // paymentMethods resolves per-field (narrowest scope that set a non-empty list
+  // wins, else the built-in default) so an outlet that only overrides, say, the
+  // terminology doesn't accidentally blank out a company-wide method list.
+  let paymentMethods: string[] = [...DEFAULT_PAYMENT_METHODS]
+  for (const p of priority) {
+    const row = rows.find((r) => r.scope === p.scope && r.scopeId === p.scopeId)
+    const list = parsePaymentMethods(row?.paymentMethods)
+    if (list.length) { paymentMethods = list; break }
+  }
   for (const p of priority) {
     const row = rows.find((r) => r.scope === p.scope && r.scopeId === p.scopeId)
     if (row) {
@@ -137,11 +175,29 @@ export async function resolveExpenseModuleConfig(
         requireReceiptDefault: row.requireReceiptDefault,
         allowMixedPayment: row.allowMixedPayment,
         allowOverBudget: (OVER_BUDGET_BEHAVIORS as readonly string[]).includes(row.allowOverBudget) ? (row.allowOverBudget as OverBudgetBehavior) : 'WARN',
+        paymentMethods,
         terminology: parseTerminology(row.terminology),
       }
     }
   }
-  return DEFAULT_MODULE_CONFIG
+  return { ...DEFAULT_MODULE_CONFIG, paymentMethods }
+}
+
+/** Resolve just the effective allowed payment methods for an outlet (its own
+ *  scope → company → global → built-in default). The read-time list the pay
+ *  screen offers. */
+export async function resolvePaymentMethods(db: Db, outletId?: string | null): Promise<string[]> {
+  return (await resolveExpenseModuleConfig(db, { outletId })).paymentMethods
+}
+
+/** The RAW payment-method list stored at exactly one scope (no inheritance) —
+ *  what the Expense Settings editor shows so an admin sees what THIS scope
+ *  overrides vs. inherits. Returns [] when the scope has set nothing. */
+export async function getStoredPaymentMethods(db: Db, scope: ExpenseScope, scopeId: string | null): Promise<string[]> {
+  const row = scope === 'GLOBAL'
+    ? await db.expenseModuleConfig.findFirst({ where: { scope: 'GLOBAL', scopeId: null } })
+    : await db.expenseModuleConfig.findFirst({ where: { scope, scopeId } })
+  return parsePaymentMethods(row?.paymentMethods)
 }
 
 /** Convenience: just the resolved terminology map for an outlet. */
@@ -158,6 +214,7 @@ export interface ExpenseModuleConfigPatch {
   requireReceiptDefault?: boolean
   allowMixedPayment?: boolean
   allowOverBudget?: OverBudgetBehavior
+  paymentMethods?: string[]
   terminology?: Partial<ExpenseTerminology>
 }
 
@@ -174,6 +231,12 @@ export async function setExpenseModuleConfig(db: Db, scope: ExpenseScope, scopeI
   if (patch.requireReceiptDefault !== undefined) data.requireReceiptDefault = patch.requireReceiptDefault
   if (patch.allowMixedPayment !== undefined) data.allowMixedPayment = patch.allowMixedPayment
   if (patch.allowOverBudget !== undefined) data.allowOverBudget = patch.allowOverBudget
+  // Normalize (trim + de-dup) before storing; an empty list is stored as null so
+  // the scope cleanly falls back to a wider scope rather than offering nothing.
+  if (patch.paymentMethods !== undefined) {
+    const cleaned = parsePaymentMethods(JSON.stringify(patch.paymentMethods))
+    data.paymentMethods = cleaned.length ? JSON.stringify(cleaned) : null
+  }
   if (patch.terminology !== undefined) data.terminology = JSON.stringify({ ...DEFAULT_TERMINOLOGY, ...patch.terminology })
 
   if (scope === 'GLOBAL') {

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getAuthUser, requireRole } from '@/lib/auth'
+import { isOwner } from '@/lib/rbac'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,17 +16,34 @@ const db = prisma as any
  * stale days/loss/excess. A row is orphaned when NO DailyCollection exists for
  * its (outletId, date, staffName) — the same key syncBusinessSession upserts on.
  *
- * Guarded by CRON_SECRET so it can't fire by accident:
- *   /api/admin/cleanup-orphan-sessions?secret=<CRON_SECRET>
- * Add &dryRun=1 to preview which rows would be deleted without deleting them.
+ * POST only. Authenticate either as an ADMIN / owner, or — for the first
+ * bootstrap — with CRON_SECRET passed as an `x-cron-secret` header or
+ * `Authorization: Bearer <secret>`. The secret is never read from the URL
+ * (which leaks into proxy / server / browser logs). Send { "dryRun": true } in
+ * the body (or ?dryRun=1) to preview which rows would be deleted. Example:
+ *   curl -X POST https://<app>/api/admin/cleanup-orphan-sessions \
+ *     -H "x-cron-secret: <CRON_SECRET>" -H "content-type: application/json" \
+ *     -d '{ "dryRun": true }'
  */
-async function handle(req: NextRequest) {
+function headerSecretOk(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
-  if (!secret) return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 })
-  if (req.nextUrl.searchParams.get('secret') !== secret) {
-    return NextResponse.json({ error: 'Invalid secret' }, { status: 401 })
+  if (!secret) return false
+  const authHeader = req.headers.get('authorization') || ''
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const provided = req.headers.get('x-cron-secret') || bearer // not from the query string
+  return !!provided && provided === secret
+}
+
+export async function POST(req: NextRequest) {
+  const user = getAuthUser(req)
+  const isAdmin = !!user && (isOwner(user.email) || requireRole(user, ['ADMIN']))
+  if (!isAdmin && !headerSecretOk(req)) {
+    return NextResponse.json({ error: 'Unauthorized — sign in as an admin, or send the bootstrap secret in the x-cron-secret header' }, { status: 401 })
   }
-  const dryRun = req.nextUrl.searchParams.get('dryRun') === '1'
+
+  // dryRun is a non-sensitive flag — accepted from the JSON body or a query param.
+  const body = await req.json().catch(() => ({}))
+  const dryRun = body?.dryRun === true || req.nextUrl.searchParams.get('dryRun') === '1'
 
   const sessions: Array<{ id: string; outletId: string; date: Date; staffName: string }> =
     await db.businessSession.findMany({ select: { id: true, outletId: true, date: true, staffName: true } })
@@ -53,6 +72,3 @@ async function handle(req: NextRequest) {
 
   return NextResponse.json({ ok: true, scanned: sessions.length, deleted: res.count, orphans })
 }
-
-export async function GET(req: NextRequest) { return handle(req) }
-export async function POST(req: NextRequest) { return handle(req) }

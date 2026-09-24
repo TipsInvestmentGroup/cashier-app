@@ -11,8 +11,8 @@ import { syncFromCashRecon } from '@/lib/payment-verification'
 import { autoSettleExcessPayment } from '@/lib/excess-settlement'
 import { postJournalEntry } from '@/lib/ledger'
 import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
-import { previousClosing, computeCash } from '@/lib/cash-recon'
-import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
+import { previousClosing, computeCash, businessTodayUtc, utcDayRange } from '@/lib/cash-recon'
+import { startOfDay, parse, isValid } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
@@ -29,10 +29,13 @@ export async function GET(req: NextRequest) {
   // Single-day computed view (for the reconciliation form)
   if (dateParam) {
     const parsed = parse(dateParam, 'yyyy-MM-dd', new Date())
-    const day = isValid(parsed) ? parsed : new Date()
-    const computed = await computeCash(startOfDay(day), endOfDay(day), outletId)
+    // Normalize to UTC midnight of the requested date so the window matches how
+    // the date columns are stored on any host timezone (see lib/cash-recon.ts).
+    const day = isValid(parsed) ? new Date(`${dateParam}T00:00:00.000Z`) : await businessTodayUtc(outletId)
+    const range = utcDayRange(day)
+    const computed = await computeCash(day, outletId)
     const existing = await prisma.cashRecon.findFirst({
-      where: { date: { gte: startOfDay(day), lte: endOfDay(day) }, ...(outletId ? { outletId } : {}) },
+      where: { date: { gte: range.gte, lte: range.lte }, ...(outletId ? { outletId } : {}) },
       include: { excessItems: true },
     })
     const autoOpening = await previousClosing(day, outletId)
@@ -56,9 +59,26 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { date, outletId, cashDeposited = 0, notes } = body
   const rawExcessItems: { id?: string; amount: number; reason: string; staffId?: string; personId?: string }[] = Array.isArray(body.excessItems) ? body.excessItems : []
-  const day = date ? new Date(date) : new Date()
   // Cashiers always reconcile their own outlet.
   const usedOutletId = writeOutletId(user, outletId)
+  // UTC-midnight of the target business date, matching how the date columns are
+  // stored (host-independent — see lib/cash-recon.ts). Falls back to the outlet's
+  // current business day (cutover-aware), not the raw server clock.
+  const day = date ? new Date(`${String(date).slice(0, 10)}T00:00:00.000Z`) : await businessTodayUtc(usedOutletId)
+
+  // A closed day is locked for cashiers — the standalone Cash Reconciliation
+  // page can open any past date, so without this a cashier could silently
+  // rewrite a finalized day and shift the next day's auto-opening. Officers keep
+  // the ability to correct (they hold the reopen authority). Mirrors the same
+  // guard on the collections write routes.
+  if (user.role === 'CASHIER' && usedOutletId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = prisma as any
+    const closed = await db.dayClosure.findUnique({
+      where: { outletId_date: { outletId: usedOutletId, date: startOfDay(day) } }, select: { id: true },
+    })
+    if (closed) return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before editing the reconciliation.' }, { status: 423 })
+  }
 
   const excessItems = rawExcessItems
     .map((it) => ({ id: it.id || null, amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null }))
@@ -87,13 +107,14 @@ export async function POST(req: NextRequest) {
 
   // Opening = previous closing (auto). Closing computed & stored.
   const opening = await previousClosing(day, usedOutletId)
-  const c = await computeCash(startOfDay(day), endOfDay(day), usedOutletId)
+  const c = await computeCash(day, usedOutletId)
   const deposited = roundMoney(cashDeposited)
   const closing = roundMoney(opening + c.cashCollected + c.paidBillsCash - c.cashExpenses - deposited - excess)
 
   // One reconciliation per day+outlet — update if it exists
+  const dayRange = utcDayRange(day)
   const existing = await prisma.cashRecon.findFirst({
-    where: { date: { gte: startOfDay(day), lte: endOfDay(day) }, outletId: usedOutletId },
+    where: { date: { gte: dayRange.gte, lte: dayRange.lte }, outletId: usedOutletId },
   })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

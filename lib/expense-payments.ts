@@ -19,7 +19,8 @@ import { postJournalEntry } from '@/lib/ledger'
 import { roundMoney } from '@/lib/utils'
 import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
 import { recalcExpenseRequestPaymentStatus } from '@/lib/expense-requests'
-import { getFundingSourceBalance } from '@/lib/expense-ledger'
+import { getFundingSourceBalance, writeFundingSourceTxn } from '@/lib/expense-ledger'
+import { payableAmount } from '@/lib/expense-funds'
 import { createNotification } from '@/lib/notifications'
 
 function parseIdList(raw: string | null | undefined): string[] | null {
@@ -32,10 +33,12 @@ function parseIdList(raw: string | null | undefined): string[] | null {
   }
 }
 
-/** Resolves the Cr (money-out) GL account for a funding source. CASH posts to
- *  the company's default Cash account (same account Daily Collections use);
- *  BANK/MOBILE_MONEY/CARD post to the wrapped CompanyPaymentAccount's own GL
- *  account — never a separately-materialized figure (Stage 16 decision 2).
+/** Resolves the Cr (money-out) GL account for a funding source. CASH and
+ *  CASHIER_DRAWER both post to the company's default Cash account (same account
+ *  Daily Collections use) — a cashier's till IS cash, so its disbursements move
+ *  the same Cash GL account, matching how getFundingSourceBalance treats the two
+ *  alike. BANK/MOBILE_MONEY/CARD post to the wrapped CompanyPaymentAccount's own
+ *  GL account — never a separately-materialized figure (Stage 16 decision 2).
  *  OTHER has no GL representation yet — an honest gap, not a silent wrong
  *  posting; see Stage 16 "deliberately deferred, not missing". */
 async function resolveFundingSourceAccountId(
@@ -44,7 +47,7 @@ async function resolveFundingSourceAccountId(
   companyId: string,
   outletId?: string | null,
 ): Promise<string> {
-  if (fundingSource.sourceType === 'CASH') {
+  if (fundingSource.sourceType === 'CASH' || fundingSource.sourceType === 'CASHIER_DRAWER') {
     return resolveChannelAccountId(db, { companyId, channelCode: 'CASH', outletId })
   }
   if (fundingSource.companyPaymentAccount) {
@@ -67,6 +70,11 @@ export interface CreateExpensePaymentInput {
   reference?: string | null
   paidAt?: Date
   paidById: string
+  // Denormalized name snapshot of the acting user, stored on the PAYMENT ledger
+  // row so the ledger's "By" column shows a real name even if the user is later
+  // renamed/deactivated. Optional: writeFundingSourceTxn resolves it from
+  // paidById when omitted, so no caller can produce a nameless ledger row.
+  paidByName?: string | null
   outletId?: string | null
   allocations: PaymentAllocationInput[]
 }
@@ -118,7 +126,10 @@ export async function createExpensePayment(input: CreateExpensePaymentInput): Pr
         throw new Error(`${fundingSource.name} is not an allowed funding source for ${request.requestType.name}`)
       }
       const alreadyPaid = roundMoney(request.paymentAllocations.reduce((s, a) => s + a.amount, 0))
-      const outstanding = roundMoney(request.amount - alreadyPaid)
+      // The payable ceiling is the APPROVED figure (payableAmount), not the
+      // requested one — a request approved for less than requested can only be
+      // paid up to what was approved.
+      const outstanding = roundMoney(payableAmount(request) - alreadyPaid)
       const allocAmount = roundMoney(alloc.amount)
       if (allocAmount > outstanding + 0.001) {
         throw new Error(`Allocation of ${allocAmount} exceeds outstanding balance (${outstanding}) on request "${request.purpose}"`)
@@ -183,14 +194,19 @@ export async function createExpensePayment(input: CreateExpensePaymentInput): Pr
     }
 
     if (fundingSource.sourceType === 'CASH') {
-      await tx.fundingSource.update({ where: { id: fundingSource.id }, data: { currentBalance: roundMoney(fundingSource.currentBalance - amount) } })
+      // Atomic decrement (SET currentBalance = currentBalance - amount) rather
+      // than writing a value read earlier — two concurrent payments must not
+      // both write `staleBalance - amount` and lose one debit.
+      await tx.fundingSource.update({ where: { id: fundingSource.id }, data: { currentBalance: { decrement: roundMoney(amount) } } })
     }
     // Every CASH/CASHIER_DRAWER payment gets a Petty Cash Ledger row — CASH
     // also updates its materialized currentBalance above; CASHIER_DRAWER's
     // balance is always read live, so this row is purely the audit trail.
     if (fundingSource.sourceType === 'CASH' || fundingSource.sourceType === 'CASHIER_DRAWER') {
-      await tx.fundingSourceTxn.create({
-        data: { fundingSourceId: fundingSource.id, type: 'PAYMENT', amount: -amount, reference: input.reference || null, expensePaymentId: payment.id, createdById: input.paidById },
+      await writeFundingSourceTxn(tx, {
+        fundingSourceId: fundingSource.id, type: 'PAYMENT', amount: -amount,
+        reference: input.reference, expensePaymentId: payment.id,
+        createdById: input.paidById, createdByName: input.paidByName,
       })
     }
 
