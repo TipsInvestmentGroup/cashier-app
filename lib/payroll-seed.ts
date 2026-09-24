@@ -87,14 +87,16 @@ const PAYROLL_COMPONENTS: ComponentSeed[] = [
   // pull effective-dated rates from StatutoryRule via SOURCED=STATUTORY.
   { code: 'PAYE', name: 'PAYE (Income Tax)', componentType: 'STATUTORY', calcMethod: 'SOURCED', parameters: { source: 'STATUTORY', statutoryCode: 'PAYE' }, taxable: false, pensionable: false, priority: 30, glMappingKey: 'PAYE_PAYABLE', description: 'Pay-As-You-Earn income tax (TRA), progressive on taxable pay.' },
   { code: 'PSSSF_ER', name: 'Pension (Employer)', componentType: 'EMPLOYER_CONTRIBUTION', calcMethod: 'SOURCED', parameters: { source: 'STATUTORY', statutoryCode: 'PSSSF_ER' }, taxable: false, pensionable: false, priority: 40, glMappingKey: 'PENSION_PAYABLE', description: 'Employer pension contribution (PSSSF).' },
+  { code: 'SDL_ER', name: 'Skills Development Levy (Employer)', componentType: 'EMPLOYER_CONTRIBUTION', calcMethod: 'SOURCED', parameters: { source: 'STATUTORY', statutoryCode: 'SDL' }, taxable: false, pensionable: false, priority: 41, glMappingKey: 'SDL_PAYABLE', description: 'Employer Skills Development Levy on gross emoluments (TRA).' },
+  { code: 'WCF_ER', name: 'Workers Compensation Fund (Employer)', componentType: 'EMPLOYER_CONTRIBUTION', calcMethod: 'SOURCED', parameters: { source: 'STATUTORY', statutoryCode: 'WCF' }, taxable: false, pensionable: false, priority: 42, glMappingKey: 'WCF_PAYABLE', description: 'Employer Workers Compensation Fund contribution on gross emoluments.' },
   { code: 'STAFF_PURCHASES', name: 'Staff Purchases', componentType: 'DEDUCTION', calcMethod: 'SOURCED', parameters: { source: 'CREDIT_BALANCE' }, taxable: false, pensionable: false, priority: 90, glMappingKey: 'ACCOUNTS_RECEIVABLE', description: 'Recovery of the employee’s outstanding signed-bill balance (Credit framework).' },
 ]
 
 // Which components each pay group grants (group-level assignments).
 const GROUP_COMPONENTS: Record<string, string[]> = {
-  MANAGEMENT: ['BASIC_SALARY', 'HOUSING_ALLOWANCE', 'PENSION_EE', 'PAYE', 'PSSSF_ER', 'STAFF_PURCHASES'],
-  FLOOR_STAFF: ['BASIC_SALARY', 'OVERTIME', 'PENSION_EE', 'PAYE', 'PSSSF_ER', 'STAFF_PURCHASES'],
-  CASUAL_EVENT: ['BASIC_SALARY', 'PAYE', 'STAFF_PURCHASES'],
+  MANAGEMENT: ['BASIC_SALARY', 'HOUSING_ALLOWANCE', 'PENSION_EE', 'PAYE', 'PSSSF_ER', 'SDL_ER', 'WCF_ER', 'STAFF_PURCHASES'],
+  FLOOR_STAFF: ['BASIC_SALARY', 'OVERTIME', 'PENSION_EE', 'PAYE', 'PSSSF_ER', 'SDL_ER', 'WCF_ER', 'STAFF_PURCHASES'],
+  CASUAL_EVENT: ['BASIC_SALARY', 'PAYE', 'SDL_ER', 'WCF_ER', 'STAFF_PURCHASES'],
 }
 
 // ── Phase 4: TZ statutory pack, effective-dated. THESE ARE ILLUSTRATIVE
@@ -129,6 +131,12 @@ const TZ_STATUTORY: StatutorySeed[] = [
   { code: 'PAYE', name: 'PAYE (Income Tax)', authority: 'TRA', ruleType: 'TAX_BAND', baseVar: 'taxable', parameters: { bands: [[0, 0], [270000, 0.08], [520000, 0.20], [760000, 0.25], [1000000, 0.30]] }, glMappingKey: 'PAYE_PAYABLE', isEmployer: false },
   { code: 'PSSSF_EE', name: 'Pension — Employee (PSSSF)', authority: 'PSSSF', ruleType: 'FLAT_RATE', baseVar: 'pensionable', employeeRate: 0.10, glMappingKey: 'PENSION_PAYABLE', isEmployer: false },
   { code: 'PSSSF_ER', name: 'Pension — Employer (PSSSF)', authority: 'PSSSF', ruleType: 'FLAT_RATE', baseVar: 'pensionable', employerRate: 0.10, glMappingKey: 'PENSION_PAYABLE', isEmployer: true },
+  // Employer levies on gross emoluments. DEFAULT RATES — confirm vs current TRA
+  // (SDL) / WCF guidance and the business's SDL exemption status (SDL applies to
+  // employers with 10+ employees). Both are effective-dated StatutoryRule rows,
+  // so an admin edits the rate or sets it to 0 without a code change.
+  { code: 'SDL', name: 'Skills Development Levy (SDL)', authority: 'TRA', ruleType: 'FLAT_RATE', baseVar: 'gross', employerRate: 0.035, glMappingKey: 'SDL_PAYABLE', isEmployer: true },
+  { code: 'WCF', name: 'Workers Compensation Fund (WCF)', authority: 'WCF', ruleType: 'FLAT_RATE', baseVar: 'gross', employerRate: 0.005, glMappingKey: 'WCF_PAYABLE', isEmployer: true },
 ]
 
 /**
