@@ -9,6 +9,7 @@
 import { postJournalEntry, type Db } from '@/lib/ledger'
 import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
 import { roundMoney } from '@/lib/utils'
+import { resolveVatConfig, splitOutputVat } from '@/lib/vat'
 
 export interface PostCollectionCashInInput {
   companyId: string
@@ -48,12 +49,18 @@ export async function postCollectionCashIn(db: Db, input: PostCollectionCashInIn
   const debitLines = [...accountTotals].map(([accountId, amount]) => ({ accountId, debit: amount, outletId: input.outletId }))
   if (!debitLines.length) return { posted: false }
 
-  // Split the credit: payable over-collection to the liability, the rest to revenue.
+  // Split the credit: payable over-collection to the liability, the rest to
+  // revenue — and, when VAT is enabled, peel output VAT out of that revenue
+  // (the payable-excess portion is third-party money, never VATable).
   const payableGl = roundMoney(Math.min(Math.max(0, input.payableExcessForGl), input.total))
   const revenueCredit = roundMoney(input.total - payableGl)
+  const { net: netRevenue, vat: outputVat } = splitOutputVat(revenueCredit, await resolveVatConfig())
   const creditLines: { accountId: string; credit: number; outletId: string }[] = []
-  if (revenueCredit > 0) {
-    creditLines.push({ accountId: await resolveAccountId(db, { companyId: input.companyId, key: 'SALES_REVENUE' }), credit: revenueCredit, outletId: input.outletId })
+  if (netRevenue > 0) {
+    creditLines.push({ accountId: await resolveAccountId(db, { companyId: input.companyId, key: 'SALES_REVENUE' }), credit: netRevenue, outletId: input.outletId })
+  }
+  if (outputVat > 0) {
+    creditLines.push({ accountId: await resolveAccountId(db, { companyId: input.companyId, key: 'VAT_OUTPUT' }), credit: outputVat, outletId: input.outletId })
   }
   if (payableGl > 0) {
     creditLines.push({ accountId: await resolveAccountId(db, { companyId: input.companyId, key: 'EXCESS_PAYABLE' }), credit: payableGl, outletId: input.outletId })
