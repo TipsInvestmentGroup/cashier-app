@@ -19,6 +19,8 @@ export interface CompanyConfig {
   receiptDisclaimerText: string // small-print line on printed 80mm bills (may be empty)
   receiptFooterText: string // bold sign-off line on printed 80mm bills (may be empty)
   vatRate: number // 0.18 = 18%
+  vatEnabled: boolean // OFF until the business confirms VAT registration; gates all VAT posting
+  vatInclusive: boolean // true = selling prices already include VAT (TZ norm); false = VAT added on top
   businessDayCutoverHour: number // 0-23; entries before this hour count as the previous business day
 }
 
@@ -35,6 +37,8 @@ export const DEFAULT_COMPANY_CONFIG: CompanyConfig = {
   receiptDisclaimerText: 'Hii sio risiti halali ya malipo, huu ni mchanganuo',
   receiptFooterText: 'Karibu tena!',
   vatRate: 0.18,
+  vatEnabled: false,
+  vatInclusive: true,
   businessDayCutoverHour: 5,
 }
 
@@ -58,6 +62,8 @@ export function normalizeCompanyConfig(raw: unknown): CompanyConfig {
     receiptDisclaimerText: typeof r.receiptDisclaimerText === 'string' ? r.receiptDisclaimerText : DEFAULT_COMPANY_CONFIG.receiptDisclaimerText,
     receiptFooterText: typeof r.receiptFooterText === 'string' ? r.receiptFooterText : DEFAULT_COMPANY_CONFIG.receiptFooterText,
     vatRate: Number.isFinite(vat) && vat >= 0 && vat < 1 ? vat : DEFAULT_COMPANY_CONFIG.vatRate,
+    vatEnabled: typeof r.vatEnabled === 'boolean' ? r.vatEnabled : DEFAULT_COMPANY_CONFIG.vatEnabled,
+    vatInclusive: typeof r.vatInclusive === 'boolean' ? r.vatInclusive : DEFAULT_COMPANY_CONFIG.vatInclusive,
     businessDayCutoverHour: Number.isInteger(Number(r.businessDayCutoverHour)) && Number(r.businessDayCutoverHour) >= 0 && Number(r.businessDayCutoverHour) <= 23
       ? Number(r.businessDayCutoverHour)
       : DEFAULT_COMPANY_CONFIG.businessDayCutoverHour,
