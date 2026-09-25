@@ -9,7 +9,13 @@
 // provider-specific groupBy-across-relations SQL.
 import { prisma } from './prisma'
 import { roundMoney } from './utils'
-import { startOfWeek, startOfMonth, format } from 'date-fns'
+import { format } from 'date-fns'
+import { localHour, localDateKey, localWeekStartKey, localMonthKey } from './report-time'
+
+// Label a yyyy-MM-dd / yyyy-MM key anchored at UTC noon, so the calendar date
+// in the label is stable regardless of the host timezone (noon ±3h stays put).
+const dayLabel = (key: string) => format(new Date(`${key}T12:00:00Z`), 'dd MMM yyyy')
+const monthLabel = (key: string) => format(new Date(`${key}-15T12:00:00Z`), 'MMMM yyyy')
 
 export interface SalesFilters {
   startDate?: string // ISO date, inclusive
@@ -113,10 +119,11 @@ export async function aggregateSales(f: SalesFilters, groupBy: GroupBy): Promise
       case 'category': key = it.product.category ?? 'Other'; label = key; break
       case 'counter': key = it.counterCode ?? 'UNKNOWN'; label = key; break
       case 'paymentMethod': key = it.order.paymentMethod ?? 'UNKNOWN'; label = key; break
-      case 'hour': { const h = it.order.closedAt ? it.order.closedAt.getHours() : 0; key = String(h).padStart(2, '0'); label = `${key}:00`; break }
-      case 'day': { const d = it.order.closedAt ?? new Date(0); key = format(d, 'yyyy-MM-dd'); label = format(d, 'dd MMM yyyy'); break }
-      case 'week': { const d = it.order.closedAt ? startOfWeek(it.order.closedAt, { weekStartsOn: 1 }) : new Date(0); key = format(d, 'yyyy-MM-dd'); label = `Wiki ya ${format(d, 'dd MMM yyyy')}`; break }
-      case 'month': { const d = it.order.closedAt ? startOfMonth(it.order.closedAt) : new Date(0); key = format(d, 'yyyy-MM'); label = format(d, 'MMMM yyyy'); break }
+      // Bucket in East Africa Time (EAT), not the server clock — see lib/report-time.ts.
+      case 'hour': { const h = it.order.closedAt ? localHour(it.order.closedAt) : 0; key = String(h).padStart(2, '0'); label = `${key}:00`; break }
+      case 'day': { const d = it.order.closedAt ?? new Date(0); key = localDateKey(d); label = dayLabel(key); break }
+      case 'week': { const d = it.order.closedAt ?? new Date(0); key = localWeekStartKey(d, 1); label = `Wiki ya ${dayLabel(key)}`; break }
+      case 'month': { const d = it.order.closedAt ?? new Date(0); key = localMonthKey(d); label = monthLabel(key); break }
     }
     if (!buckets.has(key)) buckets.set(key, { label, quantity: 0, revenue: 0, orderKeys: new Set() })
     const b = buckets.get(key)!
