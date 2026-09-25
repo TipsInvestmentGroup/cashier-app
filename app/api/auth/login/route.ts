@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
       outletId: user.outletId || undefined,
       name: user.name,
       position: user.position || undefined,
+      sepoch: user.sessionEpoch,
     })
 
     return NextResponse.json({
