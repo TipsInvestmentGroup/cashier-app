@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, hashPassword } from '@/lib/auth'
+import { requireActiveUser, hashPassword } from '@/lib/auth'
 import { VALID_ROLES } from '@/lib/shared-constants'
 import { resolveManageUsersPermission, MANAGE_USERS_RESOURCES } from '@/lib/rbac'
 
@@ -8,7 +8,7 @@ const PIN_RE = /^\d{4}$/
 
 /** Edit a user — gated by the Manage Access "Edit users" grant (owner always passes). */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = getAuthUser(req)
+  const user = await requireActiveUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!(await resolveManageUsersPermission(user, MANAGE_USERS_RESOURCES.EDIT_USER))) return NextResponse.json({ error: 'You do not have permission to edit users' }, { status: 403 })
 
@@ -31,6 +31,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // Setting a new PIN also clears any active lockout — a manager handing out
   // a fresh PIN shouldn't inherit a prior lockout window.
   if (pin) { data.pin = await hashPassword(String(pin)); data.pinFailedAttempts = 0; data.pinLockedUntil = null }
+  // Revoke the edited user's outstanding tokens the moment their access changes
+  // (deactivation, role/outlet, credentials) so it takes effect immediately.
+  if (isActive === false || role !== undefined || outletId !== undefined || password || pin) {
+    data.sessionEpoch = { increment: 1 }
+  }
 
   try {
     const updated = await prisma.user.update({
@@ -48,7 +53,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 /** Delete a user — gated by the Manage Access "Delete users" grant (owner always passes). Blocks if the user has linked records. */
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = getAuthUser(req)
+  const user = await requireActiveUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!(await resolveManageUsersPermission(user, MANAGE_USERS_RESOURCES.DELETE_USER))) return NextResponse.json({ error: 'You do not have permission to delete users' }, { status: 403 })
 

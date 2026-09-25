@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAuthUser, requireRole } from '@/lib/auth'
+import { getAuthUser, requireActiveUser, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { transitionRun, calculateRun } from '@/lib/payroll-run'
 
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
  *  requires the user's role to be in the run's approver roles (checked in
  *  transitionRun). */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = getAuthUser(req)
+  const user = await requireActiveUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!requireRole(user, ALLOWED_ROLES)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

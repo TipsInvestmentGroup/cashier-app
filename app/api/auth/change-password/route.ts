@@ -26,7 +26,8 @@ export async function POST(req: NextRequest) {
   if (userId && owner) {
     const target = await prisma.user.findUnique({ where: { id: userId } })
     if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    await prisma.user.update({ where: { id: userId }, data: { password: await hashPassword(newPassword) } })
+    // Owner-forced reset also revokes the target's outstanding tokens.
+    await prisma.user.update({ where: { id: userId }, data: { password: await hashPassword(newPassword), sessionEpoch: { increment: 1 } } })
     await prisma.auditLog.create({ data: { userId: user.userId, action: 'RESET_PASSWORD', entity: 'User', entityId: userId, details: `Owner reset password for ${target.email}` } })
     return NextResponse.json({ ok: true })
   }

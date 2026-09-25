@@ -22,7 +22,9 @@ export async function POST(req: NextRequest) {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { password: await hashPassword(newPassword), resetToken: null, resetTokenExpiry: null },
+      // Bump sessionEpoch: a reset revokes any outstanding tokens (the user
+      // logs in fresh anyway), so a leaked old token can't outlive the reset.
+      data: { password: await hashPassword(newPassword), resetToken: null, resetTokenExpiry: null, sessionEpoch: { increment: 1 } },
     })
 
     await prisma.auditLog.create({
