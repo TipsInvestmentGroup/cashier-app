@@ -8,11 +8,10 @@ import { prisma } from '@/lib/prisma'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, endOfDay, subDays } from 'date-fns'
 
-// Tanzania has no DST — EAT is a fixed UTC+3 (see peak-heatmap route).
-// Exported so lib/bi/insights.ts's peak-hour insight reuses the same
-// bucketing instead of a third copy of this hour-shift math.
-export const EAT_OFFSET_MS = 3 * 60 * 60 * 1000
-export const localHour = (d: Date) => new Date(d.getTime() + EAT_OFFSET_MS).getUTCHours()
+// EAT bucketing now lives in one place — lib/report-time.ts. Imported for local
+// use and re-exported so existing importers keep working off the single source.
+import { EAT_OFFSET_MS, localHour } from '@/lib/report-time'
+export { EAT_OFFSET_MS, localHour }
 
 export interface HourBucket { hour: number; label: string; amount: number; count: number; avgValue: number }
 

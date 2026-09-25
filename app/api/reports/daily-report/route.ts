@@ -6,7 +6,8 @@ import { resolveAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping
 import { BILL_TYPE_CODES, PAID_BILL_CATEGORY_MAP } from '@/lib/bill-types'
 import { channelAmountsFor } from '@/lib/collection-channels-shared'
 import { sumApprovedPettyCash } from '@/lib/petty-cash-metrics'
-import { startOfDay, endOfDay, parse, isValid } from 'date-fns'
+import { startOfDay, parse, isValid } from 'date-fns'
+import { eatDayRange } from '@/lib/report-time'
 
 /**
  * Cashier Daily Report — a single, share-ready page for one outlet on one day.
@@ -26,7 +27,9 @@ export async function GET(req: NextRequest) {
 
   const parseD = (s: string | null) => { if (!s) return null; const p = parse(s, 'yyyy-MM-dd', new Date()); return isValid(p) ? p : null }
   const day = parseD(searchParams.get('date')) || new Date()
-  const range = { gte: startOfDay(day), lte: endOfDay(day) }
+  // Bucket by the East Africa Time calendar day, not the server clock, so a
+  // late-night entry reports under the right day on a UTC host (see report-time).
+  const range = eatDayRange(day)
 
   const baseWhere: Record<string, unknown> = { date: range }
   if (outletId) baseWhere.outletId = outletId
