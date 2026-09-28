@@ -7,7 +7,8 @@ import { getSessionTotals, getSessionsByStaff, getSessionTotalsByOutlet } from '
 import { compare, trendLabel } from '@/lib/bi/insights'
 import { getPendingApprovalCounts } from '@/lib/bi/pending-approvals'
 import { getUnreconciledBankCounts } from '@/lib/bi/bank-recon-status'
-import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subDays } from 'date-fns'
+import { subDays } from 'date-fns'
+import { eatDayRange, eatWeekRange, eatMonthRange } from '@/lib/report-time'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -17,18 +18,17 @@ export async function GET(req: NextRequest) {
   // Cashiers are locked to their own outlet; managers/admin can pick any.
   const outletId = user.role === 'CASHIER' && user.outletId ? user.outletId : (searchParams.get('outletId') || user.outletId)
 
+  // All report windows are East Africa Time calendar periods expressed as UTC
+  // instants, so late-night activity buckets under the right day on a UTC host
+  // (see lib/report-time.ts). Same variable names downstream — only the source changes.
   const now = new Date()
-  const todayStart = startOfDay(now)
-  const todayEnd = endOfDay(now)
-  const weekStart = startOfWeek(now)
-  const weekEnd = endOfWeek(now)
-  const monthStart = startOfMonth(now)
-  const monthEnd = endOfMonth(now)
-  const yesterday = subDays(now, 1)
-  const yesterdayStart = startOfDay(yesterday)
-  const yesterdayEnd = endOfDay(yesterday)
-  const prevWeekStart = startOfWeek(subDays(weekStart, 1))
-  const prevWeekEnd = endOfWeek(subDays(weekStart, 1))
+  const { gte: todayStart, lte: todayEnd } = eatDayRange(now)
+  // weekStartsOn: 0 (Sunday) preserves this dashboard's prior week convention —
+  // only the timezone is being fixed here; unifying week-start is RPT-2/#119.
+  const { gte: weekStart, lte: weekEnd } = eatWeekRange(now, 0)
+  const { gte: monthStart, lte: monthEnd } = eatMonthRange(now)
+  const { gte: yesterdayStart, lte: yesterdayEnd } = eatDayRange(new Date(now.getTime() - 86_400_000))
+  const { gte: prevWeekStart, lte: prevWeekEnd } = eatWeekRange(new Date(now.getTime() - 7 * 86_400_000), 0)
 
   const outletFilter = outletId ? { outletId } : {}
 
