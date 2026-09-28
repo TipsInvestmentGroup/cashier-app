@@ -6,6 +6,7 @@ import { prisma } from './prisma'
 import { roundMoney } from './utils'
 import { postJournalEntry, nextScopedNumber, type Db } from './ledger'
 import { resolveAccountId, resolveChannelAccountId } from './finance-mapping'
+import { resolveVatConfig, splitInputVat } from './vat'
 
 async function nextSequenceNumber(db: Db, prefix: string, count: () => Promise<number>): Promise<string> {
   // Race-safe (BillSequenceCounter) instead of count()+1 — see nextScopedNumber.
@@ -52,6 +53,13 @@ export async function createSupplierInvoice(input: CreateSupplierInvoiceInput): 
     const total = roundMoney(input.total)
     const apControlAccountId = await resolveAccountId(tx, { companyId: input.companyId, key: 'AP_CONTROL' })
 
+    // Input VAT: when VAT is enabled, peel the recoverable VAT out of the total
+    // into VAT Input (1200) rather than capitalizing it into the goods cost. A
+    // no-op (vat 0) when VAT is off, so the entry is unchanged then.
+    const { vat: inputVat } = splitInputVat(total, await resolveVatConfig(), input.vatAmount)
+    const goodsNet = roundMoney(total - inputVat)
+    const vatInputAccountId = inputVat > 0 ? await resolveAccountId(tx, { companyId: input.companyId, key: 'VAT_INPUT' }) : null
+
     let lines: { accountId: string; debit?: number; credit?: number; description: string }[]
 
     if (grn.journalEntryId) {
@@ -59,21 +67,24 @@ export async function createSupplierInvoice(input: CreateSupplierInvoiceInput): 
       const accrualLine = accrualEntry?.lines.find((l) => l.credit > 0)
       const accrualAmount = roundMoney(accrualLine?.credit || 0)
       const apAccrualAccountId = await resolveAccountId(tx, { companyId: input.companyId, key: 'AP_ACCRUAL' })
-      const variance = roundMoney(total - accrualAmount)
+      // Variance is the true goods cost variance (net of VAT) vs the accrual.
+      const variance = roundMoney(goodsNet - accrualAmount)
       const varianceAccountId = variance !== 0 ? await resolveAccountId(tx, { companyId: input.companyId, key: 'ROUNDING' }) : null
 
       lines = [
         { accountId: apAccrualAccountId, debit: accrualAmount, description: `Clear accrual for GRN ${grn.grnNumber}` },
         { accountId: apControlAccountId, credit: total, description: `Supplier invoice for GRN ${grn.grnNumber}` },
       ]
+      if (vatInputAccountId) lines.push({ accountId: vatInputAccountId, debit: inputVat, description: `Input VAT on GRN ${grn.grnNumber}` })
       if (variance > 0) lines.push({ accountId: varianceAccountId!, debit: variance, description: 'Invoice/GRN cost variance' })
       if (variance < 0) lines.push({ accountId: varianceAccountId!, credit: -variance, description: 'Invoice/GRN cost variance' })
     } else {
       const inventoryAccountId = await resolveAccountId(tx, { companyId: input.companyId, key: 'INVENTORY_ASSET' })
       lines = [
-        { accountId: inventoryAccountId, debit: total, description: `Cost GRN ${grn.grnNumber} on invoice` },
+        { accountId: inventoryAccountId, debit: goodsNet, description: `Cost GRN ${grn.grnNumber} on invoice` },
         { accountId: apControlAccountId, credit: total, description: `Supplier invoice for GRN ${grn.grnNumber}` },
       ]
+      if (vatInputAccountId) lines.push({ accountId: vatInputAccountId, debit: inputVat, description: `Input VAT on GRN ${grn.grnNumber}` })
     }
 
     const { id: journalEntryId } = await postJournalEntry(tx, {
