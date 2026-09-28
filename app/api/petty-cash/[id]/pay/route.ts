@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { requireActiveUser } from '@/lib/auth'
 import { canDisbursePetty } from '@/lib/petty-access'
 import { roundMoney } from '@/lib/utils'
 import { postJournalEntry } from '@/lib/ledger'
@@ -17,7 +17,7 @@ const db = prisma as any
  * - ACCOUNTANT: drawn down from an allocated PettyFund (must have balance).
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = getAuthUser(req)
+  const user = await requireActiveUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!canDisbursePetty(user.role)) return NextResponse.json({ error: 'You are not authorized to disburse petty cash' }, { status: 403 })
 

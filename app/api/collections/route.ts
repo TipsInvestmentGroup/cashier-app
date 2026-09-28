@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
+import { getAuthUser, requireActiveUser, NO_OUTLET, writeOutletId } from '@/lib/auth'
 import { allocatePayment } from '@/lib/payment-alloc'
 import { roundMoney } from '@/lib/utils'
 import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const user = getAuthUser(req)
+  const user = await requireActiveUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!['CASHIER', 'ADMIN', 'ACCOUNTANT'].includes(user.role)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

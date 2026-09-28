@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { NextRequest } from 'next/server'
+import { prisma } from '@/lib/prisma'
 
 // A missing JWT_SECRET in production means every token is signed with this
 // well-known string — anyone could forge an ADMIN token and bypass all
@@ -20,7 +21,14 @@ export interface JWTPayload {
   outletId?: string
   name: string
   position?: string
+  /** Session-revocation epoch the token was signed with (see User.sessionEpoch). */
+  sepoch?: number
 }
+
+// Session lifetime is configurable (default 8h ≈ one shift). Shorten via env
+// without a code change; the DB re-check in requireActiveUser, not the lifetime,
+// is what contains a stolen/stale token.
+const SESSION_TTL = process.env.SESSION_TTL || '8h'
 
 // Shared read-access role whitelists, mirroring the two groupings
 // components/Layout/SectionTabs.tsx uses to gate the pages that call these
@@ -31,7 +39,8 @@ export const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'A
 export const MGMT_ROLES = ['ACCOUNTANT', 'MANAGER', 'DIRECTOR', 'ADMIN']
 
 export function signToken(payload: JWTPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: SESSION_TTL } as any)
 }
 
 export function verifyToken(token: string): JWTPayload | null {
@@ -69,6 +78,42 @@ export function getAuthUser(req: NextRequest): JWTPayload | null {
   if (!authHeader?.startsWith('Bearer ')) return null
   const token = authHeader.slice(7)
   return verifyToken(token)
+}
+
+/**
+ * Like getAuthUser, but re-validates the token against the DB and returns the
+ * authoritative identity — for SENSITIVE actions (mutations, admin, money).
+ * Rejects (null) when the user is gone, deactivated, or the token's sessionEpoch
+ * is stale (revoked), and returns the CURRENT role/outlet from the DB rather
+ * than trusting the possibly-stale token payload. So deactivating or demoting a
+ * user takes effect immediately, not after the token's 8h lifetime.
+ *
+ * One extra indexed lookup by primary key — used on sensitive endpoints, not
+ * every read (reads keep the fast token-only getAuthUser).
+ */
+export async function requireActiveUser(req: NextRequest): Promise<JWTPayload | null> {
+  const token = getAuthUser(req)
+  if (!token) return null
+  const u = await prisma.user.findUnique({
+    where: { id: token.userId },
+    select: { id: true, email: true, role: true, outletId: true, name: true, position: true, isActive: true, sessionEpoch: true },
+  })
+  if (!u || !u.isActive) return null
+  // A token minted before the account's epoch was last bumped is revoked.
+  if (typeof token.sepoch === 'number' && token.sepoch !== u.sessionEpoch) return null
+  return {
+    userId: u.id, email: u.email, role: u.role, outletId: u.outletId ?? undefined,
+    name: u.name, position: u.position ?? undefined, sepoch: u.sessionEpoch,
+  }
+}
+
+/** Revoke a user's outstanding tokens by advancing their sessionEpoch. Call
+ *  when deactivating, changing role/outlet, or resetting password/PIN. */
+export async function revokeUserSessions(
+  db: { user: { update: (args: unknown) => Promise<unknown> } },
+  userId: string,
+): Promise<void> {
+  await db.user.update({ where: { id: userId }, data: { sessionEpoch: { increment: 1 } } } as never)
 }
 
 export function requireRole(user: JWTPayload | null, roles: string[]): boolean {
