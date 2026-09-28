@@ -137,6 +137,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only an authorized officer can enter the verified cash amount' }, { status: 403 })
     }
   }
+  // Drawer variance = physical verified cash − computed closing. Persist and
+  // classify it (>0 cash over → PAYABLE/refundable; <0 short → RECEIVABLE owed
+  // to the company; 0 → none) whenever a verified amount is on record, keeping
+  // it in step with a recomputed closing even if this request didn't re-verify.
+  const effectiveVerified = data.verifiedAmount !== undefined ? data.verifiedAmount : (existing?.verifiedAmount ?? null)
+  if (effectiveVerified !== null && effectiveVerified !== undefined) {
+    const v = roundMoney(effectiveVerified - closing)
+    data.variance = v
+    data.varianceClass = v > 0 ? 'PAYABLE' : v < 0 ? 'RECEIVABLE' : null
+  }
 
   let item
   try {
