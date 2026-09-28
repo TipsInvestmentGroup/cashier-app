@@ -88,4 +88,8 @@ export const DEFAULT_ACCOUNTS: DefaultAccount[] = [
   { code: '2330', name: 'Social Security Payable', type: 'LIABILITY', mappingKey: 'SSF_PAYABLE' },
   { code: '2340', name: 'Health Insurance Payable', type: 'LIABILITY', mappingKey: 'HEALTH_PAYABLE' },
   { code: '2350', name: 'Payroll Deductions Payable', type: 'LIABILITY', mappingKey: 'PAYROLL_DEDUCTIONS_PAYABLE' },
+  // Employer statutory levies (Tanzania) — the employer contribution debits
+  // EMPLOYER_CONTRIB_EXPENSE (5210) and credits these monthly-remitted payables.
+  { code: '2360', name: 'SDL Payable (Skills Development Levy)', type: 'LIABILITY', mappingKey: 'SDL_PAYABLE' },
+  { code: '2370', name: 'WCF Payable (Workers Compensation Fund)', type: 'LIABILITY', mappingKey: 'WCF_PAYABLE' },
 ]
