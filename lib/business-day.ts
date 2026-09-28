@@ -86,7 +86,7 @@ export async function runMissingDataDetection({ outletId, date }: { outletId: st
   const missingItems: MissingItem[] = []
 
   const [cashRecon, digitalCount, dailyCollectionCount, shifts, counters] = await Promise.all([
-    prisma.cashRecon.findFirst({ where: { outletId, date: range }, select: { id: true } }),
+    prisma.cashRecon.findFirst({ where: { outletId, date: range }, select: { id: true, variance: true, notes: true } }),
     prisma.bankRecon.count({ where: { outletId, date: range, channel: { not: null } } }),
     prisma.dailyCollection.count({ where: { outletId, date: range } }),
     prisma.posShift.findMany({ where: { outletId, date: range }, select: { name: true, closedAt: true } }),
@@ -94,6 +94,12 @@ export async function runMissingDataDetection({ outletId, date }: { outletId: st
   ])
 
   if (!cashRecon) missingItems.push({ type: 'CASH_RECONCILIATION', label: 'Cash Reconciliation not completed' })
+  // A verified drawer that is over/short must be explained (a note) before the
+  // day closes — an unexplained variance is money unaccounted for. A supervisor
+  // can still override via allowIncomplete, same as any other missing item.
+  else if (cashRecon.variance != null && Math.abs(cashRecon.variance) > 0.009 && !cashRecon.notes?.trim()) {
+    missingItems.push({ type: 'CASH_RECONCILIATION', label: `Unexplained drawer variance of ${cashRecon.variance > 0 ? '+' : ''}${cashRecon.variance} — add a note explaining the over/short` })
+  }
   if (digitalCount === 0) missingItems.push({ type: 'BILLS', label: 'Digital/Bank Reconciliation not completed' })
   if (dailyCollectionCount === 0) missingItems.push({ type: 'COLLECTIONS', label: 'No Daily Collection recorded' })
   // Sales Import is an independent task (its own sidebar feature) and no longer

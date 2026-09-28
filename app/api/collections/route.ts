@@ -249,9 +249,22 @@ export async function POST(req: NextRequest) {
         )
       }
       const categories = reasonCategoryMap
+      // Direction of the difference: lossAmount > 0 is a SHORTFALL (collected less
+      // than system sales); < 0 is a SURPLUS (over-collection). A reason's
+      // accounting class encodes its side — RECEIVABLE = shortfall (owed TO us),
+      // PAYABLE = surplus (owed BY us), ADJUSTMENT = either. Enforce the match so
+      // a shortfall can't be booked as a company payout (or vice-versa).
+      const isShortfall = lossAmount > 0
       for (const it of items) {
         if (!categories.has(it.reason)) {
           throw new Error('Select a valid Difference Reason for each line')
+        }
+        const cls = classForReason(it.reason, categories.get(it.reason))
+        if (isShortfall && cls === 'PAYABLE') {
+          throw new Error(`"${it.reason}" is a surplus/payout reason and can't explain a shortfall — choose a shortfall reason.`)
+        }
+        if (!isShortfall && cls === 'RECEIVABLE') {
+          throw new Error(`"${it.reason}" is a shortfall reason and can't explain an over-collection — choose a surplus reason.`)
         }
         if (it.reason === 'STAFF_TIP' && !it.staffId) throw new Error('Select the staff name for the Staff Tip line')
         if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) throw new Error('Select the customer name for the Customer Excess line')
