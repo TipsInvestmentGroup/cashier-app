@@ -15,6 +15,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const data: any = {}
   if (body.label !== undefined) data.label = String(body.label).trim()
   if (body.isActive !== undefined) data.isActive = !!body.isActive
+  // Sales-target department mapping (SHISHA | FOOD | null to unmap).
+  if (body.department !== undefined) {
+    const dep = body.department == null ? null : String(body.department).toUpperCase()
+    if (dep !== null && dep !== 'SHISHA' && dep !== 'FOOD') return NextResponse.json({ error: 'department must be SHISHA, FOOD, or null' }, { status: 400 })
+    data.department = dep
+  }
 
   try {
     const item = await prisma.productCategory.update({ where: { id }, data })

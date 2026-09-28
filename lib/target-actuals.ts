@@ -25,14 +25,25 @@ export async function computeActuals(opts: { from: Date; to: Date; outletId?: st
     prisma.outlet.findMany({ select: { id: true, name: true } }),
     prisma.dailyCollection.findMany({ where: { date: range, ...oWhere }, select: { outletId: true, staffName: true, total: true } }),
     db.salesMetric.findMany({ where: { date: range, ...oWhere }, select: { outletId: true, department: true, staffName: true, value: true } }),
-    prisma.product.findMany({ select: { id: true, category: true, name: true } }),
+    prisma.product.findMany({ select: { id: true, category: true, name: true, productCategory: { select: { department: true } } } }),
     prisma.signedBill.findMany({ where: { date: range, ...oWhere, approvalStatus: { not: 'REJECTED' } }, select: { outletId: true, serviceStaff: true, items: { select: { productId: true, productName: true, quantity: true, amount: true } } } }),
     prisma.cancellation.findMany({ where: { date: range, ...(opts.outletId ? { outletId: opts.outletId } : {}), status: 'APPROVED' }, select: { outletId: true, productId: true, productName: true, quantity: true, amount: true, staffName: true, collection: { select: { staffName: true } } } }),
   ])
 
   const prodCat = new Map<string, string>()
-  for (const p of products) prodCat.set(p.id, (p.category || '').toLowerCase())
+  // The real mapping: a product's category → target department (SHISHA | FOOD),
+  // admin-configured on ProductCategory.department.
+  const prodDept = new Map<string, 'shisha' | 'food' | null>()
+  for (const p of products) {
+    prodCat.set(p.id, (p.category || '').toLowerCase())
+    const dep = (p as { productCategory?: { department: string | null } | null }).productCategory?.department
+    prodDept.set(p.id, dep === 'SHISHA' ? 'shisha' : dep === 'FOOD' ? 'food' : null)
+  }
   const classify = (productId?: string | null, productName?: string | null): 'shisha' | 'food' | null => {
+    // Prefer the category's configured department; fall back to the legacy
+    // name/category substring only for categories not yet mapped (so counts
+    // don't change until an admin sets the mapping).
+    if (productId) { const d = prodDept.get(productId); if (d) return d }
     const hay = `${productId ? prodCat.get(productId) || '' : ''} ${productName || ''}`.toLowerCase()
     if (hay.includes('shisha')) return 'shisha'
     if (hay.includes('food')) return 'food'

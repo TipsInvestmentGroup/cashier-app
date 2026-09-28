@@ -19,17 +19,36 @@ export function ExportBar({ rows, filename, title, subject }: { rows: Row[]; fil
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url)
   }
 
+  // Stable, complete column set across heterogeneous rows (union in first-seen
+  // order) — not just the first row's keys, which silently drops later columns.
+  const columnKeys = () => {
+    const set = new Set<string>()
+    for (const r of rows) for (const k of Object.keys(r)) set.add(k)
+    return [...set]
+  }
+
+  // One CSV field: escape embedded quotes (RFC 4180), and neutralise Excel/Sheets
+  // formula injection — a text cell starting with = + - @ (or tab/CR) could be
+  // executed as a formula, so prefix it with an apostrophe. Numbers are left as-is.
+  const csvCell = (v: unknown): string => {
+    let s = v == null ? '' : String(v)
+    const isNumeric = typeof v === 'number' || (s !== '' && !isNaN(Number(s)))
+    if (!isNumeric && /^[=+\-@\t\r]/.test(s)) s = `'${s}`
+    return `"${s.replace(/"/g, '""')}"`
+  }
+
   const exportCSV = () => {
     if (!guard()) return
-    const keys = Object.keys(rows[0])
-    const csv = [keys.join(','), ...rows.map((r) => keys.map((k) => `"${r[k] ?? ''}"`).join(','))].join('\n')
-    download(new Blob([csv], { type: 'text/csv' }), `${filename}.csv`)
+    const keys = columnKeys()
+    const csv = [keys.map(csvCell).join(','), ...rows.map((r) => keys.map((k) => csvCell(r[k])).join(','))].join('\r\n')
+    // Prepend a UTF-8 BOM so Excel opens accented text/currency correctly.
+    download(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), `${filename}.csv`)
     toast.success('CSV exported!')
   }
   const exportExcel = async () => {
     if (!guard()) return
     const XLSX = await import('xlsx')
-    const ws = XLSX.utils.json_to_sheet(rows)
+    const ws = XLSX.utils.json_to_sheet(rows, { header: columnKeys() })
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Report')
     XLSX.writeFile(wb, `${filename}.xlsx`)
     toast.success('Excel exported!')
@@ -38,7 +57,7 @@ export function ExportBar({ rows, filename, title, subject }: { rows: Row[]; fil
     if (!guard()) return
     const { jsPDF } = await import('jspdf')
     const autoTable = (await import('jspdf-autotable')).default
-    const keys = Object.keys(rows[0])
+    const keys = columnKeys()
     const doc = new jsPDF({ orientation: keys.length > 6 ? 'landscape' : 'portrait' })
     doc.setFontSize(14); doc.text(title, 14, 16)
     doc.setFontSize(9); doc.text(new Date().toLocaleString(), 14, 22)
