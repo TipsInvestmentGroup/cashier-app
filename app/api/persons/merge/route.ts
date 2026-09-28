@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
+import { mergePersons } from '@/lib/person-merge'
 
 /** Merge 2+ person records into one: reassigns all signed/paid bills to the
  *  kept record, keeps the highest credit limit among the merged records, and
@@ -25,12 +26,9 @@ export async function POST(req: NextRequest) {
 
   const bestCreditLimit = Math.max(...people.map((p) => p.creditLimit))
 
-  const [signedResult, paidResult] = await prisma.$transaction([
-    prisma.signedBill.updateMany({ where: { personId: { in: ids } }, data: { personId: keepId } }),
-    prisma.paidBill.updateMany({ where: { personId: { in: ids } }, data: { personId: keepId } }),
-    prisma.person.update({ where: { id: keepId }, data: { creditLimit: bestCreditLimit } }),
-    prisma.person.updateMany({ where: { id: { in: ids } }, data: { isActive: false } }),
-  ])
+  const { signedBillsReassigned, paidBillsReassigned } = await prisma.$transaction((tx) =>
+    mergePersons(tx, { keepId, mergeIds: ids, keepName: keep.name, bestCreditLimit }),
+  )
 
   await prisma.auditLog.create({
     data: {
@@ -38,10 +36,10 @@ export async function POST(req: NextRequest) {
       action: 'UPDATE',
       entity: 'Person',
       entityId: keepId,
-      details: `Merged ${people.filter((p) => p.id !== keepId).map((p) => p.name).join(', ')} into ${keep.name} (${signedResult.count} signed bills, ${paidResult.count} paid bills reassigned)`,
+      details: `Merged ${people.filter((p) => p.id !== keepId).map((p) => p.name).join(', ')} into ${keep.name} (${signedBillsReassigned} signed bills, ${paidBillsReassigned} paid bills reassigned)`,
     },
   })
 
   const merged = await prisma.person.findUnique({ where: { id: keepId } })
-  return NextResponse.json({ person: merged, signedBillsReassigned: signedResult.count, paidBillsReassigned: paidResult.count })
+  return NextResponse.json({ person: merged, signedBillsReassigned, paidBillsReassigned })
 }
