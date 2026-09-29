@@ -69,6 +69,15 @@ async function nextEntryNumber(db: Db, prefix: string): Promise<string> {
 /** Throws if the company has a FinancialPeriod covering entryDate and it is
  *  LOCKED. Absence of any period row means "unconfigured — treat as open",
  *  matching the rest of the app's "no config = today's behavior" convention. */
+/** True when a LOCKED financial period covers the date (see assertPeriodOpen). */
+export async function isPeriodLocked(db: Db, companyId: string, date: Date): Promise<boolean> {
+  const locked = await db.financialPeriod.findFirst({
+    where: { companyId, startDate: { lte: date }, endDate: { gte: date }, status: 'LOCKED' },
+    select: { id: true },
+  })
+  return !!locked
+}
+
 async function assertPeriodOpen(db: Db, companyId: string, entryDate: Date) {
   // findMany, not findFirst — Stage 4 periods can nest (e.g. a MONTHLY
   // period inside its ANNUAL year), so more than one row can cover the same

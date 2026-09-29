@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, writeOutletId } from '@/lib/auth'
-import { resolveCollectionMode } from '@/lib/collection-mode'
+import { dayCollectionMode, isDayLocked } from '@/lib/day-lock'
 import { startOfDay, endOfDay } from 'date-fns'
 
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
@@ -49,10 +49,15 @@ export async function POST(req: NextRequest) {
   // Transaction Session there rather than silently letting two workflows run
   // in parallel for the same outlet/day. HYBRID explicitly allows both
   // workflows at once (e.g. some staff self-declare while the cashier still
-  // enters others directly), so it passes this gate too.
-  const mode = await resolveCollectionMode({ outletId })
+  // enters others directly), so it passes this gate too. The mode is the
+  // one frozen on this business day (lib/day-lock.ts dayCollectionMode), so a
+  // Setup change applies from the next day instead of splitting today.
+  const mode = await dayCollectionMode(prisma, outletId, date)
   if (mode !== 'TRANSACTION_VERIFICATION' && mode !== 'HYBRID') {
-    return NextResponse.json({ error: 'This outlet is configured for Default Collection Mode — use Daily Collections instead. Ask an Admin to change it under Setup → Collection Mode if this is wrong.' }, { status: 409 })
+    return NextResponse.json({ error: 'This business day runs in Default Collection Mode — use Daily Collections instead. A change under Setup → Collection Mode applies from the next business day.' }, { status: 409 })
+  }
+  if (await isDayLocked(prisma, outletId, date)) {
+    return NextResponse.json({ error: 'This business day is closed.' }, { status: 423 })
   }
 
   const session = await prisma.transactionSession.upsert({

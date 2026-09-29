@@ -11,8 +11,9 @@ import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill
 import { resolveBusinessDate, resolveEffectiveConfig } from '@/lib/business-calendar'
 import { resolvePerson } from '@/lib/resolve-person'
 import { syncBusinessSession } from '@/lib/business-session'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
-import { postCollectionCashIn } from '@/lib/collection-gl'
+import { syncCollectionGl } from '@/lib/collection-gl'
+import { writeChannelTotalLines } from '@/lib/collection-ledger'
+import { isDayLocked, dayCollectionMode } from '@/lib/day-lock'
 import { postCreditSale } from '@/lib/finance-ar'
 import { syncStaffLossReceivable } from '@/lib/staff-loss-gl'
 import { resolveCreditTags } from '@/lib/credit-config'
@@ -76,12 +77,12 @@ export async function POST(req: NextRequest) {
   const effectiveCalendar = await resolveEffectiveConfig({ outletId: usedOutletId })
   const collDate = date ? new Date(date) : resolveBusinessDate(new Date(), effectiveCalendar)
 
-  // A closed day is locked for cashiers — no new collections.
-  if (user.role === 'CASHIER') {
-    const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
-    const closed = await db.dayClosure.findUnique({ where: { outletId_date: { outletId: usedOutletId, date: startOfDay(collDate) } }, select: { id: true } })
-    if (closed) return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before adding collections.' }, { status: 423 })
+  // A closed day is locked for EVERY role — changes need a formal reopen.
+  if (await isDayLocked(prisma, usedOutletId, collDate)) {
+    return NextResponse.json({ error: 'This day is closed. It must be reopened (Unlock Requests) before collections can be added.' }, { status: 423 })
   }
+  // Freeze the day's Collection Mode on its first collection activity.
+  await dayCollectionMode(prisma, usedOutletId, collDate)
   if (staffName) {
     const dup = await prisma.dailyCollection.findFirst({
       where: {
@@ -127,10 +128,14 @@ export async function POST(req: NextRequest) {
         total, staffName: staffName || null, systemSales: roundMoney(systemSales),
         discount, discountReason: discountReason || null,
         notes, outletId: usedOutletId, cashierId: user.userId, date: collDate,
+        ledgerBacked: true,
       },
       include: { outlet: true },
     })
     await syncCollectionChannels(tx, collection.id, channelAmounts)
+    // Transaction Ledger: the typed totals become CHANNEL_TOTAL ledger rows —
+    // from here on this collection's money is derived from those rows.
+    await writeChannelTotalLines(tx, { collectionId: collection.id, outletId: usedOutletId, date: collDate, staffName: staffName || null, cash: roundMoney(cash), channelAmounts })
 
     await tx.auditLog.create({
       data: {
@@ -224,14 +229,6 @@ export async function POST(req: NextRequest) {
     const lossAmount = roundMoney((Number(systemSales) || 0) - total - signedTotal - paidStaffLoss - discount)
     let staffLoss: { amount: number; voucher: string; staffName: string } | null = null
     let excess: { amount: number; items: number } | null = null
-    // Portion of an over-collection that belongs to a third party (kitchen
-    // transfer, customer overpayment — accountingClass PAYABLE). At collection
-    // this is credited to the Excess-Payable liability clearing instead of
-    // Sales Revenue, so revenue isn't overstated and the obligation is on the
-    // balance sheet until it's paid out (relieved in Excess Recon settlement).
-    // ADJUSTMENT-class overages (pass-through staff tips) stay in revenue —
-    // their cash-handling basis is handled separately.
-    let payableExcessForGl = 0
     // "The" payment channel this collection's money came in through, for
     // auto-inheriting onto any payable excess record (no re-entry needed).
     const primaryChannelCode = primaryChannelFromAmounts(Number(cash) || 0, channelAmounts)
@@ -300,7 +297,6 @@ export async function POST(req: NextRequest) {
           },
         })
         if (category === 'PAYABLE_EXCESS') payableItemCount++
-        if (classForReason(it.reason, category) === 'PAYABLE') payableExcessForGl = roundMoney(payableExcessForGl + it.amount)
       }
       if (payableItemCount > 0) excess = { amount: roundMoney(items.filter((it) => categories.get(it.reason) === 'PAYABLE_EXCESS').reduce((s, it) => s + it.amount, 0)), items: payableItemCount }
 
@@ -340,16 +336,12 @@ export async function POST(req: NextRequest) {
 
     // Finance Platform (Phase 1): post the cash-in side of this collection —
     // Dr Cash/Bank/Mobile-Money (per channel) / Cr Sales Revenue (+ Cr
-    // Excess-Payable for the payable portion of an over-collection). Shared with
-    // the historical backfill (scripts/backfill-collections-to-gl.ts) via
-    // lib/collection-gl.ts so both paths post identically.
-    const companyId = collection.outlet.companyId || (await resolveDefaultCompanyId(tx))
-    if (companyId) {
-      await postCollectionCashIn(tx, {
-        companyId, collectionId: collection.id, outletId: usedOutletId, entryDate: collDate, createdById: user.userId,
-        amountsByCode: { CASH: roundMoney(Number(cash) || 0), ...channelAmounts }, total, payableExcessForGl,
-      })
-    }
+    // Excess-Payable for the portion of an over-collection that belongs to a
+    // third party — the PAYABLE-class excess rows created above — so revenue
+    // isn't overstated; ADJUSTMENT-class overages such as staff tips stay in
+    // revenue). Same shared GL path edits/validation/amendments use
+    // (lib/collection-gl.ts syncCollectionGl).
+    await syncCollectionGl(tx, collection.id, user.userId)
 
     return { collection, signedTotal, paidTotal, paidStaffLoss, signedCreated, paidCreated, staffLoss, excess }
   }, { timeout: 20000 })

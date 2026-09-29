@@ -37,7 +37,8 @@ const DRY_RUN = process.argv.includes('--dry-run')
 async function main() {
   // Collections that already have a live COLLECTIONS entry — skip those.
   const posted = new Set(
-    (await prisma.journalEntry.findMany({ where: { sourceType: 'DailyCollection', status: { not: 'REVERSED' } }, select: { sourceId: true } }))
+    // reversalOfId: null — a reversal entry shares the source id but is not a live posting.
+    (await prisma.journalEntry.findMany({ where: { sourceType: 'DailyCollection', status: { not: 'REVERSED' }, reversalOfId: null }, select: { sourceId: true } }))
       .map((j) => j.sourceId)
       .filter((s): s is string => !!s),
   )
