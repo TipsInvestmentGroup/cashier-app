@@ -1,6 +1,12 @@
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns'
 import { DEFAULT_COMPANY_CONFIG, formatAmountLabel, type CompanyConfig } from '@/lib/company-config-shared'
 
+// Upper bound on rows an in-memory report query pulls. Generous enough that a
+// single venue (thousands of rows/month) is never truncated in practice, but
+// caps memory against unbounded growth — replaces silent 500-row truncation and
+// bounds the previously unbounded fetches.
+export const MAX_REPORT_ROWS = 50000
+
 /** Round a monetary value to 2 decimals to avoid floating-point drift (e.g. 0.1+0.2). */
 export function roundMoney(n: number | string | null | undefined): number {
   const v = Number(n) || 0

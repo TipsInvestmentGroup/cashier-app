@@ -7,7 +7,7 @@
 // (PurchaseOrder, Grn, StockTransfer, StockCountItem, Breakage) are
 // structurally distinct, so there's no single flexible query to share.
 import { prisma } from './prisma'
-import { roundMoney } from './utils'
+import { roundMoney, MAX_REPORT_ROWS } from './utils'
 
 export interface InventoryFilters {
   startDate?: string
@@ -70,7 +70,7 @@ export async function getPurchaseOrderReport(f: InventoryFilters): Promise<Purch
     where: dateWhere(f),
     include: { supplier: { select: { name: true } } },
     orderBy: { createdAt: 'desc' },
-    take: 500,
+    take: MAX_REPORT_ROWS,
   })
   return orders.map((o) => ({ id: o.id, poNumber: o.poNumber, supplierName: o.supplier.name, status: o.status, total: roundMoney(o.total), createdAt: o.createdAt }))
 }
@@ -82,7 +82,7 @@ export async function getGrnReport(f: InventoryFilters): Promise<GrnRow[]> {
     where: dateWhere(f, 'receivedDate'),
     include: { items: { select: { piecesReceived: true } } },
     orderBy: { receivedDate: 'desc' },
-    take: 500,
+    take: MAX_REPORT_ROWS,
   })
   return grns.map((g) => ({
     id: g.id, grnNumber: g.grnNumber, supplierName: g.supplierName, itemCount: g.items.length,
@@ -101,7 +101,7 @@ export async function getTransferReport(f: InventoryFilters): Promise<TransferRo
     },
     include: { items: { select: { quantity: true } }, outlet: { select: { name: true } } },
     orderBy: { createdAt: 'desc' },
-    take: 500,
+    take: MAX_REPORT_ROWS,
   })
   return transfers.map((t) => ({
     id: t.id, transferNumber: t.transferNumber, destination: `${t.outlet.name} / ${t.counterCode}`,
@@ -212,7 +212,7 @@ export async function getMovementLedger(f: InventoryFilters): Promise<MovementLe
     },
     include: { warehouse: { select: { name: true } } },
     orderBy: { createdAt: 'desc' },
-    take: 500,
+    take: MAX_REPORT_ROWS,
   })
   const outletIds = [...new Set(entries.map((e) => e.outletId).filter((v): v is string => !!v))]
   const outlets = await prisma.outlet.findMany({ where: { id: { in: outletIds } }, select: { id: true, name: true } })

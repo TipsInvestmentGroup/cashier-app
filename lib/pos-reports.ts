@@ -8,7 +8,7 @@
 // more portable across SQLite (dev) / Postgres (prod) than relying on
 // provider-specific groupBy-across-relations SQL.
 import { prisma } from './prisma'
-import { roundMoney } from './utils'
+import { roundMoney, MAX_REPORT_ROWS } from './utils'
 import { format } from 'date-fns'
 import { localHour, localDateKey, localWeekStartKey, localMonthKey } from './report-time'
 
@@ -99,6 +99,8 @@ async function fetchSalesItems(f: SalesFilters): Promise<SalesItemRow[]> {
       product: { select: { category: true } },
       order: { select: { waiterId: true, waiter: { select: { name: true } }, paymentMethod: true, closedAt: true } },
     },
+    orderBy: { order: { closedAt: 'desc' } }, // deterministic, so the cap keeps the most recent
+    take: MAX_REPORT_ROWS, // bound the in-memory aggregation against unbounded growth
   })
 }
 

@@ -1648,6 +1648,10 @@ model ProductCategory {
   id        String   @id @default(cuid())
   code      String   @unique
   label     String
+  // Sales-target department this category rolls up into (SHISHA | FOOD | null).
+  // The real, admin-set mapping that replaces classifying by literal name
+  // substring in lib/target-actuals.ts — null = not counted toward a department.
+  department String?
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
