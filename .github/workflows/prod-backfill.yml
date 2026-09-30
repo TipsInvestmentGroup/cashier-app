@@ -1,0 +1,74 @@
+name: "Ops: Run data backfill"
+
+# Manual, one-off runner for the repo's idempotent backfill scripts against a
+# live database. The database URL stays in GitHub secrets — nobody needs it on
+# their own machine. Gated behind the same Environment approval as a deploy.
+#
+# Always run with "apply" UNCHECKED first: every listed script supports
+# --dry-run and only reports what it would change. Read the report (it is also
+# written to the run's Summary page), then re-run the same script with "apply"
+# checked.
+#
+# Transaction Ledger rollout order (2026-09-30):
+#   1. backfill-transaction-ledger   (links validated sessions to collections)
+#   2. backfill-collections-to-gl    (posts collections that never reached the GL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Which environment's database"
+        required: true
+        type: choice
+        options: [production, staging]
+      script:
+        description: "Backfill script to run"
+        required: true
+        type: choice
+        options:
+          - backfill-transaction-ledger
+          - backfill-collections-to-gl
+      apply:
+        description: "Apply changes (leave UNCHECKED for a dry run first)"
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: data-backfill-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      DATABASE_URL: ${{ inputs.environment == 'production' && secrets.PROD_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+      DATABASE_URL_UNPOOLED: ${{ inputs.environment == 'production' && secrets.PROD_DATABASE_URL_UNPOOLED || secrets.STAGING_DATABASE_URL_UNPOOLED }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+
+      - name: Generate Prisma client for Postgres
+        run: |
+          node scripts/prepare-db.mjs
+          npx prisma generate
+
+      - name: Run ${{ inputs.script }} (${{ inputs.apply && 'APPLY' || 'DRY RUN' }})
+        env:
+          SCRIPT: ${{ inputs.script }}
+          APPLY: ${{ inputs.apply }}
+        run: |
+          set -o pipefail
+          FLAG="--dry-run"
+          if [ "$APPLY" = "true" ]; then FLAG=""; fi
+          {
+            echo "## $SCRIPT — ${{ inputs.environment }} — $([ -z "$FLAG" ] && echo APPLIED || echo DRY RUN)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          npx tsx "scripts/$SCRIPT.ts" $FLAG 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
