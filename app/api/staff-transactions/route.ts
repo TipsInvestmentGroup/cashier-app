@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { createStaffTransaction, categoryNeedsApproval, notifyApprovers, APPROVER_ROLE } from '@/lib/staff-transaction-submit'
+import { isDayLocked } from '@/lib/day-lock'
+import { referenceKeyFor, assertReferenceFree, DuplicateReferenceError } from '@/lib/collection-ledger'
 
 const CATEGORIES = ['PAYMENT', 'SIGNED_BILL', 'DISCOUNT', 'CANCELLATION', 'CREDIT_SALE']
 
@@ -46,10 +48,27 @@ export async function POST(req: NextRequest) {
   const session = await prisma.transactionSession.findUnique({ where: { id: sessionId } })
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
   if (session.status !== 'OPEN') return NextResponse.json({ error: 'This session is no longer open for new transactions' }, { status: 409 })
+  if (await isDayLocked(prisma, session.outletId, session.date)) {
+    return NextResponse.json({ error: 'This business day is closed — transactions can no longer be declared for it.' }, { status: 423 })
+  }
 
-  const transaction = await prisma.$transaction((tx) =>
-    createStaffTransaction({ tx, sessionId, staffId: user.userId, category, paymentMethod, amount, receivingAccount, reference, personName }),
-  )
+  // One payment reference, one claim — across all staff and all days.
+  const referenceKey = await referenceKeyFor(prisma, { outletId: session.outletId, category, paymentMethod, reference })
+  let transaction
+  try {
+    await assertReferenceFree(prisma, referenceKey)
+    transaction = await prisma.$transaction((tx) =>
+      createStaffTransaction({
+        tx, sessionId, staffId: user.userId, category, paymentMethod, amount, receivingAccount, reference, personName,
+        staffName: user.name, outletId: session.outletId, date: session.date, referenceKey,
+      }),
+    )
+  } catch (e) {
+    if (e instanceof DuplicateReferenceError) return NextResponse.json({ error: e.message }, { status: 409 })
+    // Unique-index backstop for two simultaneous claims of the same reference.
+    if ((e as { code?: string })?.code === 'P2002') return NextResponse.json({ error: 'That payment reference has already been recorded.' }, { status: 409 })
+    throw e
+  }
 
   if (categoryNeedsApproval(category)) {
     notifyApprovers(APPROVER_ROLE, {

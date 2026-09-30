@@ -1,15 +1,18 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, requireActiveUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
-import { recomputeStaffLoss } from '@/lib/staff-loss'
-import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels } from '@/lib/collection-channels'
+import { sumChannelAmounts, legacyFixedFields, syncCollectionChannels, channelAmountsFor } from '@/lib/collection-channels'
 import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-reasons-db'
 import { primaryChannelFromAmounts } from '@/lib/collection-channels'
 import { generateBillReference } from '@/lib/bill-reference'
 import { reverseJournalEntry, type Db } from '@/lib/ledger'
 import { syncCreditForAccount, syncCreditForPerson } from '@/lib/credit-ledger'
+import { classForReason } from '@/lib/reconciliation-classification'
+import { isDayLocked } from '@/lib/day-lock'
+import { liveCollectionEntryWhere } from '@/lib/collection-gl'
+import { hasItemisedLines, rebuildCollection, writeChannelTotalLines } from '@/lib/collection-ledger'
 import { startOfDay, endOfDay, format } from 'date-fns'
 
 const ALLOWED = ['CASHIER', 'ADMIN', 'ACCOUNTANT']
@@ -19,29 +22,26 @@ const CROSS_OUTLET = ['ADMIN', 'ACCOUNTANT', 'MANAGER', 'DIRECTOR']
 // DayClosure types are generated on deploy; assert to avoid local type drift.
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
 
-/** True if the given outlet's day is locked. Cashiers cannot touch a closed day. */
-async function isDayClosed(outletId: string, date: Date) {
-  const closure = await db.dayClosure.findUnique({
-    where: { outletId_date: { outletId, date: startOfDay(date) } },
-    select: { id: true },
-  })
-  return !!closure
-}
-
-/** Update a collection and keep its auto staff-loss (voucher SL-<id>) in sync. */
+/**
+ * Update a collection. Everything runs in one transaction and ends with
+ * rebuildCollection(), the single writer of the derived figures — staff loss /
+ * excess, BusinessSession and the GL cash-in entry (reversed and re-posted when
+ * the amounts change; before this, an edit left the GL at the old amounts).
+ */
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const user = getAuthUser(req)
+  const user = await requireActiveUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!ALLOWED.includes(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  const existing = await prisma.dailyCollection.findUnique({ where: { id } })
+  const existing = await prisma.dailyCollection.findUnique({ where: { id }, include: { channels: true } })
   if (!existing) return NextResponse.json({ error: 'Collection not found' }, { status: 404 })
   if (!CROSS_OUTLET.includes(user.role) && user.outletId && existing.outletId !== user.outletId) {
     return NextResponse.json({ error: 'You can only edit collections from your own outlet' }, { status: 403 })
   }
-  if (user.role === 'CASHIER' && await isDayClosed(existing.outletId, existing.date)) {
-    return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before editing.' }, { status: 423 })
+  // Closed days are locked for EVERY role (was: cashiers only).
+  if (await isDayLocked(prisma, existing.outletId, existing.date)) {
+    return NextResponse.json({ error: 'This day is closed. It must be reopened (Unlock Requests) before this collection can be edited.' }, { status: 423 })
   }
 
   const body = await req.json()
@@ -75,51 +75,42 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     }
   }
 
-  const updated = await prisma.dailyCollection.update({
-    where: { id },
-    data: {
-      cash: roundMoney(cash), ...legacyFixedFields(channelAmounts),
-      total, staffName: staffName || null, systemSales: roundMoney(systemSales),
-      discount, discountReason: discountReason || null,
-      notes, outletId: usedOutletId, date: collDate,
-    },
-    include: { outlet: true },
-  })
-  await syncCollectionChannels(prisma, id, channelAmounts)
+  // Moving the collection onto another (closed) day is no back door either.
+  if ((usedOutletId !== existing.outletId || startOfDay(collDate).getTime() !== startOfDay(existing.date).getTime())
+    && await isDayLocked(prisma, usedOutletId, collDate)) {
+    return NextResponse.json({ error: 'The target day is closed. It must be reopened before a collection can be moved onto it.' }, { status: 423 })
+  }
 
-  // Replace cancellations for this collection if the edit form sent them.
-  if (Array.isArray(body.cancellations)) {
-    await prisma.cancellation.deleteMany({ where: { collectionId: id } })
-    for (const cn of body.cancellations as { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[]) {
-      const qty = Number(cn.quantity) || 0
-      const price = roundMoney(cn.sellingPrice)
-      if (!cn.productName || qty <= 0) continue
-      await prisma.cancellation.create({
-        data: {
-          collectionId: id,
-          reason: cn.reason || '',
-          productId: cn.productId || null,
-          productName: cn.productName,
-          sellingPrice: price,
-          quantity: qty,
-          amount: roundMoney(Number(cn.amount) || price * qty),
-          outletId: usedOutletId,
-          cashierId: user.userId,
-          date: collDate,
-        },
-      })
+  // Itemised money (staff declarations / itemised cashier entries) can't be
+  // overwritten by typed totals: those figures are derived from the
+  // transactions themselves. Correct the transactions instead.
+  const itemised = existing.ledgerBacked && await hasItemisedLines(prisma, id)
+  if (itemised) {
+    const current = channelAmountsFor(existing)
+    const codes = new Set([...Object.keys(current), ...Object.keys(channelAmounts)])
+    const moneyChanged = roundMoney(Number(cash) || 0) !== roundMoney(existing.cash)
+      || [...codes].some((k) => roundMoney(Number(channelAmounts[k]) || 0) !== roundMoney(current[k] || 0))
+    const identityChanged = (staffName || null) !== existing.staffName || usedOutletId !== existing.outletId
+      || startOfDay(collDate).getTime() !== startOfDay(existing.date).getTime()
+    if (moneyChanged || identityChanged) {
+      return NextResponse.json({
+        error: 'This collection\'s cash and channel amounts come from itemised transactions, so they can\'t be typed over. Correct the individual transactions instead.',
+      }, { status: 409 })
     }
   }
 
-  // Sync submitted excess line items (upsert-by-id, preserving paidAmount and
-  // blocking removal of settled rows — same rule as Cash Recon's excessItems).
+  // Validate Difference Reasons BEFORE opening the transaction —
+  // excessReasonCategoryDb can write-seed through the plain client, which would
+  // deadlock against an open SQLite write transaction (see collections POST).
+  type ExcessInput = { id: string | null; amount: number; reason: string; staffId: string | null; personId: string | null; notes: string | null }
+  let excessItems: ExcessInput[] | null = null
+  const categories = new Map<string, string>()
   if (Array.isArray(body.excessItems)) {
     const rawItems: { id?: string; amount: number; reason: string; staffId?: string; personId?: string; notes?: string }[] = body.excessItems
-    const items = rawItems
+    excessItems = rawItems
       .map((it) => ({ id: it.id || null, amount: roundMoney(it.amount), reason: it.reason, staffId: it.staffId || null, personId: it.personId || null, notes: it.notes?.trim() || null }))
       .filter((it) => it.amount > 0)
-    const categories = new Map<string, string>()
-    for (const it of items) {
+    for (const it of excessItems) {
       if (!(await isValidExcessReasonCode(it.reason))) {
         return NextResponse.json({ error: 'Select a reason for each excess amount collected' }, { status: 400 })
       }
@@ -129,75 +120,139 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (it.reason === 'STAFF_TIP' && !it.staffId) return NextResponse.json({ error: 'Select the staff name for the excess amount collected' }, { status: 400 })
       if (it.reason === 'CUSTOMER_EXCESS' && !it.personId) return NextResponse.json({ error: 'Select the customer name for the excess amount collected' }, { status: 400 })
     }
-    const primaryChannelCode = primaryChannelFromAmounts(Number(cash) || 0, channelAmounts)
-    const [staffRows, personRows] = await Promise.all([
-      prisma.user.findMany({ where: { id: { in: items.filter((i) => i.staffId).map((i) => i.staffId as string) } }, select: { id: true, name: true } }),
-      prisma.person.findMany({ where: { id: { in: items.filter((i) => i.personId).map((i) => i.personId as string) } }, select: { id: true, name: true } }),
-    ])
-    const priorItems = await db.collectionExcess.findMany({ where: { collectionId: id } })
-    const incomingIds = new Set(items.filter((it) => it.id).map((it) => it.id as string))
-    const toRemove = priorItems.filter((p: { id: string; paidAmount: number }) => !incomingIds.has(p.id))
-    const blockedRemoval = toRemove.find((p: { paidAmount: number }) => p.paidAmount > 0)
-    if (blockedRemoval) {
-      return NextResponse.json({ error: `Cannot remove an excess item that already has ${blockedRemoval.paidAmount} settled — clear its payments in Excess Recon first` }, { status: 409 })
-    }
-    if (toRemove.length > 0) {
-      await db.collectionExcess.deleteMany({ where: { id: { in: toRemove.map((p: { id: string }) => p.id) } } })
-    }
-    for (const it of items) {
-      const fields = {
-        amount: it.amount, reason: it.reason, category: categories.get(it.reason)!, notes: it.notes, channelCode: primaryChannelCode,
-        staffId: it.staffId, staffName: it.staffId ? staffRows.find((s) => s.id === it.staffId)?.name || null : null,
-        personId: it.personId, personName: it.personId ? personRows.find((p) => p.id === it.personId)?.name || null : null,
-      }
-      if (it.id && priorItems.some((p: { id: string }) => p.id === it.id)) {
-        await db.collectionExcess.update({ where: { id: it.id }, data: fields })
+  }
+
+  let result: { updated: Awaited<ReturnType<typeof prisma.dailyCollection.findUniqueOrThrow>>; shortfall: number }
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const moneyFields = itemised ? {} : { cash: roundMoney(cash), ...legacyFixedFields(channelAmounts), total }
+      await tx.dailyCollection.update({
+        where: { id },
+        data: {
+          ...moneyFields,
+          staffName: staffName || null, systemSales: roundMoney(systemSales),
+          discount, discountReason: discountReason || null,
+          notes, outletId: usedOutletId, date: collDate,
+        },
+      })
+      if (existing.ledgerBacked) {
+        // Un-itemised collection: the typed totals ARE its CHANNEL_TOTAL rows.
+        if (!itemised) {
+          await writeChannelTotalLines(tx, { collectionId: id, outletId: usedOutletId, date: collDate, staffName: staffName || null, cash: roundMoney(cash), channelAmounts })
+        }
       } else {
-        // Small dedicated transaction — the bill-reference generation must be
-        // atomic with this row's creation (see lib/bill-reference.ts).
-        await prisma.$transaction(async (tx) => {
-          const recordId = crypto.randomUUID()
-          const ref = await generateBillReference(tx, {
-            recordId, sourceModel: 'CollectionExcess', billTypeCode: 'EXS', date: collDate, personId: it.personId, outletId: usedOutletId,
-          })
-          await tx.collectionExcess.create({
+        // Pre-ledger collection: typed totals stay the record (no synthetic rows).
+        await syncCollectionChannels(tx, id, channelAmounts)
+      }
+
+      // Replace cancellations for this collection if the edit form sent them.
+      if (Array.isArray(body.cancellations)) {
+        await tx.cancellation.deleteMany({ where: { collectionId: id } })
+        for (const cn of body.cancellations as { reason: string; productId?: string; productName: string; sellingPrice: number; quantity: number; amount: number }[]) {
+          const qty = Number(cn.quantity) || 0
+          const price = roundMoney(cn.sellingPrice)
+          if (!cn.productName || qty <= 0) continue
+          await tx.cancellation.create({
             data: {
-              id: recordId, collectionId: id, ...fields,
-              internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+              collectionId: id,
+              reason: cn.reason || '',
+              productId: cn.productId || null,
+              productName: cn.productName,
+              sellingPrice: price,
+              quantity: qty,
+              amount: roundMoney(Number(cn.amount) || price * qty),
+              outletId: usedOutletId,
+              cashierId: user.userId,
+              date: collDate,
             },
           })
-        })
+        }
       }
-    }
+
+      // Sync submitted excess line items (upsert-by-id, preserving paidAmount and
+      // blocking removal of settled rows — same rule as Cash Recon's excessItems).
+      if (excessItems) {
+        const items = excessItems
+        const primaryChannelCode = primaryChannelFromAmounts(Number(cash) || 0, channelAmounts)
+        const [staffRows, personRows] = await Promise.all([
+          tx.user.findMany({ where: { id: { in: items.filter((i) => i.staffId).map((i) => i.staffId as string) } }, select: { id: true, name: true } }),
+          tx.person.findMany({ where: { id: { in: items.filter((i) => i.personId).map((i) => i.personId as string) } }, select: { id: true, name: true } }),
+        ])
+        const priorItems = await tx.collectionExcess.findMany({ where: { collectionId: id } })
+        const incomingIds = new Set(items.filter((it) => it.id).map((it) => it.id as string))
+        const toRemove = priorItems.filter((p) => !incomingIds.has(p.id))
+        const blockedRemoval = toRemove.find((p) => p.paidAmount > 0)
+        if (blockedRemoval) {
+          throw new EditConflict(`Cannot remove an excess item that already has ${blockedRemoval.paidAmount} settled — clear its payments in Excess Recon first`)
+        }
+        if (toRemove.length > 0) {
+          await tx.collectionExcess.deleteMany({ where: { id: { in: toRemove.map((p) => p.id) } } })
+        }
+        for (const it of items) {
+          const category = categories.get(it.reason)!
+          const fields = {
+            amount: it.amount, reason: it.reason, category, accountingClass: classForReason(it.reason, category), notes: it.notes, channelCode: primaryChannelCode,
+            staffId: it.staffId, staffName: it.staffId ? staffRows.find((s) => s.id === it.staffId)?.name || null : null,
+            personId: it.personId, personName: it.personId ? personRows.find((p) => p.id === it.personId)?.name || null : null,
+          }
+          if (it.id && priorItems.some((p) => p.id === it.id)) {
+            await tx.collectionExcess.update({ where: { id: it.id }, data: fields })
+          } else {
+            const recordId = crypto.randomUUID()
+            const ref = await generateBillReference(tx, {
+              recordId, sourceModel: 'CollectionExcess', billTypeCode: 'EXS', date: collDate, personId: it.personId, outletId: usedOutletId,
+            })
+            await tx.collectionExcess.create({
+              data: {
+                id: recordId, collectionId: id, ...fields,
+                internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
+              },
+            })
+          }
+        }
+      }
+
+      // The single writer of derived figures: re-derive ledger totals, staff
+      // loss (nets approved cancellations) + excess true-up, BusinessSession,
+      // and the GL cash-in entry (reverse + re-post if the amounts moved).
+      const { shortfall } = await rebuildCollection(tx, id, user.userId)
+      const updated = await tx.dailyCollection.findUniqueOrThrow({ where: { id }, include: { outlet: true } })
+
+      // Before/after snapshot of the fields that actually changed, plus the
+      // caller's stated reason (if any) — so an admin tracing a discrepancy back
+      // through /audit sees exactly what changed and why, not just the new total.
+      const CHANGED_FIELDS = ['cash', 'crdb', 'stanbic', 'mpesa', 'total', 'staffName', 'systemSales', 'discount', 'notes', 'outletId', 'date'] as const
+      const changes: Record<string, { from: unknown; to: unknown }> = {}
+      for (const field of CHANGED_FIELDS) {
+        const before = existing[field] instanceof Date ? existing[field].toISOString() : existing[field]
+        const after = updated[field] instanceof Date ? updated[field].toISOString() : updated[field]
+        if (before !== after) changes[field] = { from: before, to: after }
+      }
+      const channelsBefore = channelAmountsFor(existing)
+      const channelsAfter = channelAmountsFor({ ...updated, channels: await tx.dailyCollectionChannel.findMany({ where: { collectionId: id } }) })
+      for (const code of new Set([...Object.keys(channelsBefore), ...Object.keys(channelsAfter)])) {
+        if ((channelsBefore[code] || 0) !== (channelsAfter[code] || 0)) changes[`channel:${code}`] = { from: channelsBefore[code] || 0, to: channelsAfter[code] || 0 }
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.userId, action: 'UPDATE', entity: 'DailyCollection', entityId: id,
+          details: JSON.stringify({ changes, staffLoss: shortfall > 0 ? shortfall : 0, reason: body.reason || null }),
+        },
+      })
+      return { updated, shortfall }
+    }, { timeout: 20000 })
+  } catch (e) {
+    // EditConflict = a business rule; anything else (e.g. a locked financial
+    // period refusing the GL reversal) rolls the whole edit back.
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to update collection' }, { status: 409 })
   }
 
-  // Reconcile linked auto staff-loss — now also nets off approved cancellations,
-  // and true up excess line items to the recomputed total (see lib/collection-excess.ts).
-  // Wrapped in a transaction so the bill-reference generation inside
-  // recomputeStaffLoss stays atomic with the SignedBill it creates.
-  const shortfall = await prisma.$transaction((tx) => recomputeStaffLoss(tx, id))
-  const staffLoss = staffName && shortfall > 0 ? { amount: shortfall, staffName } : null
-
-  // Before/after snapshot of the fields that actually changed, plus the
-  // caller's stated reason (if any) — so an admin tracing a discrepancy back
-  // through /audit sees exactly what changed and why, not just the new total.
-  const CHANGED_FIELDS = ['cash', 'crdb', 'stanbic', 'mpesa', 'total', 'staffName', 'systemSales', 'discount', 'notes', 'outletId', 'date'] as const
-  const changes: Record<string, { from: unknown; to: unknown }> = {}
-  for (const field of CHANGED_FIELDS) {
-    const before = existing[field] instanceof Date ? existing[field].toISOString() : existing[field]
-    const after = updated[field] instanceof Date ? updated[field].toISOString() : updated[field]
-    if (before !== after) changes[field] = { from: before, to: after }
-  }
-
-  await prisma.auditLog.create({
-    data: {
-      userId: user.userId, action: 'UPDATE', entity: 'DailyCollection', entityId: id,
-      details: JSON.stringify({ changes, staffLoss: shortfall > 0 ? shortfall : 0, reason: body.reason || null }),
-    },
-  })
-
-  return NextResponse.json({ ...updated, staffLoss })
+  const staffLoss = staffName && result.shortfall > 0 ? { amount: result.shortfall, staffName } : null
+  return NextResponse.json({ ...result.updated, staffLoss })
 }
+
+class EditConflict extends Error {}
 
 /** Reverse a posted GL entry if it exists and isn't already reversed. The
  *  Finance Platform's rule is "never delete, only reverse" (see lib/ledger.ts),
@@ -240,8 +295,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!CROSS_OUTLET.includes(user.role) && user.outletId && existing.outletId !== user.outletId) {
     return NextResponse.json({ error: 'You can only delete collections from your own outlet' }, { status: 403 })
   }
-  if (user.role === 'CASHIER' && await isDayClosed(existing.outletId, existing.date)) {
-    return NextResponse.json({ error: 'This day is closed. Ask a supervisor to reopen it before deleting.' }, { status: 423 })
+  // Closed days are locked for EVERY role (was: cashiers only).
+  if (await isDayLocked(prisma, existing.outletId, existing.date)) {
+    return NextResponse.json({ error: 'This day is closed. It must be reopened (Unlock Requests) before this collection can be deleted.' }, { status: 423 })
   }
   const excessItems = await db.collectionExcess.findMany({ where: { collectionId: id } })
   if (excessItems.some((it: { paidAmount: number }) => it.paidAmount > 0)) {
@@ -296,7 +352,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       // only be found by source. Without reversing it the GL would overstate
       // cash and revenue by the deleted collection's total forever.
       const collectionEntries = await tx.journalEntry.findMany({
-        where: { sourceType: 'DailyCollection', sourceId: id, status: { not: 'REVERSED' } },
+        where: liveCollectionEntryWhere(id), // excludes earlier reversal entries
         select: { id: true },
       })
 
@@ -312,6 +368,17 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       if (writeOffs.length) await tx.signedBillWriteOff.deleteMany({ where: { id: { in: writeOffs.map((w) => w.id) } } })
       if (autoBillIds.length) await tx.signedBill.deleteMany({ where: { id: { in: autoBillIds } } }) // BillItems cascade
       await tx.cancellation.deleteMany({ where: { collectionId: id } })
+
+      // Transaction Ledger: the typed CHANNEL_TOTAL rows belong to this
+      // collection and go with it; staff declarations are released (unlinked,
+      // unlocked) so the cashier can re-validate them, and their session is
+      // reopened for that.
+      await tx.staffTransaction.deleteMany({ where: { collectionId: id, source: 'CHANNEL_TOTAL' } })
+      const released = await tx.staffTransaction.findMany({ where: { collectionId: id }, select: { sessionId: true } })
+      await tx.staffTransaction.updateMany({ where: { collectionId: id }, data: { collectionId: null, lockedAt: null } })
+      const sessionIds = [...new Set(released.map((r) => r.sessionId).filter((s): s is string => !!s))]
+      if (sessionIds.length) await tx.transactionSession.updateMany({ where: { id: { in: sessionIds }, status: 'VALIDATED' }, data: { status: 'OPEN' } })
+
       await tx.dailyCollection.delete({ where: { id } }) // channels + excess cascade
 
       // The BI layer's BusinessSession row is denormalized from this collection

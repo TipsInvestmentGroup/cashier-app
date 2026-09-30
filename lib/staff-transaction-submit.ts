@@ -23,6 +23,11 @@ interface CreateArgs {
   receivingAccount: string | null
   reference: string | null
   personName: string | null
+  // Transaction Ledger denormalization (see StaffTransaction in schema.prisma).
+  staffName?: string | null
+  outletId?: string | null
+  date?: Date | null
+  referenceKey?: string | null
 }
 
 /**
@@ -31,7 +36,7 @@ interface CreateArgs {
  * via the existing /api/collection-approvals decide endpoint) — otherwise it
  * is immediately DECLARED and counts toward the cashier's summary.
  */
-export async function createStaffTransaction({ tx, sessionId, staffId, category, paymentMethod, amount, receivingAccount, reference, personName }: CreateArgs) {
+export async function createStaffTransaction({ tx, sessionId, staffId, category, paymentMethod, amount, receivingAccount, reference, personName, staffName, outletId, date, referenceKey }: CreateArgs) {
   const needsApproval = categoryNeedsApproval(category)
   const transaction = await tx.staffTransaction.create({
     data: {
@@ -43,6 +48,11 @@ export async function createStaffTransaction({ tx, sessionId, staffId, category,
       receivingAccount,
       reference,
       personName,
+      staffName: staffName ?? null,
+      outletId: outletId ?? null,
+      date: date ?? null,
+      referenceKey: referenceKey ?? null,
+      source: 'STAFF_DECLARED',
       status: needsApproval ? 'PENDING_APPROVAL' : 'DECLARED',
     },
   })

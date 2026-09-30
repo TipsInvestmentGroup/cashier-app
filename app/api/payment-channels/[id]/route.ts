@@ -19,6 +19,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   // channel's money lands in — required before it can be used on a Supplier
   // Payment (see lib/finance.ts createSupplierPayment).
   if ('glAccountId' in body) data.glAccountId = body.glAccountId || null
+  // Transaction Ledger: whether this channel is captured as one total or as
+  // itemised transactions (after the outlet's itemisation cut-over).
+  if (body.captureMode !== undefined) {
+    if (!['TOTAL', 'TRANSACTIONS'].includes(body.captureMode)) return NextResponse.json({ error: 'captureMode must be TOTAL or TRANSACTIONS' }, { status: 400 })
+    data.captureMode = body.captureMode
+  }
+  if (body.requiresReference !== undefined) data.requiresReference = !!body.requiresReference
 
   try {
     const item = await prisma.paymentChannel.update({ where: { id }, data })

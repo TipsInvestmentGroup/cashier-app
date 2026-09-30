@@ -244,6 +244,9 @@ model Outlet {
   // components (see lib/bill-reference.ts). Falls back to a slugified
   // Outlet.name when unset.
   branchCode        String?
+  // Transaction Ledger cut-over: from this business date on, channels with
+  // captureMode=TRANSACTIONS must be itemised. Null = not yet cut over.
+  itemisedCollectionsFrom DateTime?
   createdAt         DateTime            @default(now())
 
   users                  User[]
@@ -655,6 +658,9 @@ model BusinessDay {
   outlet         Outlet    @relation(fields: [outletId], references: [id])
   date           DateTime
   status         String    @default("OPEN")
+  // Collection Mode snapshot, taken at the day's first collection activity so
+  // a mode change in Setup applies from the next business day, never mid-day.
+  collectionMode String?
   isComplete     Boolean   @default(true)
   missingItems   String? // JSON array of {type, label, shift?, counter?} — informational only
   closedById     String?
@@ -794,12 +800,17 @@ model DailyCollection {
   outlet           Outlet   @relation(fields: [outletId], references: [id])
   cashierId        String
   cashier          User     @relation(fields: [cashierId], references: [id])
+  // true = cash + channel amounts are derived from StaffTransaction rows by
+  // lib/collection-ledger.ts rebuildCollection(), never written directly.
+  // false = recorded before the Transaction Ledger existed (typed totals).
+  ledgerBacked     Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   cancellations Cancellation[]
   channels      DailyCollectionChannel[]
   excessItems   CollectionExcess[]
+  transactions  StaffTransaction[]
 
   @@index([date])
   @@index([outletId])
@@ -1238,12 +1249,40 @@ model SystemSalesRecord {
 /// A single payment a service staff personally received, self-declared. The
 /// cashier's dashboard groups and totals these by paymentMethod +
 /// receivingAccount per staff — never manually calculated.
+///
+/// Transaction Ledger (Phase 1): this table is the single source of truth for
+/// a collection's money. A DailyCollection with ledgerBacked=true never has
+/// its cash/channel totals typed in — lib/collection-ledger.ts
+/// rebuildCollection() derives them from these rows (category PAYMENT, status
+/// DECLARED/APPROVED). Rows come from three sources:
+///   STAFF_DECLARED — self-declared via My Transactions (sessionId set)
+///   CASHIER_ENTERED — one itemised transaction typed by the cashier
+///   CHANNEL_TOTAL  — one un-itemised total per channel (the Default-mode form
+///                    before an outlet's itemisation cut-over, and cash)
+/// Once linked to a saved collection (lockedAt set) a row is changed only by
+/// that collection's own edit path or, later, the amendment workflow.
 model StaffTransaction {
   id               String             @id @default(cuid())
-  sessionId        String
-  session          TransactionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  staffId          String
-  staff            User               @relation("StaffTransactionStaff", fields: [staffId], references: [id])
+  sessionId        String?
+  session          TransactionSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  staffId          String?
+  staff            User?              @relation("StaffTransactionStaff", fields: [staffId], references: [id], onDelete: Restrict)
+  // Denormalized so ledger rows without a session (Default-mode collections)
+  // still carry their outlet / business date / staff.
+  staffName        String?
+  outletId         String?
+  date             DateTime?
+  collectionId     String?
+  collection       DailyCollection?   @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  source           String             @default("STAFF_DECLARED") // STAFF_DECLARED | CASHIER_ENTERED | CHANNEL_TOTAL
+  // "<companyId>:<CHANNEL>:<REFERENCE>" for a live (not rejected) digital
+  // PAYMENT with a reference — the unique index is what stops one M-PESA/bank
+  // reference being claimed twice, by anyone, on any day.
+  referenceKey     String?            @unique
+  version          Int                @default(1)
+  lockedAt         DateTime?
+  originalSnapshot String? // JSON of the money fields frozen at lock time
+  isAmended        Boolean            @default(false)
   category         String             @default("PAYMENT")
   paymentMethod    String?
   amount           Float
@@ -1263,6 +1302,8 @@ model StaffTransaction {
   @@index([sessionId])
   @@index([staffId])
   @@index([status])
+  @@index([collectionId])
+  @@index([outletId, date])
 }
 
 // ─── Business Intelligence Layer ────────────────────────────────────────────
@@ -2168,6 +2209,11 @@ model PaymentChannel {
   // resolveChannelAccountId's cascade).
   glAccountId String?
   glAccount   Account? @relation(fields: [glAccountId], references: [id])
+  // Transaction Ledger: TOTAL = one amount per staff/day (today's form);
+  // TRANSACTIONS = each payment itemised once the outlet passes its
+  // itemisation cut-over (Outlet.itemisedCollectionsFrom).
+  captureMode       String  @default("TOTAL")
+  requiresReference Boolean @default(false)
 
   supplierPayments SupplierPayment[]
   companyAccounts  CompanyPaymentAccount[]

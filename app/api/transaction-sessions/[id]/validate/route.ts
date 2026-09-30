@@ -6,10 +6,9 @@ import { roundMoney } from '@/lib/utils'
 import { resolvePerson } from '@/lib/resolve-person'
 import { generateBillReference, resolveBillTypeCodeFromLegacy } from '@/lib/bill-reference'
 import { allocatePayment } from '@/lib/payment-alloc'
-import { syncBusinessSession } from '@/lib/business-session'
 import { resolveCreditTags } from '@/lib/credit-config'
-import { syncCreditForBill } from '@/lib/credit-ledger'
-import { syncStaffLossReceivable } from '@/lib/staff-loss-gl'
+import { isDayLocked } from '@/lib/day-lock'
+import { linkAndLockTransactions, rebuildCollection } from '@/lib/collection-ledger'
 
 const CASHIER_ROLES = ['CASHIER', 'ACCOUNTANT', 'ADMIN']
 
@@ -49,6 +48,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const staff = await prisma.user.findUnique({ where: { id: staffId }, select: { id: true, name: true } })
   if (!staff) return NextResponse.json({ error: 'Staff not found' }, { status: 404 })
+  if (await isDayLocked(prisma, session.outletId, session.date)) {
+    return NextResponse.json({ error: 'This day is closed. It must be reopened (Unlock Requests) before transactions can be validated or rejected.' }, { status: 423 })
+  }
 
   const existingCollection = await prisma.dailyCollection.findFirst({
     where: { outletId: session.outletId, date: session.date, staffName: staff.name },
@@ -56,9 +58,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (existingCollection) return NextResponse.json({ error: `${staff.name}'s collection for this day has already been validated` }, { status: 409 })
 
   if (decision === 'REJECT') {
+    // A rejected declaration no longer claims its payment reference, so the
+    // genuine owner can still record it.
     await prisma.staffTransaction.updateMany({
       where: { sessionId: id, staffId, status: { in: ['DECLARED', 'APPROVED'] } },
-      data: { status: 'REJECTED' },
+      data: { status: 'REJECTED', referenceKey: null },
     })
     await prisma.auditLog.create({
       data: { userId: user.userId, action: 'REJECT', entity: 'TransactionSession', entityId: id, details: `Rejected ${staff.name}'s declared transactions` },
@@ -78,28 +82,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const systemSalesRow = await prisma.systemSalesRecord.findFirst({ where: { sessionId: id, staffName: staff.name } })
 
-  let cash = 0
   let discount = 0
-  const channelTotals: Record<string, number> = {}
   const cancellations: typeof usable = []
   const creditSaleTxns: typeof usable = []
   const signedBillPaymentTxns: typeof usable = []
 
+  // PAYMENT rows are NOT summed here any more — they're linked to the
+  // collection and rebuildCollection() derives cash/channels/total from them,
+  // the same single path every other collection uses.
   for (const t of usable) {
-    if (t.category === 'PAYMENT') {
-      if ((t.paymentMethod || 'CASH') === 'CASH') cash += t.amount
-      else channelTotals[t.paymentMethod!] = roundMoney((channelTotals[t.paymentMethod!] || 0) + t.amount)
-    } else if (t.category === 'CREDIT_SALE') creditSaleTxns.push(t)
+    if (t.category === 'CREDIT_SALE') creditSaleTxns.push(t)
     else if (t.category === 'DISCOUNT') discount += t.amount
     else if (t.category === 'SIGNED_BILL') signedBillPaymentTxns.push(t)
     else if (t.category === 'CANCELLATION') cancellations.push(t)
   }
 
-  const digitalTotal = roundMoney(Object.values(channelTotals).reduce((s, v) => s + v, 0))
-  cash = roundMoney(cash)
-  const total = roundMoney(cash + digitalTotal)
-
-  const collection = await prisma.$transaction(async (tx) => {
+  let collection
+  try {
+  collection = await prisma.$transaction(async (tx) => {
     const created = await tx.dailyCollection.create({
       data: {
         date: session.date,
@@ -107,20 +107,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         cashierId: user.userId,
         staffName: staff.name,
         systemSales: systemSalesRow?.amount || 0,
-        cash,
-        crdb: channelTotals.CRDB || 0,
-        stanbic: channelTotals.STANBIC || 0,
-        mpesa: channelTotals.MPESA || 0,
-        total,
         discount: roundMoney(discount),
         discountReason: discount > 0 ? 'Staff-declared discount(s), see Transaction Sessions drill-down' : null,
         notes: `Validated from Transaction Session ${id}`,
+        ledgerBacked: true,
       },
     })
 
-    for (const code of Object.keys(channelTotals)) {
-      await tx.dailyCollectionChannel.create({ data: { collectionId: created.id, channelCode: code, amount: channelTotals[code] } })
-    }
+    // Link + freeze every validated declaration to this collection.
+    await linkAndLockTransactions(tx, { ids: usable.map((t) => t.id), collectionId: created.id, outletId: session.outletId, date: session.date, staffName: staff.name })
 
     for (const c of cancellations) {
       await tx.cancellation.create({
@@ -182,63 +177,30 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       paymentsReceived += amt
     }
 
-    const updated = await tx.dailyCollection.update({
+    await tx.dailyCollection.update({
       where: { id: created.id },
       data: { creditSales: roundMoney(creditSales), paymentsReceived: roundMoney(paymentsReceived) },
     })
 
-    // Same reconciliation the fixed Daily Collections form runs (see
-    // app/api/collections/route.ts) — without this, Excess & Loss / Excess
-    // Recon would silently see nothing for collections validated through
-    // Transaction Verification mode. A shortfall becomes an auto STAFF_LOSS
-    // SignedBill; a surplus becomes a CollectionExcess row. There's no
-    // interactive excess-reason picker in this flow (unlike the fixed form),
-    // so surplus is filed under the existing UNASSIGNED reason for the
-    // cashier to reclassify later via Excess Recon.
-    const lossAmount = roundMoney((systemSalesRow?.amount || 0) - total - creditSales - paymentsReceived - discount)
-    if (lossAmount > 0) {
-      const person = await tx.person.findFirst({ where: { name: staff.name, type: 'STAFF_LOSS' } })
-      const recordId = crypto.randomUUID()
-      const billTypeCode = await resolveBillTypeCodeFromLegacy(tx, 'SIGNED_BILL', 'STAFF_LOSS')
-      const ref = await generateBillReference(tx, {
-        recordId, sourceModel: 'SignedBill', billTypeCode, date: session.date, personId: person?.id ?? null, outletId: session.outletId,
-      })
-      const tags = await resolveCreditTags(tx, { billType: 'STAFF_LOSS', personId: person?.id ?? null, outletId: session.outletId })
-      await tx.signedBill.create({
-        data: {
-          id: recordId,
-          autoKey: `SL-${created.id}`, voucherNumber: ref.displayReference, billType: 'STAFF_LOSS',
-          personId: person?.id ?? null, personName: staff.name, amount: lossAmount, serviceStaff: staff.name,
-          description: `Auto staff loss: System ${systemSalesRow?.amount || 0} − collected ${total} − credit sales ${creditSales} − payments received ${paymentsReceived} − discount ${discount} (Transaction Session ${id})`,
-          status: 'UNPAID', date: session.date, outletId: session.outletId, cashierId: user.userId,
-          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
-          creditGroupId: tags.creditGroupId, creditAccountId: tags.creditAccountId,
-          autoSourceCollectionId: created.id,
-        },
-      })
-      await syncStaffLossReceivable(tx, recordId) // GL: Dr A/R (1300) / Cr Sales Revenue for the shortfall
-      await syncCreditForBill(tx, recordId) // credit ledger: STAFF_LOSS owed by staff
-    } else if (lossAmount < 0) {
-      const excessAmount = roundMoney(Math.abs(lossAmount))
-      const recordId = crypto.randomUUID()
-      const ref = await generateBillReference(tx, {
-        recordId, sourceModel: 'CollectionExcess', billTypeCode: 'EXS', date: session.date, personId: null, outletId: session.outletId,
-      })
-      await tx.collectionExcess.create({
-        data: {
-          id: recordId,
-          collectionId: created.id, amount: excessAmount, reason: 'UNASSIGNED', category: 'PAYABLE_EXCESS', staffName: staff.name,
-          internalBillId: ref.internalBillId, displayReference: ref.displayReference, billTypeConfigId: ref.billTypeConfigId,
-        },
-      })
-    }
-
     await tx.staffTransaction.updateMany({ where: { id: { in: usable.map((t) => t.id) } }, data: { status: 'APPROVED' } })
 
-    await syncBusinessSession(tx, created.id)
+    // The one shared path (lib/collection-ledger.ts): derive cash/channels/
+    // total from the linked PAYMENT rows, then staff loss / excess with the
+    // authoritative formula (lib/staff-loss.ts — a shortfall becomes the auto
+    // STAFF_LOSS bill, a surplus an UNASSIGNED excess row for Excess Recon),
+    // BusinessSession, and the GL cash-in entry — which this flow never posted
+    // before, leaving Transaction-Verification collections off the books.
+    await rebuildCollection(tx, created.id, user.userId)
+    // No interactive reason picker in this flow: keep the staff name on the
+    // UNASSIGNED surplus row so Excess Recon shows whose it is.
+    await tx.collectionExcess.updateMany({ where: { collectionId: created.id, staffName: null }, data: { staffName: staff.name } })
 
-    return updated
+    return tx.dailyCollection.findUniqueOrThrow({ where: { id: created.id } })
   }, { timeout: 20000 })
+  } catch (e) {
+    // e.g. a locked financial period refusing the GL posting — nothing is saved.
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'Failed to validate' }, { status: 409 })
+  }
 
   const allTransactions = await prisma.staffTransaction.findMany({ where: { sessionId: id } })
   const allStaffIds = new Set(allTransactions.map((t) => t.staffId))
