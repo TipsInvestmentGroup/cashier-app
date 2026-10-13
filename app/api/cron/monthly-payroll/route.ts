@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { sendPayrollReport } from '@/lib/payroll-email'
 import { requireCronSecret } from '@/lib/cron-auth'
+import { forEachCompany } from '@/lib/tenant'
 import { subMonths, format } from 'date-fns'
 
 export const maxDuration = 60
@@ -23,10 +24,12 @@ async function handle(req: NextRequest) {
   const monthOverride = req.nextUrl.searchParams.get('month')
   const month = monthOverride || format(subMonths(new Date(), 1), 'yyyy-MM')
 
-  try {
+  // One report PER COMPANY, computed and addressed inside that company (the tenant guard confines the deductions and
+  // the directors who receive it).
+  const results = await forEachCompany(async () => {
     const result = await sendPayrollReport({ month })
 
-    // Attribute the audit entry to an admin/accountant if one exists
+    // Attribute the audit entry to an admin/accountant of THIS company if one exists
     const sys = await prisma.user.findFirst({
       where: { role: { in: ['ADMIN', 'ACCOUNTANT'] }, isActive: true },
       select: { id: true },
@@ -41,14 +44,19 @@ async function handle(req: NextRequest) {
         },
       })
     }
-
-    return NextResponse.json({ ok: true, month, ...result })
-  } catch (err: unknown) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to send scheduled report' },
-      { status: 500 }
-    )
+    return result
+  })
+  if (results.length === 1) {
+    const r = results[0]
+    return r.ok
+      ? NextResponse.json({ ok: true, month, ...r.value })
+      : NextResponse.json({ error: r.error || 'Failed to send scheduled report' }, { status: 500 })
   }
+  const anyOk = results.some((r) => r.ok)
+  return NextResponse.json(
+    { ok: anyOk, month, companies: results.map((r) => ({ company: r.company, ok: r.ok, ...(!r.ok ? { error: r.error } : {}) })) },
+    { status: anyOk ? 200 : 500 },
+  )
 }
 
 export async function GET(req: NextRequest) {

@@ -11,6 +11,7 @@
 // item-level detail lives in SalesImportLine, which powers product analytics.
 
 import { prisma } from '@/lib/prisma'
+import { aliasCompanyKey } from '@/lib/tenant'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay, format } from 'date-fns'
 import { normalizeName, bestMatch } from '@/lib/fuzzy-match'
@@ -78,7 +79,8 @@ export interface MasterData {
 }
 
 /** Load everything resolveLines needs to reconcile a batch against master data. */
-export async function loadMasterData(companyId = ''): Promise<MasterData> {
+export async function loadMasterData(companyIdArg?: string): Promise<MasterData> {
+  const companyId = companyIdArg ?? (await aliasCompanyKey())
   const [persons, products, sAliases, pAliases] = await Promise.all([
     prisma.person.findMany({ where: { isActive: true }, select: { id: true, name: true } }),
     prisma.product.findMany({
@@ -322,8 +324,8 @@ export async function commitImport(importId: string, actor: { userId: string; us
   }
 
   // Remember the mappings the user resolved (raw → canonical), skipping trivial
-  // identity matches. companyId "" = single-company default; multi-company later.
-  const companyId = ''
+  // identity matches. Alias rows are keyed per company ('' = the original company's legacy key).
+  const companyId = await aliasCompanyKey()
   const staffAliasOps = new Map<string, { alias: string; staffName: string }>()
   const productAliasOps = new Map<string, { alias: string; productId: string; productName: string }>()
   for (const l of lines) {
