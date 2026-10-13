@@ -31,6 +31,13 @@ jobs:
       # companyId column + index - so a new table can't ship without deciding how it belongs to a company.
       - name: Tenancy registry
         run: npm run check:tenancy
+      # Two-company fixture in a throwaway SQLite file: proves the Prisma tenant guard confines reads/writes/references
+      # to the session's company (scripts/test-tenancy-guard.ts refuses to run against anything but a local file DB).
+      - name: Tenancy guard test
+        run: |
+          export DATABASE_URL="file:$RUNNER_TEMP/tenancy-test.db"
+          npx prisma db push
+          npm run test:tenancy
       # Dummy secrets, scoped to only this step — this job builds against
       # SQLite and touches no real database; next build's production-mode
       # page-data collection needs *something* set to satisfy lib/auth.ts's

@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { isOwner, canManageDepartments, canApprovePetty, canRequestPetty } from '@/lib/petty-access'
 import { getDeptManagers, setDeptManagers, getPettyApprovers } from '@/lib/approvals'
 import { ownerEmail } from '@/lib/owner'
+import { legacyAuthorityApplies, sessionOwnerEmail } from '@/lib/tenant'
 
 const OWNER_EMAIL = ownerEmail()
 
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
   })
 
   return NextResponse.json({
-    owner: OWNER_EMAIL,
+    owner: (await legacyAuthorityApplies()) ? OWNER_EMAIL : await sessionOwnerEmail(),
     deptManagers,
     approvers,
     approverEmails: pettyApproverEmails,

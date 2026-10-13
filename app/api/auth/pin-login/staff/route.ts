@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prismaSystem as prisma } from '@/lib/prisma'
 import { startOfDay, endOfDay } from 'date-fns'
 import { limitEveryRequest } from '@/lib/rate-limit'
+import { resolvePickerCompany } from '@/lib/tenant'
 
 const STAFF_SELECT = { id: true, name: true, position: true, outlet: { select: { id: true, name: true } } } as const
 
@@ -25,9 +26,14 @@ export async function GET(req: NextRequest) {
   const outletId = new URL(req.url).searchParams.get('outletId')
   if (!outletId) return NextResponse.json([])
 
-  const outlet = await prisma.outlet.findUnique({ where: { id: outletId }, select: { isEventsOnly: true, isActive: true } })
+  const outlet = await prisma.outlet.findUnique({ where: { id: outletId }, select: { isEventsOnly: true, isActive: true, companyId: true } })
   // Unknown or deactivated outlet: reveal nothing (no roster for ids that aren't a live outlet).
   if (!outlet || !outlet.isActive) return NextResponse.json([])
+
+  // The outlet must belong to the company this terminal declared (when there are several companies).
+  const pc = await resolvePickerCompany(new URL(req.url).searchParams.get('company'))
+  if (pc.mode === 'required' || pc.mode === 'none') return NextResponse.json([])
+  if (pc.mode === 'company' && !(outlet.companyId === pc.companyId || (outlet.companyId === null && pc.isOriginal))) return NextResponse.json([])
 
   if (outlet.isEventsOnly) {
     const today = new Date()
