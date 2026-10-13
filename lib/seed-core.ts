@@ -9,6 +9,7 @@ import { seedPayrollFramework } from './payroll-seed'
 import { RECONCILIATION_STAGE_RESOURCES as RSR, WRITE_OFF_RESOURCES as WOR } from './rbac'
 import { classForReason } from './reconciliation-classification'
 import { backfillTenantIdentity } from './tenant'
+import { backfillTenantRoots } from './tenant-backfill'
 
 // Sensible role defaults for the Reconciliation Workflow Engine + Write-Off
 // resources. Each entry lists the roles GRANTED that resource; every other
@@ -255,6 +256,15 @@ export async function seedCore(prisma: any) {
   // original company, every user gets a Membership, the legacy owner is flagged on the original company.
   // Running it on every deploy means no separate manual backfill step is needed.
   const tenant = await backfillTenantIdentity(prisma, { apply: true })
+  // Phase 3: give every existing row in every tenant-owned table its owning company (fill-only, idempotent).
+  // Never allowed to fail a deploy: if the expand migration is not applied yet, each table is just reported skipped.
+  let tenantRows: { assigned: number; viaFallback: number; remaining: number } | { error: string }
+  try {
+    const r = await backfillTenantRoots(prisma, { apply: true })
+    tenantRows = { assigned: r.totalAssigned, viaFallback: r.totalFallback, remaining: r.totalRemaining }
+  } catch (err) {
+    tenantRows = { error: err instanceof Error ? err.message.slice(0, 160) : 'backfill failed' }
+  }
 
-  return { tenant, outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes, expenseCategories: expense.categories, expenseFundingSources: expense.fundingSources }
+  return { tenant, tenantRows, outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes, expenseCategories: expense.categories, expenseFundingSources: expense.fundingSources }
 }
