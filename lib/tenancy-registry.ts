@@ -86,7 +86,7 @@ export const SCOPED = [
 
 /** Identity / platform tables outside any single company. */
 export const IDENTITY = [
-  'Company', 'Membership', 'NotificationPreference', 'PlatformAdmin', 'PlatformAuditLog', 'PushSubscription', 'User',
+  'Company', 'NotificationPreference', 'PlatformAdmin', 'PlatformAuditLog', 'PushSubscription', 'User',
 ] as const
 
 /** Not yet per-company: the key itself must change first. */
@@ -94,8 +94,65 @@ export const DEFERRED: Record<string, string> = {
   Setting: 'key is the primary key (global); needs a (companyId, key) redesign + a per-company CompanyConfig - Phase 3 step 3g',
 }
 
-export function classify(model: string): 'ROOT' | 'CHILD' | 'SCOPED' | 'IDENTITY' | 'DEFERRED' | null {
+/**
+ * Company-native models: they already carried a `companyId` column before the multi-company programme (the
+ * finance / payroll / expense / credit / reconciliation families, Outlet, ...). Together with TENANT_ROOTS these
+ * are the models the Prisma tenant guard (lib/tenant-guard.ts) scopes to the session's company. Verified against
+ * schema.prisma by `npm run check:tenancy`.
+ */
+export const NATIVE: readonly string[] = [
+  'Outlet',
+  'SalesImport',
+  'SalesStaffAlias',
+  'SalesProductAlias',
+  'CustomerGroup',
+  'PriceList',
+  'Promotion',
+  'CollectionTemplate',
+  'BusinessSession',
+  'Grn',
+  'Account',
+  'FinancialPeriod',
+  'JournalEntry',
+  'SupplierInvoice',
+  'SupplierPayment',
+  'CompanyPaymentAccount',
+  'BankTransaction',
+  'Budget',
+  'ReconciliationStage',
+  'PaymentVerification',
+  'PaymentIntegrationConnector',
+  'WriteOffRequest',
+  'CreditPolicy',
+  'CreditGroup',
+  'CreditAccount',
+  'EmployeeCategory',
+  'PayGroup',
+  'Employee',
+  'PayrollFormula',
+  'PayComponent',
+  'PayrollRun',
+  'StatutoryRule',
+  'LeaveType',
+  'PaymentBatch',
+  'RequestType',
+  'ExpenseCategory',
+  'FundingSource',
+  'ExpenseRequest',
+  'ExpenseAccessGrant',
+  'ExpenseNotificationRule',
+] as const
+
+/** Carry a companyId column but are deliberately NOT scoped: a user's memberships span companies by design. */
+export const EXEMPT: readonly string[] = ['Membership'] as const
+
+/** Every model the tenant guard scopes by its `companyId` column. */
+export const GUARDED: ReadonlySet<string> = new Set<string>([...Object.keys(TENANT_ROOTS), ...NATIVE])
+
+export function classify(model: string): 'ROOT' | 'NATIVE' | 'EXEMPT' | 'CHILD' | 'SCOPED' | 'IDENTITY' | 'DEFERRED' | null {
   if (model in TENANT_ROOTS) return 'ROOT'
+  if (NATIVE.includes(model)) return 'NATIVE'
+  if (EXEMPT.includes(model)) return 'EXEMPT'
   if (model in CHILDREN) return 'CHILD'
   if ((SCOPED as readonly string[]).includes(model)) return 'SCOPED'
   if ((IDENTITY as readonly string[]).includes(model)) return 'IDENTITY'

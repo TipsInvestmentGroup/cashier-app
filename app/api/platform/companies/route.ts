@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { requirePlatformAdmin, platformAudit } from '@/lib/platform-auth'
 import { SLUG_RE, slugify } from '@/lib/tenant'
 

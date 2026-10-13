@@ -1,5 +1,9 @@
 import { Prisma, type PrismaClient } from '@prisma/client'
 import { TENANT_ROOTS } from '@/lib/tenancy-registry'
+import { sessionCompany, TENANT_HEADER } from '@/lib/tenant-context'
+
+// re-exported for existing importers
+export { TENANT_HEADER }
 
 /**
  * Write-path guard (Phase 3): every row created in a tenant-root table is stamped with its owning company.
@@ -18,19 +22,8 @@ import { TENANT_ROOTS } from '@/lib/tenancy-registry'
  * stragglers. This is *stamping*, not enforcement: reads are not filtered here (Phase 4).
  */
 
-export const TENANT_HEADER = 'x-tenant-company'
-
 const OUTLET_TTL_MS = 60_000
 const MAX_CACHE = 2_000
-
-async function sessionCompany(): Promise<string | null> {
-  try {
-    const { headers } = await import('next/headers')
-    return (await headers()).get(TENANT_HEADER) || null
-  } catch {
-    return null // not inside a request (script, seed, cron without a user)
-  }
-}
 
 export function tenantStampExtension(base: PrismaClient) {
   const outletCache = new Map<string, { company: string | null; at: number }>()

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { startOfDay, endOfDay } from 'date-fns'
 import { limitEveryRequest } from '@/lib/rate-limit'
 
