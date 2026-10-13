@@ -131,6 +131,7 @@ export async function postJournalEntry(db: Db, input: PostJournalEntryInput): Pr
       createdById: input.createdById,
       lines: {
         create: input.lines.map((l) => ({
+          companyId: input.companyId,
           accountId: l.accountId,
           outletId: l.outletId || null,
           debit: roundMoney(l.debit || 0),

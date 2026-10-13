@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { TENANT_HEADER } from '@/lib/tenant-stamp'
 
 /**
  * Central session-revocation gate for the API.
@@ -62,21 +63,30 @@ async function currentState(userId: string, companyId?: string): Promise<CachedU
   return fresh
 }
 
+/** Request headers for downstream code: any client-supplied tenant header is removed, and the verified
+ *  session company (if any) is set. lib/tenant-stamp.ts reads it to stamp new rows. */
+function forward(req: NextRequest, companyId?: string) {
+  const headers = new Headers(req.headers)
+  headers.delete(TENANT_HEADER)
+  if (companyId) headers.set(TENANT_HEADER, companyId)
+  return NextResponse.next({ request: { headers } })
+}
+
 export async function proxy(req: NextRequest) {
   const header = req.headers.get('authorization')
-  if (!header?.startsWith('Bearer ')) return NextResponse.next()
+  if (!header?.startsWith('Bearer ')) return forward(req)
 
   const claims = verifyToken(header.slice(7))
-  if (!claims?.userId || claims.kind) return NextResponse.next() // not a session token of ours (or a platform / selection token)
+  if (!claims?.userId || claims.kind) return forward(req) // not a session token of ours (or a platform / selection token)
 
   let state: CachedUser | null = null
   try {
     state = await currentState(claims.userId, claims.companyId)
   } catch (err) {
     console.error('[proxy] session check unavailable, failing open:', err instanceof Error ? err.message : err)
-    return NextResponse.next()
+    return forward(req, claims.companyId)
   }
-  if (!state) return NextResponse.next()
+  if (!state) return forward(req, claims.companyId)
 
   const stale = typeof claims.sepoch === 'number' && claims.sepoch !== state.epoch
   // The membership the session was issued for must still exist and be active, and its company must be
@@ -95,7 +105,7 @@ export async function proxy(req: NextRequest) {
       { status: 403 },
     )
   }
-  return NextResponse.next()
+  return forward(req, claims.companyId)
 }
 
 export const config = {

@@ -27,6 +27,10 @@ jobs:
       # (PrismaClient, model types) don't exist until then, which otherwise
       # cascades into unrelated "implicit any" errors across the codebase.
       - run: npm run typecheck
+      # Every Prisma model must have a tenancy decision (lib/tenancy-registry.ts) and every tenant-root table a
+      # companyId column + index - so a new table can't ship without deciding how it belongs to a company.
+      - name: Tenancy registry
+        run: npm run check:tenancy
       # Dummy secrets, scoped to only this step — this job builds against
       # SQLite and touches no real database; next build's production-mode
       # page-data collection needs *something* set to satisfy lib/auth.ts's
