@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { approveReconciliation } from '@/lib/finance-reconciliation'
+import { isOwnerEmail } from '@/lib/owner'
 
 const APPROVER_ROLES = ['DIRECTOR', 'ADMIN']
 
@@ -11,8 +12,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const isOwner = !!process.env.NEXT_PUBLIC_OWNER_EMAIL && user.email?.toLowerCase() === process.env.NEXT_PUBLIC_OWNER_EMAIL.toLowerCase()
-  if (!APPROVER_ROLES.includes(user.role) && !isOwner) {
+  if (!APPROVER_ROLES.includes(user.role) && !isOwnerEmail(user.email)) {
     return NextResponse.json({ error: 'Only a Director or Admin can approve a reconciliation' }, { status: 403 })
   }
 

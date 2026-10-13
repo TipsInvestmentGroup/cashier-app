@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { canActOnOrder } from '@/lib/pos-close'
+import { canActOnOrder, canViewOrder } from '@/lib/pos-close'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -25,7 +25,8 @@ export async function GET(req: NextRequest, { params }: Params) {
       },
     },
   })
-  if (!order) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  // Same response for "missing" and "not yours" so ids can't be probed for existence.
+  if (!order || !canViewOrder(payload, order)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // preparedBy is a plain userId (no relation on PosOrderItem) — resolve to a
   // display name here so the client's order-history view doesn't need a

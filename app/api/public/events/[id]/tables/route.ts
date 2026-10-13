@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import QRCode from 'qrcode'
 import { prisma } from '@/lib/prisma'
 import { createTableBooking } from '@/lib/bookings'
+import { limitEveryRequest } from '@/lib/rate-limit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = prisma as any
@@ -9,6 +10,8 @@ const BOOKABLE_STATUSES = ['PLANNED', 'CONFIRMED']
 
 /** POST /api/public/events/[id]/tables — no auth. body: { tableId, name, phone, guests?, depositPaid?, specialRequests? } */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const limited = limitEveryRequest(req, 'public-book', { limit: 10, windowMs: 10 * 60 * 1000 })
+  if (limited) return limited
   const { id } = await params
   const event = await db.event.findUnique({ where: { id } })
   if (!event || !BOOKABLE_STATUSES.includes(event.status)) return NextResponse.json({ error: 'Event not found' }, { status: 404 })

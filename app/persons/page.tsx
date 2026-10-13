@@ -58,7 +58,7 @@ export default function PersonsPage() {
   const catLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
   const catColor = (code: string) => BILL_TYPE_COLORS[code] || 'bg-gray-100 text-gray-700'
 
-  const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const OWNER_EMAIL = (user?.ownerEmail || '').toLowerCase()
   const myEmail = (user?.email || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && myEmail === OWNER_EMAIL
   const canEditDelete = (!!myEmail && (myEmail === OWNER_EMAIL || managers.includes(myEmail))) || perms.canEdit || perms.canDelete

@@ -75,7 +75,7 @@ export default function SignedBillsPage() {
   const hasItems = itemRows.some((r) => r.productName && Number(r.quantity) > 0)
   const BILL_TYPES = categories.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: TYPE_COLOR[c.code] || 'bg-gray-600' }))
   const typeLabel = (code: string) => categories.find((c) => c.code === code)?.label || BILL_TYPE_LABELS[code] || code
-  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const isOwner = !!user?.isOwner
   // Edit/delete visibility: superuser always, cashier while the day allows it (server has final say),
   // or an account explicitly granted access via Manage Access. r.mlay@tips.co.tz explicitly blocked otherwise.
   const canManageBills = (user?.email !== 'r.mlay@tips.co.tz' && (user?.email === 'johnonecmo@gmail.com' || user?.role === 'CASHIER'))

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { isOwner, getCashVerifierEmail, setCashVerifierEmail, canVerifyCash, CASH_VERIFIERS_FIXED } from '@/lib/cash-verify'
+import { ownerEmail } from '@/lib/owner'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 /** Who can enter "cash verified": owner + two fixed officers + owner-chosen one. */
 export async function GET(req: NextRequest) {

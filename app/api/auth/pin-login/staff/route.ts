@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { startOfDay, endOfDay } from 'date-fns'
+import { limitEveryRequest } from '@/lib/rate-limit'
 
 const STAFF_SELECT = { id: true, name: true, position: true, outlet: { select: { id: true, name: true } } } as const
 
@@ -16,12 +17,19 @@ const STAFF_SELECT = { id: true, name: true, position: true, outlet: { select: {
  * who they normally work for.
  */
 export async function GET(req: NextRequest) {
+  // Public + enumerable by outlet id: cap the request rate per client so the staff
+  // roster can't be scraped in bulk, and never cache it.
+  const limited = limitEveryRequest(req, 'pin-staff', { limit: 120, windowMs: 60 * 1000 })
+  if (limited) return limited
+
   const outletId = new URL(req.url).searchParams.get('outletId')
   if (!outletId) return NextResponse.json([])
 
-  const outlet = await prisma.outlet.findUnique({ where: { id: outletId }, select: { isEventsOnly: true } })
+  const outlet = await prisma.outlet.findUnique({ where: { id: outletId }, select: { isEventsOnly: true, isActive: true } })
+  // Unknown or deactivated outlet: reveal nothing (no roster for ids that aren't a live outlet).
+  if (!outlet || !outlet.isActive) return NextResponse.json([])
 
-  if (outlet?.isEventsOnly) {
+  if (outlet.isEventsOnly) {
     const today = new Date()
     const events = await prisma.event.findMany({
       where: { date: { gte: startOfDay(today), lte: endOfDay(today) }, status: { in: ['PLANNED', 'CONFIRMED'] } },

@@ -80,7 +80,7 @@ function PettyCashPage() {
   const [reconCanVerify, setReconCanVerify] = useState(false)
   const [reconBusy, setReconBusy] = useState(false)
   // Owner: manage the extra verifier
-  const ownerEmail = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const ownerEmail = (user?.ownerEmail || '').toLowerCase()
   const isOwner = !!ownerEmail && (user?.email || '').toLowerCase() === ownerEmail
   const [verifierEmail, setVerifierEmail] = useState('')
   const [verifierUsers, setVerifierUsers] = useState<{ id: string; name: string; email: string }[]>([])

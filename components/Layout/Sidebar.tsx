@@ -46,7 +46,7 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname()
-  const { user, logout } = useAuth()
+  const { user, logout, loginWithToken } = useAuth()
   const { config } = useCompanyConfig()
   const { request } = useApi()
 
@@ -74,7 +74,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     if (pwForm.next !== pwForm.confirm) return toast.error('New passwords do not match')
     setPwBusy(true)
     try {
-      await request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }) })
+      const r = await request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }) })
+      // The server revokes all older tokens on a password change and hands this device a fresh one.
+      if (r?.token && user) loginWithToken(r.token, user)
       toast.success('Password changed!')
       setPwForm({ current: '', next: '', confirm: '' }); setPwOpen(false)
     } catch (err: unknown) {

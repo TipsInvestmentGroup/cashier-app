@@ -39,7 +39,7 @@ export default function ManageAccessPage() {
   const [loading, setLoading] = useState(true)
   const [addingUserId, setAddingUserId] = useState('')
 
-  const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const OWNER_EMAIL = (user?.ownerEmail || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && (user?.email || '').toLowerCase() === OWNER_EMAIL
 
   const load = useCallback(async () => {

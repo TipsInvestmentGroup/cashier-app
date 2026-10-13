@@ -78,7 +78,7 @@ export default function PaidBillsPage() {
   const [editingBill, setEditingBill] = useState<PaidBill | null>(null)
   const [editForm, setEditForm] = useState({ date: '', payerName: '', amountPaid: '', paymentMethod: 'CASH', notes: '', billRef: '', outletId: '' })
   const [editSubmitting, setEditSubmitting] = useState(false)
-  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const isOwner = !!user?.isOwner
   const PAY_CATEGORIES = categories.filter((c) => c.isActive).map((c) => ({ label: c.label, type: c.code }))
   const PAYMENT_METHODS = channels.filter((c) => c.isActive).map((c) => ({ value: c.code, label: c.label, color: METHOD_COLOR[c.code] || 'bg-gray-100 text-gray-700' }))
     .concat([{ value: 'PAYROLL', label: 'Payroll', color: METHOD_COLOR.PAYROLL }])

@@ -1,6 +1,7 @@
 import { getRequestManagers } from '@/lib/approvals'
+import { ownerEmail } from '@/lib/owner'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 /** Cashiers + the designated manager(s) (owner override) may file cancellation/bill requests. */
 export async function canFileRequest(role?: string, email?: string): Promise<boolean> {

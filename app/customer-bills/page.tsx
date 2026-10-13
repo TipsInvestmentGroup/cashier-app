@@ -56,7 +56,7 @@ function CustomerBillsPage() {
   const hasItems = itemRows.some((r) => r.productName && Number(r.quantity) > 0)
 
   const canApprove = ['ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR'].includes(user?.role || '')
-  const ownerEmail = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const ownerEmail = (user?.ownerEmail || '').toLowerCase()
   const myEmail = (user?.email || '').toLowerCase()
   const canCreate = user?.role === 'CASHIER' || myEmail === 'alphonce.mvungi@tips.co.tz' || (!!ownerEmail && myEmail === ownerEmail)
 

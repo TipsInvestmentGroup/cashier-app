@@ -1,7 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import { getDeptManagers, getPettyApprovers } from '@/lib/approvals'
+import { ownerEmail } from '@/lib/owner'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 // Default accounts allowed to SUBMIT a petty-cash request (used until the owner customises the list).
 export const DEFAULT_PETTY_REQUESTERS = [

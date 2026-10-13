@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser, requireRole } from '@/lib/auth'
+import { getAuthUser, requireRole, isSingleOutletRole } from '@/lib/auth'
 import { SCHEDULE_MANAGE_ROLES, EVENT_STATUSES } from '@/lib/scheduling'
 import { roundMoney } from '@/lib/utils'
 import { parse, isValid, startOfDay } from 'date-fns'
@@ -30,6 +30,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     },
   })
   if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+
+  // Single-outlet roles (CASHIER/WAITER) may open an event only if it is at their outlet or they
+  // are rostered on it (event staff work at an events outlet that isn't their home one). Same
+  // response as "missing" so ids can't be probed. Management keeps cross-outlet oversight.
+  if (isSingleOutletRole(user.role)) {
+    const atMyOutlet = !!user.outletId && user.outletId === event.outletId
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rostered = (event.staff || []).some((s: any) => s.staffId === user.userId)
+    if (!atMyOutlet && !rostered) return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+  }
 
   // Once an event has real POS sales, those become the source of truth for
   // "Event Sales" — the manual field stays as a fallback for events that

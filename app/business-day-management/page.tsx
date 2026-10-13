@@ -35,7 +35,7 @@ const DURATIONS = [
 function BusinessDayManagementInner() {
   const { request } = useApi()
   const { user } = useAuth()
-  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const isOwner = !!user?.isOwner
   const searchParams = useSearchParams()
   const focusId = searchParams.get('id')
   const [days, setDays] = useState<BusinessDay[]>([])

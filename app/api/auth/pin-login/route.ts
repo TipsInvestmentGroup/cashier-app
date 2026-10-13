@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { comparePassword, signToken } from '@/lib/auth'
+import { clientIp, isLimited, recordHit, tooMany, type LimitRule } from '@/lib/rate-limit'
 
 const MAX_ATTEMPTS = 5
 const LOCKOUT_MS = 5 * 60 * 1000 // 5 minutes
+// Per-IP cap on FAILED PINs, on top of the per-account lockout below: the lockout
+// stops a guess run against one waiter, this stops one client sweeping across
+// every waiter's account (each only a few guesses) from the public picker.
+// Generous so a shared venue network full of fumbled PINs isn't locked out.
+const IP_FAIL_RULE: LimitRule = { limit: 60, windowMs: 10 * 60 * 1000 }
 
 /**
  * POST /api/auth/pin-login — public. body: { userId, pin }
@@ -17,8 +23,13 @@ export async function POST(req: NextRequest) {
     const { userId, pin } = await req.json().catch(() => ({}))
     if (!userId || !pin) return NextResponse.json({ error: 'Select your name and enter your PIN' }, { status: 400 })
 
+    const ipKey = `pin:ip:${clientIp(req)}`
+    const ipState = isLimited(ipKey, IP_FAIL_RULE)
+    if (ipState.limited) return tooMany(ipState.retryAfterSec)
+
     const user = await prisma.user.findUnique({ where: { id: userId } })
     if (!user || !user.isActive || user.role !== 'WAITER' || !user.pin) {
+      recordHit(ipKey, IP_FAIL_RULE)
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
@@ -29,6 +40,7 @@ export async function POST(req: NextRequest) {
 
     const valid = await comparePassword(String(pin), user.pin)
     if (!valid) {
+      recordHit(ipKey, IP_FAIL_RULE)
       // Atomic DB-level increment, not a JS read-then-write — concurrent wrong
       // guesses (e.g. a brute-force script firing many requests at once) each
       // get an accurate, correctly-serialized post-increment count, so the

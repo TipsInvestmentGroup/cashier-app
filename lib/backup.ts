@@ -3,7 +3,12 @@ import { prisma } from '@/lib/prisma'
 /**
  * Full logical backup of every table → a plain JSON object.
  * Used by the weekly cron (emails it to directors) and the on-demand download.
- * Note: includes hashed (not plaintext) user passwords so logins can be restored.
+ * SECURITY: credential material (password hash, PIN hash, reset token) is
+ * deliberately EXCLUDED. This JSON is emailed and downloaded; a leaked copy
+ * must not hand anyone offline-crackable password hashes or a live reset
+ * token. Consequence: restoring from this file recreates users without
+ * credentials (they must be reset). Full-fidelity disaster recovery is the
+ * database-level point-in-time restore (Neon), not this export.
  */
 export async function dumpDatabase() {
   const [
@@ -52,8 +57,15 @@ export async function dumpDatabase() {
     prisma.attachment.findMany(),
   ])
 
+  // Strip credential material before anything is serialised (see header note).
+  const safeUsers = users.map((u) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password, pin, resetToken, resetTokenExpiry, ...rest } = u
+    return rest
+  })
+
   const data = {
-    users, outlets, dailyCollections, persons, signedBills, paidBills, billItems,
+    users: safeUsers, outlets, dailyCollections, persons, signedBills, paidBills, billItems,
     pettyCash, pettyCashItems, cashRecon, cashReconExcess, bankRecon, settings, departments, pettyFunctions,
     products, cancellations, personCategories, paymentChannels, auditLogs,
     pettyFunds, pettyFundTxns,

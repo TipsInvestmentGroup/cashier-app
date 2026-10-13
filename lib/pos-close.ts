@@ -13,6 +13,18 @@ export function canActOnOrder(user: JWTPayload, order: { outletId: string | null
   return !!user.outletId && user.outletId === order.outletId
 }
 
+// READING an order (receipt, items, payments, the outlet's legal/tax identifiers) is
+// allowed to: management + ACCOUNTANT oversight, the waiter who owns the order, and
+// anyone at the order's own outlet. It was previously open to ANY signed-in account,
+// so a waiter at one outlet could read any other outlet's order by guessing/knowing an id.
+export const ORDER_VIEW_ROLES = [...ORDER_MANAGEMENT_ROLES, 'ACCOUNTANT']
+
+export function canViewOrder(user: JWTPayload, order: { outletId: string | null; waiterId?: string | null }): boolean {
+  if (ORDER_VIEW_ROLES.includes(user.role)) return true
+  if (order.waiterId && order.waiterId === user.userId) return true
+  return !!user.outletId && user.outletId === order.outletId
+}
+
 /**
  * Close a settled POS order (mark CLOSED, record payment method/amount).
  * Shared by the close route (full payment) and the pay route (final partial

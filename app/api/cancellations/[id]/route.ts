@@ -3,8 +3,9 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { recomputeStaffLoss } from '@/lib/staff-loss'
 import { getCancellationApprovers } from '@/lib/approvals'
+import { ownerEmail } from '@/lib/owner'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 async function canApproveCancellations(email?: string): Promise<boolean> {
   const e = (email || '').toLowerCase()

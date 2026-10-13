@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashResetToken, hashPassword } from '@/lib/auth'
+import { limitEveryRequest } from '@/lib/rate-limit'
 
 /**
  * POST /api/auth/reset-password — body: { token, newPassword }
@@ -8,6 +9,8 @@ import { hashResetToken, hashPassword } from '@/lib/auth'
  * sets the new password, and clears the token so it can't be replayed.
  */
 export async function POST(req: NextRequest) {
+  const limited = limitEveryRequest(req, 'reset', { limit: 20, windowMs: 10 * 60 * 1000 })
+  if (limited) return limited
   try {
     const { token, newPassword } = await req.json().catch(() => ({}))
     if (!token) return NextResponse.json({ error: 'Reset token is required' }, { status: 400 })

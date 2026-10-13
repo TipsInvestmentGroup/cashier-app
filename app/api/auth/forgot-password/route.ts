@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { generateResetToken } from '@/lib/auth'
 import { sendMail } from '@/lib/email'
+import { clientIp, recordHit, tooMany } from '@/lib/rate-limit'
 
 const GENERIC_MESSAGE = 'If that email is registered, a reset link has been sent.'
 
@@ -15,6 +16,13 @@ export async function POST(req: NextRequest) {
   try {
     const { email } = await req.json().catch(() => ({}))
     if (!email) return NextResponse.json({ error: 'Email is required' }, { status: 400 })
+
+    // Every request counts (this endpoint sends real email): cap per client IP and per
+    // target address so it can't be used to mail-bomb a user or burn the SMTP quota.
+    // Over-limit requests still get the generic 429 — no account information leaks.
+    const ipHit = recordHit(`forgot:ip:${clientIp(req)}`, { limit: 10, windowMs: 60 * 60 * 1000 })
+    const acctHit = recordHit(`forgot:acct:${String(email).trim().toLowerCase()}`, { limit: 3, windowMs: 60 * 60 * 1000 })
+    if (ipHit.limited || acctHit.limited) return tooMany(Math.max(ipHit.retryAfterSec, acctHit.retryAfterSec))
 
     const user = await prisma.user.findUnique({ where: { email: String(email).toLowerCase().trim() } })
 

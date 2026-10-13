@@ -37,7 +37,7 @@ export default function UsersPage() {
   const [staffFilter, setStaffFilter] = useState<'all' | 'permanent' | 'casual'>('all')
   const [positions, setPositions] = useState<string[]>(DEFAULT_FLOOR_POSITIONS)
 
-  const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const OWNER_EMAIL = (user?.ownerEmail || '').toLowerCase()
   const isOwner = !!OWNER_EMAIL && (user?.email || '').toLowerCase() === OWNER_EMAIL
   const [access, setAccess] = useState({ canAdd: false, canEdit: false, canDelete: false })
 

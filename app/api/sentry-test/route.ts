@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cronSecretOk } from '@/lib/cron-auth'
 
 /**
- * One-time Sentry smoke test. Visit /api/sentry-test?secret=<CRON_SECRET> once
- * in production — it throws on purpose so the error shows up in Sentry.
+ * One-time Sentry smoke test. Call GET /api/sentry-test once in production with the
+ * header `x-cron-secret: <CRON_SECRET>` — it throws on purpose so the error shows up in Sentry.
  */
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  if (searchParams.get('secret') !== process.env.CRON_SECRET) {
+  if (!cronSecretOk(req)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   throw new Error('Sentry test error — intentional, from /api/sentry-test')

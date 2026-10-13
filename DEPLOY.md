@@ -60,16 +60,22 @@ git push -u origin main
 
 ## 4. Seed the database (one click)
 
-After the database is connected and the app has redeployed, open this URL once
-in your browser (replace the host + secret):
+After the database is connected and the app has redeployed, run this once
+(replace the host + secret). The secret goes in a **header** — it is rejected in the
+URL, because URLs are written to logs and browser history:
 ```
-https://<your-app>.vercel.app/api/admin/seed?secret=<CRON_SECRET>
+curl -X POST https://<your-app>.vercel.app/api/admin/seed -H "x-cron-secret: <CRON_SECRET>"
 ```
-It creates the 2 outlets, the login users, and all Directors/Admins/Staff
-(from `prisma/persons.seed.json`). You should see `{"ok":true,...}`.
+It creates the outlets and all Directors/Admins/Staff (from `prisma/persons.seed.json`).
+You should see `{"ok":true,...}`.
 
-Then log in at your Vercel URL with `admin@lounge.com` / `admin123` and
-**change the passwords immediately** (Users page) — the defaults are public.
+**Production creates no demo logins** (their passwords were public). To get your first
+administrator on a brand-new production database, set `SEED_ADMIN_EMAIL` and
+`SEED_ADMIN_PASSWORD` (12+ characters) in the environment *before* running the seed; it
+creates that one ADMIN account (never overwriting an existing one). Remove the password
+variable afterwards. Staging/local still get the demo users (`SETUP.md`) unless you
+unset them. Floor staff PINs are not pre-set in production: set each person's PIN in
+Setup → Users, otherwise they will not appear on the sign-in picker.
 
 ---
 
