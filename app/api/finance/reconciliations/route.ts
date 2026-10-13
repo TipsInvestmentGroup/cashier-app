@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance, canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 import { createReconciliation } from '@/lib/finance-reconciliation'
 
 export async function GET(req: NextRequest) {
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json([])
 
   const reconciliations = await prisma.accountReconciliation.findMany({
@@ -56,6 +56,12 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(amount) || amount === 0) return NextResponse.json({ error: `Statement line ${i + 1} needs a non-zero numeric amount` }, { status: 400 })
     parsedLines.push({ transactionDate: date, description: l?.description || null, amount })
   }
+
+  // The reconciled account must belong to the caller's company.
+  const companyId = await tenantCompanyId(user, body.companyId || null)
+  if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
+  const cpa = await prisma.companyPaymentAccount.findUnique({ where: { id: companyPaymentAccountId }, select: { companyId: true } })
+  if (!cpa || cpa.companyId !== companyId) return NextResponse.json({ error: 'companyPaymentAccountId does not belong to your company' }, { status: 400 })
 
   try {
     const rec = await createReconciliation({

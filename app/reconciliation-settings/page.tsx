@@ -37,7 +37,7 @@ const DEFAULT_CONFIG: Omit<StageConfig, 'id' | 'scope' | 'scopeId' | 'stageKey'>
 export default function ReconciliationSettingsPage() {
   const { request } = useApi()
   const { user } = useAuth()
-  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const isOwner = !!user?.isOwner
   const [configs, setConfigs] = useState<StageConfig[]>([])
   const [requirements, setRequirements] = useState<Requirement[]>([])
   const [reminderPolicy, setReminderPolicyState] = useState<ReminderPolicy | null>(null)

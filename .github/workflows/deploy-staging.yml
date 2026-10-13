@@ -129,7 +129,8 @@ jobs:
       # onto staging without anyone remembering to re-run it by hand.
       - name: Seed database
         run: |
-          response=$(curl -s -w "\n%{http_code}" "${{ steps.deploy.outputs.url }}/api/admin/seed?secret=$CRON_SECRET" \
+          response=$(curl -s -w "\n%{http_code}" -X POST "${{ steps.deploy.outputs.url }}/api/admin/seed" \
+            -H "x-cron-secret: $CRON_SECRET" \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET")
           status="${response##*$'\n'}"
           body="${response%$'\n'*}"

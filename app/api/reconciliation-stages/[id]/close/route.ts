@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 import { resolveResourcePermission } from '@/lib/rbac'
 import { closeStage, getStageStageKey, resourceForStage } from '@/lib/reconciliation-stage'
 
@@ -9,6 +11,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await params
+  const callerCompany = await tenantCompanyId(user)
+  const owned = await prisma.reconciliationStage.findUnique({ where: { id }, select: { companyId: true } })
+  if (!callerCompany || !owned || owned.companyId !== callerCompany) return NextResponse.json({ error: 'Stage not found' }, { status: 404 })
   const stageKey = await getStageStageKey(id)
   if (!stageKey) return NextResponse.json({ error: 'Stage not found' }, { status: 404 })
   if (!(await resolveResourcePermission(user, resourceForStage(stageKey)))) {

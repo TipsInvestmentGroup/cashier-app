@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId, memberOfCompanyWhere, outletInCompany } from '@/lib/tenant'
 import { grantAccess, listGrants, isGrantType, validateGrantShape, RESERVED_GRANT_TYPES, GRANT_TYPES } from '@/lib/expense-grants'
 
 /** GET — the Manage Access table (§4). ADMIN only: the list names who can move
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const companyId = await resolveDefaultCompanyId(prisma)
+  const companyId = await tenantCompanyId(user)
   if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
 
   const includeRevoked = req.nextUrl.searchParams.get('includeRevoked') === 'true'
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const companyId = await resolveDefaultCompanyId(prisma)
+  const companyId = await tenantCompanyId(user)
   if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
 
   const body = await req.json().catch(() => ({}))
@@ -48,7 +48,11 @@ export async function POST(req: NextRequest) {
   }
   if (!targetUserId) return NextResponse.json({ error: 'userId or email is required' }, { status: 400 })
 
-  const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true, name: true, isActive: true } })
+  // The grantee must belong to the caller's company (a cross-company id looks like a missing user).
+  const target = await prisma.user.findFirst({
+    where: { id: targetUserId, ...(await memberOfCompanyWhere(prisma, companyId)) },
+    select: { id: true, name: true, isActive: true },
+  })
   if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 })
   if (!target.isActive) return NextResponse.json({ error: `${target.name} is deactivated — reactivate the account before granting access` }, { status: 400 })
 
@@ -56,6 +60,7 @@ export async function POST(req: NextRequest) {
   if (outletId) {
     const outlet = await prisma.outlet.findUnique({ where: { id: outletId }, select: { id: true } })
     if (!outlet) return NextResponse.json({ error: 'outletId does not reference a known outlet' }, { status: 400 })
+    if (!(await outletInCompany(prisma, outletId, companyId))) return NextResponse.json({ error: 'Outlet does not belong to your company' }, { status: 400 })
   }
 
   // Normalize single-grant and batch shapes into one list.

@@ -6,7 +6,8 @@ import { hasPermission, RESOURCES } from '@/lib/rbac'
 import { UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 import { classForReason } from '@/lib/reconciliation-classification'
 import { postJournalEntry } from '@/lib/ledger'
-import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
@@ -35,9 +36,17 @@ export async function POST(req: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const modelFor = (source: Target['source']) => (source === 'CASH_RECON' ? prisma.cashReconExcess : prisma.collectionExcess) as any
 
+  // Every row must belong to an outlet of the caller's company; a foreign id is reported exactly like a missing one.
+  const companyId = await tenantCompanyId(user)
+  if (!companyId) return NextResponse.json({ error: 'Excess item not found' }, { status: 404 })
+
   const rows = await Promise.all(items.map(async (it) => {
     const row = await modelFor(it.source).findUnique({ where: { id: it.id } })
     if (!row) throw new Error(`Excess item ${it.id} not found`)
+    const parent = it.source === 'CASH_RECON'
+      ? await prisma.cashRecon.findUnique({ where: { id: row.cashReconId }, select: { outletId: true } })
+      : await prisma.dailyCollection.findUnique({ where: { id: row.collectionId }, select: { outletId: true } })
+    if (!parent || !(await outletInCompany(prisma, parent.outletId, companyId))) throw new Error(`Excess item ${it.id} not found`)
     return { ...it, row }
   })).catch((err: unknown) => { throw err })
 
@@ -75,8 +84,7 @@ export async function POST(req: NextRequest) {
       if (source === 'COLLECTION' && classForReason(row.reason, row.category) === 'PAYABLE') {
         const coll = await tx.collectionExcess.findUnique({ where: { id }, include: { collection: { include: { outlet: true } } } })
         const outletId = coll?.collection.outletId
-        const companyId = coll?.collection.outlet?.companyId || (await resolveDefaultCompanyId(tx))
-        if (companyId && outletId) {
+        if (outletId) {
           const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: row.channelCode || 'CASH', outletId })
           const excessPayableAccountId = await resolveAccountId(tx, { companyId, key: 'EXCESS_PAYABLE' })
           await postJournalEntry(tx, {

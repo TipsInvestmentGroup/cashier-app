@@ -39,7 +39,7 @@ export default function ProductsPage() {
   const [perms, setPerms] = useState({ canAdd: false, canEdit: false, canDelete: false })
   const [accessOpen, setAccessOpen] = useState(false)
 
-  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const isOwner = !!user?.isOwner
   const roleManager = ['ADMIN', 'ACCOUNTANT', 'MANAGER'].includes(user?.role || '')
   const canAdd = roleManager || perms.canAdd
   const canEdit = roleManager || perms.canEdit

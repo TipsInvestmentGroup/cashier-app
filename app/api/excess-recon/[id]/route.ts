@@ -7,7 +7,8 @@ import { isValidExcessReasonCode, excessReasonCategoryDb } from '@/lib/excess-re
 import { classForReason } from '@/lib/reconciliation-classification'
 import { UNASSIGNED_EXCESS_REASON } from '@/lib/excess-reasons'
 import { postJournalEntry } from '@/lib/ledger'
-import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 
 const ALLOWED = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN']
 
@@ -21,6 +22,19 @@ function modelFor(source: Source): any {
   return source === 'CASH_RECON' ? prisma.cashReconExcess : prisma.collectionExcess
 }
 
+/** Load an excess row only if its parent (cash recon / daily collection) sits in an outlet of `companyId`;
+ *  null when missing OR owned by another company, so a foreign id is indistinguishable from a bad one. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function loadExcessInCompany(source: Source, id: string, companyId: string): Promise<any | null> {
+  const existing = await modelFor(source).findUnique({ where: { id } })
+  if (!existing) return null
+  const parent = source === 'CASH_RECON'
+    ? await prisma.cashRecon.findUnique({ where: { id: existing.cashReconId }, select: { outletId: true } })
+    : await prisma.dailyCollection.findUnique({ where: { id: existing.collectionId }, select: { outletId: true } })
+  if (!parent || !(await outletInCompany(prisma, parent.outletId, companyId))) return null
+  return existing
+}
+
 /** Record a payment against an excess item, or (body.unsettle) reset it back to fully unpaid. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = getAuthUser(req)
@@ -30,9 +44,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json()
   const source = parseSource(body.source)
   if (!source) return NextResponse.json({ error: 'source must be CASH_RECON or COLLECTION' }, { status: 400 })
-  const model = modelFor(source)
-  const existing = await model.findUnique({ where: { id } })
-  if (!existing) return NextResponse.json({ error: 'Excess item not found' }, { status: 404 })
+  const companyId = await tenantCompanyId(user)
+  const existing = companyId ? await loadExcessInCompany(source, id, companyId) : null
+  if (!companyId || !existing) return NextResponse.json({ error: 'Excess item not found' }, { status: 404 })
 
   if (body.unsettle) {
     if (!(await hasPermission(user.email, user.userId, RESOURCES.EXCESS_RECON, 'unsettle'))) {
@@ -67,8 +81,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (reverseGl) {
         const coll = await tx.collectionExcess.findUnique({ where: { id }, include: { collection: { include: { outlet: true } } } })
         const outletId = coll?.collection.outletId
-        const companyId = coll?.collection.outlet?.companyId || (await resolveDefaultCompanyId(tx))
-        if (companyId && outletId) {
+        if (outletId) {
           const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: existing.channelCode || 'CASH', outletId })
           const excessPayableAccountId = await resolveAccountId(tx, { companyId, key: 'EXCESS_PAYABLE' })
           await postJournalEntry(tx, {
@@ -139,8 +152,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (postGl) {
       const coll = await tx.collectionExcess.findUnique({ where: { id }, include: { collection: { include: { outlet: true } } } })
       const outletId = coll?.collection.outletId
-      const companyId = coll?.collection.outlet?.companyId || (await resolveDefaultCompanyId(tx))
-      if (companyId && outletId) {
+      if (outletId) {
         const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: existing.channelCode || 'CASH', outletId })
         const excessPayableAccountId = await resolveAccountId(tx, { companyId, key: 'EXCESS_PAYABLE' })
         await postJournalEntry(tx, {
@@ -188,7 +200,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const source = parseSource(body.source)
   if (!source) return NextResponse.json({ error: 'source must be CASH_RECON or COLLECTION' }, { status: 400 })
   const model = modelFor(source)
-  const existing = await model.findUnique({ where: { id } })
+  const companyId = await tenantCompanyId(user)
+  const existing = companyId ? await loadExcessInCompany(source, id, companyId) : null
   if (!existing) return NextResponse.json({ error: 'Excess item not found' }, { status: 404 })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -252,7 +265,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const source = parseSource(new URL(req.url).searchParams.get('source'))
   if (!source) return NextResponse.json({ error: 'source must be CASH_RECON or COLLECTION' }, { status: 400 })
   const model = modelFor(source)
-  const existing = await model.findUnique({ where: { id } })
+  const companyId = await tenantCompanyId(user)
+  const existing = companyId ? await loadExcessInCompany(source, id, companyId) : null
   if (!existing) return NextResponse.json({ error: 'Excess item not found' }, { status: 404 })
   if (existing.paidAmount > 0) {
     return NextResponse.json({ error: 'This excess record has payments recorded — unsettle it first before deleting' }, { status: 409 })

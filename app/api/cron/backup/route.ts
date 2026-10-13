@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { dumpDatabase } from '@/lib/backup'
 import { sendMail } from '@/lib/email'
+import { requireCronSecret } from '@/lib/cron-auth'
+import { ownerEmail } from '@/lib/owner'
 import { format } from 'date-fns'
 
 export const maxDuration = 60
@@ -10,17 +12,14 @@ export const dynamic = 'force-dynamic'
 /**
  * Database backup.
  *  - Weekly Vercel cron calls this → emails a JSON backup to directors/admins.
- *  - Manual download: /api/cron/backup?secret=<CRON_SECRET>&download=1
- * Protected by CRON_SECRET (?secret=, x-cron-secret header, or Vercel's Bearer).
+ *  - Manual download: GET /api/cron/backup?download=1 with the header
+ *    `x-cron-secret: <CRON_SECRET>` (never put the secret in the URL).
+ * Protected by CRON_SECRET (x-cron-secret header, or Vercel's Bearer).
+ * The dump never contains credential material (password/PIN/reset-token hashes).
  */
 async function handle(req: NextRequest) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 })
-
-  const authHeader = req.headers.get('authorization') || ''
-  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const provided = req.nextUrl.searchParams.get('secret') || req.headers.get('x-cron-secret') || bearer
-  if (provided !== secret) return NextResponse.json({ error: 'Invalid cron secret' }, { status: 401 })
+  const denied = requireCronSecret(req)
+  if (denied) return denied
 
   const dump = await dumpDatabase()
   const json = JSON.stringify(dump)
@@ -41,7 +40,7 @@ async function handle(req: NextRequest) {
   })
   let to = recipients.map((r) => r.email).filter(Boolean)
   if (to.length === 0) {
-    const fallback = process.env.SMTP_FROM || process.env.NEXT_PUBLIC_OWNER_EMAIL
+    const fallback = process.env.SMTP_FROM || ownerEmail()
     if (fallback) to = [fallback]
   }
   if (to.length === 0) return NextResponse.json({ error: 'No backup recipients found' }, { status: 400 })

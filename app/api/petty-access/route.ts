@@ -3,8 +3,9 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { isOwner, canManageDepartments, canApprovePetty, canRequestPetty } from '@/lib/petty-access'
 import { getDeptManagers, setDeptManagers, getPettyApprovers } from '@/lib/approvals'
+import { ownerEmail } from '@/lib/owner'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 /**
  * Petty-cash access config. Any authed user may read it (the cash-request form

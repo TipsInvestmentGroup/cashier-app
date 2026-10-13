@@ -9,11 +9,12 @@ import { reverseJournalEntry, type Db } from '@/lib/ledger'
 import { postCreditSale } from '@/lib/finance-ar'
 import { resolveCreditTags } from '@/lib/credit-config'
 import { syncCreditForBill, syncCreditForAccount, syncCreditForPerson } from '@/lib/credit-ledger'
+import { ownerEmail } from '@/lib/owner'
 
 // Prisma client types for DayClosure are generated on deploy; assert to avoid local type drift.
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 /** Access policy for editing/deleting a Signed Bill:
  *  - The system owner: full access, always.

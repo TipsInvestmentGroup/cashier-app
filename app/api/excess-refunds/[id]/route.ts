@@ -3,7 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { postJournalEntry } from '@/lib/ledger'
-import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 
 const CAN_WRITE = ['CASHIER', 'ACCOUNTANT', 'MANAGER', 'ADMIN', 'DIRECTOR']
 
@@ -22,8 +23,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { action } = await req.json().catch(() => ({}))
   if (action !== 'approve' && action !== 'reject') return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
 
+  // The refund must belong to an outlet of the caller's company (a foreign id looks like a missing one),
+  // and any GL posting goes to that same company.
+  const companyId = await tenantCompanyId(user)
   const existing = await prisma.excessRefund.findUnique({ where: { id } })
-  if (!existing) return NextResponse.json({ error: 'Excess refund not found' }, { status: 404 })
+  if (!companyId || !existing || !(await outletInCompany(prisma, existing.outletId, companyId))) {
+    return NextResponse.json({ error: 'Excess refund not found' }, { status: 404 })
+  }
 
   const approvalStatus = action === 'approve' ? 'APPROVED' : 'REJECTED'
   // Only post on the first approval — guard re-approval so we never
@@ -34,21 +40,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const item = await prisma.$transaction(async (tx) => {
     let journalEntryId: string | null = null
     if (postGl) {
-      const outlet = await tx.outlet.findUnique({ where: { id: existing.outletId }, select: { companyId: true } })
-      const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
-      if (companyId) {
-        const salesRevenueAccountId = await resolveAccountId(tx, { companyId, key: 'SALES_REVENUE' })
-        const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: 'CASH', outletId: existing.outletId })
-        const entry = await postJournalEntry(tx, {
-          companyId, entryDate: new Date(), sourceModule: 'COLLECTIONS', sourceType: 'ExcessRefund', sourceId: id,
-          description: `Customer refund — ${existing.personName} (${existing.reason})`, createdById: user.userId,
-          lines: [
-            { accountId: salesRevenueAccountId, debit: amount, outletId: existing.outletId },
-            { accountId: cashAccountId, credit: amount, outletId: existing.outletId },
-          ],
-        })
-        journalEntryId = entry.id
-      }
+      const salesRevenueAccountId = await resolveAccountId(tx, { companyId, key: 'SALES_REVENUE' })
+      const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: 'CASH', outletId: existing.outletId })
+      const entry = await postJournalEntry(tx, {
+        companyId, entryDate: new Date(), sourceModule: 'COLLECTIONS', sourceType: 'ExcessRefund', sourceId: id,
+        description: `Customer refund — ${existing.personName} (${existing.reason})`, createdById: user.userId,
+        lines: [
+          { accountId: salesRevenueAccountId, debit: amount, outletId: existing.outletId },
+          { accountId: cashAccountId, credit: amount, outletId: existing.outletId },
+        ],
+      })
+      journalEntryId = entry.id
     }
     return tx.excessRefund.update({
       where: { id },

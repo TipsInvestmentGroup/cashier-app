@@ -42,7 +42,7 @@ export default function ExcessReconPage() {
   const { user } = useAuth()
   const confirm = useConfirm()
   const isCashier = user?.role === 'CASHIER'
-  const isOwner = (user?.email || '').toLowerCase() === (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+  const isOwner = !!user?.isOwner
 
   const [perms, setPerms] = useState(DEFAULT_PERMS)
   const [accessOpen, setAccessOpen] = useState(false)

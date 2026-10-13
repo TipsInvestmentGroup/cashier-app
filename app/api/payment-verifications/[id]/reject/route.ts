@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
 import { rejectPaymentVerification } from '@/lib/payment-verification'
 
@@ -14,6 +16,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const body = await req.json().catch(() => ({}))
   if (!body.failureReason) return NextResponse.json({ error: 'failureReason is required' }, { status: 400 })
+
+  const callerCompany = await tenantCompanyId(user)
+  const found = await prisma.paymentVerification.findUnique({ where: { id }, select: { companyId: true } })
+  if (!callerCompany || !found || found.companyId !== callerCompany) {
+    return NextResponse.json({ error: 'Payment verification not found' }, { status: 404 })
+  }
 
   const record = await rejectPaymentVerification(id, { userId: user.userId }, body.failureReason)
   return NextResponse.json({ ok: true, paymentVerification: record })

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import QRCode from 'qrcode'
 import { prisma } from '@/lib/prisma'
 import { createTicketBooking } from '@/lib/bookings'
+import { limitEveryRequest } from '@/lib/rate-limit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = prisma as any
@@ -9,6 +10,9 @@ const BOOKABLE_STATUSES = ['PLANNED', 'CONFIRMED']
 
 /** POST /api/public/events/[id]/tickets — no auth. body: { ticketTypeId, fullName, phone, email?, quantity? } */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  // Unauthenticated and writes rows: cap per client so it can't be used to exhaust ticket inventory or flood the table.
+  const limited = limitEveryRequest(req, 'public-book', { limit: 10, windowMs: 10 * 60 * 1000 })
+  if (limited) return limited
   const { id } = await params
   const event = await db.event.findUnique({ where: { id } })
   if (!event || !BOOKABLE_STATUSES.includes(event.status)) return NextResponse.json({ error: 'Event not found' }, { status: 404 })

@@ -1,6 +1,7 @@
 import { getPersonsManagers } from '@/lib/approvals'
+import { ownerEmail } from '@/lib/owner'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 export function isOwner(email?: string) {
   return !!OWNER_EMAIL && (email || '').toLowerCase() === OWNER_EMAIL

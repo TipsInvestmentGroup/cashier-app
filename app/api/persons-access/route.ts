@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { isOwner, canManagePersons } from '@/lib/persons-access'
 import { getPersonsManagers, setPersonsManagers } from '@/lib/approvals'
+import { ownerEmail } from '@/lib/owner'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 /** Who can edit/delete persons: owner + the configured persons managers. */
 export async function GET(req: NextRequest) {

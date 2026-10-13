@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { getCancellationApprovers } from '@/lib/approvals'
 import { canFileRequest } from '@/lib/request-access'
+import { ownerEmail } from '@/lib/owner'
 
-const OWNER_EMAIL = (process.env.NEXT_PUBLIC_OWNER_EMAIL || '').toLowerCase()
+const OWNER_EMAIL = ownerEmail()
 
 /** Computed booleans only — the approver/requester email lists themselves stay server-side. */
 export async function GET(req: NextRequest) {

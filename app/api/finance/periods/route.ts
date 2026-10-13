@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance, canManageFinance } from '@/lib/finance-access'
 import { RESOURCES, isOwner } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json([])
 
   const periods = await prisma.financialPeriod.findMany({ where: { companyId }, orderBy: { startDate: 'desc' } })
@@ -38,6 +38,10 @@ export async function POST(req: NextRequest) {
     if (body.status === 'OPEN' && !REOPEN_ROLES.includes(user.role) && !isOwner(user.email)) {
       return NextResponse.json({ error: 'Only a Director or Admin can reopen a locked period' }, { status: 403 })
     }
+    // The period must belong to the caller's company; a foreign id looks like a missing one.
+    const own = await tenantCompanyId(user)
+    const existing = await prisma.financialPeriod.findUnique({ where: { id: body.id }, select: { companyId: true } })
+    if (!existing || !own || existing.companyId !== own) return NextResponse.json({ error: 'Period not found' }, { status: 404 })
     const updated = await prisma.financialPeriod.update({
       where: { id: body.id },
       data: {
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(updated)
   }
 
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId || null)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
   if (!body.name || !body.startDate || !body.endDate) return NextResponse.json({ error: 'name, startDate and endDate are required' }, { status: 400 })
 

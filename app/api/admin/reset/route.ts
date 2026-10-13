@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireCronSecret } from '@/lib/cron-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,18 +11,28 @@ export const dynamic = 'force-dynamic'
  * KEEPS:   users, outlets, persons, products, categories, payment channels,
  *          departments, functions, settings.
  *
- * Guarded by CRON_SECRET + an explicit confirm word so it can never fire by accident:
- *   /api/admin/reset?secret=<CRON_SECRET>&confirm=RESET
- * ⚠️ Irreversible — take a backup first (/api/cron/backup?secret=...&download=1).
+ * Guarded by CRON_SECRET (header) + an explicit confirm word so it can never fire by accident:
+ *   POST /api/admin/reset?confirm=RESET   with header  x-cron-secret: <CRON_SECRET>
+ * ⚠️ Irreversible — take a backup first (GET /api/cron/backup?download=1, secret in the header).
+ *
+ * HARD-BLOCKED on the live production deployment (VERCEL_ENV=production) unless
+ * ALLOW_ADMIN_RESET=true is deliberately set for the duration of an intended wipe:
+ * a single leaked secret must not be enough to erase the business's records.
  */
 async function handle(req: NextRequest) {
-  const secret = process.env.CRON_SECRET
-  if (!secret) return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 })
+  const denied = requireCronSecret(req)
+  if (denied) return denied
+
+  if (process.env.VERCEL_ENV === 'production' && process.env.ALLOW_ADMIN_RESET !== 'true') {
+    return NextResponse.json(
+      { error: 'Reset is disabled on the production deployment. Set ALLOW_ADMIN_RESET=true temporarily if a wipe is truly intended.' },
+      { status: 403 },
+    )
+  }
 
   const sp = req.nextUrl.searchParams
-  if (sp.get('secret') !== secret) return NextResponse.json({ error: 'Invalid secret' }, { status: 401 })
   if (sp.get('confirm') !== 'RESET') {
-    return NextResponse.json({ error: 'Add &confirm=RESET to confirm. This permanently deletes transactional data.' }, { status: 400 })
+    return NextResponse.json({ error: 'Add ?confirm=RESET to confirm. This permanently deletes transactional data.' }, { status: 400 })
   }
 
   // businessSession is the denormalized BI mirror of dailyCollection; clearing

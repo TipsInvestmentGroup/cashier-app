@@ -116,7 +116,8 @@ jobs:
       # `reconciliation` 403 on 2026-07-29.
       - name: Seed database
         run: |
-          response=$(curl -s -w "\n%{http_code}" "${{ secrets.PROD_APP_URL }}/api/admin/seed?secret=$CRON_SECRET" \
+          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.PROD_APP_URL }}/api/admin/seed" \
+            -H "x-cron-secret: $CRON_SECRET" \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET")
           status="${response##*$'\n'}"
           body="${response%$'\n'*}"

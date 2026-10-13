@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-
-const CRON_SECRET = process.env.CRON_SECRET
+import { requireCronSecret } from '@/lib/cron-auth'
 
 /**
- * /api/pos/setup?secret=xxx — idempotent seed of tables, counters, and
- * extras. Supports GET as well as POST (like /api/admin/seed) so it can be
- * run by just visiting the URL in a browser — a plain address-bar visit is
- * always a GET, and a POST-only route 405s on that.
+ * /api/pos/setup — idempotent seed of tables, counters, and extras. The secret is
+ * sent in the x-cron-secret header (never the URL). Supports GET and POST.
  */
 async function handle(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get('secret')
-  if (!CRON_SECRET || secret !== CRON_SECRET)
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const denied = requireCronSecret(req)
+  if (denied) return denied
 
   const outlets = await prisma.outlet.findMany({ where: { isActive: true } })
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { SETTLEMENT_METHODS } from '@/lib/credit-config'
+import { tenantCompanyId } from '@/lib/tenant'
 
 /** PATCH — update a credit group's editable fields. */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -10,8 +11,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
+  const callerCompany = await tenantCompanyId(user)
   const existing = await prisma.creditGroup.findUnique({ where: { id } })
-  if (!existing) return NextResponse.json({ error: 'Group not found' }, { status: 404 })
+  if (!existing || !callerCompany || existing.companyId !== callerCompany) return NextResponse.json({ error: 'Group not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
   const data: Record<string, unknown> = {}
@@ -61,8 +63,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
+  const callerCompany = await tenantCompanyId(user)
   const existing = await prisma.creditGroup.findUnique({ where: { id } })
-  if (!existing) return NextResponse.json({ error: 'Group not found' }, { status: 404 })
+  if (!existing || !callerCompany || existing.companyId !== callerCompany) return NextResponse.json({ error: 'Group not found' }, { status: 404 })
 
   await prisma.creditGroup.update({ where: { id }, data: { status: 'INACTIVE' } })
   await prisma.auditLog.create({

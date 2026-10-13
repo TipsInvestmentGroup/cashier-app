@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, NO_OUTLET } from '@/lib/auth'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 import { getExceptionReport } from '@/lib/reconciliation-reminders'
 
 /**
@@ -24,7 +23,7 @@ export async function GET(req: NextRequest) {
   const outletId = readOutletScope(user, requestedOutletId)
   if (outletId === NO_OUTLET) return NextResponse.json({ exceptions: [] })
 
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json({ exceptions: [] })
 
   const date = searchParams.get('date')

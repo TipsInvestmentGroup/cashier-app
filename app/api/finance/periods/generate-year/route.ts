@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 import { generateFinancialYearPeriods } from '@/lib/finance-periods'
 
 /** "Financial Year Management" — generates the standard 1 ANNUAL + 4
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}))
   if (!body.yearStartDate) return NextResponse.json({ error: 'yearStartDate is required' }, { status: 400 })
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId || null)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
 
   const result = await generateFinancialYearPeriods(companyId, new Date(body.yearStartDate))

@@ -34,7 +34,7 @@ export function PosLeanShell({
   actions?: FabAction[]
   children: React.ReactNode
 }) {
-  const { user, isLoading, logout } = useAuth()
+  const { user, isLoading, logout, loginWithToken } = useAuth()
   const { config } = useCompanyConfig()
   const router = useRouter()
   const pathname = usePathname()
@@ -72,7 +72,9 @@ export function PosLeanShell({
     if (pwForm.next !== pwForm.confirm) return toast.error('New passwords do not match')
     setPwBusy(true)
     try {
-      await request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }) })
+      const r = await request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }) })
+      // The server revokes all older tokens on a password change and hands this device a fresh one.
+      if (r?.token && user) loginWithToken(r.token, user)
       toast.success('Password changed!')
       setPwForm({ current: '', next: '', confirm: '' }); setPwOpen(false)
     } catch (err: unknown) {

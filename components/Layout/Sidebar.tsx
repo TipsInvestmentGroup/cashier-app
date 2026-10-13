@@ -46,7 +46,7 @@ const navItems: { href: string; icon: LucideIcon; label: string; section: string
 
 export function Sidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname()
-  const { user, logout } = useAuth()
+  const { user, logout, loginWithToken, companies, switchCompany } = useAuth()
   const { config } = useCompanyConfig()
   const { request } = useApi()
 
@@ -74,7 +74,9 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
     if (pwForm.next !== pwForm.confirm) return toast.error('New passwords do not match')
     setPwBusy(true)
     try {
-      await request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }) })
+      const r = await request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next }) })
+      // The server revokes all older tokens on a password change and hands this device a fresh one.
+      if (r?.token && user) loginWithToken(r.token, user)
       toast.success('Password changed!')
       setPwForm({ current: '', next: '', confirm: '' }); setPwOpen(false)
     } catch (err: unknown) {
@@ -91,6 +93,19 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
         </div>
         <h1 className="text-lg font-bold leading-tight">{config.appName}</h1>
         <p className="text-indigo-300 text-xs mt-1">{user?.outlet?.name || 'All Outlets'}</p>
+        {companies.length > 1 ? (
+          // More than one company on this login: let the person switch (re-issues the session, reloads the app).
+          <select
+            aria-label="Switch company"
+            value={user?.company?.id || ''}
+            onChange={(e) => { const id = e.target.value; if (id && id !== user?.company?.id) switchCompany(id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : 'Could not switch company')) }}
+            className="mt-2 w-full text-xs bg-indigo-800 border border-indigo-600 text-white rounded-lg px-2 py-1.5"
+          >
+            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        ) : user?.company?.name ? (
+          <p className="text-indigo-400 text-[11px] mt-0.5 truncate">{user.company.name}</p>
+        ) : null}
       </div>
 
       <div className="px-3 py-2 border-b border-indigo-700">

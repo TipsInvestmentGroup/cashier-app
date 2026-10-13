@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { comparePassword, signToken } from '@/lib/auth'
+import { comparePassword } from '@/lib/auth'
+import { ensureMemberships, issueSession, pickMembership, usableMemberships } from '@/lib/tenant'
+import { clientIp, isLimited, recordHit, tooMany, type LimitRule } from '@/lib/rate-limit'
 
 const MAX_ATTEMPTS = 5
 const LOCKOUT_MS = 5 * 60 * 1000 // 5 minutes
+// Per-IP cap on FAILED PINs, on top of the per-account lockout below: the lockout
+// stops a guess run against one waiter, this stops one client sweeping across
+// every waiter's account (each only a few guesses) from the public picker.
+// Generous so a shared venue network full of fumbled PINs isn't locked out.
+const IP_FAIL_RULE: LimitRule = { limit: 60, windowMs: 10 * 60 * 1000 }
 
 /**
  * POST /api/auth/pin-login — public. body: { userId, pin }
@@ -17,8 +24,13 @@ export async function POST(req: NextRequest) {
     const { userId, pin } = await req.json().catch(() => ({}))
     if (!userId || !pin) return NextResponse.json({ error: 'Select your name and enter your PIN' }, { status: 400 })
 
+    const ipKey = `pin:ip:${clientIp(req)}`
+    const ipState = isLimited(ipKey, IP_FAIL_RULE)
+    if (ipState.limited) return tooMany(ipState.retryAfterSec)
+
     const user = await prisma.user.findUnique({ where: { id: userId } })
     if (!user || !user.isActive || user.role !== 'WAITER' || !user.pin) {
+      recordHit(ipKey, IP_FAIL_RULE)
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
@@ -29,6 +41,7 @@ export async function POST(req: NextRequest) {
 
     const valid = await comparePassword(String(pin), user.pin)
     if (!valid) {
+      recordHit(ipKey, IP_FAIL_RULE)
       // Atomic DB-level increment, not a JS read-then-write — concurrent wrong
       // guesses (e.g. a brute-force script firing many requests at once) each
       // get an accurate, correctly-serialized post-increment count, so the
@@ -49,13 +62,15 @@ export async function POST(req: NextRequest) {
 
     await prisma.user.update({ where: { id: user.id }, data: { pinFailedAttempts: 0, pinLockedUntil: null } })
 
-    const outlet = user.outletId ? await prisma.outlet.findUnique({ where: { id: user.outletId } }) : null
-    const token = signToken({ userId: user.id, email: user.email, role: user.role, outletId: user.outletId || undefined, name: user.name, position: user.position || undefined, sepoch: user.sessionEpoch })
+    // Bind the session to the company that OWNS the waiter's outlet (a PIN sign-in starts from an outlet
+    // tile, so the company is implied by it).
+    const homeOutlet = user.outletId ? await prisma.outlet.findUnique({ where: { id: user.outletId } }) : null
+    const usable = usableMemberships(await ensureMemberships(prisma, user))
+    const chosen = pickMembership(usable, homeOutlet?.companyId) ?? usable[0] ?? null
+    if (!chosen) return NextResponse.json({ error: 'Your company access is suspended or has been removed. Contact your manager.' }, { status: 403 })
+    const outlet = chosen.outletId === user.outletId ? homeOutlet : chosen.outletId ? await prisma.outlet.findUnique({ where: { id: chosen.outletId } }) : null
 
-    return NextResponse.json({
-      token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, position: user.position, outlet },
-    })
+    return NextResponse.json(issueSession(user, chosen, outlet))
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

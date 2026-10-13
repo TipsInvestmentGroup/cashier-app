@@ -5,6 +5,7 @@ import { canManageFinance, canViewFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
 import { setDefaultCompanyPaymentAccount, companyAccountBalance } from '@/lib/finance-banking'
 import { fieldDiff } from '@/lib/utils'
+import { tenantCompanyId } from '@/lib/tenant'
 
 /** Edit / activate-deactivate / set-as-default a Company Payment Account. */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -16,7 +17,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const account = await prisma.companyPaymentAccount.findUnique({ where: { id } })
-  if (!account) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+  if (!account || account.companyId !== (await tenantCompanyId(user))) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
   if (body.isDefault === true) await setDefaultCompanyPaymentAccount(id)
@@ -40,6 +41,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const owned = await prisma.companyPaymentAccount.findUnique({ where: { id }, select: { companyId: true } })
+  if (!owned || owned.companyId !== (await tenantCompanyId(user))) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
   const balance = await companyAccountBalance(prisma, id)
   return NextResponse.json({ balance })
 }

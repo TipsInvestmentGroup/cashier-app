@@ -19,6 +19,7 @@ interface Connector {
   isActive: boolean
   lastSyncAt: string | null
   createdAt: string
+  hasWebhookSecret?: boolean
 }
 
 const KINDS = [
@@ -38,6 +39,9 @@ export default function PaymentIntegrationConnectorsPage() {
   const [parseResult, setParseResult] = useState<ParseResult | null>(null)
   const [parsing, setParsing] = useState(false)
   const [importing, setImporting] = useState(false)
+  // Webhook signing secret: shown exactly once (after creating or rotating), never retrievable later.
+  const [revealedSecret, setRevealedSecret] = useState<{ connectorId: string; name: string; secret: string } | null>(null)
+  const [rotatingId, setRotatingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -53,8 +57,9 @@ export default function PaymentIntegrationConnectorsPage() {
     if (!form.name || !form.channel) return toast.error('Name and channel are required')
     setSubmitting(true)
     try {
-      await request('/api/payment-integration-connectors', { method: 'POST', body: JSON.stringify(form) })
+      const r = await request('/api/payment-integration-connectors', { method: 'POST', body: JSON.stringify(form) })
       toast.success('Connector added')
+      if (r?.webhookSecret && r?.connector?.id) setRevealedSecret({ connectorId: r.connector.id, name: form.name, secret: r.webhookSecret })
       setShowForm(false)
       setForm({ name: '', kind: 'API_WEBHOOK', channel: '' })
       load()
@@ -72,6 +77,18 @@ export default function PaymentIntegrationConnectorsPage() {
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not update')
     } finally { setTogglingId(null) }
+  }
+
+  const rotateSecret = async (c: Connector) => {
+    if (!window.confirm(`Generate a new signing secret for "${c.name}"? The current one stops working immediately - update the sender's webhook settings straight after.`)) return
+    setRotatingId(c.id)
+    try {
+      const r = await request(`/api/payment-integration-connectors/${c.id}`, { method: 'POST' })
+      if (r?.webhookSecret) setRevealedSecret({ connectorId: c.id, name: c.name, secret: r.webhookSecret })
+      load()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not rotate the secret')
+    } finally { setRotatingId(null) }
   }
 
   const openImport = (c: Connector) => {
@@ -119,6 +136,18 @@ export default function PaymentIntegrationConnectorsPage() {
           <button onClick={() => setShowForm(true)} className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 whitespace-nowrap">Add Connector</button>
         </div>
 
+        {revealedSecret && (
+          <Card className="p-4 border-2 border-amber-300 bg-amber-50 space-y-2">
+            <p className="text-sm font-bold text-amber-900">Webhook signing secret for “{revealedSecret.name}” — copy it now</p>
+            <p className="text-xs text-amber-800">This is shown only once and cannot be retrieved later (rotate to get a new one). Give it to the bank/gateway; every webhook call must send header <code className="font-mono">x-signature</code> = HMAC-SHA256 (hex) of the raw request body using this secret, to <code className="font-mono break-all">/api/payment-integration-connectors/{revealedSecret.connectorId}/webhook</code>.</p>
+            <code className="block p-2 bg-white border border-amber-200 rounded-lg text-xs font-mono break-all select-all">{revealedSecret.secret}</code>
+            <div className="flex gap-2">
+              <button onClick={() => { navigator.clipboard?.writeText(revealedSecret.secret).then(() => toast.success('Copied')).catch(() => toast.error('Copy failed - select and copy manually')) }} className="px-3 py-1.5 text-xs font-semibold bg-amber-600 text-white rounded-lg hover:bg-amber-700">Copy secret</button>
+              <button onClick={() => setRevealedSecret(null)} className="px-3 py-1.5 text-xs font-semibold bg-white border border-amber-300 text-amber-800 rounded-lg hover:bg-amber-100">I have saved it</button>
+            </div>
+          </Card>
+        )}
+
         <Card className="p-0 overflow-hidden">
           {loading ? (
             <div className="p-5 space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
@@ -136,6 +165,12 @@ export default function PaymentIntegrationConnectorsPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
+                    {c.kind === 'API_WEBHOOK' && (
+                      <button onClick={() => rotateSecret(c)} disabled={rotatingId === c.id}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-60 ${c.hasWebhookSecret ? 'bg-gray-100 text-gray-700 hover:bg-gray-200' : 'bg-amber-100 text-amber-800 hover:bg-amber-200'}`}>
+                        {c.hasWebhookSecret ? 'Rotate secret' : 'Set signing secret'}
+                      </button>
+                    )}
                     {c.kind === 'FILE_IMPORT' && (
                       <button onClick={() => openImport(c)} className="px-3 py-1.5 text-xs font-semibold bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100">Import File</button>
                     )}

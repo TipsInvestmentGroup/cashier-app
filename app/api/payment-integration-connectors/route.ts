@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
+import { generateWebhookSecret, redactConnector } from '@/lib/webhook-signature'
 
 /** GET — list connectors for a company (API_WEBHOOK | FILE_IMPORT). */
 export async function GET(req: NextRequest) {
@@ -13,11 +14,12 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json({ connectors: [] })
 
   const connectors = await prisma.paymentIntegrationConnector.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' } })
-  return NextResponse.json({ connectors })
+  // The webhook signing secret is never returned after creation.
+  return NextResponse.json({ connectors: connectors.map(redactConnector) })
 }
 
 /** POST — register a connector. Body: { companyId?, name, kind, channel, config? }. */
@@ -31,11 +33,19 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   if (!body.name || !body.kind || !body.channel) return NextResponse.json({ error: 'name, kind, and channel are required' }, { status: 400 })
 
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
 
+  // Webhook connectors get a per-connector HMAC signing secret. It is stored in `config`, shown to
+  // the admin exactly once here (they paste it into the bank/gateway's webhook settings), and
+  // redacted on every later read. Callers cannot supply their own (a weak or reused one).
+  const config: Record<string, unknown> = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? { ...body.config } : {}
+  delete config.webhookSecret
+  let webhookSecret: string | undefined
+  if (body.kind === 'API_WEBHOOK') { webhookSecret = generateWebhookSecret(); config.webhookSecret = webhookSecret }
+
   const connector = await prisma.paymentIntegrationConnector.create({
-    data: { companyId, name: body.name, kind: body.kind, channel: body.channel, config: body.config ? JSON.stringify(body.config) : null },
+    data: { companyId, name: body.name, kind: body.kind, channel: body.channel, config: Object.keys(config).length ? JSON.stringify(config) : null },
   })
-  return NextResponse.json({ ok: true, connector })
+  return NextResponse.json({ ok: true, connector: redactConnector(connector), ...(webhookSecret ? { webhookSecret } : {}) })
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getAuthUser } from '@/lib/auth'
+import { getAuthUser, isSingleOutletRole } from '@/lib/auth'
 
 /**
  * Full "payment story" for a signed bill: the bill itself, every payment made
@@ -15,7 +15,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     where: { id },
     include: { outlet: { select: { name: true } }, cashier: { select: { name: true } } },
   })
-  if (!bill) return NextResponse.json({ error: 'Bill not found' }, { status: 404 })
+  // CASHIER/WAITER are single-outlet roles: only bills from their own outlet. Same response as
+  // "missing" so ids can't be probed. (Management roles keep their cross-outlet oversight.)
+  if (!bill || (isSingleOutletRole(user.role) && (!user.outletId || user.outletId !== bill.outletId))) {
+    return NextResponse.json({ error: 'Bill not found' }, { status: 404 })
+  }
 
   const payments = await prisma.paidBill.findMany({
     where: { signedBillId: id },

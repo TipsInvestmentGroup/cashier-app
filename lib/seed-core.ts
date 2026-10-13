@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { seedStandardCollectionTemplate } from './collection-template-seed'
@@ -7,6 +8,7 @@ import { seedExpenseFramework } from './expense-seed'
 import { seedPayrollFramework } from './payroll-seed'
 import { RECONCILIATION_STAGE_RESOURCES as RSR, WRITE_OFF_RESOURCES as WOR } from './rbac'
 import { classForReason } from './reconciliation-classification'
+import { backfillTenantIdentity } from './tenant'
 
 // Sensible role defaults for the Reconciliation Workflow Engine + Write-Off
 // resources. Each entry lists the roles GRANTED that resource; every other
@@ -84,6 +86,20 @@ export async function backfillExcessReasonAccountingClass(prisma: any): Promise<
 }
 
 /**
+ * True on the live production deployment (or any self-hosted NODE_ENV=production without a
+ * Vercel env). There the seed must never plant accounts with publicly-known passwords/PINs:
+ * because it runs on EVERY deploy and upserts, a demo account that was deleted or deactivated in
+ * production would otherwise be silently re-created with its default password at the next deploy.
+ * Staging/preview (VERCEL_ENV=preview) and local dev keep the convenient demo logins; set
+ * SEED_DEMO_USERS=true to force them anywhere.
+ */
+export function isHardenedSeed(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.SEED_DEMO_USERS === 'true') return false
+  if (env.VERCEL_ENV) return env.VERCEL_ENV === 'production'
+  return env.NODE_ENV === 'production'
+}
+
+/**
  * Idempotent seeding shared by the CLI seed (prisma/seed.ts) and the
  * /api/admin/seed endpoint. Creates the 2 outlets, the role login users,
  * and the Directors/Admins/Staff persons (from persons.seed.json).
@@ -121,7 +137,8 @@ export async function seedCore(prisma: any) {
   // additive — DailyCollection storage/behavior is unchanged.
   await seedStandardCollectionTemplate(prisma, [mikocheni.id, cocoBeach.id])
 
-  const users = [
+  const hardened = isHardenedSeed()
+  const demoUsers = [
     { email: 'admin@lounge.com', name: 'System Admin', role: 'ADMIN', pass: 'admin123', outletId: null },
     { email: 'cashier@lounge.com', name: 'Jane Cashier', role: 'CASHIER', pass: 'cashier123', outletId: mikocheni.id },
     { email: 'cashier2@lounge.com', name: 'Mary Cashier', role: 'CASHIER', pass: 'cashier123', outletId: cocoBeach.id },
@@ -139,11 +156,24 @@ export async function seedCore(prisma: any) {
     { email: 'kitchen.mikocheni@lounge.com', name: 'Juma Kitchen', role: 'WAITER', pass: 'waiter123', outletId: mikocheni.id },
     { email: 'barlady.mikocheni@lounge.com', name: 'Rehema Bar Lady', role: 'WAITER', pass: 'waiter123', outletId: mikocheni.id },
   ]
+  // Production: no demo logins. A fresh production database gets exactly one bootstrap admin, and
+  // only when SEED_ADMIN_EMAIL + SEED_ADMIN_PASSWORD are supplied (create-only; never overwrites an
+  // existing account, and the password is whatever the operator chose - nothing public).
+  const users = hardened ? [] : demoUsers
   for (const u of users) {
     await prisma.user.upsert({
       where: { email: u.email },
       update: {},
       create: { name: u.name, email: u.email, password: await bcrypt.hash(u.pass, 12), role: u.role, outletId: u.outletId },
+    })
+  }
+  const bootstrapEmail = (process.env.SEED_ADMIN_EMAIL || '').trim().toLowerCase()
+  const bootstrapPassword = process.env.SEED_ADMIN_PASSWORD || ''
+  if (hardened && bootstrapEmail && bootstrapPassword.length >= 12) {
+    await prisma.user.upsert({
+      where: { email: bootstrapEmail },
+      update: {},
+      create: { name: 'Administrator', email: bootstrapEmail, password: await bcrypt.hash(bootstrapPassword, 12), role: 'ADMIN', outletId: null },
     })
   }
 
@@ -153,6 +183,9 @@ export async function seedCore(prisma: any) {
   // constraint — never shown to them. Default PIN "1234" for everyone on
   // first seed; change per-person via Setup → Users once live.
   const slug = (name: string) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.+|\.+$/g, '')
+  // Default PIN only outside production. In production a newly-seeded waiter has NO PIN (so they do
+  // not appear on the sign-in picker) until an admin sets one in Setup -> Users: a shared, guessable
+  // "1234" on every account is not a credential.
   const DEFAULT_PIN = '1234'
   // outletTag ('mik'/'coco') feeds the generated placeholder email below —
   // kept exactly as before so re-running this against an already-seeded
@@ -168,14 +201,16 @@ export async function seedCore(prisma: any) {
     outletId: OUTLET_BY_TAG[w.outlet]?.id ?? mikocheni.id,
     outletTag: OUTLET_BY_TAG[w.outlet]?.tag ?? 'mik',
   }))
-  const hashedDefaultPin = await bcrypt.hash(DEFAULT_PIN, 12)
+  const hashedDefaultPin = hardened ? null : await bcrypt.hash(DEFAULT_PIN, 12)
   for (const w of waiterRoster) {
     const email = `${slug(w.name)}.${w.outletTag}@staff.internal`
     await prisma.user.upsert({
       where: { email },
       update: {},
       create: {
-        name: w.name, email, password: await bcrypt.hash('staffLogin123', 12), role: 'WAITER',
+        // These accounts sign in by PIN only (the @staff.internal email is a placeholder) so the
+        // password is a random throwaway nobody knows - never a fixed, guessable string.
+        name: w.name, email, password: await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 12), role: 'WAITER',
         outletId: w.outletId, position: w.position, pin: hashedDefaultPin,
       },
     })
@@ -216,5 +251,10 @@ export async function seedCore(prisma: any) {
   // screens are built.
   const expense = await seedExpenseFramework(prisma)
 
-  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes, expenseCategories: expense.categories, expenseFundingSources: expense.fundingSources }
+  // Multi-company identity (idempotent, fill-only): slug for every company, outlets with no company join the
+  // original company, every user gets a Membership, the legacy owner is flagged on the original company.
+  // Running it on every deploy means no separate manual backfill step is needed.
+  const tenant = await backfillTenantIdentity(prisma, { apply: true })
+
+  return { tenant, outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes, expenseCategories: expense.categories, expenseFundingSources: expense.fundingSources }
 }
