@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
 import { createPaymentVerification } from '@/lib/payment-verification'
+import { tenantCompanyId } from '@/lib/tenant'
 
 /**
  * POST — batch file import for a FILE_IMPORT connector. Expects the caller
@@ -19,7 +20,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const { id } = await params
   const connector = await prisma.paymentIntegrationConnector.findUnique({ where: { id } })
-  if (!connector || connector.kind !== 'FILE_IMPORT') return NextResponse.json({ error: 'Connector not found' }, { status: 404 })
+  const callerCompany = await tenantCompanyId(user)
+  if (!connector || !callerCompany || connector.companyId !== callerCompany || connector.kind !== 'FILE_IMPORT') return NextResponse.json({ error: 'Connector not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
   const rows: Array<{ reference?: string; amount: number; date: string; customerName?: string; paidAt?: string }> = body.rows || []

@@ -8,6 +8,7 @@ import { seedExpenseFramework } from './expense-seed'
 import { seedPayrollFramework } from './payroll-seed'
 import { RECONCILIATION_STAGE_RESOURCES as RSR, WRITE_OFF_RESOURCES as WOR } from './rbac'
 import { classForReason } from './reconciliation-classification'
+import { backfillTenantIdentity } from './tenant'
 
 // Sensible role defaults for the Reconciliation Workflow Engine + Write-Off
 // resources. Each entry lists the roles GRANTED that resource; every other
@@ -250,5 +251,10 @@ export async function seedCore(prisma: any) {
   // screens are built.
   const expense = await seedExpenseFramework(prisma)
 
-  return { outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes, expenseCategories: expense.categories, expenseFundingSources: expense.fundingSources }
+  // Multi-company identity (idempotent, fill-only): slug for every company, outlets with no company join the
+  // original company, every user gets a Membership, the legacy owner is flagged on the original company.
+  // Running it on every deploy means no separate manual backfill step is needed.
+  const tenant = await backfillTenantIdentity(prisma, { apply: true })
+
+  return { tenant, outlets: 2, users: users.length, waitersSeeded: waitersCreated, personsCreated, personsExisting: existing, reconRoleDefaults, excessClassBackfill, creditGroups: credit.groups, creditAccounts: credit.accounts, payrollCategories: payroll.categories, payrollPayGroups: payroll.payGroups, employees: payroll.employees, payrollComponents: payroll.components, payrollAssignments: payroll.assignments, payrollStatutoryRules: payroll.statutoryRules, payrollLeaveTypes: payroll.leaveTypes, expenseCategories: expense.categories, expenseFundingSources: expense.fundingSources }
 }

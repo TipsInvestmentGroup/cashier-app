@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance } from '@/lib/finance-access'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 
 /** GRNs that don't have a Supplier Invoice raised against them yet — the
  *  picklist for "Raise Supplier Invoice". One GRN -> one invoice in Phase 1. */
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json([])
 
   const grns = await prisma.grn.findMany({

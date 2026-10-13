@@ -4,7 +4,8 @@ import { getAuthUser } from '@/lib/auth'
 import { canRequestPetty } from '@/lib/petty-access'
 import { roundMoney } from '@/lib/utils'
 import { postJournalEntry } from '@/lib/ledger'
-import { resolveExpenseDebitAccount, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { resolveExpenseDebitAccount, resolveChannelAccountId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 
 export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
@@ -50,6 +51,12 @@ export async function POST(req: NextRequest) {
 
   const outletIdVal = outletId || user.outletId || null
 
+  // The ledger company is the caller's (session) company; the outlet must belong to it.
+  const companyId = await tenantCompanyId(user)
+  if (outletIdVal && (!companyId || !(await outletInCompany(prisma, outletIdVal, companyId)))) {
+    return NextResponse.json({ error: 'Outlet not found' }, { status: 404 })
+  }
+
   const item = await prisma.$transaction(async (tx) => {
     const created = await tx.pettyCash.create({
       data: {
@@ -81,8 +88,6 @@ export async function POST(req: NextRequest) {
     // A record created already-paid disburses immediately — post the same
     // Dr Petty Cash Expense / Cr <method account> entry as the pay route (D17).
     if (isPaid) {
-      const outlet = outletIdVal ? await tx.outlet.findUnique({ where: { id: outletIdVal }, select: { companyId: true } }) : null
-      const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
       if (companyId) {
         const expenseAccountId = await resolveExpenseDebitAccount(tx, { companyId, outletId: outletIdVal || undefined, functionName })
         const cashAccountId = await resolveChannelAccountId(tx, { companyId, channelCode: method, outletId: outletIdVal || undefined })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { comparePassword, signToken } from '@/lib/auth'
+import { comparePassword } from '@/lib/auth'
+import { ensureMemberships, issueSession, pickMembership, usableMemberships } from '@/lib/tenant'
 import { clientIp, isLimited, recordHit, tooMany, type LimitRule } from '@/lib/rate-limit'
 
 const MAX_ATTEMPTS = 5
@@ -61,13 +62,15 @@ export async function POST(req: NextRequest) {
 
     await prisma.user.update({ where: { id: user.id }, data: { pinFailedAttempts: 0, pinLockedUntil: null } })
 
-    const outlet = user.outletId ? await prisma.outlet.findUnique({ where: { id: user.outletId } }) : null
-    const token = signToken({ userId: user.id, email: user.email, role: user.role, outletId: user.outletId || undefined, name: user.name, position: user.position || undefined, sepoch: user.sessionEpoch })
+    // Bind the session to the company that OWNS the waiter's outlet (a PIN sign-in starts from an outlet
+    // tile, so the company is implied by it).
+    const homeOutlet = user.outletId ? await prisma.outlet.findUnique({ where: { id: user.outletId } }) : null
+    const usable = usableMemberships(await ensureMemberships(prisma, user))
+    const chosen = pickMembership(usable, homeOutlet?.companyId) ?? usable[0] ?? null
+    if (!chosen) return NextResponse.json({ error: 'Your company access is suspended or has been removed. Contact your manager.' }, { status: 403 })
+    const outlet = chosen.outletId === user.outletId ? homeOutlet : chosen.outletId ? await prisma.outlet.findUnique({ where: { id: chosen.outletId } }) : null
 
-    return NextResponse.json({
-      token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role, position: user.position, outlet },
-    })
+    return NextResponse.json(issueSession(user, chosen, outlet))
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

@@ -19,3 +19,14 @@ export function isOwnerEmail(email?: string | null): boolean {
   const owner = ownerEmail()
   return !!owner && (email || '').trim().toLowerCase() === owner
 }
+
+/**
+ * Is this session's user the OWNER of the company the session is bound to?
+ * With a company claim the answer is the membership's own `owner` flag - owner power never travels to
+ * another company just because the same email happens to be a member there. A legacy token without a
+ * company claim falls back to the single-owner email (the pre-multi-company behaviour).
+ */
+export function isCompanyOwner(user: { email?: string | null; companyId?: string | null; owner?: boolean | null }): boolean {
+  if (user.companyId) return !!user.owner
+  return isOwnerEmail(user.email)
+}

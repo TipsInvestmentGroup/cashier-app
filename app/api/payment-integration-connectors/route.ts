@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 import { generateWebhookSecret, redactConnector } from '@/lib/webhook-signature'
 
 /** GET — list connectors for a company (API_WEBHOOK | FILE_IMPORT). */
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json({ connectors: [] })
 
   const connectors = await prisma.paymentIntegrationConnector.findMany({ where: { companyId }, orderBy: { createdAt: 'desc' } })
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   if (!body.name || !body.kind || !body.channel) return NextResponse.json({ error: 'name, kind, and channel are required' }, { status: 400 })
 
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
 
   // Webhook connectors get a per-connector HMAC signing secret. It is stored in `config`, shown to

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance, canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 import { budgetVsActual } from '@/lib/finance-budget'
 
 /** List budgets with their computed Actual / Variance / Variance% / Forecast. */
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json([])
   const outletId = searchParams.get('outletId')
 
@@ -48,8 +48,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'periodStart/periodEnd must be valid dates' }, { status: 400 })
   }
   if (parsedStart > parsedEnd) return NextResponse.json({ error: 'periodStart must not be after periodEnd' }, { status: 400 })
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId || null)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
+  const acct = await prisma.account.findUnique({ where: { id: String(accountId) }, select: { companyId: true } })
+  if (!acct || acct.companyId !== companyId) return NextResponse.json({ error: 'Account does not belong to your company' }, { status: 400 })
+  if (!(await outletInCompany(prisma, outletId || null, companyId))) {
+    return NextResponse.json({ error: 'Outlet does not belong to your company' }, { status: 400 })
+  }
 
   const budget = await prisma.budget.create({
     data: {

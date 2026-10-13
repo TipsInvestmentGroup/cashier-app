@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 
 /**
  * GET — list credit accounts with their groups, effective limit inputs, and the
@@ -17,8 +18,11 @@ export async function GET(req: NextRequest) {
   const q = (searchParams.get('q') || '').trim()
   const take = Math.min(Number(searchParams.get('take')) || 500, 2000)
 
+  const companyId = await tenantCompanyId(user)
+  if (!companyId) return NextResponse.json([])
+
   const accounts = await prisma.creditAccount.findMany({
-    where: q ? { displayName: { contains: q } } : undefined,
+    where: { companyId, ...(q ? { displayName: { contains: q } } : {}) },
     orderBy: { displayName: 'asc' },
     take,
     include: {

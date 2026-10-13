@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, requireRole } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 
 // Read-only listing of statutory rules (Phase 4). Supervisor-gated. Without
 // `at`, returns every version; with `at=YYYY-MM-DD`, returns only the version of
@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!requireRole(user, ALLOWED_ROLES)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const companyId = await resolveDefaultCompanyId(prisma)
+  const companyId = await tenantCompanyId(user)
   if (!companyId) return NextResponse.json({ rules: [] })
 
   const { searchParams } = new URL(req.url)

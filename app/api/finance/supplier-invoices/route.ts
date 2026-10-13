@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance, canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 import { createSupplierInvoice } from '@/lib/finance'
 
 /** List supplier invoices — includes enough to render an AP aging view
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   const status = searchParams.get('status')
   if (!companyId) return NextResponse.json([])
 
@@ -40,8 +40,11 @@ export async function POST(req: NextRequest) {
   if (!grnId || !supplierId || !invoiceDate || !(Number(total) > 0)) {
     return NextResponse.json({ error: 'grnId, supplierId, invoiceDate and a positive total are required' }, { status: 400 })
   }
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId || null)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
+  // The GRN being invoiced must belong to the caller's company.
+  const grn = await prisma.grn.findUnique({ where: { id: grnId }, select: { companyId: true } })
+  if (grn && grn.companyId !== companyId) return NextResponse.json({ error: 'grnId does not belong to your company' }, { status: 400 })
 
   try {
     const invoice = await createSupplierInvoice({

@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { ownerEmail } from '@/lib/owner'
+import { ownerEmail, isCompanyOwner } from '@/lib/owner'
 
 const OWNER_EMAIL = ownerEmail()
 export { OWNER_EMAIL }
@@ -164,10 +164,10 @@ const MANAGE_USERS_LEGACY_DEFAULT: Record<ManageUsersResource, string[]> = {
 /** Same resolution as resolveResourcePermission, but falls back to the
  * legacy default above for a role with no explicit RolePermission row yet. */
 export async function resolveManageUsersPermission(
-  user: { email?: string; userId: string; role: string },
+  user: { email?: string; userId: string; role: string; companyId?: string; owner?: boolean },
   resource: ManageUsersResource
 ): Promise<boolean> {
-  if (isOwner(user.email)) return true
+  if (isCompanyOwner(user)) return true
   const userRow = await prisma.userPermission.findUnique({ where: { userId_resource: { userId: user.userId, resource } } })
   if (userRow) return !!userRow.canAdd
   const roleRow = await prisma.rolePermission.findUnique({ where: { role_resource: { role: user.role, resource } } })

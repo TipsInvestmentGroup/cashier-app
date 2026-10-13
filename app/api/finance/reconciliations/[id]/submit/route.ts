@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 import { canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
 import { submitReconciliation } from '@/lib/finance-reconciliation'
@@ -12,6 +13,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!(await canManageFinance(user.email, user.userId, user.role, RESOURCES.FINANCE_RECONCILIATION))) {
     return NextResponse.json({ error: 'You are not authorized to submit reconciliations' }, { status: 403 })
   }
+
+  const companyId = await tenantCompanyId(user)
+  const rec = await prisma.accountReconciliation.findUnique({ where: { id }, select: { companyPaymentAccount: { select: { companyId: true } } } })
+  if (!rec || !companyId || rec.companyPaymentAccount.companyId !== companyId) return NextResponse.json({ error: 'Reconciliation not found' }, { status: 404 })
 
   try {
     await submitReconciliation(id, user.userId)

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance, canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 import { postBankTransaction, BANK_TRANSACTION_TYPES } from '@/lib/finance-banking'
 
 export async function GET(req: NextRequest) {
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json([])
 
   const txns = await prisma.bankTransaction.findMany({
@@ -36,8 +36,14 @@ export async function POST(req: NextRequest) {
   const { type, fromAccountId, toAccountId, amount, transactionDate, reference, note } = body
   if (!BANK_TRANSACTION_TYPES.includes(type)) return NextResponse.json({ error: 'Invalid transaction type' }, { status: 400 })
   if (!(Number(amount) > 0)) return NextResponse.json({ error: 'A positive amount is required' }, { status: 400 })
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId || null)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
+  // Both legs are Company Payment Accounts and must belong to this company.
+  for (const accId of [fromAccountId, toAccountId]) {
+    if (!accId) continue
+    const cpa = await prisma.companyPaymentAccount.findUnique({ where: { id: String(accId) }, select: { companyId: true } })
+    if (!cpa || cpa.companyId !== companyId) return NextResponse.json({ error: 'Account does not belong to your company' }, { status: 400 })
+  }
 
   try {
     const txn = await postBankTransaction({

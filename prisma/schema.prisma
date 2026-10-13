@@ -137,6 +137,59 @@ model User {
   businessDayUnlockRequestsApproved BusinessDayUnlockRequest[] @relation("BusinessDayUnlockApprover")
   notifications                     Notification[]
   notificationPreferences           NotificationPreference[]
+  memberships                       Membership[]
+}
+
+/// A user's membership of ONE company: the company-specific role / outlet / position they hold there.
+/// One login (User) may have several memberships; the session token is bound to exactly one of them
+/// (the "active company"). Until a second membership exists for a user, this row simply mirrors the
+/// legacy User.role / outletId / position columns, which the user-management code keeps in sync.
+/// See lib/tenant.ts and docs/MULTI-TENANT-ASSESSMENT.md §2.
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  role      String // same vocabulary as User.role (CASHIER | WAITER | ACCOUNTANT | MANAGER | DIRECTOR | ADMIN)
+  outletId  String? // must belong to `companyId` (validated in code)
+  position  String?
+  /// The company's owner (replaces the single global NEXT_PUBLIC_OWNER_EMAIL concept per company).
+  isOwner   Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, companyId])
+  @@index([companyId, isActive])
+}
+
+/// The product owner's own identity — completely separate from company users, with NO membership in any
+/// company and no implicit access to company data. Signs in at /api/platform/auth/login and may only call
+/// /api/platform/* (company directory, suspend/activate). Created by scripts/create-platform-admin.ts.
+model PlatformAdmin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  password     String
+  isActive     Boolean  @default(true)
+  sessionEpoch Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// What the platform owner did (create / suspend / reactivate a company ...). Separate from AuditLog because
+/// AuditLog rows belong to a company user; a platform admin is not one.
+model PlatformAuditLog {
+  id        String   @id @default(cuid())
+  adminId   String
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@index([adminId, createdAt])
 }
 
 /// Per-user, per-resource grant of Add/Edit/Delete(/Settle/Unsettle for
@@ -187,8 +240,14 @@ model Company {
   legalName String?
   tin       String?
   vrn       String?
+  // Multi-company (Phase 2). `slug` is the sign-in "company code" (lower-case a-z0-9-); nullable only
+  // until the Phase 3 backfill assigns one to every existing company, then it becomes required.
+  slug      String?  @unique
+  // ACTIVE | SUSPENDED | ARCHIVED. A non-ACTIVE company's users are refused at the API gate (proxy.ts).
+  status    String   @default("ACTIVE")
   createdAt DateTime @default(now())
 
+  memberships         Membership[]
   outlets             Outlet[]
   collectionTemplates CollectionTemplate[]
 

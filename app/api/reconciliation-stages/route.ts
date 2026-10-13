@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, readOutletScope, NO_OUTLET } from '@/lib/auth'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 import { getOrCreateStage, openStage, checkGraceAndEscalateMany, type StageKey } from '@/lib/reconciliation-stage'
 
 /** GET — Reconciliation Stage dashboard list. Filters: companyId, outletId, stageKey, status, from, to. */
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const outletId = readOutletScope(user, requestedOutletId)
   if (outletId === NO_OUTLET) return NextResponse.json({ stages: [] })
 
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json({ stages: [] })
 
   const stageKey = searchParams.get('stageKey')
@@ -71,13 +71,11 @@ export async function POST(req: NextRequest) {
   const outletId = body.outletId ? readOutletScope(user, body.outletId) : null
   if (outletId === NO_OUTLET) return NextResponse.json({ error: 'No outlet access' }, { status: 403 })
 
-  let companyId = body.companyId as string | undefined
-  if (!companyId && outletId) {
-    const outlet = await prisma.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } })
-    companyId = outlet?.companyId || undefined
-  }
-  if (!companyId) companyId = (await resolveDefaultCompanyId(prisma)) || undefined
+  const companyId = await tenantCompanyId(user, body.companyId)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
+  if (outletId && !(await outletInCompany(prisma, outletId, companyId))) {
+    return NextResponse.json({ error: 'Outlet does not belong to your company' }, { status: 400 })
+  }
 
   const actor = { userId: user.userId, userName: user.name || user.email || 'Unknown' }
   try {

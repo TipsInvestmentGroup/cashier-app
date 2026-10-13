@@ -3,8 +3,9 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance, canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
-import { ensureChartOfAccounts, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { ensureChartOfAccounts } from '@/lib/finance-mapping'
 import { ACCOUNT_TYPES } from '@/lib/ledger'
+import { tenantCompanyId } from '@/lib/tenant'
 
 /** List the Chart of Accounts for a company (seeds the default set on first read). */
 export async function GET(req: NextRequest) {
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json([])
 
   await ensureChartOfAccounts(prisma, companyId)
@@ -31,11 +32,15 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}))
   const { code, name, type, parentId } = body
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId || null)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
   if (!code || !String(code).trim()) return NextResponse.json({ error: 'Account code is required' }, { status: 400 })
   if (!name || !String(name).trim()) return NextResponse.json({ error: 'Account name is required' }, { status: 400 })
   if (!ACCOUNT_TYPES.includes(type)) return NextResponse.json({ error: 'Invalid account type' }, { status: 400 })
+  if (parentId) {
+    const parent = await prisma.account.findUnique({ where: { id: String(parentId) }, select: { companyId: true } })
+    if (!parent || parent.companyId !== companyId) return NextResponse.json({ error: 'Parent account does not belong to your company' }, { status: 400 })
+  }
 
   try {
     const account = await prisma.account.create({

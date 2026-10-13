@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance } from '@/lib/finance-access'
+import { tenantCompanyId } from '@/lib/tenant'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -13,6 +14,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     where: { id },
     include: { supplier: true, grn: { include: { items: true } }, allocations: { include: { payment: true } } },
   })
-  if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
+  const companyId = await tenantCompanyId(user)
+  if (!invoice || !companyId || invoice.companyId !== companyId) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
   return NextResponse.json(invoice)
 }

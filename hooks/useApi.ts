@@ -22,7 +22,7 @@ export function useApi() {
         const data = await res.json().catch(() => ({}))
         // The account was deactivated / its sessions were revoked (see proxy.ts): sign out cleanly
         // instead of leaving the user on a page that fails every request.
-        if (res.status === 401 && data.code === 'SESSION_REVOKED') logoutRef.current()
+        if ((res.status === 401 && data.code === 'SESSION_REVOKED') || (res.status === 403 && data.code === 'COMPANY_SUSPENDED')) logoutRef.current()
         throw new Error(data.error || `Request failed: ${res.status}`)
       }
       return res.json()

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 import { SETTLEMENT_METHODS, type SettlementMethod } from '@/lib/credit-config'
 
 // Validate a settlement-methods payload: a non-empty array of known methods,
@@ -21,7 +21,11 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+  const companyId = await tenantCompanyId(user)
+  if (!companyId) return NextResponse.json([])
+
   const groups = await prisma.creditGroup.findMany({
+    where: { companyId },
     orderBy: [{ priority: 'asc' }, { name: 'asc' }],
     include: { _count: { select: { accountLinks: true, signedBills: true } } },
   })
@@ -43,7 +47,7 @@ export async function POST(req: NextRequest) {
   const settlement = normalizeSettlement(body.settlementMethods, body.defaultSettlementMethod)
   if ('error' in settlement) return NextResponse.json({ error: settlement.error }, { status: 400 })
 
-  const companyId = await resolveDefaultCompanyId(prisma)
+  const companyId = await tenantCompanyId(user)
   if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
 
   const dupe = await prisma.creditGroup.findUnique({ where: { companyId_code: { companyId, code } } })
