@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 import { approveReconciliation } from '@/lib/finance-reconciliation'
 import { isOwnerEmail } from '@/lib/owner'
 
@@ -15,6 +16,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!APPROVER_ROLES.includes(user.role) && !isOwnerEmail(user.email)) {
     return NextResponse.json({ error: 'Only a Director or Admin can approve a reconciliation' }, { status: 403 })
   }
+
+  const companyId = await tenantCompanyId(user)
+  const rec = await prisma.accountReconciliation.findUnique({ where: { id }, select: { companyPaymentAccount: { select: { companyId: true } } } })
+  if (!rec || !companyId || rec.companyPaymentAccount.companyId !== companyId) return NextResponse.json({ error: 'Reconciliation not found' }, { status: 404 })
 
   try {
     await approveReconciliation(id, user.userId)

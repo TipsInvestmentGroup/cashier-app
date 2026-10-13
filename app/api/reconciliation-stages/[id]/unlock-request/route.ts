@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 import { requestUnlock } from '@/lib/reconciliation-stage'
 
 /** POST — request an unlock for a closed stage (non-management roles). Body: { reason, requestedDuration?, requestedMinutes? }. */
@@ -10,6 +12,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const body = await req.json().catch(() => ({}))
   if (!body.reason) return NextResponse.json({ error: 'A reason is required' }, { status: 400 })
+
+  const callerCompany = await tenantCompanyId(user)
+  const owned = await prisma.reconciliationStage.findUnique({ where: { id }, select: { companyId: true } })
+  if (!callerCompany || !owned || owned.companyId !== callerCompany) return NextResponse.json({ error: 'Stage not found' }, { status: 404 })
 
   const actor = { userId: user.userId, userName: user.name || user.email || 'Unknown' }
   const request = await requestUnlock({

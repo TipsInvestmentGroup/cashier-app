@@ -25,20 +25,40 @@ import { prisma } from '@/lib/prisma'
  * revocation takes effect within ~15s rather than after the token's lifetime.
  */
 
-interface CachedUser { isActive: boolean; epoch: number; at: number }
+interface CachedUser {
+  isActive: boolean
+  epoch: number
+  /** undefined when the token carries no company claim (legacy token): membership is not checked. */
+  membershipOk?: boolean
+  companyStatus?: string
+  at: number
+}
 const CACHE_TTL_MS = 15_000
 const MAX_CACHE = 5_000
 const cache = new Map<string, CachedUser>()
 
-async function currentState(userId: string): Promise<CachedUser | null> {
+async function currentState(userId: string, companyId?: string): Promise<CachedUser | null> {
   const now = Date.now()
-  const hit = cache.get(userId)
+  const key = `${userId}:${companyId ?? ''}`
+  const hit = cache.get(key)
   if (hit && now - hit.at < CACHE_TTL_MS) return hit
-  const u = await prisma.user.findUnique({ where: { id: userId }, select: { isActive: true, sessionEpoch: true } })
+  // One query: the account, plus (when the token is bound to a company) that membership and its company.
+  const u = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      isActive: true, sessionEpoch: true,
+      ...(companyId ? { memberships: { where: { companyId }, select: { isActive: true, company: { select: { status: true } } } } } : {}),
+    },
+  })
   if (!u) return { isActive: false, epoch: -1, at: now } // user deleted -> revoked
   if (cache.size >= MAX_CACHE) cache.clear()
-  const fresh = { isActive: u.isActive, epoch: u.sessionEpoch, at: now }
-  cache.set(userId, fresh)
+  const fresh: CachedUser = { isActive: u.isActive, epoch: u.sessionEpoch, at: now }
+  if (companyId) {
+    const m = (u as unknown as { memberships?: { isActive: boolean; company: { status: string } }[] }).memberships?.[0]
+    fresh.membershipOk = !!m && m.isActive
+    fresh.companyStatus = m?.company.status
+  }
+  cache.set(key, fresh)
   return fresh
 }
 
@@ -47,11 +67,11 @@ export async function proxy(req: NextRequest) {
   if (!header?.startsWith('Bearer ')) return NextResponse.next()
 
   const claims = verifyToken(header.slice(7))
-  if (!claims?.userId) return NextResponse.next() // not a session token of ours
+  if (!claims?.userId || claims.kind) return NextResponse.next() // not a session token of ours (or a platform / selection token)
 
   let state: CachedUser | null = null
   try {
-    state = await currentState(claims.userId)
+    state = await currentState(claims.userId, claims.companyId)
   } catch (err) {
     console.error('[proxy] session check unavailable, failing open:', err instanceof Error ? err.message : err)
     return NextResponse.next()
@@ -59,11 +79,20 @@ export async function proxy(req: NextRequest) {
   if (!state) return NextResponse.next()
 
   const stale = typeof claims.sepoch === 'number' && claims.sepoch !== state.epoch
-  if (!state.isActive || stale) {
+  // The membership the session was issued for must still exist and be active, and its company must be
+  // ACTIVE: removing a user from a company (or suspending the company) ends their sessions there.
+  const lostMembership = !!claims.companyId && state.membershipOk === false
+  if (!state.isActive || stale || lostMembership) {
     return NextResponse.json(
       // `code` lets the client log out cleanly instead of showing a generic error.
       { error: 'Your session has ended. Please sign in again.', code: 'SESSION_REVOKED' },
       { status: 401 },
+    )
+  }
+  if (claims.companyId && state.companyStatus && state.companyStatus !== 'ACTIVE') {
+    return NextResponse.json(
+      { error: 'This company account is suspended. Contact your administrator.', code: 'COMPANY_SUSPENDED' },
+      { status: 403 },
     )
   }
   return NextResponse.next()

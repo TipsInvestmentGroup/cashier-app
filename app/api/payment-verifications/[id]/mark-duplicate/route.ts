@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
 import { markPaymentVerificationDuplicate } from '@/lib/payment-verification'
 
@@ -14,6 +16,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const body = await req.json().catch(() => ({}))
   if (!body.duplicateOfId) return NextResponse.json({ error: 'duplicateOfId is required' }, { status: 400 })
+
+  const callerCompany = await tenantCompanyId(user)
+  const found = await prisma.paymentVerification.findUnique({ where: { id }, select: { companyId: true } })
+  if (!callerCompany || !found || found.companyId !== callerCompany) {
+    return NextResponse.json({ error: 'Payment verification not found' }, { status: 404 })
+  }
+  const original = await prisma.paymentVerification.findUnique({ where: { id: body.duplicateOfId }, select: { companyId: true } })
+  if (!original || original.companyId !== callerCompany) {
+    return NextResponse.json({ error: 'duplicateOfId does not belong to your company' }, { status: 400 })
+  }
 
   const record = await markPaymentVerificationDuplicate(id, body.duplicateOfId)
   return NextResponse.json({ ok: true, paymentVerification: record })

@@ -3,7 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance, canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
-import { resolveDefaultCompanyId, ensureChartOfAccounts } from '@/lib/finance-mapping'
+import { ensureChartOfAccounts } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 import { setDefaultCompanyPaymentAccount } from '@/lib/finance-banking'
 
 /** List Company Payment Accounts (the real bank/mobile-money/cash accounts
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest) {
   if (!canViewFinance(user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const companyId = searchParams.get('companyId') || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, searchParams.get('companyId'))
   if (!companyId) return NextResponse.json([])
 
   const accounts = await prisma.companyPaymentAccount.findMany({
@@ -38,8 +39,11 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
   const { paymentChannelId, accountName, bankName, accountNumber, currency, outletId, isDefault } = body
   if (!paymentChannelId || !accountName?.trim()) return NextResponse.json({ error: 'paymentChannelId and accountName are required' }, { status: 400 })
-  const companyId = body.companyId || (await resolveDefaultCompanyId(prisma))
+  const companyId = await tenantCompanyId(user, body.companyId || null)
   if (!companyId) return NextResponse.json({ error: 'No company found' }, { status: 400 })
+  if (!(await outletInCompany(prisma, outletId || null, companyId))) {
+    return NextResponse.json({ error: 'Outlet does not belong to your company' }, { status: 400 })
+  }
 
   await ensureChartOfAccounts(prisma, companyId)
 

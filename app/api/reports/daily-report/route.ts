@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
-import { resolveAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { resolveAccountId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 import { BILL_TYPE_CODES, PAID_BILL_CATEGORY_MAP } from '@/lib/bill-types'
 import { channelAmountsFor } from '@/lib/collection-channels-shared'
 import { sumApprovedPettyCash } from '@/lib/petty-cash-metrics'
@@ -24,6 +25,12 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const outletId = user.role === 'CASHIER' ? user.outletId : searchParams.get('outletId')
+
+  // The report is always for the caller's own company; a chosen outlet must belong to it.
+  const companyId = await tenantCompanyId(user)
+  if (outletId && (!companyId || !(await outletInCompany(prisma, outletId, companyId)))) {
+    return NextResponse.json({ error: 'Outlet not found' }, { status: 404 })
+  }
 
   const parseD = (s: string | null) => { if (!s) return null; const p = parse(s, 'yyyy-MM-dd', new Date()); return isValid(p) ? p : null }
   const day = parseD(searchParams.get('date')) || new Date()
@@ -158,9 +165,6 @@ export async function GET(req: NextRequest) {
   // (Dr Cash), on this day for this outlet. Falls back to 0 for a company with
   // no such postings, so nothing changes for outlets that don't use this.
   let settlementsPaidFromTill = 0
-  const companyId = outletId
-    ? (await prisma.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } }))?.companyId
-    : await resolveDefaultCompanyId(prisma)
   if (companyId) {
     const cashAccountId = await resolveAccountId(prisma, { companyId, key: 'CASH' })
     const cashLines = await prisma.journalLine.findMany({

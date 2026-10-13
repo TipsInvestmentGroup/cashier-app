@@ -17,12 +17,13 @@ const isOwner = (email?: string) => !!OWNER_EMAIL && (email || '').toLowerCase()
 /** A fresh session token for the caller after their own password changed. Changing a password
  *  revokes every outstanding token (sessionEpoch bump), so the browser that made the change
  *  must be handed a new one or it would be logged out by its own action. */
-function freshToken(u: { id: string; email: string; role: string; outletId: string | null; name: string; position: string | null; sessionEpoch: number }): string {
-  const payload: JWTPayload = {
-    userId: u.id, email: u.email, role: u.role, outletId: u.outletId || undefined,
-    name: u.name, position: u.position || undefined, sepoch: u.sessionEpoch,
-  }
-  return signToken(payload)
+function freshToken(u: { id: string; sessionEpoch: number }, claims: JWTPayload): string {
+  // Carry the caller's CURRENT claims (role/outlet/company come from the membership the session is bound
+  // to), changing only the revocation epoch.
+  return signToken({
+    userId: u.id, email: claims.email, role: claims.role, outletId: claims.outletId, name: claims.name,
+    position: claims.position, sepoch: u.sessionEpoch, companyId: claims.companyId, owner: claims.owner,
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     const updated = await prisma.user.update({ where: { id: userId }, data: { password: await hashPassword(newPassword), sessionEpoch: { increment: 1 } } })
     await prisma.auditLog.create({ data: { userId: user.userId, action: 'RESET_PASSWORD', entity: 'User', entityId: userId, details: `Owner reset password for ${target.email}` } })
     // Owner changed their OWN password through this path: keep their session alive.
-    return NextResponse.json({ ok: true, ...(updated.id === user.userId ? { token: freshToken(updated) } : {}) })
+    return NextResponse.json({ ok: true, ...(updated.id === user.userId ? { token: freshToken(updated, user) } : {}) })
   }
 
   // Self-service change — verify current password
@@ -60,5 +61,5 @@ export async function POST(req: NextRequest) {
   // credential (a stolen token or a forgotten shared-device login). This device gets a new token.
   const updated = await prisma.user.update({ where: { id: me.id }, data: { password: await hashPassword(newPassword), sessionEpoch: { increment: 1 } } })
   await prisma.auditLog.create({ data: { userId: me.id, action: 'CHANGE_PASSWORD', entity: 'User', entityId: me.id, details: 'Changed own password' } })
-  return NextResponse.json({ ok: true, token: freshToken(updated) })
+  return NextResponse.json({ ok: true, token: freshToken(updated, user) })
 }

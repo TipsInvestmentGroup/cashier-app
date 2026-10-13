@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId, memberOfCompanyWhere, outletInCompany } from '@/lib/tenant'
 import { FUNDING_SOURCE_TYPES, type FundingSourceType } from '@/lib/expense-config'
 import { getFundingSourceBalance, writeFundingSourceTxn } from '@/lib/expense-ledger'
 import { fundClassOf, allocationModeFor, supportsManualAllocation } from '@/lib/expense-funds'
@@ -23,8 +23,11 @@ export async function GET(req: NextRequest) {
   // Archived rows are hidden from EVERY caller (admin included) — kept only so
   // historical payments stay readable, never re-selectable. ADMIN still sees
   // inactive-but-not-archived rows to manage them in Expense Settings.
+  const companyId = await tenantCompanyId(user)
+  if (!companyId) return NextResponse.json([])
+
   const sources = await prisma.fundingSource.findMany({
-    where: user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false },
+    where: { companyId, ...(user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false }) },
     orderBy: [{ name: 'asc' }],
     include: { companyPaymentAccount: { select: { id: true, accountName: true, bankName: true } }, _count: { select: { payments: true } } },
   })
@@ -81,16 +84,24 @@ export async function POST(req: NextRequest) {
   // scenario A: no manual opening balance required).
   const isLiveBalance = isAccountBacked || sourceType === 'CASHIER_DRAWER'
 
+  const companyId = await tenantCompanyId(user)
+  if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
+
   let companyPaymentAccountId: string | null = null
   if (isAccountBacked) {
     if (!body.companyPaymentAccountId) return NextResponse.json({ error: `${sourceType} funding sources require companyPaymentAccountId` }, { status: 400 })
     const account = await prisma.companyPaymentAccount.findUnique({ where: { id: String(body.companyPaymentAccountId) } })
     if (!account) return NextResponse.json({ error: 'companyPaymentAccountId does not reference a known payment account' }, { status: 400 })
+    if (account.companyId !== companyId) return NextResponse.json({ error: 'companyPaymentAccountId does not belong to your company' }, { status: 400 })
     companyPaymentAccountId = account.id
   }
-
-  const companyId = await resolveDefaultCompanyId(prisma)
-  if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
+  if (body.outletId && !(await outletInCompany(prisma, String(body.outletId), companyId))) {
+    return NextResponse.json({ error: 'outletId does not belong to your company' }, { status: 400 })
+  }
+  if (body.responsibleUserId) {
+    const responsible = await prisma.user.findFirst({ where: { id: String(body.responsibleUserId), ...(await memberOfCompanyWhere(prisma, companyId)) }, select: { id: true } })
+    if (!responsible) return NextResponse.json({ error: 'responsibleUserId does not belong to your company' }, { status: 400 })
+  }
 
   const dupe = await prisma.fundingSource.findUnique({ where: { companyId_code: { companyId, code } } })
   if (dupe) return NextResponse.json({ error: `A funding source with code ${code} already exists` }, { status: 409 })

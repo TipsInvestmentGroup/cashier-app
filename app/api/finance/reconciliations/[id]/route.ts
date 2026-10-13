@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canViewFinance } from '@/lib/finance-access'
+import { tenantCompanyId } from '@/lib/tenant'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -12,6 +13,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const rec = await prisma.accountReconciliation.findUnique({
     where: { id }, include: { companyPaymentAccount: true, items: { orderBy: { transactionDate: 'asc' } } },
   })
-  if (!rec) return NextResponse.json({ error: 'Reconciliation not found' }, { status: 404 })
+  const companyId = await tenantCompanyId(user)
+  if (!rec || !companyId || rec.companyPaymentAccount.companyId !== companyId) return NextResponse.json({ error: 'Reconciliation not found' }, { status: 404 })
   return NextResponse.json(rec)
 }

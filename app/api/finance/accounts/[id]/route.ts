@@ -4,6 +4,7 @@ import { getAuthUser } from '@/lib/auth'
 import { canManageFinance } from '@/lib/finance-access'
 import { RESOURCES } from '@/lib/rbac'
 import { fieldDiff } from '@/lib/utils'
+import { tenantCompanyId } from '@/lib/tenant'
 
 /** Edit / disable / archive an account. isSystemAccount rows can be renamed
  *  but not deactivated or reparented — they're what FinanceAccountMapping
@@ -17,7 +18,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const account = await prisma.account.findUnique({ where: { id } })
-  if (!account) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+  if (!account || account.companyId !== (await tenantCompanyId(user))) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
   const data: Record<string, unknown> = {}
@@ -27,7 +28,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (account.isSystemAccount && !body.isActive) return NextResponse.json({ error: 'A system account cannot be deactivated' }, { status: 400 })
     data.isActive = body.isActive
   }
-  if ('parentId' in body && !account.isSystemAccount) data.parentId = body.parentId || null
+  if ('parentId' in body && !account.isSystemAccount) {
+    if (body.parentId) {
+      const parent = await prisma.account.findUnique({ where: { id: String(body.parentId) }, select: { companyId: true } })
+      if (!parent || parent.companyId !== account.companyId) return NextResponse.json({ error: 'Parent account does not belong to your company' }, { status: 400 })
+    }
+    data.parentId = body.parentId || null
+  }
 
   const updated = await prisma.account.update({ where: { id }, data })
   await prisma.auditLog.create({ data: { userId: user.userId, action: 'UPDATE', entity: 'Account', entityId: id, details: `Updated account ${updated.code}: ${fieldDiff(account, data)}` } })

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 import { resolveResourcePermission, WRITE_OFF_RESOURCES } from '@/lib/rbac'
 import { rejectWriteOff } from '@/lib/write-off'
 
@@ -12,6 +14,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const { id } = await params
+  const callerCompany = await tenantCompanyId(user)
+  const owned = await prisma.writeOffRequest.findUnique({ where: { id }, select: { companyId: true } })
+  if (!callerCompany || !owned || owned.companyId !== callerCompany) return NextResponse.json({ error: 'Write-off request not found' }, { status: 404 })
   const body = await req.json().catch(() => ({}))
   if (!body.comment) return NextResponse.json({ error: 'A comment is required to reject a write-off request' }, { status: 400 })
 

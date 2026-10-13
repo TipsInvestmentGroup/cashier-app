@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId } from '@/lib/tenant'
 import { BUDGET_VALIDATION_MODES, VERIFICATION_STAGES } from '@/lib/expense-config'
 
 // Normalizes an optional JSON string-array field (requiredFields,
@@ -34,8 +34,11 @@ export async function GET(req: NextRequest) {
   // Archived rows are hidden from EVERY caller (admin included) — kept only so
   // historical requests stay readable, never re-selectable. ADMIN still sees
   // inactive-but-not-archived rows to manage them in Expense Settings.
+  const companyId = await tenantCompanyId(user)
+  if (!companyId) return NextResponse.json([])
+
   const types = await prisma.requestType.findMany({
-    where: user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false },
+    where: { companyId, ...(user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false }) },
     orderBy: [{ name: 'asc' }],
     include: { _count: { select: { requests: true } } },
   })
@@ -59,11 +62,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `budgetValidation must be one of ${BUDGET_VALIDATION_MODES.join(', ')}` }, { status: 400 })
   }
 
-  const companyId = await resolveDefaultCompanyId(prisma)
+  const companyId = await tenantCompanyId(user)
   if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
 
   const dupe = await prisma.requestType.findUnique({ where: { companyId_code: { companyId, code } } })
   if (dupe) return NextResponse.json({ error: `A request type with code ${code} already exists` }, { status: 409 })
+
+  // Allowed category / funding-source ids must belong to the caller's company.
+  const allowedCategoryIds = Array.isArray(body.allowedCategoryIds) ? body.allowedCategoryIds.map(String).filter(Boolean) : []
+  if (allowedCategoryIds.length) {
+    const n = await prisma.expenseCategory.count({ where: { id: { in: allowedCategoryIds }, companyId } })
+    if (n !== new Set(allowedCategoryIds).size) return NextResponse.json({ error: 'allowedCategoryIds contains a category that does not belong to your company' }, { status: 400 })
+  }
+  const allowedFundingSourceIds = Array.isArray(body.allowedFundingSourceIds) ? body.allowedFundingSourceIds.map(String).filter(Boolean) : []
+  if (allowedFundingSourceIds.length) {
+    const n = await prisma.fundingSource.count({ where: { id: { in: allowedFundingSourceIds }, companyId } })
+    if (n !== new Set(allowedFundingSourceIds).size) return NextResponse.json({ error: 'allowedFundingSourceIds contains a funding source that does not belong to your company' }, { status: 400 })
+  }
 
   let requiredVerificationStages: string | null
   try {

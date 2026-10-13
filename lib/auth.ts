@@ -23,6 +23,15 @@ export interface JWTPayload {
   position?: string
   /** Session-revocation epoch the token was signed with (see User.sessionEpoch). */
   sepoch?: number
+  /** The ACTIVE company this session is bound to (Membership.companyId). Absent only on tokens minted
+   *  before multi-company support shipped — those are resolved to the user's primary company on use
+   *  (lib/tenant.ts) and age out within the session lifetime. */
+  companyId?: string
+  /** True when this user is the owner of `companyId` (Membership.isOwner). */
+  owner?: boolean
+  /** Set ONLY on non-session tokens (company-selection step, platform admin). A normal session token
+   *  never has it; getAuthUser rejects anything that does, so those tokens can never act as a session. */
+  kind?: 'select' | 'platform'
 }
 
 // Session lifetime is configurable (default 8h ≈ one shift). Shorten via env
@@ -51,6 +60,18 @@ export function verifyToken(token: string): JWTPayload | null {
   }
 }
 
+/** Sign a short-lived token of a specific non-session `kind` (company selection, platform admin). */
+export function signKindToken(payload: Record<string, unknown> & { kind: 'select' | 'platform' }, expiresIn: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return jwt.sign(payload, JWT_SECRET, { expiresIn } as any)
+}
+
+/** Verify a token and require it to be of exactly `kind`. */
+export function verifyKindToken<T extends Record<string, unknown>>(token: string, kind: 'select' | 'platform'): (T & { kind: string }) | null {
+  const p = verifyToken(token) as unknown as (T & { kind?: string }) | null
+  return p && p.kind === kind ? (p as T & { kind: string }) : null
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12)
 }
@@ -77,7 +98,10 @@ export function getAuthUser(req: NextRequest): JWTPayload | null {
   const authHeader = req.headers.get('authorization')
   if (!authHeader?.startsWith('Bearer ')) return null
   const token = authHeader.slice(7)
-  return verifyToken(token)
+  const payload = verifyToken(token)
+  // Company-selection and platform-admin tokens are signed with the same key but are not sessions.
+  if (!payload || payload.kind) return null
+  return payload
 }
 
 /**
@@ -101,9 +125,39 @@ export async function requireActiveUser(req: NextRequest): Promise<JWTPayload | 
   if (!u || !u.isActive) return null
   // A token minted before the account's epoch was last bumped is revoked.
   if (typeof token.sepoch === 'number' && token.sepoch !== u.sessionEpoch) return null
+
+  // Multi-company: the session is bound to ONE company. Role / outlet / position come from the
+  // membership the token was issued for (they equal the User columns for single-company users), and
+  // the membership and company must still be active. A legacy token with no company claim falls back
+  // to the user's primary membership, if any (a user with no membership yet keeps the old behaviour).
+  const readMemberships = () => prisma.membership.findMany({
+    where: { userId: u.id, ...(token.companyId ? { companyId: token.companyId } : {}) },
+    orderBy: { createdAt: 'asc' },
+    select: { companyId: true, role: true, outletId: true, position: true, isOwner: true, isActive: true, company: { select: { status: true } } },
+  })
+  let memberships = await readMemberships()
+  if (memberships.length === 0 && !token.companyId) {
+    // A user who has never signed in since multi-company shipped has no membership yet: create the
+    // one their legacy role/outlet implies (lib/tenant.ts), so a pre-deploy token keeps working.
+    const { ensureMemberships } = await import('@/lib/tenant')
+    await ensureMemberships(prisma, { id: u.id, email: u.email, role: u.role, outletId: u.outletId, position: u.position, isActive: u.isActive })
+    memberships = await readMemberships()
+  }
+  if (token.companyId) {
+    const m = memberships[0]
+    if (!m || !m.isActive || m.company.status !== 'ACTIVE') return null
+    return {
+      userId: u.id, email: u.email, role: m.role, outletId: m.outletId ?? undefined,
+      name: u.name, position: m.position ?? undefined, sepoch: u.sessionEpoch,
+      companyId: m.companyId, owner: m.isOwner,
+    }
+  }
+  const primary = memberships.find((m) => m.isActive && m.company.status === 'ACTIVE')
+  if (memberships.length > 0 && !primary) return null
   return {
-    userId: u.id, email: u.email, role: u.role, outletId: u.outletId ?? undefined,
-    name: u.name, position: u.position ?? undefined, sepoch: u.sessionEpoch,
+    userId: u.id, email: u.email, role: primary?.role ?? u.role, outletId: (primary?.outletId ?? u.outletId) ?? undefined,
+    name: u.name, position: (primary?.position ?? u.position) ?? undefined, sepoch: u.sessionEpoch,
+    ...(primary ? { companyId: primary.companyId, owner: primary.isOwner } : {}),
   }
 }
 

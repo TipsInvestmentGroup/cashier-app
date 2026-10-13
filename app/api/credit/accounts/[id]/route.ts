@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 
 const STATUSES = ['ACTIVE', 'SUSPENDED', 'CLOSED', 'BLACKLISTED']
 
@@ -11,8 +12,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (user.role !== 'ADMIN') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
+  const callerCompany = await tenantCompanyId(user)
   const existing = await prisma.creditAccount.findUnique({ where: { id } })
-  if (!existing) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+  if (!existing || !callerCompany || existing.companyId !== callerCompany) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
   const data: Record<string, unknown> = {}

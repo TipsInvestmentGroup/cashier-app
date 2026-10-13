@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
+import { tenantCompanyId } from '@/lib/tenant'
 import { generateWebhookSecret, parseConnectorConfig, redactConnector } from '@/lib/webhook-signature'
 
 /** PATCH — toggle a connector's active state. Body: { isActive }. */
@@ -14,6 +15,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id } = await params
   const body = await req.json().catch(() => ({}))
+  const callerCompany = await tenantCompanyId(user)
+  const found = await prisma.paymentIntegrationConnector.findUnique({ where: { id }, select: { companyId: true } })
+  if (!callerCompany || !found || found.companyId !== callerCompany) return NextResponse.json({ error: 'Connector not found' }, { status: 404 })
   const connector = await prisma.paymentIntegrationConnector.update({ where: { id }, data: { isActive: !!body.isActive } })
   return NextResponse.json({ ok: true, connector: redactConnector(connector) })
 }
@@ -31,8 +35,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const { id } = await params
+  const callerCompany = await tenantCompanyId(user)
   const existing = await prisma.paymentIntegrationConnector.findUnique({ where: { id } })
-  if (!existing) return NextResponse.json({ error: 'Connector not found' }, { status: 404 })
+  if (!existing || !callerCompany || existing.companyId !== callerCompany) return NextResponse.json({ error: 'Connector not found' }, { status: 404 })
   if (existing.kind !== 'API_WEBHOOK') return NextResponse.json({ error: 'Only API_WEBHOOK connectors have a signing secret' }, { status: 400 })
 
   const webhookSecret = generateWebhookSecret()

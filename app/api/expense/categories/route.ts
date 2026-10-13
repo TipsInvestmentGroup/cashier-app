@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 
 /** GET — list expense categories. Any authenticated user (the New Expense
  *  Request form needs this to render); non-ADMIN only sees active ones. */
@@ -13,8 +13,11 @@ export async function GET(req: NextRequest) {
   // only to keep historical requests readable, never to be picked again. ADMIN
   // still sees inactive-but-not-archived rows so they can be managed in Expense
   // Settings; everyone else only sees active ones.
+  const companyId = await tenantCompanyId(user)
+  if (!companyId) return NextResponse.json([])
+
   const categories = await prisma.expenseCategory.findMany({
-    where: user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false },
+    where: { companyId, ...(user.role === 'ADMIN' ? { archived: false } : { isActive: true, archived: false }) },
     orderBy: [{ name: 'asc' }],
     include: { budgetAccount: { select: { id: true, code: true, name: true } }, _count: { select: { requests: true } } },
   })
@@ -33,7 +36,7 @@ export async function POST(req: NextRequest) {
   if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 })
   if (!code) return NextResponse.json({ error: 'Code is required' }, { status: 400 })
 
-  const companyId = await resolveDefaultCompanyId(prisma)
+  const companyId = await tenantCompanyId(user)
   if (!companyId) return NextResponse.json({ error: 'No company configured' }, { status: 400 })
 
   const dupe = await prisma.expenseCategory.findUnique({ where: { companyId_code: { companyId, code } } })
@@ -46,7 +49,14 @@ export async function POST(req: NextRequest) {
   if (!body.budgetAccountId) return NextResponse.json({ error: 'Pick a GL account for this category (choose "9000 Unclassified / Suspense" only for a deliberate uncategorized bucket)' }, { status: 400 })
   const account = await prisma.account.findUnique({ where: { id: String(body.budgetAccountId) } })
   if (!account) return NextResponse.json({ error: 'budgetAccountId does not reference a known account' }, { status: 400 })
+  if (account.companyId !== companyId) return NextResponse.json({ error: 'budgetAccountId does not belong to your company' }, { status: 400 })
   const budgetAccountId: string = account.id
+  if (body.eventId) {
+    const event = await prisma.event.findUnique({ where: { id: String(body.eventId) }, select: { outletId: true } })
+    if (!event || !(await outletInCompany(prisma, event.outletId, companyId))) {
+      return NextResponse.json({ error: 'eventId does not belong to your company' }, { status: 400 })
+    }
+  }
 
   const category = await prisma.expenseCategory.create({
     data: {

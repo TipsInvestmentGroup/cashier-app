@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole, writeOutletId, readOutletScope, CASHIER_ROLES } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { startOfDay } from 'date-fns'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 import { overlayEnginePrices, type ResolvedLine } from '@/lib/sales-import'
 
 const db = prisma as any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -53,7 +54,11 @@ export async function POST(req: NextRequest) {
   const blocking = lines.filter((l) => l.issues?.some((i) => i === 'UNKNOWN_STAFF' || i === 'MISSING_STAFF' || i === 'MISSING_VALUE'))
   if (blocking.length) return NextResponse.json({ error: `${blocking.length} row(s) still have unresolved staff or missing values. Fix them before submitting.` }, { status: 400 })
 
-  const company = await prisma.outlet.findUnique({ where: { id: outletId }, select: { companyId: true } })
+  // The import belongs to the caller's (session) company, and its outlet must too.
+  const companyId = await tenantCompanyId(user)
+  if (!companyId || !(await outletInCompany(prisma, outletId, companyId))) {
+    return NextResponse.json({ error: 'Outlet not found' }, { status: 404 })
+  }
 
   const eventId = body.eventId || null
   const customerGroupId = body.customerGroupId || null
@@ -97,7 +102,7 @@ export async function POST(req: NextRequest) {
 
   const created = await db.salesImport.create({
     data: {
-      companyId: company?.companyId || null,
+      companyId,
       outletId,
       eventId,
       customerGroupId,

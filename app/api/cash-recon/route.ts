@@ -10,7 +10,8 @@ import { generateBillReference } from '@/lib/bill-reference'
 import { syncFromCashRecon } from '@/lib/payment-verification'
 import { autoSettleExcessPayment } from '@/lib/excess-settlement'
 import { postJournalEntry } from '@/lib/ledger'
-import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
+import { resolveAccountId, resolveChannelAccountId } from '@/lib/finance-mapping'
+import { tenantCompanyId, outletInCompany } from '@/lib/tenant'
 import { previousClosing, computeCash, businessTodayUtc, utcDayRange } from '@/lib/cash-recon'
 import { startOfDay, parse, isValid } from 'date-fns'
 
@@ -61,6 +62,12 @@ export async function POST(req: NextRequest) {
   const rawExcessItems: { id?: string; amount: number; reason: string; staffId?: string; personId?: string }[] = Array.isArray(body.excessItems) ? body.excessItems : []
   // Cashiers always reconcile their own outlet.
   const usedOutletId = writeOutletId(user, outletId)
+  // The company is the caller's (session) company, never derived from the outlet or a default; the outlet
+  // being reconciled must belong to it.
+  const companyId = await tenantCompanyId(user)
+  if (usedOutletId && (!companyId || !(await outletInCompany(prisma, usedOutletId, companyId)))) {
+    return NextResponse.json({ error: 'Outlet not found' }, { status: 404 })
+  }
   // UTC-midnight of the target business date, matching how the date columns are
   // stored (host-independent — see lib/cash-recon.ts). Falls back to the outlet's
   // current business day (cutover-aware), not the raw server clock.
@@ -243,8 +250,6 @@ export async function POST(req: NextRequest) {
     // pay down outstanding CollectionExcess balances (that portion posts its
     // own Dr Excess-Payable / Cr Cash inside autoSettleExcessPayment) — only
     // the unmatched remainder is a genuine Sales-Revenue reversal.
-    const outlet = usedOutletId ? await tx.outlet.findUnique({ where: { id: usedOutletId }, select: { companyId: true } }) : null
-    const companyId = outlet?.companyId || (await resolveDefaultCompanyId(tx))
     if (companyId) {
       const freshItems = await tx.cashReconExcess.findMany({ where: { cashReconId: saved.id } })
       const excessNetOfAutoSettlement = roundMoney(freshItems.reduce((s, it) => s + roundMoney(it.amount - it.settledAsSourceAmount), 0))

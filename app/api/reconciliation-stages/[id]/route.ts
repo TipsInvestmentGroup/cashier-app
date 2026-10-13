@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
+import { tenantCompanyId } from '@/lib/tenant'
 import { resolveResourcePermission, RECONCILIATION_STAGE_RESOURCES } from '@/lib/rbac'
 import { checkGraceAndEscalate } from '@/lib/reconciliation-stage'
 
@@ -13,6 +14,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 
   const { id } = await params
+  // Verify ownership BEFORE the escalation side effect runs.
+  const callerCompany = await tenantCompanyId(user)
+  const owned = await prisma.reconciliationStage.findUnique({ where: { id }, select: { companyId: true } })
+  if (!callerCompany || !owned || owned.companyId !== callerCompany) return NextResponse.json({ error: 'Stage not found' }, { status: 404 })
   await checkGraceAndEscalate(id)
 
   const stage = await prisma.reconciliationStage.findUnique({
