@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { requireActiveUser } from '@/lib/auth'
 import { ownerEmail } from '@/lib/owner'
 import { ensureMemberships, usableMemberships } from '@/lib/tenant'

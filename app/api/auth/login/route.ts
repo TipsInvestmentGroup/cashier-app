@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { randomBytes } from 'crypto'
 import { comparePassword, hashPassword, signKindToken } from '@/lib/auth'
 import { ensureMemberships, issueSession, pickMembership, usableMemberships } from '@/lib/tenant'

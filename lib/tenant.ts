@@ -1,5 +1,5 @@
 import type { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { getAuthUser, signToken, type JWTPayload } from '@/lib/auth'
 import { isOwnerEmail } from '@/lib/owner'
 
