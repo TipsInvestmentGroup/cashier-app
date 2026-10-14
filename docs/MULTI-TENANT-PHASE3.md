@@ -29,11 +29,32 @@ Rollout order is forgiving: the migration only adds nullable columns, so old app
 before or after; new rows are stamped from the first request of the new code. If anything misbehaves, set `TENANT_STAMP=off`
 (rows then arrive unstamped and the next backfill assigns them); promoting the previous deployment is also safe.
 
+## 3e Per-company unique keys — DONE (two PRs: expand, then contract)
+Master-data names/codes are now unique **per company** instead of across the whole database, for 17 keys: `Outlet.name`,
+`Department.name`, `PettyFunction.name`, `Product.code`, `ProductCategory.code`, `Warehouse.name`, `Supplier.name`,
+`PersonCategory.code`, `PaymentChannel.code`, `CancellationReason.code`, `ExcessReason.code`, `BillTypeConfig.code`,
+`PosProductExtra.name`, `CollectionTemplate.code`, `Person[type,code]`, `RolePermission[role,resource]`,
+`UserPermission[userId,resource]` — each becomes `[companyId, …]`.
+
+- **Expand PR** (`20261015100000_unique_keys_per_company_expand`): adds the 17 per-company unique indexes **alongside** the
+  old global ones, and moves every lookup/upsert to the per-company key (`companyKey()` in `lib/tenant.ts` gives the
+  current company, or the original company in scripts/cron). Behaviour for TIPS is unchanged: the old keys still apply,
+  so nothing that was rejected before is accepted now. Seed (`lib/seed-core.ts`) creates the company and assigns
+  pre-existing rows to it *before* its keyed upserts, so re-seeding an existing database creates no duplicates.
+  The index build fails only if two rows of the same company already share a name/code — impossible while the global
+  key is in force.
+- **Contract PR**: drops the 17 old global indexes. Only after this can a second company reuse a name/code that TIPS
+  uses ("Main", "CASH", "Bar"…). Until then the nine "seed defaults on first use" screens (bill types, bill-reference
+  config, cancellation reasons, departments, excess reasons, functions, payment channels, person categories,
+  excess-loss report) return HTTP 500 for a second company because its defaults collide with TIPS's codes.
+  Verified in the contract state: guard test 66/66 (62/62 in expand), leak crawl of 205 GET routes as TIPS and as a
+  second company: 0 leaks either way, those nine screens 500 → 200, no other status changes.
+- Rollback: expand — revert the code (indexes are harmless); contract — recreate the 17 global indexes (they rebuild
+  only while no two companies share a code).
+
 ## Not in this change — remaining Phase 3 steps (in order)
-1. **3e Unique-key swaps.** Per-company uniqueness for `Outlet.name`, `Product.code`, `Supplier.name`, `Warehouse.name`,
-   `Department.name`, `PaymentChannel.code`, `PersonCategory.code`, `Person[type,code]`, `RolePermission`, document numbers
-   (`PosOrder.orderNo`, PO/GRN/TRF numbers, `JournalEntry.entryNumber`, bill references…). Needs every `findUnique({where:{code}})` /
-   `upsert` call site rewritten to the composite key (the compiler lists them) — a code change, so it follows the contract.
+1. **3e (rest) Document numbers.** `PosOrder.orderNo`, PO/GRN/TRF numbers, `JournalEntry.entryNumber`, bill references
+   are still globally unique — they move with 3f's per-company counters.
 2. **3f Per-company numbering.** Counters keyed by company (`BillSequenceCounter`, `ExpenseRequestSequence`, `count()+1` PO/GRN/TRF numbers → race-safe counters).
 3. **3g `Setting` → per-company.** Key redesign to `(companyId, key)` + a `CompanyConfig` (branding, currency, VAT, receipt text); move the 15 keys; per-company caches.
 4. **3h Contract.** Apply `scripts/gen-tenancy-contract-sql.ts` as a reviewed migration together with `schema.prisma` (`String?` → `String`), after: census READY across a soak period, a clone-of-production rehearsal, and an agreed TIPS window.

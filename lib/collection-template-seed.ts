@@ -6,16 +6,22 @@
 // outlets have a `defaultTemplateId` to point at, ready for the Template
 // Designer (a later phase) to read and for new custom templates to sit
 // alongside without special-casing "no template selected".
+/** The original company (TIPS). One definition shared by every seed; idempotent (upsert by name). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function seedStandardCollectionTemplate(prisma: any, outletIds: string[]) {
-  const company = await prisma.company.upsert({
+export async function ensureTipsCompany(prisma: any): Promise<{ id: string; name: string }> {
+  return prisma.company.upsert({
     where: { name: 'TIPS Investment Group' },
     update: {},
     create: { name: 'TIPS Investment Group', legalName: 'TIPS INVESTMENT LTD', tin: '132-051-100', vrn: '40-028205-X' },
   })
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function seedStandardCollectionTemplate(prisma: any, outletIds: string[]) {
+  const company = await ensureTipsCompany(prisma)
 
   const template = await prisma.collectionTemplate.upsert({
-    where: { code: 'STANDARD_STAFF_COLLECTION' },
+    where: { companyId_code: { companyId: company.id, code: 'STANDARD_STAFF_COLLECTION' } },
     update: { companyId: company.id, isDefault: true },
     create: {
       companyId: company.id,

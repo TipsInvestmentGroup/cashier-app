@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
+import { ensureTipsCompany } from './collection-template-seed'
 
 // The outlets the business runs. Add/rename here if needed.
 export const OUTLET_NAMES = ['Mikocheni Outlet', 'Coco Beach Outlet', 'Tips Events']
@@ -31,9 +32,10 @@ export function loadTeamRoster(): TeamMember[] {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function setupTeam(prisma: any, tempPassword: string) {
+  const { id: companyId } = await ensureTipsCompany(prisma)
   const outletMap: Record<string, string> = {}
   for (const name of OUTLET_NAMES) {
-    const o = await prisma.outlet.upsert({ where: { name }, update: {}, create: { name } })
+    const o = await prisma.outlet.upsert({ where: { companyId_name: { companyId, name } }, update: {}, create: { companyId, name } })
     outletMap[name] = o.id
   }
 

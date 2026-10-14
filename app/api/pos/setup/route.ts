@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireCronSecret } from '@/lib/cron-auth'
+import { companyKey } from '@/lib/tenant'
 
 /**
  * /api/pos/setup — idempotent seed of tables, counters, and extras. The secret is
@@ -50,8 +51,9 @@ async function handle(req: NextRequest) {
   }
 
   const EXTRAS = ['Barafu', 'Straw', 'Lemon', 'Sugar', 'Soda', 'Water (Mixer)', 'No Ice']
+  const companyId = await companyKey() // cron context: the original company (legacy behaviour)
   for (const name of EXTRAS) {
-    await prisma.posProductExtra.upsert({ where: { name }, update: {}, create: { name } })
+    await prisma.posProductExtra.upsert({ where: { companyId_name: { companyId, name } }, update: {}, create: { name, companyId } })
   }
 
   return NextResponse.json({ ok: true, outlets: outlets.length, tablesCreated, countersCreated })

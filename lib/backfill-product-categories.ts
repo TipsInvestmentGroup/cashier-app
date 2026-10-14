@@ -4,6 +4,8 @@
 // See prisma/schema.prisma's comment on Product.category for why both the
 // legacy string and the new relation coexist.
 
+import { ensureTipsCompany } from './collection-template-seed'
+
 function slugify(label: string): string {
   return label.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'CATEGORY'
 }
@@ -13,10 +15,11 @@ export async function backfillProductCategories(prisma: any) {
   const products: { id: string; category: string | null }[] = await prisma.product.findMany({ where: { category: { not: null } }, select: { id: true, category: true } })
   const labels: string[] = [...new Set(products.map((p) => (p.category as string).trim()).filter(Boolean))]
 
+  const { id: companyId } = await ensureTipsCompany(prisma)
   const idByLabel = new Map<string, string>()
   for (const label of labels) {
     const code = slugify(label)
-    const cat: { id: string } = await prisma.productCategory.upsert({ where: { code }, update: { label }, create: { code, label } })
+    const cat: { id: string } = await prisma.productCategory.upsert({ where: { companyId_code: { companyId, code } }, update: { label }, create: { companyId, code, label } })
     idByLabel.set(label, cat.id)
   }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
+import { companyKey } from '@/lib/tenant'
 
 const DEFAULTS = [
   { code: 'ADMIN', label: 'Admin' },
@@ -19,7 +20,8 @@ export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if ((await prisma.personCategory.count()) === 0) {
-    for (const d of DEFAULTS) await prisma.personCategory.upsert({ where: { code: d.code }, update: {}, create: d })
+    const companyId = await companyKey()
+    for (const d of DEFAULTS) await prisma.personCategory.upsert({ where: { companyId_code: { companyId, code: d.code } }, update: {}, create: { ...d, companyId } })
   }
   const items = await prisma.personCategory.findMany({ orderBy: { label: 'asc' } })
   return NextResponse.json(items)

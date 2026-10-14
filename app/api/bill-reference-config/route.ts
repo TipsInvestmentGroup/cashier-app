@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
+import { companyKey, singletonId } from '@/lib/tenant'
 import { DEFAULT_REFERENCE_COMPONENTS, DATE_FORMAT_OPTIONS, SEPARATOR_OPTIONS, PERSON_NUMBERING_MODES, SEQUENCE_RESET_RULES } from '@/lib/bill-reference-defaults'
 
 const CAN_MANAGE = ['ADMIN', 'DIRECTOR']
@@ -11,21 +12,23 @@ const CAN_MANAGE = ['ADMIN', 'DIRECTOR']
  *  doesn't filter to isEnabled, since the settings UI needs to show disabled
  *  components too so they can be re-enabled. */
 async function loadFullConfig() {
+  const id = await singletonId('default')
   const existing = await prisma.billReferenceConfig.findUnique({
-    where: { id: 'default' },
+    where: { id },
     include: { components: { orderBy: { order: 'asc' } } },
   })
   if (existing) return existing
   try {
+    const companyId = await companyKey()
     return await prisma.billReferenceConfig.create({
-      data: { id: 'default', components: { create: DEFAULT_REFERENCE_COMPONENTS } },
+      data: { id, companyId, components: { create: DEFAULT_REFERENCE_COMPONENTS } },
       include: { components: { orderBy: { order: 'asc' } } },
     })
   } catch (err) {
     // Concurrent first-ever-use race — recover by re-reading rather than failing.
     if (err instanceof Error && err.message.includes('Unique')) {
       const created = await prisma.billReferenceConfig.findUnique({
-        where: { id: 'default' },
+        where: { id },
         include: { components: { orderBy: { order: 'asc' } } },
       })
       if (created) return created
@@ -76,8 +79,9 @@ export async function PUT(req: NextRequest) {
   // the settings page may PUT format settings before ever GET-ing the config.
   await loadFullConfig()
 
+  const configId = await singletonId('default')
   const updated = await prisma.billReferenceConfig.update({
-    where: { id: 'default' },
+    where: { id: configId },
     data: {
       ...(dateFormat !== undefined && { dateFormat }),
       ...(customDateFormat !== undefined && { customDateFormat: customDateFormat || null }),
@@ -95,7 +99,7 @@ export async function PUT(req: NextRequest) {
       userId: user.userId,
       action: 'UPDATE',
       entity: 'BillReferenceConfig',
-      entityId: 'default',
+      entityId: configId,
       details: `Updated Bill Reference format settings (dateFormat=${updated.dateFormat}, separator=${updated.separator}, numberPadding=${updated.numberPadding}, personNumberingMode=${updated.personNumberingMode}, sequenceResetRule=${updated.sequenceResetRule})`,
     },
   })

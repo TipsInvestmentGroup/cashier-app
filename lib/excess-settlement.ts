@@ -17,6 +17,7 @@ import { roundMoney } from '@/lib/utils'
 import { postJournalEntry } from '@/lib/ledger'
 import { resolveAccountId, resolveChannelAccountId, resolveDefaultCompanyId } from '@/lib/finance-mapping'
 import { classForReason } from '@/lib/reconciliation-classification'
+import { companyKey } from '@/lib/tenant'
 
 export interface AutoSettleResult {
   allocated: number
@@ -36,7 +37,7 @@ export async function autoSettleExcessPayment(tx: Db, opts: {
   const amount = roundMoney(opts.amount)
   if (amount <= 0) return { allocated: 0, remainder: 0, settlements: [] }
 
-  const reasonRow = await tx.excessReason.findUnique({ where: { code: opts.reason } })
+  const reasonRow = await tx.excessReason.findUnique({ where: { companyId_code: { companyId: await companyKey(), code: opts.reason } } })
   const strategy = reasonRow?.allocationStrategy === 'LIFO' ? 'LIFO' : 'FIFO'
 
   const candidates = await tx.collectionExcess.findMany({

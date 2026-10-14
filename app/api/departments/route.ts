@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManageDepartments } from '@/lib/petty-access'
+import { companyKey } from '@/lib/tenant'
 
 const DEFAULTS = ['Maintenance', 'Procurement', 'Store Expenses', 'Security', 'Marketing', 'Managers Expenses']
 
@@ -12,8 +13,9 @@ export async function GET(req: NextRequest) {
 
   const count = await prisma.department.count()
   if (count === 0) {
+    const companyId = await companyKey()
     for (const name of DEFAULTS) {
-      await prisma.department.upsert({ where: { name }, update: {}, create: { name } })
+      await prisma.department.upsert({ where: { companyId_name: { companyId, name } }, update: {}, create: { name, companyId } })
     }
   }
 
