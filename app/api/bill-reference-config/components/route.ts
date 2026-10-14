@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
+import { companyKey, singletonId } from '@/lib/tenant'
 import { REFERENCE_COMPONENT_TYPES } from '@/lib/bill-reference-defaults'
 
 const CAN_MANAGE = ['ADMIN', 'DIRECTOR']
@@ -49,13 +50,15 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'Each component type may only appear once' }, { status: 400 })
   }
 
+  const configId = await singletonId('default')
+  const companyId = await companyKey()
   const result = await prisma.$transaction(async (tx) => {
-    // Ensure the singleton row exists (a client could in theory hit this
+    // Ensure this company's config row exists (a client could in theory hit this
     // endpoint before ever GET-ing /api/bill-reference-config).
-    await tx.billReferenceConfig.upsert({ where: { id: 'default' }, update: {}, create: { id: 'default' } })
+    await tx.billReferenceConfig.upsert({ where: { id: configId }, update: {}, create: { id: configId, companyId } })
 
     if (deleteIds.length) {
-      const toDelete = await tx.billReferenceComponent.findMany({ where: { id: { in: deleteIds }, configId: 'default' } })
+      const toDelete = await tx.billReferenceComponent.findMany({ where: { id: { in: deleteIds }, configId } })
       const safeDeleteIds = toDelete.filter((c) => !CORE_TYPES.has(c.type)).map((c) => c.id)
       if (safeDeleteIds.length) await tx.billReferenceComponent.deleteMany({ where: { id: { in: safeDeleteIds } } })
     }
@@ -64,13 +67,13 @@ export async function PUT(req: NextRequest) {
       const label = String(c.label).trim()
       const staticValue = c.type === 'STATIC_TEXT' ? (c.staticValue ?? null) : null
       await tx.billReferenceComponent.upsert({
-        where: { configId_type: { configId: 'default', type: c.type } },
+        where: { configId_type: { configId, type: c.type } },
         update: { label, order: Number(c.order) || 0, isEnabled: !!c.isEnabled, staticValue },
-        create: { configId: 'default', type: c.type, label, order: Number(c.order) || 0, isEnabled: !!c.isEnabled, staticValue },
+        create: { configId, type: c.type, label, order: Number(c.order) || 0, isEnabled: !!c.isEnabled, staticValue },
       })
     }
 
-    return tx.billReferenceComponent.findMany({ where: { configId: 'default' }, orderBy: { order: 'asc' } })
+    return tx.billReferenceComponent.findMany({ where: { configId }, orderBy: { order: 'asc' } })
   })
 
   await prisma.auditLog.create({
@@ -78,7 +81,7 @@ export async function PUT(req: NextRequest) {
       userId: user.userId,
       action: 'UPDATE',
       entity: 'BillReferenceComponent',
-      entityId: 'default',
+      entityId: configId,
       details: `Updated Bill Reference component layout (${result.length} components${deleteIds.length ? `, removed ${deleteIds.length}` : ''})`,
     },
   })

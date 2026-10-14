@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { roundMoney } from '@/lib/utils'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
+import { companyKey } from '@/lib/tenant'
 
 const MANAGERS = ['ADMIN', 'ACCOUNTANT', 'MANAGER']
 const UNITS = ['unit', 'kg', 'crate 24 bottle', 'crate 25 bottle', 'crate 6 bottle']
@@ -10,11 +11,12 @@ const UNITS = ['unit', 'kg', 'crate 24 bottle', 'crate 25 bottle', 'crate 6 bott
 /** Build a human-readable, unique product code from the name (e.g. "Coca Cola" → COC-001). */
 async function generateCode(name: string): Promise<string> {
   const base = (String(name).replace(/[^a-zA-Z0-9]/g, '').slice(0, 3) || 'PRD').toUpperCase().padEnd(3, 'X')
+  const companyId = await companyKey()
   let n = (await prisma.product.count({ where: { code: { startsWith: `${base}-` } } })) + 1
   // ensure uniqueness even if codes were deleted/reused
   while (true) {
     const code = `${base}-${String(n).padStart(3, '0')}`
-    const exists = await prisma.product.findUnique({ where: { code } })
+    const exists = await prisma.product.findUnique({ where: { companyId_code: { companyId, code } } })
     if (!exists) return code
     n++
   }

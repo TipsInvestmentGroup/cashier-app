@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { companyKey } from '@/lib/tenant'
 
 export async function GET(req: NextRequest) {
   const payload = getAuthUser(req)
@@ -22,10 +23,11 @@ export async function POST(req: NextRequest) {
   const { name } = await req.json()
   if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
 
+  const companyId = await companyKey()
   const extra = await prisma.posProductExtra.upsert({
-    where: { name: name.trim() },
+    where: { companyId_name: { companyId, name: name.trim() } },
     update: { isActive: true },
-    create: { name: name.trim() },
+    create: { name: name.trim(), companyId },
   })
   return NextResponse.json(extra, { status: 201 })
 }

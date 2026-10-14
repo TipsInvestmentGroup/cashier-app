@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
+import { companyKey } from '@/lib/tenant'
 import { DEFAULT_PAYMENT_CHANNELS as DEFAULTS } from '@/lib/payment-channels-defaults'
 
 const toCode = (s: string) => String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
@@ -11,7 +12,8 @@ export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if ((await prisma.paymentChannel.count()) === 0) {
-    for (const d of DEFAULTS) await prisma.paymentChannel.upsert({ where: { code: d.code }, update: {}, create: d })
+    const companyId = await companyKey()
+    for (const d of DEFAULTS) await prisma.paymentChannel.upsert({ where: { companyId_code: { companyId, code: d.code } }, update: {}, create: { ...d, companyId } })
   }
   const items = await prisma.paymentChannel.findMany({ orderBy: { createdAt: 'asc' } })
   return NextResponse.json(items)

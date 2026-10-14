@@ -150,7 +150,7 @@ export async function resolveDefaultCompanyId(db: Db): Promise<string | null> {
  * exactly one place.
  */
 export async function resolveChannelAccountId(db: Db, opts: { companyId: string; channelCode: string; outletId?: string | null }): Promise<string> {
-  const channel = await db.paymentChannel.findUnique({ where: { code: opts.channelCode } })
+  const channel = await db.paymentChannel.findUnique({ where: { companyId_code: { companyId: opts.companyId, code: opts.channelCode } } })
   if (channel) {
     if (opts.outletId) {
       const outletDefault = await db.companyPaymentAccount.findFirst({
