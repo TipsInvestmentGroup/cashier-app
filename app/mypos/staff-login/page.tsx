@@ -56,23 +56,38 @@ export default function StaffLoginPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  // Company code for this terminal (needed only once several companies exist; remembered on the device).
+  const [companyCode, setCompanyCode] = useState('')
+  const [needCompany, setNeedCompany] = useState(false)
+  const [codeInput, setCodeInput] = useState('')
+  const companyQs = useCallback((sep: '?' | '&') => (companyCode ? `${sep}company=${encodeURIComponent(companyCode)}` : ''), [companyCode])
+
   useEffect(() => {
-    fetch('/api/auth/pin-login/outlets')
-      .then((r) => (r.ok ? r.json() : []))
+    try { setCompanyCode(localStorage.getItem('mypos_company') || '') } catch { /* storage unavailable */ }
+  }, [])
+
+  useEffect(() => {
+    setLoadingOutlets(true)
+    fetch(`/api/auth/pin-login/outlets${companyQs('?')}`)
+      .then(async (r) => {
+        if (r.status === 400 && (await r.json().catch(() => ({}))).needsCompany) { setNeedCompany(true); return [] }
+        setNeedCompany(false)
+        return r.ok ? r.json() : []
+      })
       .then(setOutlets)
       .finally(() => setLoadingOutlets(false))
-  }, [])
+  }, [companyQs])
 
   const pickOutlet = useCallback((o: Outlet) => {
     setOutlet(o)
     setStep('staff')
     setSearch('')
     setLoadingStaff(true)
-    fetch(`/api/auth/pin-login/staff?outletId=${o.id}`)
+    fetch(`/api/auth/pin-login/staff?outletId=${o.id}${companyQs('&')}`)
       .then((r) => (r.ok ? r.json() : []))
       .then(setStaff)
       .finally(() => setLoadingStaff(false))
-  }, [])
+  }, [companyQs])
 
   const backToOutlets = useCallback(() => { setStep('outlet'); setOutlet(null); setStaff([]); setSearch('') }, [])
 
@@ -146,7 +161,21 @@ export default function StaffLoginPage() {
 
       {/* Body */}
       <div className="flex-1 min-h-0 bg-white rounded-t-[2rem] sm:rounded-t-[2.5rem] shadow-2xl flex flex-col overflow-hidden">
-        {step === 'outlet' && (
+        {step === 'outlet' && needCompany && (
+          <div className="flex-1 flex items-center justify-center p-6">
+            <form
+              onSubmit={(e) => { e.preventDefault(); const c = codeInput.trim().toLowerCase(); if (!c) return; try { localStorage.setItem('mypos_company', c) } catch { /* ignore */ } setCompanyCode(c) }}
+              className="w-full max-w-sm space-y-4 text-center"
+            >
+              <h2 className="text-xl font-bold text-gray-800">Company code</h2>
+              <p className="text-sm text-gray-500">Enter your company code once to set up this terminal.</p>
+              <input value={codeInput} onChange={(e) => setCodeInput(e.target.value)} autoFocus autoCapitalize="none" autoComplete="off"
+                className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-indigo-500 focus:outline-none text-lg text-center" placeholder="e.g. acme" />
+              <button type="submit" className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700">Continue</button>
+            </form>
+          </div>
+        )}
+        {step === 'outlet' && !needCompany && (
           <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
             {loadingOutlets ? (
               <div className="text-gray-400 text-lg">Loading outlets...</div>

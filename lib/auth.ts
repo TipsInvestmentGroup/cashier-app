@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 
 // A missing JWT_SECRET in production means every token is signed with this
 // well-known string — anyone could forge an ADMIN token and bypass all

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { getAuthUser, comparePassword, hashPassword, signToken, type JWTPayload } from '@/lib/auth'
 import { limitEveryRequest } from '@/lib/rate-limit'
 import { ownerEmail } from '@/lib/owner'

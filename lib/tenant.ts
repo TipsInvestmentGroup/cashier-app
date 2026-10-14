@@ -1,7 +1,8 @@
 import type { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { getAuthUser, signToken, type JWTPayload } from '@/lib/auth'
-import { isOwnerEmail } from '@/lib/owner'
+import { isOwnerEmail, ownerEmail } from '@/lib/owner'
+import { originalCompanyId, runAsCompany, sessionCompany } from '@/lib/tenant-context'
 
 /**
  * Multi-company tenancy layer (Phase 2).
@@ -180,6 +181,85 @@ export async function memberOfCompanyWhere(db: TenantDb, companyId: string) {
   return oldest === companyId
     ? { OR: [{ memberships: { some: { companyId } } }, { memberships: { none: {} } }] }
     : { memberships: { some: { companyId } } }
+}
+
+/**
+ * Do the LEGACY, deployment-wide authorities apply to the current request? These are the hard-coded TIPS approver
+ * emails, the single global owner email and the global Setting lists (approvers, cash verifiers ...). They were built
+ * when there was one company, so they belong to the ORIGINAL company only: inside any other company's session this is
+ * false and they contribute nothing (no hard-coded emails leak to, or grant rights in, another company) until
+ * per-company grants replace them. Outside a request (scripts, cron) there is no company to protect, so true.
+ */
+export async function legacyAuthorityApplies(): Promise<boolean> {
+  const ctx = await sessionCompany()
+  if (!ctx) return true
+  return ctx === (await originalCompanyId(prisma))
+}
+
+/** The owner's email to show for THIS session's company: the global owner for the original company, otherwise
+ *  that company's own owner (the member flagged isOwner), else ''. */
+export async function sessionOwnerEmail(): Promise<string> {
+  const ctx = await sessionCompany()
+  if (!ctx || ctx === (await originalCompanyId(prisma))) return ownerEmail()
+  const m = await prisma.membership.findFirst({ where: { companyId: ctx, isOwner: true, isActive: true }, orderBy: { createdAt: 'asc' }, select: { user: { select: { email: true } } } })
+  return m?.user.email.toLowerCase() ?? ''
+}
+
+export type PickerCompany =
+  | { mode: 'legacy' } // one active company and no code given: behave exactly as before
+  | { mode: 'company'; companyId: string; isOriginal: boolean }
+  | { mode: 'required' } // several companies and no code: the device must say which one
+  | { mode: 'none' } // a code that matches no active company (reveals nothing)
+
+/**
+ * Resolve which company a PRE-LOGIN request (the MyPOS outlet / staff pickers) is for. With a single active company the
+ * pickers behave exactly as they always have; once there are several, the device must supply the company code, and the
+ * pickers then list only that company's outlets and staff - an anonymous caller can never enumerate other companies.
+ */
+export async function resolvePickerCompany(code: string | null | undefined): Promise<PickerCompany> {
+  const wanted = (code || '').trim().toLowerCase()
+  if (wanted) {
+    const c = await prisma.company.findFirst({ where: { slug: wanted, status: COMPANY_STATUS.ACTIVE }, select: { id: true } })
+    if (!c) return { mode: 'none' }
+    return { mode: 'company', companyId: c.id, isOriginal: c.id === (await oldestCompanyId(prisma)) }
+  }
+  const active = await prisma.company.count({ where: { status: COMPANY_STATUS.ACTIVE } })
+  return active > 1 ? { mode: 'required' } : { mode: 'legacy' }
+}
+
+export interface ActiveCompany { id: string; name: string; slug: string | null; isOriginal: boolean }
+
+export async function listActiveCompanies(): Promise<ActiveCompany[]> {
+  const [rows, original] = await Promise.all([
+    prisma.company.findMany({ where: { status: COMPANY_STATUS.ACTIVE }, orderBy: { createdAt: 'asc' }, select: { id: true, name: true, slug: true } }),
+    oldestCompanyId(prisma),
+  ])
+  return rows.map((c) => ({ ...c, isOriginal: c.id === original }))
+}
+
+/**
+ * Run a job once PER ACTIVE COMPANY, each inside that company's context, so the Prisma tenant guard confines every
+ * query the job makes (outlets, users, who receives the email ...) to that company. One company failing does not stop
+ * the others; the per-company outcome is returned.
+ */
+export async function forEachCompany<T>(fn: (c: ActiveCompany) => Promise<T>): Promise<{ company: string; companyId: string; ok: boolean; value?: T; error?: string }[]> {
+  const out: { company: string; companyId: string; ok: boolean; value?: T; error?: string }[] = []
+  for (const c of await listActiveCompanies()) {
+    try {
+      out.push({ company: c.name, companyId: c.id, ok: true, value: await runAsCompany(c.id, () => fn(c)) })
+    } catch (err) {
+      out.push({ company: c.name, companyId: c.id, ok: false, error: err instanceof Error ? err.message : 'failed' })
+    }
+  }
+  return out
+}
+
+/** companyId key for the sales-import alias tables: '' (the pre-multi-company default) for the original company and for
+ *  system contexts, the company's id for any other company. */
+export async function aliasCompanyKey(): Promise<string> {
+  const ctx = await sessionCompany()
+  if (!ctx || ctx === (await originalCompanyId(prisma))) return ''
+  return ctx
 }
 
 /** Does `outletId` belong to `companyId`? (null/undefined outlet = true: "no outlet" is company-wide.) */
