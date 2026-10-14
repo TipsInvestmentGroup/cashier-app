@@ -212,7 +212,6 @@ model UserPermission {
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, resource])
   @@unique([companyId, userId, resource])
   @@index([companyId])
 }
@@ -285,7 +284,7 @@ model Company {
 
 model Outlet {
   id                      String              @id @default(cuid())
-  name                    String              @unique
+  name                    String
   location                String?
   isActive                Boolean             @default(true)
   companyId               String?
@@ -832,7 +831,6 @@ model RolePermission {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([role, resource])
   @@unique([companyId, role, resource])
   @@index([companyId])
 }
@@ -943,7 +941,7 @@ model CollectionTemplate {
   id          String   @id @default(cuid())
   companyId   String
   company     Company  @relation(fields: [companyId], references: [id])
-  code        String   @unique
+  code        String
   name        String
   description String?
   isDefault   Boolean  @default(false)
@@ -1500,7 +1498,6 @@ model Person {
   // CreditAccount makes). Nullable — most Persons (customers) are not employees.
   employee Employee?
 
-  @@unique([type, code])
   @@unique([companyId, type, code])
   @@index([type])
   @@index([customerGroupId])
@@ -1752,7 +1749,7 @@ model Department {
   id        String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId String?
-  name      String   @unique
+  name      String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
@@ -1767,7 +1764,7 @@ model PettyFunction {
   id        String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId String?
-  name      String   @unique
+  name      String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
@@ -1780,7 +1777,7 @@ model Product {
   id              String           @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId       String?
-  code            String           @unique // auto-generated, human-readable e.g. COC-001
+  code            String // auto-generated, human-readable e.g. COC-001
   name            String
   // Legacy free-text category — kept (not dropped) so any reader that hasn't
   // migrated to categoryId still sees a value; scripts/backfill-product-categories.ts
@@ -1825,7 +1822,7 @@ model ProductCategory {
   id         String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId  String?
-  code       String   @unique
+  code       String
   label      String
   // Sales-target department this category rolls up into (SHISHA | FOOD | null).
   // The real, admin-set mapping that replaces classifying by literal name
@@ -1848,7 +1845,7 @@ model Warehouse {
   id        String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId String?
-  name      String   @unique // "Main Store"
+  name      String // "Main Store"
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
@@ -1923,7 +1920,7 @@ model Supplier {
   id            String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId     String?
-  name          String   @unique
+  name          String
   contactPerson String?
   phone         String?
   email         String?
@@ -2367,7 +2364,7 @@ model PersonCategory {
   id        String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId String?
-  code      String   @unique
+  code      String
   label     String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -2382,7 +2379,7 @@ model PaymentChannel {
   id                String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId         String?
-  code              String   @unique
+  code              String
   label             String
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
@@ -2413,7 +2410,7 @@ model CancellationReason {
   id           String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId    String?
-  code         String   @unique
+  code         String
   label        String
   isActive     Boolean  @default(true)
   // true (the default) = this reason is offered for every product, exactly
@@ -2469,7 +2466,7 @@ model ExcessReason {
   id                 String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId          String?
-  code               String   @unique
+  code               String
   label              String
   category           String   @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS (legacy: also drives form placement)
   accountingClass    String? // RECEIVABLE | PAYABLE | ADJUSTMENT — accounting treatment, derived from code (see lib/reconciliation-classification.ts); drift-proof
@@ -2541,7 +2538,7 @@ model BillTypeConfig {
   id                 String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId          String?
-  code               String   @unique // SBA|SBD|SBS|SBC|SBJ|SBT|PBA|PBD|PBS|PBC|PBJ|PBT|EXS|EXR|LOS
+  code               String // SBA|SBD|SBS|SBC|SBJ|SBT|PBA|PBD|PBS|PBC|PBJ|PBT|EXS|EXR|LOS
   name               String
   prefix             String
   category           String // SIGNED_BILL | PAID_BILL | EXCESS_PAYMENT | EXCESS_REFUND | LOSS_RECORD
@@ -2907,7 +2904,7 @@ model PosProductExtra {
   id        String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId String?
-  name      String   @unique
+  name      String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
