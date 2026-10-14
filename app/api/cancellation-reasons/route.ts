@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { canManagePersons } from '@/lib/persons-access'
+import { companyKey } from '@/lib/tenant'
 
 const DEFAULTS = [
   { code: 'DOUBLE_PUNCH', label: 'Double Punch' },
@@ -16,7 +17,8 @@ export async function GET(req: NextRequest) {
   const user = getAuthUser(req)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if ((await prisma.cancellationReason.count()) === 0) {
-    for (const d of DEFAULTS) await prisma.cancellationReason.upsert({ where: { code: d.code }, update: {}, create: d })
+    const companyId = await companyKey()
+    for (const d of DEFAULTS) await prisma.cancellationReason.upsert({ where: { companyId_code: { companyId, code: d.code } }, update: {}, create: { ...d, companyId } })
   }
   const items = await prisma.cancellationReason.findMany({
     orderBy: { createdAt: 'asc' },

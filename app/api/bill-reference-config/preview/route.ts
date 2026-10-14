@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { seedBillTypesIfEmpty } from '@/lib/bill-reference'
+import { companyKey, singletonId } from '@/lib/tenant'
 
 // Mirrors DATE_FORMAT_TOKENS / formatConfiguredDate / renderDisplayReference in
 // lib/bill-reference.ts (kept private there — see file header). Duplicated
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
   await seedBillTypesIfEmpty(prisma)
 
   const persisted = await prisma.billReferenceConfig.findUnique({
-    where: { id: 'default' },
+    where: { id: await singletonId('default') },
     include: { components: { where: { isEnabled: true }, orderBy: { order: 'asc' } } },
   })
 
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
 
   let billTypePrefix = ''
   if (body.billTypeCode) {
-    const bt = await prisma.billTypeConfig.findUnique({ where: { code: body.billTypeCode } })
+    const bt = await prisma.billTypeConfig.findUnique({ where: { companyId_code: { companyId: await companyKey(), code: body.billTypeCode } } })
     if (!bt) return NextResponse.json({ error: `Unknown bill type "${body.billTypeCode}"` }, { status: 400 })
     billTypePrefix = bt.prefix
   } else {

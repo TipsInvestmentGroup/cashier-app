@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { seedStandardCollectionTemplate } from './collection-template-seed'
+import { ensureTipsCompany, seedStandardCollectionTemplate } from './collection-template-seed'
 import { seedCreditFramework } from './credit-seed'
 import { seedExpenseFramework } from './expense-seed'
 import { seedPayrollFramework } from './payroll-seed'
@@ -41,11 +41,12 @@ const RECON_ROLE_DEFAULTS: Record<string, string[]> = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function seedReconciliationRoleDefaults(prisma: any): Promise<number> {
   let created = 0
+  const { id: companyId } = await ensureTipsCompany(prisma)
   for (const [resource, roles] of Object.entries(RECON_ROLE_DEFAULTS)) {
     for (const role of roles) {
-      const existing = await prisma.rolePermission.findUnique({ where: { role_resource: { role, resource } } })
+      const existing = await prisma.rolePermission.findUnique({ where: { companyId_role_resource: { companyId, role, resource } } })
       if (!existing) {
-        await prisma.rolePermission.create({ data: { role, resource, allowed: true } })
+        await prisma.rolePermission.create({ data: { companyId, role, resource, allowed: true } })
         created++
       }
     }
@@ -110,27 +111,36 @@ export function isHardenedSeed(env: NodeJS.ProcessEnv = process.env): boolean {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function seedCore(prisma: any) {
   const TAX = { legalName: 'TIPS INVESTMENT LTD', tin: '132-051-100', vrn: '40-028205-X' }
+  // The original company must exist before the per-company keyed rows below (outlets, warehouse).
+  const { id: companyId } = await ensureTipsCompany(prisma)
+  // ... and rows that predate the multi-company columns must already belong to it BEFORE the keyed upserts run: those
+  // look rows up by (companyId, name/code), so an existing row with no company yet would not be found and a duplicate
+  // would be inserted. Fill-only and idempotent; failures are tolerated here (the end-of-seed pass reports them).
+  try {
+    await backfillTenantIdentity(prisma, { apply: true })
+    await backfillTenantRoots(prisma, { apply: true })
+  } catch { /* e.g. the expand migration is not applied yet: nothing to assign */ }
   const mikocheni = await prisma.outlet.upsert({
-    where: { name: 'Mikocheni Outlet' },
+    where: { companyId_name: { companyId, name: 'Mikocheni Outlet' } },
     update: TAX,
-    create: { name: 'Mikocheni Outlet', location: 'Mikocheni, Dar es Salaam', ...TAX },
+    create: { companyId, name: 'Mikocheni Outlet', location: 'Mikocheni, Dar es Salaam', ...TAX },
   })
   const cocoBeach = await prisma.outlet.upsert({
-    where: { name: 'Coco Beach Outlet' },
+    where: { companyId_name: { companyId, name: 'Coco Beach Outlet' } },
     update: TAX,
-    create: { name: 'Coco Beach Outlet', location: 'Coco Beach, Dar es Salaam', ...TAX },
+    create: { companyId, name: 'Coco Beach Outlet', location: 'Coco Beach, Dar es Salaam', ...TAX },
   })
   // Events-only outlet: never auto-rostered; staffed temporarily per event.
   await prisma.outlet.upsert({
-    where: { name: 'Tips Events' },
+    where: { companyId_name: { companyId, name: 'Tips Events' } },
     update: { isEventsOnly: true },
-    create: { name: 'Tips Events', location: 'External events & functions', isEventsOnly: true },
+    create: { companyId, name: 'Tips Events', location: 'External events & functions', isEventsOnly: true },
   })
   // Central stock location that GRNs receive into and transfers issue out of.
   await prisma.warehouse.upsert({
-    where: { name: 'Main Store' },
+    where: { companyId_name: { companyId, name: 'Main Store' } },
     update: {},
-    create: { name: 'Main Store' },
+    create: { companyId, name: 'Main Store' },
   })
 
   // Collection Workflow Engine: Company + "Standard Staff Collection" template
@@ -224,7 +234,7 @@ export async function seedCore(prisma: any) {
     const personsData = loadSeedJson<SeedPerson[]>('persons.seed')
     for (const p of personsData) {
       await prisma.person.create({
-        data: { name: p.name, phone: p.phone ?? null, type: p.type, creditLimit: p.creditLimit ?? 0, isActive: true },
+        data: { companyId, name: p.name, phone: p.phone ?? null, type: p.type, creditLimit: p.creditLimit ?? 0, isActive: true },
       })
       personsCreated++
     }

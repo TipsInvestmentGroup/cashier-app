@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { hasPermission, RESOURCES } from '@/lib/rbac'
+import { companyKey } from '@/lib/tenant'
 
 const toCode = (s: string) => String(s).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 
@@ -30,12 +31,13 @@ export async function POST(req: NextRequest) {
   const code = toCode(name)
   if (!code) return NextResponse.json({ error: 'Invalid name' }, { status: 400 })
 
-  const company = await prisma.company.findFirst({ orderBy: { createdAt: 'asc' } })
-  if (!company) return NextResponse.json({ error: 'No company record found — run the database seed first' }, { status: 500 })
+  // The session's company (original company in system contexts) - templates are keyed per company.
+  const companyId = await companyKey().catch(() => null)
+  if (!companyId) return NextResponse.json({ error: 'No company record found — run the database seed first' }, { status: 500 })
 
   try {
     const template = await prisma.collectionTemplate.create({
-      data: { companyId: company.id, code, name: String(name).trim(), description: description ? String(description).trim() : null },
+      data: { companyId, code, name: String(name).trim(), description: description ? String(description).trim() : null },
     })
     await prisma.auditLog.create({
       data: { userId: user.userId, action: 'CREATE', entity: 'CollectionTemplate', entityId: template.id, details: `Created template ${template.name} (${template.code})` },

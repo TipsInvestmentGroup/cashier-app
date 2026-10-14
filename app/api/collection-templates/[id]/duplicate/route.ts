@@ -31,7 +31,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const baseName = `${source.name} (Copy)`
   let name = baseName
   let code = toCode(name)
-  for (let n = 2; await prisma.collectionTemplate.findUnique({ where: { code } }); n++) {
+  // Codes are unique per company - check within the source template's own company.
+  for (let n = 2; await prisma.collectionTemplate.findUnique({ where: { companyId_code: { companyId: source.companyId, code } } }); n++) {
     name = `${baseName} ${n}`
     code = toCode(name)
   }

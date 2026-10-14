@@ -11,6 +11,7 @@
 import { format } from 'date-fns'
 import { DEFAULT_BILL_TYPES, DEFAULT_REFERENCE_COMPONENTS } from './bill-reference-defaults'
 import { resolveEffectiveConfig, resolveBusinessDate as resolveEngineBusinessDate } from '@/lib/business-calendar'
+import { companyKey, singletonId } from '@/lib/tenant'
 
 // Loose type — works with both the prisma singleton and a $transaction
 // client, same convention as lib/stock.ts's `Tx` / lib/collection-excess.ts's `DB`.
@@ -76,31 +77,35 @@ async function resolveBusinessDate(ctx: { date?: Date | null; outletId?: string 
 /** Seeds the 15 default bill types once, the first time any of them is needed
  *  — same lazy-seed-on-first-use convention as app/api/payment-channels/route.ts. */
 export async function seedBillTypesIfEmpty(tx: Tx): Promise<void> {
+  // count() is confined to the current company by the tenant guard => each company seeds its own defaults on first use.
   if ((await tx.billTypeConfig.count()) === 0) {
+    const companyId = await companyKey()
     for (const d of DEFAULT_BILL_TYPES) {
-      await tx.billTypeConfig.upsert({ where: { code: d.code }, update: {}, create: d })
+      await tx.billTypeConfig.upsert({ where: { companyId_code: { companyId, code: d.code } }, update: {}, create: { ...d, companyId } })
     }
   }
 }
 
-/** Loads (or lazily creates) the singleton BillReferenceConfig + its enabled,
+/** Loads (or lazily creates) this company's BillReferenceConfig (one row per company) + its enabled,
  *  ordered components. */
 async function loadReferenceConfig(tx: Tx) {
+  const id = await singletonId('default')
   const existing = await tx.billReferenceConfig.findUnique({
-    where: { id: 'default' },
+    where: { id },
     include: { components: { where: { isEnabled: true }, orderBy: { order: 'asc' } } },
   })
   if (existing) return existing
   try {
+    const companyId = await companyKey()
     return await tx.billReferenceConfig.create({
-      data: { id: 'default', components: { create: DEFAULT_REFERENCE_COMPONENTS } },
+      data: { id, companyId, components: { create: DEFAULT_REFERENCE_COMPONENTS } },
       include: { components: { where: { isEnabled: true }, orderBy: { order: 'asc' } } },
     })
   } catch (err) {
     // Concurrent first-ever-use race — recover by re-reading rather than failing.
     if (err instanceof Error && err.message.includes('Unique')) {
       const created = await tx.billReferenceConfig.findUnique({
-        where: { id: 'default' },
+        where: { id },
         include: { components: { where: { isEnabled: true }, orderBy: { order: 'asc' } } },
       })
       if (created) return created
@@ -230,7 +235,7 @@ async function resolveOutletCodeForCtx(tx: Tx, ctx: { branchCode?: string | null
 export async function generateBillReference(tx: Tx, ctx: BillReferenceContext): Promise<GeneratedBillReference> {
   await seedBillTypesIfEmpty(tx)
 
-  const billTypeConfig = await tx.billTypeConfig.findUnique({ where: { code: ctx.billTypeCode } })
+  const billTypeConfig = await tx.billTypeConfig.findUnique({ where: { companyId_code: { companyId: await companyKey(), code: ctx.billTypeCode } } })
   if (!billTypeConfig) throw new Error(`Unknown bill type "${ctx.billTypeCode}" — check Bill Types settings`)
   if (!billTypeConfig.isActive) throw new Error(`Bill type "${billTypeConfig.name}" is deactivated — reactivate it in Bill Types settings before creating new bills of this type`)
 
@@ -295,7 +300,7 @@ export async function resolveBillTypeCodeFromLegacy(tx: Tx, category: string, le
  *  Bill Reference Settings page's live preview. */
 export async function previewDisplayReference(tx: Tx, sample: Partial<BillReferenceContext> & { billTypeCode: string }): Promise<string> {
   await seedBillTypesIfEmpty(tx)
-  const billTypeConfig = await tx.billTypeConfig.findUnique({ where: { code: sample.billTypeCode } })
+  const billTypeConfig = await tx.billTypeConfig.findUnique({ where: { companyId_code: { companyId: await companyKey(), code: sample.billTypeCode } } })
   if (!billTypeConfig) throw new Error(`Unknown bill type "${sample.billTypeCode}"`)
 
   const config = await loadReferenceConfig(tx)

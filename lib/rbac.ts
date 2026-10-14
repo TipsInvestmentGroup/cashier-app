@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { ownerEmail, isCompanyOwner } from '@/lib/owner'
+import { companyKey } from '@/lib/tenant'
 
 const OWNER_EMAIL = ownerEmail()
 export { OWNER_EMAIL }
@@ -91,7 +92,8 @@ const ACTION_FIELD: Record<Action, 'canAdd' | 'canEdit' | 'canDelete' | 'canSett
 export async function hasPermission(email: string | undefined, userId: string | undefined, resource: Resource, action: Action): Promise<boolean> {
   if (isOwner(email)) return true
   if (!userId) return false
-  const perm = await prisma.userPermission.findUnique({ where: { userId_resource: { userId, resource } } })
+  const companyId = await companyKey()
+  const perm = await prisma.userPermission.findUnique({ where: { companyId_userId_resource: { companyId, userId, resource } } })
   if (!perm) return false
   return !!perm[ACTION_FIELD[action]]
 }
@@ -106,10 +108,11 @@ export async function listPermissions(resource: Resource | BooleanResource) {
 
 /** Owner sets/changes a user's grant for a resource. */
 export async function setPermission(resource: Resource | BooleanResource, userId: string, grants: { canAdd?: boolean; canEdit?: boolean; canDelete?: boolean; canSettle?: boolean; canUnsettle?: boolean }) {
+  const companyId = await companyKey()
   return prisma.userPermission.upsert({
-    where: { userId_resource: { userId, resource } },
+    where: { companyId_userId_resource: { companyId, userId, resource } },
     update: grants,
-    create: { userId, resource, canAdd: !!grants.canAdd, canEdit: !!grants.canEdit, canDelete: !!grants.canDelete, canSettle: !!grants.canSettle, canUnsettle: !!grants.canUnsettle },
+    create: { companyId, userId, resource, canAdd: !!grants.canAdd, canEdit: !!grants.canEdit, canDelete: !!grants.canDelete, canSettle: !!grants.canSettle, canUnsettle: !!grants.canUnsettle },
   })
 }
 
@@ -141,13 +144,14 @@ export async function myPermissions(email: string | undefined, userId: string) {
  * > RolePermission default for the caller's role > deny.
  */
 export async function resolveResourcePermission(
-  user: { email?: string; userId: string; role: string },
+  user: { email?: string; userId: string; role: string; companyId?: string },
   resource: BooleanResource
 ): Promise<boolean> {
   if (isOwner(user.email)) return true
-  const userRow = await prisma.userPermission.findUnique({ where: { userId_resource: { userId: user.userId, resource } } })
+  const companyId = user.companyId ?? (await companyKey())
+  const userRow = await prisma.userPermission.findUnique({ where: { companyId_userId_resource: { companyId, userId: user.userId, resource } } })
   if (userRow) return !!userRow.canAdd
-  const roleRow = await prisma.rolePermission.findUnique({ where: { role_resource: { role: user.role, resource } } })
+  const roleRow = await prisma.rolePermission.findUnique({ where: { companyId_role_resource: { companyId, role: user.role, resource } } })
   return !!roleRow?.allowed
 }
 
@@ -168,9 +172,10 @@ export async function resolveManageUsersPermission(
   resource: ManageUsersResource
 ): Promise<boolean> {
   if (isCompanyOwner(user)) return true
-  const userRow = await prisma.userPermission.findUnique({ where: { userId_resource: { userId: user.userId, resource } } })
+  const companyId = user.companyId ?? (await companyKey())
+  const userRow = await prisma.userPermission.findUnique({ where: { companyId_userId_resource: { companyId, userId: user.userId, resource } } })
   if (userRow) return !!userRow.canAdd
-  const roleRow = await prisma.rolePermission.findUnique({ where: { role_resource: { role: user.role, resource } } })
+  const roleRow = await prisma.rolePermission.findUnique({ where: { companyId_role_resource: { companyId, role: user.role, resource } } })
   if (roleRow) return roleRow.allowed
   return MANAGE_USERS_LEGACY_DEFAULT[resource].includes(user.role)
 }
@@ -182,9 +187,10 @@ export async function listRolePermissions(resource: BooleanResource) {
 
 /** Owner sets/changes a role's default for a resource. */
 export async function setRolePermission(role: string, resource: BooleanResource, allowed: boolean) {
+  const companyId = await companyKey()
   return prisma.rolePermission.upsert({
-    where: { role_resource: { role, resource } },
+    where: { companyId_role_resource: { companyId, role, resource } },
     update: { allowed },
-    create: { role, resource, allowed },
+    create: { companyId, role, resource, allowed },
   })
 }

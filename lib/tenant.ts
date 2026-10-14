@@ -227,6 +227,29 @@ export async function resolvePickerCompany(code: string | null | undefined): Pro
   return active > 1 ? { mode: 'required' } : { mode: 'legacy' }
 }
 
+/**
+ * The company that KEYS rows in the current context - used with the per-company unique keys
+ * (`companyId_code`, `companyId_name`, ...). Inside a signed-in request (or `runAsCompany`) it is the session's company;
+ * with no company context (scripts, the deploy seed, cron without a user) it is the ORIGINAL company, which is exactly the
+ * legacy single-company behaviour those paths always had. Throws only if no company exists at all.
+ */
+export async function companyKey(): Promise<string> {
+  const ctx = await sessionCompany()
+  if (ctx) return ctx
+  const original = await originalCompanyId(prisma)
+  if (!original) throw new Error('No company exists yet')
+  return original
+}
+
+/**
+ * Id of a per-company SINGLETON row (e.g. the bill-reference config). The original company keeps the historical id
+ * (`base`, e.g. 'default') so existing data needs no migration; every other company gets `base:<companyId>`.
+ */
+export async function singletonId(base = 'default'): Promise<string> {
+  const key = await companyKey()
+  return key === (await originalCompanyId(prisma)) ? base : `${base}:${key}`
+}
+
 export interface ActiveCompany { id: string; name: string; slug: string | null; isOriginal: boolean }
 
 export async function listActiveCompanies(): Promise<ActiveCompany[]> {

@@ -7,7 +7,9 @@
 import { prisma, prismaSystem } from '../lib/prisma'
 import { runAsCompany } from '../lib/tenant-context'
 import { TenantAccessError } from '../lib/tenant-guard'
-import { aliasCompanyKey, forEachCompany, legacyAuthorityApplies, resolvePickerCompany, sessionOwnerEmail } from '../lib/tenant'
+import { aliasCompanyKey, companyKey, forEachCompany, legacyAuthorityApplies, resolvePickerCompany, sessionOwnerEmail } from '../lib/tenant'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 
 const url = process.env.DATABASE_URL || ''
 if (!/^file:/.test(url)) throw new Error('refusing to run: DATABASE_URL must be a local file: SQLite database (this test writes data)')
@@ -83,7 +85,9 @@ async function main() {
   check('foreign key to another company\'s product rejected', await rejectsTenant(() => as(B, () => prisma.stockLevel.create({ data: { productId: 'p_a', outletId: 'out_b', quantity: 1 } as never }))))
   check('...relation connect to another company\'s product rejected', await rejectsTenant(() => as(B, () => prisma.stockLevel.create({ data: { product: { connect: { id: 'p_a' } }, outletId: 'out_b', quantity: 1 } as never }))))
   check('referencing its OWN product + outlet works', !(await rejects(() => as(B, () => prisma.stockLevel.create({ data: { productId: 'p_b', outletId: 'out_b', quantity: 1 } as never })))))
-  check('upsert cannot overwrite another company\'s row', await rejects(() => as(B, () => prisma.product.upsert({ where: { code: 'PA' }, update: { name: 'pwned' }, create: { name: 'pwned', code: 'PA', category: 'X', unitMeasure: 'PCS', sellingPrice: 1, buyingPrice: 1 } as never }))) && (await prismaSystem.product.findUnique({ where: { id: 'p_a' } }))?.name === 'p_a')
+  // B targets A's row through A's own key: the guard must not let it match (it falls through to create) - A's row is never changed
+  await as(B, () => prisma.product.upsert({ where: { companyId_code: { companyId: A, code: 'PA' } }, update: { name: 'pwned' }, create: { name: 'pwned', code: 'PA-B2', category: 'X', unitMeasure: 'PCS', sellingPrice: 1, buyingPrice: 1, companyId: B } as never })).catch(() => null)
+  check('upsert keyed to another company\'s row can never modify it', (await prismaSystem.product.findUnique({ where: { id: 'p_a' } }))?.name === 'p_a')
 
   // ---------------------------------------------------------------- users by membership
   const uA = (await as(A, () => prisma.user.findMany({ select: { id: true } }))).map((u) => u.id).sort().join()
@@ -151,6 +155,49 @@ async function main() {
   check('...a job\'s user lookup only reaches that company (a shared CASHIER only in Beta)', seen[0].value?.recipients === '' && seen[1].value?.recipients === 'u_shared', JSON.stringify(seen.map((s) => s.value?.recipients)))
   check('forEachCompany: one failing company does not stop the others', (await forEachCompany(async (c) => { if (c.id === A) throw new Error('boom'); return 1 })).map((r) => r.ok).join() === 'false,true')
   check("alias key: '' for the original company and system contexts, the id for others", (await as(A, () => aliasCompanyKey())) === '' && (await aliasCompanyKey()) === '' && (await as(B, () => aliasCompanyKey())) === B)
+
+  // ---------------------------------------------------------------- per-company unique keys (step 3e)
+  const schemaText = readFileSync(path.join(process.cwd(), 'prisma/schema.prisma'), 'utf8')
+  const modelBlock = (m: string) => new RegExp(`^model ${m} \\{[\\s\\S]*?^\\}`, 'm').exec(schemaText)?.[0] ?? ''
+  const globalKeysDropped = !/^\s+code\s+String\s+@unique/m.test(modelBlock('PaymentChannel')) // contract state
+  // within ONE company a key is still unique, and the composite key is the lookup
+  await prismaSystem.department.create({ data: { name: 'Bar', companyId: A } })
+  check('same company: a duplicate name is still rejected', await rejects(() => prismaSystem.department.create({ data: { name: 'Bar', companyId: A } })))
+  await as(A, () => prisma.department.upsert({ where: { companyId_name: { companyId: A, name: 'Bar' } }, update: {}, create: { name: 'Bar', companyId: A } }))
+  check('composite-key upsert is idempotent within a company', (await prismaSystem.department.count({ where: { name: 'Bar', companyId: A } })) === 1)
+  check('composite-key lookup finds the row', !!(await prismaSystem.department.findUnique({ where: { companyId_name: { companyId: A, name: 'Bar' } } })))
+  if (globalKeysDropped) {
+    // contract state: the OLD global keys are gone, so a second company can use the same codes/names
+    await prismaSystem.department.create({ data: { name: 'Bar', companyId: B } })
+    await prismaSystem.paymentChannel.create({ data: { code: 'CASH', label: 'Cash', companyId: A } as never })
+    await prismaSystem.paymentChannel.create({ data: { code: 'CASH', label: 'Cash', companyId: B } as never })
+    await prismaSystem.outlet.create({ data: { name: 'Main', companyId: A } })
+    await prismaSystem.outlet.create({ data: { name: 'Main', companyId: B } })
+    await product('p_b_pa', 'PA', B)
+    await prismaSystem.person.create({ data: { name: 'Ann', type: 'CUSTOMER', code: 'C001', companyId: A } as never })
+    await prismaSystem.person.create({ data: { name: 'Bob', type: 'CUSTOMER', code: 'C001', companyId: B } as never })
+    await prismaSystem.rolePermission.create({ data: { role: 'CASHIER', resource: 'X', allowed: true, companyId: A } as never })
+    await prismaSystem.rolePermission.create({ data: { role: 'CASHIER', resource: 'X', allowed: false, companyId: B } as never })
+    check('CONTRACT: two companies can both have a department / payment channel / outlet / product / person code', true)
+    check('...each company still sees only its own copy', (await as(B, () => prisma.paymentChannel.findMany())).length === 1 && (await as(A, () => prisma.paymentChannel.findMany())).length === 1)
+    check('...role permissions are independent per company', (await as(A, () => prisma.rolePermission.findFirst({ where: { role: 'CASHIER', resource: 'X' } })))?.allowed === true && (await as(B, () => prisma.rolePermission.findFirst({ where: { role: 'CASHIER', resource: 'X' } })))?.allowed === false)
+    // the screens that "seed defaults when the table is empty" (the crawler's HTTP 500s) now work for a NEW company
+    const C = 'co_gamma'
+    await prismaSystem.company.create({ data: { id: C, name: 'Gamma', slug: 'gamma', createdAt: new Date('2022-01-01') } })
+    const seedDefaults = async () => as(C, async () => {
+      const companyId = await companyKey()
+      if ((await prisma.paymentChannel.count()) === 0) {
+        for (const d of [{ code: 'CASH', label: 'Cash' }, { code: 'CRDB', label: 'CRDB' }]) {
+          await prisma.paymentChannel.upsert({ where: { companyId_code: { companyId, code: d.code } }, update: {}, create: { ...d, companyId } as never })
+        }
+      }
+      return (await prisma.paymentChannel.findMany()).map((r) => r.code).sort().join()
+    })
+    check('a NEW company can seed its own default channels on first use (was HTTP 500)', (await seedDefaults()) === 'CASH,CRDB')
+    check('...and that seeding is idempotent and leaves the others untouched', (await seedDefaults()) === 'CASH,CRDB' && (await prismaSystem.paymentChannel.count({ where: { code: 'CASH' } })) === 3)
+  } else {
+    check('EXPAND state: old global keys still in force (cross-company duplicates intentionally still rejected until the contract migration)', await rejects(() => prismaSystem.paymentChannel.create({ data: { code: 'CASH', label: 'Cash', companyId: A } as never }).then(() => prismaSystem.paymentChannel.create({ data: { code: 'CASH', label: 'Cash', companyId: B } as never }))))
+  }
 
   // ---------------------------------------------------------------- unscoped paths
   check('prismaSystem is NOT scoped even inside a company context', (await as(B, () => prismaSystem.posTable.count())) === 3)
