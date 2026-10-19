@@ -1514,7 +1514,7 @@ model SignedBill {
   // lib/staff-loss.ts, app/api/collections/route.ts). New auto-created bills
   // use `autoKey` for that role instead; `voucherNumber` becomes read-only
   // legacy/display data once a bill has been migrated (see legacyReference).
-  voucherNumber  String?   @unique
+  voucherNumber  String?
   // Idempotency key for auto-generated bills (e.g. "SL-<collectionId>",
   // "VCH-<collectionId>-<i>") — replaces voucherNumber's old lookup role.
   autoKey        String?   @unique
@@ -1553,8 +1553,8 @@ model SignedBill {
   // each environment, then tightened to NOT NULL in a follow-up deploy.
   // legacyReference preserves the old voucherNumber value verbatim so an
   // already-printed paper bill stays searchable after migration.
-  internalBillId         String?         @unique
-  displayReference       String?         @unique
+  internalBillId         String?
+  displayReference       String?
   legacyReference        String?
   billTypeConfigId       String?
   billTypeConfig         BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
@@ -1635,8 +1635,8 @@ model PaidBill {
   journalEntryId String?
 
   // Bill Reference System (see lib/bill-reference.ts / SignedBill above).
-  internalBillId   String?         @unique
-  displayReference String?         @unique
+  internalBillId   String?
+  displayReference String?
   legacyReference  String?
   billTypeConfigId String?
   billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
@@ -1950,7 +1950,7 @@ model PurchaseOrder {
   id              String    @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId       String?
-  poNumber        String    @unique // "PO-000001"
+  poNumber        String    // "PO-000001"
   supplierId      String
   supplier        Supplier  @relation(fields: [supplierId], references: [id])
   status          String    @default("DRAFT")
@@ -2004,7 +2004,7 @@ model PurchaseOrderItem {
 /// receiveGrn).
 model Grn {
   id              String         @id @default(cuid())
-  grnNumber       String         @unique // "GRN-000123"
+  grnNumber       String         // "GRN-000123"
   warehouseId     String
   warehouse       Warehouse      @relation(fields: [warehouseId], references: [id])
   purchaseOrderId String?
@@ -2069,7 +2069,7 @@ model StockTransfer {
   id             String    @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId      String?
-  transferNumber String    @unique // "TRF-000045"
+  transferNumber String    // "TRF-000045"
   warehouseId    String
   warehouse      Warehouse @relation(fields: [warehouseId], references: [id])
   outletId       String
@@ -2200,8 +2200,8 @@ model Breakage {
 
   // Bill Reference System — Breakage plays the "Loss Record" (LOS) bill
   // type (see lib/bill-reference.ts).
-  internalBillId   String?         @unique
-  displayReference String?         @unique
+  internalBillId   String?
+  displayReference String?
   billTypeConfigId String?
   billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
 
@@ -2290,12 +2290,14 @@ model CashReconExcess {
 
   // Bill Reference System — plays the "Excess Payment" (EXS) bill type
   // alongside CollectionExcess (see lib/bill-reference.ts).
-  internalBillId   String?         @unique
-  displayReference String?         @unique
+  internalBillId   String?
+  displayReference String?
   billTypeConfigId String?
   billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
 
   @@index([cashReconId])
+  @@index([internalBillId])
+  @@index([displayReference])
 }
 
 // Excess recorded during a Daily Collection (staff collected more than the
@@ -2322,12 +2324,14 @@ model CollectionExcess {
 
   // Bill Reference System — plays the "Excess Payment" (EXS) bill type
   // alongside CashReconExcess (see lib/bill-reference.ts).
-  internalBillId   String?         @unique
-  displayReference String?         @unique
+  internalBillId   String?
+  displayReference String?
   billTypeConfigId String?
   billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
 
   @@index([collectionId])
+  @@index([internalBillId])
+  @@index([displayReference])
 }
 
 // Digital Payment Reconciliation — one row per digital channel per day+outlet.
@@ -2578,7 +2582,7 @@ model BillSequenceCounter {
   id        String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId String?
-  scopeKey  String   @unique
+  scopeKey  String
   lastValue Int      @default(0)
   updatedAt DateTime @updatedAt
 
@@ -2595,8 +2599,8 @@ model BillReferenceRegistry {
   id               String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId        String?
-  internalBillId   String   @unique
-  displayReference String   @unique
+  internalBillId   String
+  displayReference String
   sourceModel      String // SignedBill | PaidBill | CashReconExcess | CollectionExcess | Breakage | ExcessRefund
   sourceId         String
   billTypeId       String
@@ -2617,8 +2621,8 @@ model ExcessRefund {
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId        String?
   date             DateTime        @default(now())
-  internalBillId   String          @unique
-  displayReference String          @unique
+  internalBillId   String
+  displayReference String
   billTypeConfigId String?
   billTypeConfig   BillTypeConfig? @relation(fields: [billTypeConfigId], references: [id])
   amount           Float
@@ -2771,7 +2775,7 @@ model PosOrder {
   id              String    @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId       String?
-  orderNo         String    @unique // ORD-20260619-001
+  orderNo         String    // ORD-20260619-001
   outletId        String
   outlet          Outlet    @relation(fields: [outletId], references: [id])
   tableId         String?
@@ -3328,7 +3332,7 @@ model FinancialPeriod {
 /// module (Grn, SupplierInvoice, SupplierPayment, DailyCollection, ...).
 model JournalEntry {
   id           String        @id @default(cuid())
-  entryNumber  String        @unique // "JE-000001"
+  entryNumber  String        // "JE-000001"
   companyId    String
   company      Company       @relation(fields: [companyId], references: [id])
   entryDate    DateTime
@@ -3401,7 +3405,7 @@ model FinanceAccountMapping {
 /// lib/finance.ts createSupplierInvoice().
 model SupplierInvoice {
   id                 String    @id @default(cuid())
-  invoiceNumber      String    @unique // "INV-000001", internal
+  invoiceNumber      String    // "INV-000001", internal
   supplierId         String
   supplier           Supplier  @relation(fields: [supplierId], references: [id])
   companyId          String
@@ -3432,7 +3436,7 @@ model SupplierInvoice {
 /// Dr AP Control / Cr Cash-Bank (via paymentChannel's mapped GL account).
 model SupplierPayment {
   id               String         @id @default(cuid())
-  paymentNumber    String         @unique // "PAY-000001"
+  paymentNumber    String         // "PAY-000001"
   supplierId       String
   supplier         Supplier       @relation(fields: [supplierId], references: [id])
   companyId        String
@@ -5197,7 +5201,7 @@ model ExpenseRequest {
   // a slug of the name) is what makes per-outlet numbering collision-free; NNNN
   // is that branch's continuous counter (see ExpenseRequestSequence). Nullable:
   // drafts and pre-Phase-3 rows have none.
-  requestNumber  String?   @unique
+  requestNumber  String?
   // The transaction KIND (Allowance | Purchase | Repair | Utility Bill | Digital
   // Expense | Casual Expense — EXPENSE_TYPES in lib/shared-constants.ts), a
   // dimension genuinely distinct from categoryId (the cost centre / GL account,
@@ -5241,7 +5245,7 @@ model ExpenseRequestSequence {
   id         String   @id @default(cuid())
   /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
   companyId  String?
-  scopeKey   String   @unique // resolved branch code, e.g. "MIK"
+  scopeKey   String   // resolved branch code, e.g. "MIK"
   lastNumber Int      @default(0)
   updatedAt  DateTime @updatedAt
 
