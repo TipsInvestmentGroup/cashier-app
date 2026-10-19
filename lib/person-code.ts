@@ -9,6 +9,8 @@
 // increment must be atomic with the Person row write, exactly like every
 // other caller of nextGenericSequenceValue.
 import { nextGenericSequenceValue } from './bill-reference'
+import { companyRowsWhere } from './doc-numbering'
+import { companyKey } from './tenant'
 
 // Loose type — works with both the prisma singleton and a $transaction
 // client, same convention as lib/bill-reference.ts's `Tx`.
@@ -22,10 +24,12 @@ const MAX_ATTEMPTS = 20
  *  collision with an existing (e.g. manually-assigned) code — mirrors the
  *  retry convention in generateBillReference's registry-insert loop. */
 export async function nextFreePersonCode(tx: Tx, type: string): Promise<string> {
+  const mine = await companyRowsWhere(await companyKey())
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const n = await nextGenericSequenceValue(tx, `PERSONCODE:${type}`)
     const code = String(n).padStart(PERSON_CODE_PADDING, '0')
-    const clash = await tx.person.findFirst({ where: { type, code }, select: { id: true } })
+    // codes are unique per company (Person @@unique([companyId, type, code])): only this company's people can clash
+    const clash = await tx.person.findFirst({ where: { AND: [mine, { type, code }] }, select: { id: true } })
     if (!clash) return code
   }
   throw new Error(`Could not find a free person code for type "${type}" after ${MAX_ATTEMPTS} attempts`)

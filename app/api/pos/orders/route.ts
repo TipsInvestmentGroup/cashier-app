@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { companyRowsWhere, documentCompanyId, nextFreeDocNumber, raiseDocCounter, seedFromIssued } from '@/lib/doc-numbering'
 
 export async function GET(req: NextRequest) {
   const payload = getAuthUser(req)
@@ -67,20 +68,34 @@ export async function POST(req: NextRequest) {
   const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '')
   const dayStart = new Date(today.toDateString())
 
-  // orderNo is unique across ALL outlets (not per-outlet), but the sequence
-  // number was counted per-outlet — the first order of the day at a second
-  // outlet always landed on "001" too, colliding with an outlet that had
-  // already claimed it (e.g. Mikocheni creates ORD-...-001 first, then Coco
-  // Beach's first order of the day also computes "001" and crashes on the
-  // unique constraint). Count across all outlets instead, and retry with an
-  // incrementing offset to absorb any remaining race between concurrent taps.
+  // ORD-YYYYMMDD-NNN: one sequence per COMPANY per day, shared by all of the company's outlets (each outlet counting
+  // on its own used to collide on "001"), drawn from a race-safe counter (lib/doc-numbering.ts) in the same
+  // transaction as the order, so concurrent taps never draw the same number and a failed create leaves no gap. On the
+  // day's first order the counter starts from the orders that company already has today, so the sequence continues
+  // exactly as the old count()+1 numbering did (multi-company Phase 3f).
+  const companyId = await documentCompanyId(prisma, { outletId })
+  const prefix = `ORD-${dateStr}-`
+  const counter = { companyId, scopeKey: `POS_ORDER:${dateStr}` }
+  const mine = await companyRowsWhere(companyId)
+  const issuedToday = async (db: typeof prisma) => {
+    const count = await db.posOrder.count({ where: { AND: [mine, { createdAt: { gte: dayStart } }] } })
+    const top = await db.posOrder.findFirst({ where: { AND: [mine, { orderNo: { startsWith: prefix } }] }, orderBy: { orderNo: 'desc' }, select: { orderNo: true } })
+    return seedFromIssued(count, top?.orderNo, prefix)
+  }
   let order
   for (let attempt = 0; attempt < 5; attempt++) {
-    const count = await prisma.posOrder.count({ where: { createdAt: { gte: dayStart } } })
-    const orderNo = `ORD-${dateStr}-${String(count + 1 + attempt).padStart(3, '0')}`
     try {
-      order = await prisma.posOrder.create({
-        data: { orderNo, outletId, tableId: tableId ?? null, eventId: eventId ?? null, shiftId, waiterId: payload.userId, clientRequestId: clientRequestId ?? null },
+      order = await prisma.$transaction(async (tx) => {
+        const db = tx as typeof prisma
+        const orderNo = await nextFreeDocNumber(tx, {
+          ...counter,
+          seed: () => issuedToday(db),
+          format: (n) => `${prefix}${String(n).padStart(3, '0')}`,
+          taken: async (no) => !!(await db.posOrder.findFirst({ where: { AND: [mine, { orderNo: no }] }, select: { id: true } })),
+        })
+        return tx.posOrder.create({
+          data: { orderNo, companyId, outletId, tableId: tableId ?? null, eventId: eventId ?? null, shiftId, waiterId: payload.userId, clientRequestId: clientRequestId ?? null },
+        })
       })
       break
     } catch (err) {
@@ -92,7 +107,12 @@ export async function POST(req: NextRequest) {
         const existingByKey = await prisma.posOrder.findUnique({ where: { clientRequestId } })
         if (existingByKey) { order = existingByKey; break }
       }
-      if (err instanceof Error && err.message.includes('Unique') && attempt < 4) continue
+      // An orderNo collision (a number issued some other way - e.g. by the previous app version during a deploy -
+      // between our check and our insert): move the counter past the issued numbers and retry.
+      if (err instanceof Error && err.message.includes('Unique') && attempt < 4) {
+        await raiseDocCounter(prisma, counter, await issuedToday(prisma))
+        continue
+      }
       throw err
     }
   }

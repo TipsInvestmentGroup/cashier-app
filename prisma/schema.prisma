@@ -1581,6 +1581,9 @@ model SignedBill {
   @@index([creditGroupId])
   @@index([creditAccountId])
   @@index([companyId])
+  @@unique([companyId, internalBillId])
+  @@unique([companyId, displayReference])
+  @@unique([companyId, voucherNumber])
 }
 
 // Product line items on a signed bill (Customer / Tips / DJ etc.).
@@ -1642,6 +1645,8 @@ model PaidBill {
   @@index([outletId])
   @@index([signedBillId])
   @@index([companyId])
+  @@unique([companyId, internalBillId])
+  @@unique([companyId, displayReference])
 }
 
 model PettyCash {
@@ -1971,6 +1976,7 @@ model PurchaseOrder {
   @@index([status])
   @@index([supplierId])
   @@index([companyId])
+  @@unique([companyId, poNumber])
 }
 
 model PurchaseOrderItem {
@@ -2027,6 +2033,7 @@ model Grn {
   @@index([receivedDate])
   @@index([purchaseOrderId])
   @@index([companyId])
+  @@unique([companyId, grnNumber])
 }
 
 /// One line of a Grn. Quantity is entered in a purchase unit (e.g.
@@ -2077,6 +2084,7 @@ model StockTransfer {
   @@index([warehouseId])
   @@index([outletId, counterCode])
   @@index([companyId])
+  @@unique([companyId, transferNumber])
 }
 
 model StockTransferItem {
@@ -2201,6 +2209,8 @@ model Breakage {
   @@index([warehouseId])
   @@index([createdAt])
   @@index([companyId])
+  @@unique([companyId, internalBillId])
+  @@unique([companyId, displayReference])
 }
 
 // Cancellations recorded against a daily collection (Double Punch / Out of Stock / Wrong Punch).
@@ -2573,6 +2583,7 @@ model BillSequenceCounter {
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
+  @@unique([companyId, scopeKey])
 }
 
 /// Cross-table registry — every issued reference gets one row here, written
@@ -2593,6 +2604,8 @@ model BillReferenceRegistry {
 
   @@index([sourceModel, sourceId])
   @@index([companyId])
+  @@unique([companyId, internalBillId])
+  @@unique([companyId, displayReference])
 }
 
 /// Minimal Excess Refund (EXR) record — nothing plays this role today. Mirrors
@@ -2630,6 +2643,8 @@ model ExcessRefund {
   @@index([outletId])
   @@index([personId])
   @@index([companyId])
+  @@unique([companyId, internalBillId])
+  @@unique([companyId, displayReference])
 }
 
 /// Granular settlement ledger for the Excess Recon auto-settlement engine
@@ -2799,6 +2814,7 @@ model PosOrder {
   @@index([status])
   @@index([createdAt])
   @@index([companyId])
+  @@unique([companyId, orderNo])
 }
 
 /// A (possibly partial) payment received against a POS order. Supports the
@@ -3333,6 +3349,7 @@ model JournalEntry {
 
   @@index([companyId, entryDate])
   @@index([sourceType, sourceId])
+  @@unique([companyId, entryNumber])
 }
 
 /// One debit or credit line of a JournalEntry. App-layer invariant (like
@@ -3407,6 +3424,7 @@ model SupplierInvoice {
 
   @@index([supplierId, status])
   @@index([companyId])
+  @@unique([companyId, invoiceNumber])
 }
 
 /// A payment run to a supplier — may cover one or many open invoices
@@ -3433,6 +3451,7 @@ model SupplierPayment {
 
   @@index([supplierId])
   @@index([companyId])
+  @@unique([companyId, paymentNumber])
 }
 
 /// Splits one SupplierPayment across one or more SupplierInvoices (and one
@@ -5207,6 +5226,7 @@ model ExpenseRequest {
   // table scan per custodian screen load.
   @@index([fundingSourceId, direction, status])
   @@index([expenseType])
+  @@unique([companyId, requestNumber])
 }
 
 /// CONTINUOUS per-branch counter behind ExpenseRequest.requestNumber. One row
@@ -5226,6 +5246,7 @@ model ExpenseRequestSequence {
   updatedAt  DateTime @updatedAt
 
   @@index([companyId])
+  @@unique([companyId, scopeKey])
 }
 
 /// Optional line-item breakdown of an ExpenseRequest — identical shape to

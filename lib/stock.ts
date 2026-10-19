@@ -20,6 +20,7 @@ import { generateBillReference } from './bill-reference'
 import { getCompanyConfig } from './company-config'
 import { postJournalEntry } from './ledger'
 import { resolveAccountId, resolveDefaultCompanyId } from './finance-mapping'
+import { companyRowsWhere, documentCompanyId, nextFreeDocNumber, seedFromIssued } from './doc-numbering'
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>
 
@@ -71,9 +72,29 @@ async function upsertStockLevel(tx: Tx, key: LocationKey, delta: number) {
   }
 }
 
-async function nextSequenceNumber(prefix: string, count: () => Promise<number>): Promise<string> {
-  const n = (await count()) + 1
-  return `${prefix}-${String(n).padStart(6, '0')}`
+/**
+ * Next PO- / GRN- / TRF- number for `companyId` from its race-safe counter (lib/doc-numbering.ts), replacing the old
+ * `count()+1` (two concurrent writers could draw the same number). On the company's first use the counter starts from
+ * the documents it has already issued (the larger of their count and the highest number), so the existing sequence
+ * simply continues. Must run inside the transaction that creates the document.
+ */
+async function nextStockDocNumber(tx: Tx, companyId: string, prefix: 'PO' | 'GRN' | 'TRF'): Promise<string> {
+  const model = prefix === 'PO' ? 'purchaseOrder' : prefix === 'GRN' ? 'grn' : 'stockTransfer'
+  const field = prefix === 'PO' ? 'poNumber' : prefix === 'GRN' ? 'grnNumber' : 'transferNumber'
+  const mine = await companyRowsWhere(companyId)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const table = (tx as any)[model]
+  return nextFreeDocNumber(tx, {
+    companyId,
+    scopeKey: `SEQ:${prefix}`,
+    seed: async () => {
+      const count: number = await table.count({ where: mine })
+      const top = await table.findFirst({ where: { AND: [mine, { [field]: { startsWith: `${prefix}-` } }] }, orderBy: { [field]: 'desc' }, select: { [field]: true } })
+      return seedFromIssued(count, top?.[field], `${prefix}-`)
+    },
+    format: (n) => `${prefix}-${String(n).padStart(6, '0')}`,
+    taken: async (docNo) => !!(await table.findFirst({ where: { AND: [mine, { [field]: docNo }] }, select: { id: true } })),
+  })
 }
 
 /**
@@ -228,10 +249,22 @@ export async function receiveGrn(opts: {
   const productMap = new Map(products.map((p) => [p.id, p.name]))
 
   return prisma.$transaction(async (tx) => {
-    const grnNumber = await nextSequenceNumber('GRN', () => tx.grn.count())
+    // The receiving company - the linked PO's company (else its first outlet's), otherwise the current company -
+    // resolved BEFORE the GRN is created, so the GRN belongs to it from the start and its number comes from that
+    // company's own sequence (multi-company Phase 3f).
+    let poCompanyId: string | null = null
+    let poOutletId: string | null = null
+    if (opts.purchaseOrderId) {
+      const po = await tx.purchaseOrder.findUnique({ where: { id: opts.purchaseOrderId }, select: { outletIds: true, companyId: true } })
+      const outletIds: string[] = po?.outletIds ? JSON.parse(po.outletIds) : []
+      poCompanyId = po?.companyId ?? null
+      poOutletId = outletIds[0] || null
+    }
+    const grnCompanyId = await documentCompanyId(tx, { companyId: poCompanyId, outletId: poOutletId })
+    const grnNumber = await nextStockDocNumber(tx, grnCompanyId, 'GRN')
     const grn = await tx.grn.create({
       data: {
-        grnNumber, warehouseId: opts.warehouseId, supplierName: opts.supplierName,
+        grnNumber, companyId: grnCompanyId, warehouseId: opts.warehouseId, supplierName: opts.supplierName,
         purchaseOrderId: opts.purchaseOrderId || null,
         invoiceRef: opts.invoiceRef || null, note: opts.note || null, createdById: opts.userId,
       },
@@ -309,22 +342,9 @@ export async function receiveGrn(opts: {
       }
     }
 
-    // Finance Platform (Phase 1): derive the receiving company from the
-    // linked PO's first outlet, falling back to the default (today's only)
-    // company, then post the provisional accrual — Dr Inventory Asset /
-    // Cr Accounts Payable Accrual — so the GRN shows up on the books
+    // Finance Platform (Phase 1): the receiving company (resolved above, before the GRN was created) gets the
+    // provisional accrual — Dr Inventory Asset / Cr Accounts Payable Accrual — so the GRN shows up on the books
     // immediately, ahead of the formal Supplier Invoice.
-    let grnCompanyId: string | null = null
-    if (opts.purchaseOrderId) {
-      const po = await tx.purchaseOrder.findUnique({ where: { id: opts.purchaseOrderId }, select: { outletIds: true } })
-      const outletIds: string[] = po?.outletIds ? JSON.parse(po.outletIds) : []
-      if (outletIds[0]) {
-        const outlet = await tx.outlet.findUnique({ where: { id: outletIds[0] }, select: { companyId: true } })
-        grnCompanyId = outlet?.companyId || null
-      }
-    }
-    if (!grnCompanyId) grnCompanyId = await resolveDefaultCompanyId(tx)
-
     if (grnCompanyId && !costMissing && totalCost > 0) {
       const [inventoryAccountId, apAccrualAccountId] = await Promise.all([
         resolveAccountId(tx, { companyId: grnCompanyId, key: 'INVENTORY_ASSET' }),
@@ -382,10 +402,11 @@ export async function issueTransfer(opts: {
   }
 
   return prisma.$transaction(async (tx) => {
-    const transferNumber = await nextSequenceNumber('TRF', () => tx.stockTransfer.count())
+    const transferCompanyId = await documentCompanyId(tx, { outletId: opts.outletId })
+    const transferNumber = await nextStockDocNumber(tx, transferCompanyId, 'TRF')
     const transfer = await tx.stockTransfer.create({
       data: {
-        transferNumber, warehouseId: opts.warehouseId, outletId: opts.outletId, counterCode: opts.counterCode,
+        transferNumber, companyId: transferCompanyId, warehouseId: opts.warehouseId, outletId: opts.outletId, counterCode: opts.counterCode,
         note: opts.note || null, createdById: opts.userId,
       },
     })
@@ -464,10 +485,11 @@ export async function createPurchaseOrder(opts: {
   const total = roundMoney(subtotal + vatAmount)
 
   return prisma.$transaction(async (tx) => {
-    const poNumber = await nextSequenceNumber('PO', () => tx.purchaseOrder.count())
+    const poCompanyId = await documentCompanyId(tx, { outletId: opts.outletIds[0] || null })
+    const poNumber = await nextStockDocNumber(tx, poCompanyId, 'PO')
     const po = await tx.purchaseOrder.create({
       data: {
-        poNumber, supplierId: opts.supplierId, status: 'DRAFT', outletIds: JSON.stringify(opts.outletIds),
+        poNumber, companyId: poCompanyId, supplierId: opts.supplierId, status: 'DRAFT', outletIds: JSON.stringify(opts.outletIds),
         expectedDate: opts.expectedDate || null, subtotal, vatRate: VAT_RATE, vatAmount, total,
         paymentTerms: opts.paymentTerms || null, notes: opts.notes || null, createdById: opts.userId,
       },

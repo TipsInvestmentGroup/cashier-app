@@ -10,6 +10,13 @@ import { TenantAccessError } from '../lib/tenant-guard'
 import { aliasCompanyKey, companyKey, forEachCompany, legacyAuthorityApplies, resolvePickerCompany, sessionOwnerEmail } from '../lib/tenant'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { postJournalEntry } from '../lib/ledger'
+import { createPurchaseOrder, issueTransfer, receiveGrn } from '../lib/stock'
+import { allocateRequestNumber } from '../lib/expense-requests'
+import { generateBillReference } from '../lib/bill-reference'
+import { documentCompanyId, nextDocNumber, raiseDocCounter, seedFromIssued } from '../lib/doc-numbering'
+import { signToken } from '../lib/auth'
+import { NextRequest } from 'next/server'
 
 const url = process.env.DATABASE_URL || ''
 if (!/^file:/.test(url)) throw new Error('refusing to run: DATABASE_URL must be a local file: SQLite database (this test writes data)')
@@ -197,6 +204,116 @@ async function main() {
     check('...and that seeding is idempotent and leaves the others untouched', (await seedDefaults()) === 'CASH,CRDB' && (await prismaSystem.paymentChannel.count({ where: { code: 'CASH' } })) === 3)
   } else {
     check('EXPAND state: old global keys still in force (cross-company duplicates intentionally still rejected until the contract migration)', await rejects(() => prismaSystem.paymentChannel.create({ data: { code: 'CASH', label: 'Cash', companyId: A } as never }).then(() => prismaSystem.paymentChannel.create({ data: { code: 'CASH', label: 'Cash', companyId: B } as never }))))
+  }
+
+  // ---------------------------------------------------------------- per-company document numbering (step 3f)
+  // A = the ORIGINAL company (stands in for TIPS, with history); B = a second company. Real generators where practical.
+  const numberingContract = !/^\s+scopeKey\s+String\s+@unique/m.test(modelBlock('BillSequenceCounter'))
+  const pad6 = (n: number) => String(n).padStart(6, '0')
+  // A's history from before 3f: a counter row written before rows had a company, and documents numbered by count()+1
+  await prismaSystem.billSequenceCounter.create({ data: { scopeKey: 'JOURNAL_ENTRY', lastValue: 41, companyId: null } })
+  await prismaSystem.supplier.create({ data: { id: 'sup_a', name: 'A Supplier', companyId: A } })
+  await prismaSystem.supplier.create({ data: { id: 'sup_b', name: 'B Supplier', companyId: B } })
+  await prismaSystem.warehouse.create({ data: { id: 'wh_a', name: 'A Store', companyId: A } })
+  await prismaSystem.warehouse.create({ data: { id: 'wh_b', name: 'B Store', companyId: B } })
+  // PO-000003 has no company yet (not backfilled): it still counts as the original company's
+  for (const n of [1, 2, 3]) await prismaSystem.purchaseOrder.create({ data: { poNumber: `PO-${pad6(n)}`, supplierId: 'sup_a', outletIds: '["out_a"]', createdById: 'u_a', companyId: n === 3 ? null : A } as never })
+  // GRN history with a hole (GRN-000002 deleted): count()+1 would re-issue GRN-000003, the seed must not
+  for (const n of [1, 3]) await prismaSystem.grn.create({ data: { grnNumber: `GRN-${pad6(n)}`, warehouseId: 'wh_a', supplierName: 'x', createdById: 'u_a', companyId: A } as never })
+  await prismaSystem.expenseRequestSequence.create({ data: { scopeKey: 'MIK', lastNumber: 7, companyId: A } })
+
+  const je = (c: string, acc: string, user: string) => as(c, () => postJournalEntry(prisma, { companyId: c, entryDate: new Date(), sourceModule: 'MANUAL', createdById: user, lines: [{ accountId: acc, debit: 5 }, { accountId: acc, credit: 5 }] }))
+  const po = (c: string, sup: string, outlet: string, user: string, prod: string) => as(c, () => createPurchaseOrder({ supplierId: sup, outletIds: [outlet], items: [{ productId: prod, purchaseUnit: 'PCS', packSize: 1, quantity: 1, unitPrice: 1 }], userId: user }))
+  const grn = (c: string, wh: string, user: string, prod: string) => as(c, () => receiveGrn({ warehouseId: wh, supplierName: 'x', items: [{ productId: prod, purchaseUnit: 'PCS', packSize: 1, quantityOrdered: 5 }], userId: user }))
+  const trf = (c: string, wh: string, outlet: string, user: string, prod: string) => as(c, () => issueTransfer({ warehouseId: wh, outletId: outlet, counterCode: 'BAR', items: [{ productId: prod, quantity: 1 }], userId: user }))
+  const exp = (c: string) => as(c, () => allocateRequestNumber(prisma, c, { branchCode: 'MIK', name: 'Mikocheni' }))
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  const counterOf = (c: string, scopeKey: string) => prismaSystem.billSequenceCounter.findFirst({ where: { companyId: c, scopeKey } }).then((r) => r?.lastValue)
+
+  const jeA = await je(A, 'acc_a', 'u_a')
+  check('TIPS continuity: journal numbering carries on from the legacy (company-less) counter row', jeA.entryNumber === 'JE-000042', jeA.entryNumber)
+  check('...the legacy counter row is adopted by the original company, not duplicated', (await prismaSystem.billSequenceCounter.findMany({ where: { scopeKey: 'JOURNAL_ENTRY' } })).map((r) => `${r.companyId}:${r.lastValue}`).join() === `${A}:42`)
+  check('TIPS continuity: the next JE is the next number (no gap)', (await je(A, 'acc_a', 'u_a')).entryNumber === 'JE-000043')
+  const poA = await po(A, 'sup_a', 'out_a', 'u_a', 'p_a')
+  check('TIPS continuity: PO numbering continues from the existing POs exactly as count()+1 did', poA.poNumber === 'PO-000004', poA.poNumber)
+  check("...and the PO belongs to its outlet's company", (await prismaSystem.purchaseOrder.findUnique({ where: { id: poA.purchaseOrderId } }))?.companyId === A)
+  const grnA = await grn(A, 'wh_a', 'u_a', 'p_a')
+  check('TIPS continuity: GRN numbering never re-issues a number (history GRN-1, GRN-3 -> GRN-000004)', grnA.grnNumber === 'GRN-000004', grnA.grnNumber)
+  check('...and the GRN belongs to its company from creation', (await prismaSystem.grn.findUnique({ where: { id: grnA.grnId } }))?.companyId === A)
+  const trfA = await trf(A, 'wh_a', 'out_a', 'u_a', 'p_a')
+  check('TIPS continuity: transfers start at TRF-000001 (none issued yet)', trfA.transferNumber === 'TRF-000001', trfA.transferNumber)
+  const expA = await exp(A)
+  check('TIPS continuity: expense numbers continue per branch (MIK 7 -> 0008), same format', expA === `EXP-${today}-MIK-0008`, expA)
+  const refA = await as(A, () => prisma.$transaction((tx) => generateBillReference(tx, { recordId: 'rec_a1', sourceModel: 'SignedBill', billTypeCode: 'SBC', outletId: 'out_a', date: new Date('2026-10-16') })))
+  check('bill reference: internal id B-YYYYMMDD-NNNNNN starts the day at 1 for the original company', refA.internalBillId === 'B-20261016-000001', refA.internalBillId)
+  check('...and its registry row carries the company', (await prismaSystem.billReferenceRegistry.findFirst({ where: { internalBillId: refA.internalBillId } }))?.companyId === A)
+
+  // race-safety: many concurrent first-use draws on one scope -> all distinct and contiguous
+  const conc = await Promise.all(Array.from({ length: 25 }, () => as(A, () => nextDocNumber(prisma, { companyId: A, scopeKey: 'TEST:CONCURRENT', seed: async () => 100 }))))
+  check('concurrent draws (25 at once, first use) are all distinct and contiguous', [...conc].sort((x, y) => x - y).join() === Array.from({ length: 25 }, (_, i) => 101 + i).join(), conc.join())
+  const concPo = await Promise.all(Array.from({ length: 6 }, () => po(A, 'sup_a', 'out_a', 'u_a', 'p_a')))
+  check('concurrent PO creation yields 6 distinct consecutive numbers', concPo.map((r) => r.poNumber).sort().join() === [5, 6, 7, 8, 9, 10].map((n) => `PO-${pad6(n)}`).join(), concPo.map((r) => r.poNumber).join())
+  const before = await counterOf(A, 'SEQ:PO')
+  await as(A, () => prisma.$transaction(async (tx) => { await nextDocNumber(tx, { companyId: A, scopeKey: 'SEQ:PO' }); throw new Error('rollback') })).catch(() => null)
+  check('a rolled-back document gives its number back (no gap)', (await counterOf(A, 'SEQ:PO')) === before, `${before}`)
+  await raiseDocCounter(prisma, { companyId: A, scopeKey: 'SEQ:PO' }, 3)
+  check('resync never lowers a counter', (await counterOf(A, 'SEQ:PO')) === before)
+  await raiseDocCounter(prisma, { companyId: A, scopeKey: 'SEQ:PO' }, 20)
+  check('resync raises a counter that is behind', (await counterOf(A, 'SEQ:PO')) === 20)
+  check('seedFromIssued takes the larger of count and highest number', seedFromIssued(2, 'GRN-000003', 'GRN-') === 3 && seedFromIssued(4, 'ORD-20261016-003', 'ORD-20261016-') === 4 && seedFromIssued(0, null, 'PO-') === 0)
+  check("documentCompanyId: explicit > outlet's company > current company", (await documentCompanyId(prisma, { companyId: B, outletId: 'out_a' })) === B && (await documentCompanyId(prisma, { outletId: 'out_b' })) === B && (await as(B, () => documentCompanyId(prisma, {}))) === B && (await documentCompanyId(prisma, {})) === A)
+
+  // a counter that fell behind numbers issued some other way (an older app version mid-deploy) heals itself
+  await prismaSystem.purchaseOrder.create({ data: { poNumber: 'PO-000021', supplierId: 'sup_a', outletIds: '["out_a"]', createdById: 'u_a', companyId: A } as never })
+  const healed = await po(A, 'sup_a', 'out_a', 'u_a', 'p_a')
+  check('a number already issued elsewhere is skipped, never duplicated (PO-000021 taken -> PO-000022)', healed.poNumber === 'PO-000022', healed.poNumber)
+
+  // POS orders through the real route handler (ORD-YYYYMMDD-NNN, one sequence per company per day)
+  const ordersRoute = await import('../app/api/pos/orders/route')
+  const ord = (c: string, user: string, outlet: string, shift: string) => as(c, async () => {
+    const token = signToken({ userId: user, email: `${user}@x.test`, role: 'ADMIN', name: user, outletId: outlet, companyId: c })
+    const res = await ordersRoute.POST(new NextRequest('http://localhost/api/pos/orders', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ shiftId: shift }) }))
+    return { status: res.status, orderNo: (await res.json()).orderNo as string | undefined }
+  })
+  await prismaSystem.posShift.create({ data: { id: 'sh_a', outletId: 'out_a', name: 'KWANZA', date: new Date(), openedBy: 'u_a', companyId: A } })
+  await prismaSystem.posShift.create({ data: { id: 'sh_b', outletId: 'out_b', name: 'KWANZA', date: new Date(), openedBy: 'u_b', companyId: B } })
+  const ordPrefix = `ORD-${today}-`
+  // two orders already taken today by the old count()+1 numbering
+  for (const n of ['001', '002']) await prismaSystem.posOrder.create({ data: { orderNo: ordPrefix + n, outletId: 'out_a', shiftId: 'sh_a', waiterId: 'u_a', companyId: A } })
+  const o1 = await ord(A, 'u_a', 'out_a', 'sh_a')
+  check('TIPS continuity: POS order numbering continues today\'s sequence (001, 002 -> 003), same format', o1.status === 201 && o1.orderNo === `${ordPrefix}003`, JSON.stringify(o1))
+  const oc = await Promise.all(Array.from({ length: 5 }, () => ord(A, 'u_a', 'out_a', 'sh_a')))
+  check('concurrent POS orders get distinct consecutive numbers', oc.map((o) => o.orderNo).sort().join() === ['004', '005', '006', '007', '008'].map((n) => ordPrefix + n).join(), JSON.stringify(oc))
+  await prismaSystem.posOrder.create({ data: { orderNo: `${ordPrefix}009`, outletId: 'out_a', shiftId: 'sh_a', waiterId: 'u_a', companyId: A } })
+  check('POS: a number taken by an older app version is skipped (009 taken -> 010)', (await ord(A, 'u_a', 'out_a', 'sh_a')).orderNo === `${ordPrefix}010`)
+  check('POS: the order is stamped with its company', (await prismaSystem.posOrder.findFirst({ where: { orderNo: `${ordPrefix}010` } }))?.companyId === A)
+
+  if (numberingContract) {
+    // contract state: B has its own, independent sequences - the same numbers A uses
+    const jeB = await je(B, 'acc_b', 'u_b')
+    check('CONTRACT: a second company starts its own journal sequence at JE-000001', jeB.entryNumber === 'JE-000001', jeB.entryNumber)
+    check('...while the original company carries on unaffected', (await je(A, 'acc_a', 'u_a')).entryNumber === 'JE-000044')
+    const poB = await po(B, 'sup_b', 'out_b', 'u_b', 'p_b')
+    const grnB = await grn(B, 'wh_b', 'u_b', 'p_b')
+    const trfB = await trf(B, 'wh_b', 'out_b', 'u_b', 'p_b')
+    check("CONTRACT: second company's PO / GRN / TRF sequences start at 1", poB.poNumber === 'PO-000001' && grnB.grnNumber === 'GRN-000001' && trfB.transferNumber === 'TRF-000001', `${poB.poNumber} ${grnB.grnNumber} ${trfB.transferNumber}`)
+    check('...and the same number now exists once per company', (await prismaSystem.stockTransfer.count({ where: { transferNumber: 'TRF-000001' } })) === 2)
+    const expB = await exp(B)
+    check('CONTRACT: expense numbers are per company even for the same branch code', expB === `EXP-${today}-MIK-0001` && (await exp(A)) === `EXP-${today}-MIK-0009`, expB)
+    const refB = await as(B, () => prisma.$transaction((tx) => generateBillReference(tx, { recordId: 'rec_b1', sourceModel: 'SignedBill', billTypeCode: 'SBC', outletId: 'out_b', date: new Date('2026-10-16') })))
+    check('CONTRACT: bill references are per company (same internal id, own registry row)', refB.internalBillId === 'B-20261016-000001' && (await prismaSystem.billReferenceRegistry.count({ where: { internalBillId: 'B-20261016-000001' } })) === 2, refB.internalBillId)
+    check('...each company sees only its own document with that number', (await as(B, () => prisma.stockTransfer.findMany({ where: { transferNumber: 'TRF-000001' } }))).length === 1)
+    check('CONTRACT: within ONE company a number is still unique', await rejects(() => prismaSystem.purchaseOrder.create({ data: { poNumber: 'PO-000001', supplierId: 'sup_b', outletIds: '[]', createdById: 'u_b', companyId: B } as never })))
+    const ob = await ord(B, 'u_b', 'out_b', 'sh_b')
+    check("CONTRACT: a second company's POS orders start their own daily sequence at 001", ob.status === 201 && ob.orderNo === `${ordPrefix}001`, JSON.stringify(ob))
+    check('...while the original company carries on (011)', (await ord(A, 'u_a', 'out_a', 'sh_a')).orderNo === `${ordPrefix}011`)
+    const two = await Promise.all(Array.from({ length: 10 }, (_, i) => as(i % 2 ? A : B, () => nextDocNumber(prisma, { companyId: i % 2 ? A : B, scopeKey: 'TEST:TWO' }))))
+    check('CONTRACT: concurrent draws in two companies on the same scope are independent sequences', two.filter((_, i) => i % 2).sort().join() === '1,2,3,4,5' && two.filter((_, i) => !(i % 2)).sort().join() === '1,2,3,4,5', two.join())
+  } else {
+    check('EXPAND state: a second company cannot yet draw from a scope the original company uses (clear error, no duplicate)', await rejects(() => je(B, 'acc_b', 'u_b')))
+    check('...and no stray counter row or number was created for it', (await prismaSystem.billSequenceCounter.count({ where: { companyId: B } })) === 0 && (await prismaSystem.journalEntry.count({ where: { companyId: B } })) === 0)
+    check("EXPAND state: a second company's POS order is refused the same way (no duplicate number)", await rejects(() => ord(B, 'u_b', 'out_b', 'sh_b')))
+    check('EXPAND state: scopes no other company uses already work per company', (await as(B, () => nextDocNumber(prisma, { companyId: B, scopeKey: 'TEST:B-ONLY' }))) === 1)
   }
 
   // ---------------------------------------------------------------- unscoped paths

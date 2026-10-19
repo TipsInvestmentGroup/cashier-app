@@ -12,6 +12,7 @@ import { format } from 'date-fns'
 import { DEFAULT_BILL_TYPES, DEFAULT_REFERENCE_COMPONENTS } from './bill-reference-defaults'
 import { resolveEffectiveConfig, resolveBusinessDate as resolveEngineBusinessDate } from '@/lib/business-calendar'
 import { companyKey, singletonId } from '@/lib/tenant'
+import { companyRowsWhere, nextDocNumber } from '@/lib/doc-numbering'
 
 // Loose type — works with both the prisma singleton and a $transaction
 // client, same convention as lib/stock.ts's `Tx` / lib/collection-excess.ts's `DB`.
@@ -114,26 +115,11 @@ async function loadReferenceConfig(tx: Tx) {
   }
 }
 
-/** Atomic get-or-create-then-increment counter, keyed by an opaque scopeKey.
- *  Mirrors the recovery pattern in lib/stock.ts's upsertStockLevel: a
- *  concurrent first-ever increment for the same scopeKey can race here, so
- *  a failed create falls back to the update path instead of failing outright. */
+/** Atomic, race-safe counter of the CURRENT company (`companyKey()`), keyed by an opaque scopeKey - see
+ *  lib/doc-numbering.ts. Every company has its own counters (multi-company Phase 3f): the original company keeps the
+ *  rows it has always used, so its references continue unchanged; another company starts its own at 1. */
 async function nextSequenceValue(tx: Tx, scopeKey: string): Promise<number> {
-  try {
-    const updated = await tx.billSequenceCounter.update({ where: { scopeKey }, data: { lastValue: { increment: 1 } } })
-    return updated.lastValue
-  } catch {
-    try {
-      const created = await tx.billSequenceCounter.create({ data: { scopeKey, lastValue: 1 } })
-      return created.lastValue
-    } catch (createErr) {
-      if (createErr instanceof Error && createErr.message.includes('Unique')) {
-        const updated = await tx.billSequenceCounter.update({ where: { scopeKey }, data: { lastValue: { increment: 1 } } })
-        return updated.lastValue
-      }
-      throw createErr
-    }
-  }
+  return nextDocNumber(tx, { companyId: await companyKey(), scopeKey })
 }
 
 /** Generic, exported version of the atomic counter above — same primitive,
@@ -244,6 +230,11 @@ export async function generateBillReference(tx: Tx, ctx: BillReferenceContext): 
   const personCode = await resolvePersonCode(tx, ctx)
   const outletCode = await resolveOutletCodeForCtx(tx, ctx)
 
+  // References are unique PER COMPANY (multi-company Phase 3f): the registry row carries the company, and a taken
+  // reference is detected by looking it up first - rather than by a failing insert, which on Postgres would abort the
+  // caller's whole transaction - then the loop auto-advances to the next sequence value.
+  const companyId = await companyKey()
+  const mine = await companyRowsWhere(companyId)
   let lastErr: unknown = null
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const scopeKey = resolveScopeKey(config.sequenceResetRule, billTypeConfig.id, { date, personId: ctx.personId, personCode })
@@ -251,9 +242,11 @@ export async function generateBillReference(tx: Tx, ctx: BillReferenceContext): 
     const internalBillId = await nextInternalBillId(tx, date)
     const displayReference = renderDisplayReference({ config, components: config.components, billTypeConfig, ctx, date, sequenceValue, personCode, outletCode })
 
+    const taken = await tx.billReferenceRegistry.findFirst({ where: { AND: [mine, { OR: [{ internalBillId }, { displayReference }] }] }, select: { id: true } })
+    if (taken) { lastErr = new Error(`Reference ${displayReference} is already taken`); continue }
     try {
       await tx.billReferenceRegistry.create({
-        data: { internalBillId, displayReference, sourceModel: ctx.sourceModel, sourceId: ctx.recordId, billTypeId: billTypeConfig.id },
+        data: { companyId, internalBillId, displayReference, sourceModel: ctx.sourceModel, sourceId: ctx.recordId, billTypeId: billTypeConfig.id },
       })
       return { internalBillId, displayReference, billTypeConfigId: billTypeConfig.id, sequenceValue }
     } catch (err) {
