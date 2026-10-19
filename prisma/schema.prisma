@@ -199,6 +199,8 @@ model PlatformAuditLog {
 /// EXCESS_RECON resource; other resources leave them false/unused.
 model UserPermission {
   id          String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId   String?
   userId      String
   resource    String // 'PAID_BILLS' | 'SIGNED_BILLS' | 'PERSONS' | 'PRODUCTS' | 'EXCESS_RECON'
   canAdd      Boolean  @default(false)
@@ -211,6 +213,8 @@ model UserPermission {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, resource])
+  @@unique([companyId, userId, resource])
+  @@index([companyId])
 }
 
 /// A browser's Web Push subscription for one user's device. Lets the server
@@ -280,33 +284,33 @@ model Company {
 }
 
 model Outlet {
-  id                String              @id @default(cuid())
-  name              String              @unique
-  location          String?
-  isActive          Boolean             @default(true)
-  companyId         String?
-  company           Company?            @relation(fields: [companyId], references: [id])
+  id                      String              @id @default(cuid())
+  name                    String              @unique
+  location                String?
+  isActive                Boolean             @default(true)
+  companyId               String?
+  company                 Company?            @relation(fields: [companyId], references: [id])
   // The template used when no session-specific template is chosen for a new
   // Daily Collection at this outlet. Nullable/optional even after backfill —
   // absence means "fall back to the fixed DailyCollection form unchanged".
-  defaultTemplateId String?
-  defaultTemplate   CollectionTemplate? @relation("OutletDefaultTemplate", fields: [defaultTemplateId], references: [id])
+  defaultTemplateId       String?
+  defaultTemplate         CollectionTemplate? @relation("OutletDefaultTemplate", fields: [defaultTemplateId], references: [id])
   // Events-only outlets (e.g. "Tips Events") are NOT included in the automatic
   // weekly roster — staff are only assigned temporarily when an event is created.
-  isEventsOnly      Boolean             @default(false)
+  isEventsOnly            Boolean             @default(false)
   // Printed-bill header details (company legal name + tax IDs). Shown on the
   // customer/in-house bill; the outlet name appears in parentheses beside them.
-  legalName         String?
-  tin               String?
-  vrn               String?
+  legalName               String?
+  tin                     String?
+  vrn                     String?
   // Optional code backing the BRANCH_CODE/COMPANY_CODE bill-reference
   // components (see lib/bill-reference.ts). Falls back to a slugified
   // Outlet.name when unset.
-  branchCode        String?
+  branchCode              String?
   // Transaction Ledger cut-over: from this business date on, channels with
   // captureMode=TRANSACTIONS must be itemised. Null = not yet cut over.
   itemisedCollectionsFrom DateTime?
-  createdAt         DateTime            @default(now())
+  createdAt               DateTime            @default(now())
 
   users                  User[]
   dailyCollections       DailyCollection[]
@@ -340,6 +344,8 @@ model Outlet {
   priceLists           PriceList[]
   dailyReports         DailyReport[]
   expenseRequests      ExpenseRequest[]
+
+  @@unique([companyId, name])
 }
 
 /// Uploaded per-staff sales figures that the POS/collections don't capture
@@ -347,6 +353,8 @@ model Outlet {
 /// measure actuals against the Targets.
 model SalesMetric {
   id          String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId   String?
   date        DateTime
   outletId    String?
   outlet      Outlet?  @relation(fields: [outletId], references: [id])
@@ -359,6 +367,7 @@ model SalesMetric {
   @@index([date])
   @@index([department])
   @@index([outletId])
+  @@index([companyId])
 }
 
 /// Admin-managed sales/KPI targets — replaces the old hard-coded TARGETS
@@ -369,6 +378,8 @@ model SalesMetric {
 ///   unit:  TZS (currency) | COUNT (unitLabel names the thing counted)
 model SalesTarget {
   id           String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId    String?
   outletId     String
   outlet       Outlet   @relation(fields: [outletId], references: [id])
   scope        String
@@ -383,6 +394,7 @@ model SalesTarget {
 
   @@index([outletId])
   @@index([isActive])
+  @@index([companyId])
 }
 
 /// Locks an uploaded sales day (outlet + department + date) so its SalesMetric
@@ -390,6 +402,8 @@ model SalesTarget {
 /// (super user) can unlock.
 model SalesMetricLock {
   id         String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId  String?
   outletId   String?
   department String
   date       DateTime
@@ -399,6 +413,7 @@ model SalesMetricLock {
 
   @@unique([outletId, department, date])
   @@index([department])
+  @@index([companyId])
 }
 
 // ─── Sales Import Center ─────────────────────────────────────────────────────
@@ -599,6 +614,8 @@ model PriceListItem {
 /// list items are edited.
 model PriceChangeLog {
   id            String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId     String?
   priceListId   String
   priceListName String?
   productId     String
@@ -614,6 +631,7 @@ model PriceChangeLog {
   @@index([productId])
   @@index([priceListId])
   @@index([createdAt])
+  @@index([companyId])
 }
 
 /// Promotions are kept separate from price lists and apply AFTER the selling
@@ -655,6 +673,8 @@ model Promotion {
 /// reconciliation / finance / reports / BI. `data` is the JSON snapshot at save.
 model DailyReport {
   id              String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId       String?
   outletId        String
   outlet          Outlet    @relation(fields: [outletId], references: [id])
   date            DateTime
@@ -673,6 +693,7 @@ model DailyReport {
 
   @@unique([outletId, date])
   @@index([status])
+  @@index([companyId])
 }
 
 /// Locks a single outlet's day. Once a (outlet, date) is closed, cashiers can no
@@ -682,6 +703,8 @@ model DailyReport {
 /// reader that still queries this table directly.
 model DayClosure {
   id         String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId  String?
   outletId   String
   outlet     Outlet   @relation(fields: [outletId], references: [id])
   date       DateTime
@@ -691,6 +714,7 @@ model DayClosure {
 
   @@unique([outletId, date])
   @@index([outletId])
+  @@index([companyId])
 }
 
 // ─── Business Day Exception Management ─────────────────────────────────────
@@ -713,6 +737,8 @@ model DayClosure {
 //                                     shape as CollectionModeConfig/BusinessCalendarConfig)
 model BusinessDay {
   id             String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   outletId       String
   outlet         Outlet    @relation(fields: [outletId], references: [id])
   date           DateTime
@@ -740,6 +766,7 @@ model BusinessDay {
   @@unique([outletId, date])
   @@index([outletId, status])
   @@index([date])
+  @@index([companyId])
 }
 
 /// Request → Approval → Reopen → Submit → Auto-Lock workflow for roles that
@@ -797,6 +824,8 @@ model BusinessDayAuditLog {
 /// role default > deny. See lib/rbac.ts resolveResourcePermission().
 model RolePermission {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   role      String
   resource  String
   allowed   Boolean  @default(false)
@@ -804,12 +833,16 @@ model RolePermission {
   updatedAt DateTime @updatedAt
 
   @@unique([role, resource])
+  @@unique([companyId, role, resource])
+  @@index([companyId])
 }
 
 /// Generic in-app notification — bell/list UI, hooked into
 /// lib/pendingBellEvents.ts's notifyNotificationsChanged() for live refresh.
 model Notification {
   id         String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId  String?
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   type       String
@@ -822,6 +855,7 @@ model Notification {
 
   @@index([userId, read])
   @@index([createdAt])
+  @@index([companyId])
 }
 
 /// Configurable "block close on missing data" / "who can approve unlocks"
@@ -842,6 +876,8 @@ model BusinessDayPolicyConfig {
 
 model DailyCollection {
   id               String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId        String?
   date             DateTime @default(now())
   cash             Float    @default(0)
   crdb             Float    @default(0)
@@ -873,6 +909,7 @@ model DailyCollection {
 
   @@index([date])
   @@index([outletId])
+  @@index([companyId])
 }
 
 // Per-channel amounts for a Daily Collection — lets Setup > Payment Channels
@@ -919,6 +956,7 @@ model CollectionTemplate {
   sessions          CollectionSession[]
   defaultForOutlets Outlet[]                   @relation("OutletDefaultTemplate")
 
+  @@unique([companyId, code])
   @@index([companyId])
 }
 
@@ -988,6 +1026,8 @@ model CollectionValidationRule {
 
 model CollectionSession {
   id            String             @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId     String?
   date          DateTime           @default(now())
   outletId      String
   outlet        Outlet             @relation(fields: [outletId], references: [id])
@@ -1005,6 +1045,7 @@ model CollectionSession {
 
   @@unique([outletId, date, templateId])
   @@index([outletId, date])
+  @@index([companyId])
 }
 
 model CollectionStageRecord {
@@ -1269,6 +1310,8 @@ model BusinessPeriodVersion {
 
 model TransactionSession {
   id            String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId     String?
   date          DateTime  @default(now())
   outletId      String
   outlet        Outlet    @relation(fields: [outletId], references: [id])
@@ -1286,6 +1329,7 @@ model TransactionSession {
 
   @@unique([outletId, date])
   @@index([outletId, date])
+  @@index([companyId])
 }
 
 /// One row per staff from the cashier's uploaded daily System Sales report —
@@ -1321,28 +1365,30 @@ model SystemSalesRecord {
 /// Once linked to a saved collection (lockedAt set) a row is changed only by
 /// that collection's own edit path or, later, the amendment workflow.
 model StaffTransaction {
-  id               String             @id @default(cuid())
+  id               String              @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId        String?
   sessionId        String?
   session          TransactionSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   staffId          String?
-  staff            User?              @relation("StaffTransactionStaff", fields: [staffId], references: [id], onDelete: Restrict)
+  staff            User?               @relation("StaffTransactionStaff", fields: [staffId], references: [id], onDelete: Restrict)
   // Denormalized so ledger rows without a session (Default-mode collections)
   // still carry their outlet / business date / staff.
   staffName        String?
   outletId         String?
   date             DateTime?
   collectionId     String?
-  collection       DailyCollection?   @relation(fields: [collectionId], references: [id], onDelete: SetNull)
-  source           String             @default("STAFF_DECLARED") // STAFF_DECLARED | CASHIER_ENTERED | CHANNEL_TOTAL
+  collection       DailyCollection?    @relation(fields: [collectionId], references: [id], onDelete: SetNull)
+  source           String              @default("STAFF_DECLARED") // STAFF_DECLARED | CASHIER_ENTERED | CHANNEL_TOTAL
   // "<companyId>:<CHANNEL>:<REFERENCE>" for a live (not rejected) digital
   // PAYMENT with a reference — the unique index is what stops one M-PESA/bank
   // reference being claimed twice, by anyone, on any day.
-  referenceKey     String?            @unique
-  version          Int                @default(1)
+  referenceKey     String?             @unique
+  version          Int                 @default(1)
   lockedAt         DateTime?
   originalSnapshot String? // JSON of the money fields frozen at lock time
-  isAmended        Boolean            @default(false)
-  category         String             @default("PAYMENT")
+  isAmended        Boolean             @default(false)
+  category         String              @default("PAYMENT")
   paymentMethod    String?
   amount           Float
   receivingAccount String?
@@ -1352,9 +1398,9 @@ model StaffTransaction {
   // and CREDIT_SALE (a brand-new signed bill issued today). Validating turns
   // these into real SignedBill/PaidBill rows instead of a plain sum.
   personName       String?
-  status           String             @default("DECLARED")
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  status           String              @default("DECLARED")
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
 
   approvals WorkflowApproval[]
 
@@ -1363,6 +1409,7 @@ model StaffTransaction {
   @@index([status])
   @@index([collectionId])
   @@index([outletId, date])
+  @@index([companyId])
 }
 
 // ─── Business Intelligence Layer ────────────────────────────────────────────
@@ -1417,6 +1464,8 @@ model BusinessSession {
 
 model Person {
   id          String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId   String?
   name        String
   phone       String?
   email       String?
@@ -1452,12 +1501,16 @@ model Person {
   employee Employee?
 
   @@unique([type, code])
+  @@unique([companyId, type, code])
   @@index([type])
   @@index([customerGroupId])
+  @@index([companyId])
 }
 
 model SignedBill {
   id             String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   date           DateTime  @default(now())
   // Legacy voucher — kept (not dropped) because it's overloaded today as a
   // deterministic idempotency key for auto-generated bills (see
@@ -1530,6 +1583,7 @@ model SignedBill {
   @@index([personId])
   @@index([creditGroupId])
   @@index([creditAccountId])
+  @@index([companyId])
 }
 
 // Product line items on a signed bill (Customer / Tips / DJ etc.).
@@ -1551,6 +1605,8 @@ model BillItem {
 
 model PaidBill {
   id             String      @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   date           DateTime    @default(now())
   // Free-text/correlation field — NOT the Bill Reference System's reference.
   // Also doubles as a correlation key ("COL-<collectionId>",
@@ -1588,10 +1644,13 @@ model PaidBill {
   @@index([date])
   @@index([outletId])
   @@index([signedBillId])
+  @@index([companyId])
 }
 
 model PettyCash {
   id            String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId     String?
   date          DateTime @default(now())
   requestedBy   String
   department    String?
@@ -1631,12 +1690,15 @@ model PettyCash {
   @@index([paymentStatus])
   @@index([pettyType])
   @@index([expenseRequestId])
+  @@index([companyId])
 }
 
 // A management-allocated petty-cash fund operated by an Accountant. Payments
 // against approved requests draw down this fund; replenishments top it up.
 model PettyFund {
   id             String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   name           String // e.g. "Accountant Fund — HQ"
   ownerId        String? // accountant who operates the fund
   ownerName      String?
@@ -1649,6 +1711,7 @@ model PettyFund {
   txns PettyFundTxn[]
 
   @@index([outletId])
+  @@index([companyId])
 }
 
 // Every movement on a PettyFund. amount is signed: + adds (opening/replenish),
@@ -1687,24 +1750,36 @@ model PettyCashItem {
 // Departments selectable on the cash-request form (managed in /departments).
 model Department {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   name      String   @unique
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
   budgets Budget[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
 }
 
 // Functions selectable on the cash-request form (e.g. Purchases of, Allowance, Transport).
 model PettyFunction {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   name      String   @unique
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+
+  @@unique([companyId, name])
+  @@index([companyId])
 }
 
 // Product catalogue (managed in /products).
 model Product {
   id              String           @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId       String?
   code            String           @unique // auto-generated, human-readable e.g. COC-001
   name            String
   // Legacy free-text category — kept (not dropped) so any reader that hasn't
@@ -1737,26 +1812,33 @@ model Product {
   cancellationReasons CancellationReasonProduct[]
   priceListItems      PriceListItem[]
 
+  @@unique([companyId, code])
   @@index([name])
   @@index([categoryId])
+  @@index([companyId])
 }
 
 /// Admin-managed product category (managed under Setup → Product Categories).
 /// Replaces Product.category's free-text string as the source of truth —
 /// see the backfill note on Product.category above.
 model ProductCategory {
-  id        String   @id @default(cuid())
-  code      String   @unique
-  label     String
+  id         String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId  String?
+  code       String   @unique
+  label      String
   // Sales-target department this category rolls up into (SHISHA | FOOD | null).
   // The real, admin-set mapping that replaces classifying by literal name
   // substring in lib/target-actuals.ts — null = not counted toward a department.
   department String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
 
   products                     Product[]
   cancellationReasonCategories CancellationReasonCategory[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 /// A central stock location that is not a POS counter — e.g. "Main Store".
@@ -1764,6 +1846,8 @@ model ProductCategory {
 /// warehouse needs no schema change. Single row today.
 model Warehouse {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   name      String   @unique // "Main Store"
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -1772,6 +1856,9 @@ model Warehouse {
   ledgerEntries StockLedgerEntry[]
   grns          Grn[]
   transfersOut  StockTransfer[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
 }
 
 /// Current quantity of one product at one location — pieces, or grams when
@@ -1784,6 +1871,8 @@ model Warehouse {
 /// lib/stock.ts, not by the schema.
 model StockLevel {
   id          String     @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId   String?
   productId   String
   product     Product    @relation(fields: [productId], references: [id])
   outletId    String?
@@ -1797,6 +1886,7 @@ model StockLevel {
   @@unique([productId, outletId, counterCode, warehouseId])
   @@index([outletId, counterCode])
   @@index([warehouseId])
+  @@index([companyId])
 }
 
 /// Every stock quantity change, ever — mirrors the "never delete, only
@@ -1805,6 +1895,8 @@ model StockLevel {
 /// StockLevel — an entry always describes a movement at one location.
 model StockLedgerEntry {
   id           String     @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId    String?
   productId    String
   productName  String // snapshot, same pattern as PosOrderItem.productName
   outletId     String?
@@ -1822,12 +1914,15 @@ model StockLedgerEntry {
 
   @@index([productId, outletId, counterCode, createdAt])
   @@index([productId, warehouseId, createdAt])
+  @@index([companyId])
 }
 
 /// A vendor TIPS buys from. Price history lives on PurchaseOrderItem, not
 /// here, so "cheapest supplier for X" is a query, not a separate table.
 model Supplier {
   id            String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId     String?
   name          String   @unique
   contactPerson String?
   phone         String?
@@ -1839,6 +1934,9 @@ model Supplier {
   purchaseOrders PurchaseOrder[]
   invoices       SupplierInvoice[]
   payments       SupplierPayment[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
 }
 
 /// A Purchase Order to a supplier. status is the workflow engine: DRAFT ->
@@ -1848,6 +1946,8 @@ model Supplier {
 /// decidePurchaseOrder, receiveGrn).
 model PurchaseOrder {
   id              String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId       String?
   poNumber        String    @unique // "PO-000001"
   supplierId      String
   supplier        Supplier  @relation(fields: [supplierId], references: [id])
@@ -1873,6 +1973,7 @@ model PurchaseOrder {
 
   @@index([status])
   @@index([supplierId])
+  @@index([companyId])
 }
 
 model PurchaseOrderItem {
@@ -1962,6 +2063,8 @@ model GrnItem {
 /// never the reverse (no returns) and never warehouse -> warehouse.
 model StockTransfer {
   id             String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   transferNumber String    @unique // "TRF-000045"
   warehouseId    String
   warehouse      Warehouse @relation(fields: [warehouseId], references: [id])
@@ -1976,6 +2079,7 @@ model StockTransfer {
 
   @@index([warehouseId])
   @@index([outletId, counterCode])
+  @@index([companyId])
 }
 
 model StockTransferItem {
@@ -2002,6 +2106,8 @@ model StockTransferItem {
 /// set per row, same convention StockLevel already uses.
 model StockCountSession {
   id             String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   scope          String   @default("COUNTER_DAILY") // COUNTER_DAILY | STORE_MONTHLY
   outletId       String?
   counterCode    String?
@@ -2018,6 +2124,7 @@ model StockCountSession {
   @@index([outletId, counterCode])
   @@index([warehouseId])
   @@index([countDate])
+  @@index([companyId])
 }
 
 /// One product's line in a count. Replays the real stock-take workbook's
@@ -2070,6 +2177,8 @@ model StockLossAttribution {
 /// warehouse) is set per row, same convention as StockLevel.
 model Breakage {
   id           String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId    String?
   productId    String
   productName  String // snapshot
   quantity     Float
@@ -2094,11 +2203,14 @@ model Breakage {
   @@index([outletId, counterCode])
   @@index([warehouseId])
   @@index([createdAt])
+  @@index([companyId])
 }
 
 // Cancellations recorded against a daily collection (Double Punch / Out of Stock / Wrong Punch).
 model Cancellation {
   id           String           @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId    String?
   date         DateTime         @default(now())
   collectionId String?
   collection   DailyCollection? @relation(fields: [collectionId], references: [id])
@@ -2119,10 +2231,13 @@ model Cancellation {
   @@index([collectionId])
   @@index([date])
   @@index([status])
+  @@index([companyId])
 }
 
 model CashRecon {
   id               String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId        String?
   date             DateTime @default(now())
   outletId         String?
   openingBalance   Float    @default(0) // auto = previous day's closing
@@ -2141,6 +2256,7 @@ model CashRecon {
 
   @@index([date])
   @@index([outletId])
+  @@index([companyId])
 }
 
 // One line item of "excess amount paid" within a day's cash reconciliation —
@@ -2209,32 +2325,35 @@ model CollectionExcess {
 
 // Digital Payment Reconciliation — one row per digital channel per day+outlet.
 model BankRecon {
-  id              String   @id @default(cuid())
-  date            DateTime @default(now())
-  outletId        String?
-  channel         String? // digital channel code (CRDB | STANBIC | MPESA | …); null = legacy total
-  reportedAmount  Float    @default(0) // auto: collections + paid bills for this channel (system "collected")
+  id                      String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId               String?
+  date                    DateTime @default(now())
+  outletId                String?
+  channel                 String? // digital channel code (CRDB | STANBIC | MPESA | …); null = legacy total
+  reportedAmount          Float    @default(0) // auto: collections + paid bills for this channel (system "collected")
   // Current model (per digital-reconciliation-field-redesign): cashier tallies
   // the two components of the channel by hand; Total Collection = paidBills +
   // salesCollection is derived (not persisted) and reconciled against reportedAmount.
-  paidBills       Float? // cashier: bills settled/paid out through this channel
-  salesCollection Float? // cashier: sales collections received into this channel
-  verifiedAmount  Float? // verified collected amount by an officer = verifiedPaidBills + verifiedSalesCollection (null = not yet verified)
+  paidBills               Float? // cashier: bills settled/paid out through this channel
+  salesCollection         Float? // cashier: sales collections received into this channel
+  verifiedAmount          Float? // verified collected amount by an officer = verifiedPaidBills + verifiedSalesCollection (null = not yet verified)
   verifiedPaidBills       Float? // officer-verified paid bills for this channel
   verifiedSalesCollection Float? // officer-verified sales collection for this channel
   // Deprecated (pre-redesign) — kept for historical records; no longer written or rendered.
-  openingBalance  Float? // DEPRECATED account opening balance (cashier)
-  closingBalance  Float? // DEPRECATED account closing balance (cashier)
-  verifiedOpening Float? // DEPRECATED opening balance verified by an officer
-  verifiedClosing Float? // DEPRECATED closing balance verified by an officer
-  reason          String? // reason for variance
-  reportedBy      String?
-  verifiedBy      String?
-  cashierId       String
-  createdAt       DateTime @default(now())
+  openingBalance          Float? // DEPRECATED account opening balance (cashier)
+  closingBalance          Float? // DEPRECATED account closing balance (cashier)
+  verifiedOpening         Float? // DEPRECATED opening balance verified by an officer
+  verifiedClosing         Float? // DEPRECATED closing balance verified by an officer
+  reason                  String? // reason for variance
+  reportedBy              String?
+  verifiedBy              String?
+  cashierId               String
+  createdAt               DateTime @default(now())
 
   @@index([date])
   @@index([outletId])
+  @@index([companyId])
 }
 
 model Setting {
@@ -2246,42 +2365,54 @@ model Setting {
 // canonical key used as Person.type / SignedBill.billType; label is for display.
 model PersonCategory {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   code      String   @unique
   label     String
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 // Configurable payment channels (managed under Outlets). Used by Paid Bills,
 // Petty Cash, and Daily Collections amount boxes (see DailyCollectionChannel).
 model PaymentChannel {
-  id          String   @id @default(cuid())
-  code        String   @unique
-  label       String
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  id                String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId         String?
+  code              String   @unique
+  label             String
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
   // Finance Platform (Stage 1): a simple, single default GL Cash/Bank/
   // Mobile-Money account for this channel — kept as the fallback for a
   // business that never sets up Company Payment Accounts (Stage 3). Once a
   // channel has one or more CompanyPaymentAccount rows, that account's
   // default row wins over this field (see lib/finance-mapping.ts
   // resolveChannelAccountId's cascade).
-  glAccountId String?
-  glAccount   Account? @relation(fields: [glAccountId], references: [id])
+  glAccountId       String?
+  glAccount         Account? @relation(fields: [glAccountId], references: [id])
   // Transaction Ledger: TOTAL = one amount per staff/day (today's form);
   // TRANSACTIONS = each payment itemised once the outlet passes its
   // itemisation cut-over (Outlet.itemisedCollectionsFrom).
-  captureMode       String  @default("TOTAL")
-  requiresReference Boolean @default(false)
+  captureMode       String   @default("TOTAL")
+  requiresReference Boolean  @default(false)
 
   supplierPayments SupplierPayment[]
   companyAccounts  CompanyPaymentAccount[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 // Configurable cancellation reasons (managed under Setup). Cancellation.reason
 // stores the label as free text — this table only drives the picker options.
 model CancellationReason {
   id           String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId    String?
   code         String   @unique
   label        String
   isActive     Boolean  @default(true)
@@ -2293,6 +2424,9 @@ model CancellationReason {
 
   categories CancellationReasonCategory[]
   products   CancellationReasonProduct[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 /// Restricts a CancellationReason (with appliesToAll = false) to one product category.
@@ -2333,6 +2467,8 @@ model CancellationReasonProduct {
 /// path unchanged.
 model ExcessReason {
   id                 String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId          String?
   code               String   @unique
   label              String
   category           String   @default("NON_PAYABLE") // PAYABLE_EXCESS | NON_PAYABLE | STAFF_LOSS (legacy: also drives form placement)
@@ -2340,6 +2476,9 @@ model ExcessReason {
   allocationStrategy String   @default("FIFO") // FIFO | LIFO — order the auto-settlement engine (lib/excess-settlement.ts) applies a Cash Recon payment against this reason's outstanding CollectionExcess balances
   isActive           Boolean  @default(true)
   createdAt          DateTime @default(now())
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 // ─── Bill Reference System ───────────────────────────────────────────────────
@@ -2359,6 +2498,8 @@ model ExcessReason {
 /// application code, never by end users).
 model BillReferenceConfig {
   id                  String   @id @default("default")
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId           String?
   dateFormat          String   @default("YYMMDD")
   customDateFormat    String? // date-fns token string, used when dateFormat = CUSTOM
   separator           String   @default("-")
@@ -2370,6 +2511,8 @@ model BillReferenceConfig {
   createdAt           DateTime @default(now())
 
   components BillReferenceComponent[]
+
+  @@index([companyId])
 }
 
 /// One row per component slot. `order` drives the admin drag-and-drop
@@ -2396,6 +2539,8 @@ model BillReferenceComponent {
 /// STAFF_LOSS | TIPS | DJ) so the one-time backfill can resolve historical rows.
 model BillTypeConfig {
   id                 String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId          String?
   code               String   @unique // SBA|SBD|SBS|SBC|SBJ|SBT|PBA|PBD|PBS|PBC|PBJ|PBT|EXS|EXR|LOS
   name               String
   prefix             String
@@ -2412,6 +2557,9 @@ model BillTypeConfig {
   collectionExcesses CollectionExcess[]
   breakages          Breakage[]
   excessRefunds      ExcessRefund[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
 }
 
 /// Generic atomic counter keyed by a single opaque scopeKey string built by
@@ -2421,9 +2569,13 @@ model BillTypeConfig {
 /// prefixes, so no fake "bill type" rows are needed for them.
 model BillSequenceCounter {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   scopeKey  String   @unique
   lastValue Int      @default(0)
   updatedAt DateTime @updatedAt
+
+  @@index([companyId])
 }
 
 /// Cross-table registry — every issued reference gets one row here, written
@@ -2433,6 +2585,8 @@ model BillSequenceCounter {
 /// engine's retry loop uses to "auto-advance to the next sequence" on conflict.
 model BillReferenceRegistry {
   id               String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId        String?
   internalBillId   String   @unique
   displayReference String   @unique
   sourceModel      String // SignedBill | PaidBill | CashReconExcess | CollectionExcess | Breakage | ExcessRefund
@@ -2441,6 +2595,7 @@ model BillReferenceRegistry {
   createdAt        DateTime @default(now())
 
   @@index([sourceModel, sourceId])
+  @@index([companyId])
 }
 
 /// Minimal Excess Refund (EXR) record — nothing plays this role today. Mirrors
@@ -2449,6 +2604,8 @@ model BillReferenceRegistry {
 /// a one-shot outward payment, not a receivable to collect against).
 model ExcessRefund {
   id               String          @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId        String?
   date             DateTime        @default(now())
   internalBillId   String          @unique
   displayReference String          @unique
@@ -2475,6 +2632,7 @@ model ExcessRefund {
   @@index([date])
   @@index([outletId])
   @@index([personId])
+  @@index([companyId])
 }
 
 /// Granular settlement ledger for the Excess Recon auto-settlement engine
@@ -2486,6 +2644,8 @@ model ExcessRefund {
 /// (or, for manual settlements only, CashReconExcess) row that got settled.
 model ExcessSettlement {
   id          String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId   String?
   reason      String
   method      String   @default("AUTO_FIFO") // AUTO_FIFO | AUTO_LIFO | MANUAL
   sourceType  String // CASH_RECON_PAYMENT | MANUAL_PAYMENT
@@ -2500,10 +2660,13 @@ model ExcessSettlement {
   @@index([sourceId])
   @@index([targetId])
   @@index([reason])
+  @@index([companyId])
 }
 
 model AuditLog {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   action    String
@@ -2515,6 +2678,7 @@ model AuditLog {
   @@index([userId])
   @@index([entity])
   @@index([createdAt])
+  @@index([companyId])
 }
 
 // ─── MyPos Module ─────────────────────────────────────────────────────────────
@@ -2528,6 +2692,8 @@ model AuditLog {
 // Physical tables on the venue floor.
 model PosTable {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   outletId  String
   outlet    Outlet   @relation(fields: [outletId], references: [id])
   number    Int
@@ -2540,30 +2706,36 @@ model PosTable {
 
   @@unique([outletId, number])
   @@index([outletId])
+  @@index([companyId])
 }
 
 // One shift per outlet per day — KWANZA, PILI, TATU, NNE.
 model PosShift {
-  id       String    @id @default(cuid())
-  outletId String
-  outlet   Outlet    @relation(fields: [outletId], references: [id])
-  name     String // KWANZA | PILI | TATU | NNE
-  date     DateTime
-  openedAt DateTime  @default(now())
-  closedAt DateTime?
-  openedBy String // userId
-  closedBy String? // userId
+  id        String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
+  outletId  String
+  outlet    Outlet    @relation(fields: [outletId], references: [id])
+  name      String // KWANZA | PILI | TATU | NNE
+  date      DateTime
+  openedAt  DateTime  @default(now())
+  closedAt  DateTime?
+  openedBy  String // userId
+  closedBy  String? // userId
 
   orders         PosOrder[]
   waiterSessions PosWaiterSession[]
 
   @@index([outletId])
   @@index([date])
+  @@index([companyId])
 }
 
 // One counter/station per outlet (matches the 4-counter setup).
 model PosCounter {
   id           String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId    String?
   outletId     String
   outlet       Outlet   @relation(fields: [outletId], references: [id])
   code         String // MAIN | BAR | SHISHA | KITCHEN
@@ -2579,11 +2751,14 @@ model PosCounter {
 
   @@unique([outletId, code])
   @@index([outletId])
+  @@index([companyId])
 }
 
 // One bill per table per visit. Closing it feeds into DailyCollection.
 model PosOrder {
   id              String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId       String?
   orderNo         String    @unique // ORD-20260619-001
   outletId        String
   outlet          Outlet    @relation(fields: [outletId], references: [id])
@@ -2626,6 +2801,7 @@ model PosOrder {
   @@index([eventId])
   @@index([status])
   @@index([createdAt])
+  @@index([companyId])
 }
 
 /// A (possibly partial) payment received against a POS order. Supports the
@@ -2677,6 +2853,8 @@ model PosOrderItem {
 /// hand-off between staff, this just carries the notification/queue.
 model PosStockRequest {
   id              String    @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId       String?
   outletId        String
   outlet          Outlet    @relation(fields: [outletId], references: [id])
   fromCounter     String // VIP | MAIN — counter that's out of stock and asking
@@ -2694,6 +2872,7 @@ model PosStockRequest {
 
   @@index([outletId])
   @@index([status])
+  @@index([companyId])
 }
 
 // Tracks every receipt/ticket sent to a counter printer.
@@ -2726,15 +2905,22 @@ model PosWaiterSession {
 // Add-ons selectable per order item (e.g. Barafu, Straw, Lemon).
 model PosProductExtra {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   name      String   @unique
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
+
+  @@unique([companyId, name])
+  @@index([companyId])
 }
 
 // Items blocked per outlet by a manager (out of stock / not available today).
 // Does not affect the global product catalogue — only the POS menu for that outlet.
 model PosBlockedItem {
   id        String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId String?
   outletId  String
   outlet    Outlet   @relation(fields: [outletId], references: [id])
   productId String
@@ -2745,6 +2931,7 @@ model PosBlockedItem {
 
   @@unique([outletId, productId])
   @@index([outletId])
+  @@index([companyId])
 }
 
 /// Staff scheduling: a rostered shift assignment for one staff member on one
@@ -2753,6 +2940,8 @@ model PosBlockedItem {
 /// MORNING (09:00–16:00) and EVENING (16:00–05:00 next day).
 model ScheduleAssignment {
   id          String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId   String?
   date        DateTime // the calendar day the shift starts
   shiftType   String // MORNING | EVENING
   outletId    String
@@ -2772,6 +2961,7 @@ model ScheduleAssignment {
   @@index([outletId])
   @@index([date])
   @@index([staffId])
+  @@index([companyId])
 }
 
 /// Exception to the default "every active service staff is available" rule.
@@ -2796,6 +2986,8 @@ model StaffUnavailability {
 /// rest-day policy). One row per outlet; sensible defaults if absent.
 model OutletScheduleConfig {
   id                String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId         String?
   outletId          String   @unique
   outlet            Outlet   @relation(fields: [outletId], references: [id])
   morningWeight     Float    @default(1) // expected traffic weight — Morning
@@ -2803,6 +2995,8 @@ model OutletScheduleConfig {
   weekendMultiplier Float    @default(1.4) // Fri/Sat uplift on both shifts
   daysOffPerWeek    Int      @default(1) // rest days per staff per week
   updatedAt         DateTime @updatedAt
+
+  @@index([companyId])
 }
 
 /// An external event or special function staffed temporarily from the
@@ -2810,6 +3004,8 @@ model OutletScheduleConfig {
 /// weekly roster for the event day (see /api/events/[id]/staff).
 model Event {
   id             String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   name           String
   description    String?
   eventType      String? // e.g. Wedding, Corporate, Concert, Private Party, Product Launch, Other
@@ -2843,6 +3039,7 @@ model Event {
 
   @@index([date])
   @@index([status])
+  @@index([companyId])
 }
 
 /// A staff member assigned to work an event, with their role, attendance and
@@ -3148,6 +3345,8 @@ model JournalEntry {
 /// dimension (branch/cost-centre), not a scoping field.
 model JournalLine {
   id             String       @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   journalEntryId String
   journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   accountId      String
@@ -3159,6 +3358,7 @@ model JournalLine {
 
   @@index([journalEntryId])
   @@index([accountId])
+  @@index([companyId])
 }
 
 /// Configuration-driven mapping of a business event to a GL account —
@@ -3267,6 +3467,8 @@ model SupplierPaymentAllocation {
 /// allowed (e.g. a partial recovery followed by writing off the rest).
 model SignedBillWriteOff {
   id             String     @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId      String?
   signedBillId   String
   signedBill     SignedBill @relation(fields: [signedBillId], references: [id])
   amount         Float
@@ -3276,6 +3478,7 @@ model SignedBillWriteOff {
   createdAt      DateTime   @default(now())
 
   @@index([signedBillId])
+  @@index([companyId])
 }
 
 // ─── Finance Platform (Stage 3 — Banking & Cash Management) ────────────────
@@ -3335,20 +3538,20 @@ model CompanyPaymentAccount {
 ///   BANK_CHARGE   Dr Bank Charges Expense / Cr fromAccount
 ///   INTEREST      Dr toAccount / Cr Interest Income
 model BankTransaction {
-  id              String                 @id @default(cuid())
-  companyId       String
-  company         Company                @relation(fields: [companyId], references: [id])
-  type            String
-  fromAccountId   String?
-  fromAccount     CompanyPaymentAccount? @relation("BankTxnFrom", fields: [fromAccountId], references: [id])
-  toAccountId     String?
-  toAccount       CompanyPaymentAccount? @relation("BankTxnTo", fields: [toAccountId], references: [id])
-  amount          Float
-  transactionDate DateTime               @default(now())
-  reference       String?
-  note            String?
-  createdById     String
-  journalEntryId  String?
+  id               String                 @id @default(cuid())
+  companyId        String
+  company          Company                @relation(fields: [companyId], references: [id])
+  type             String
+  fromAccountId    String?
+  fromAccount      CompanyPaymentAccount? @relation("BankTxnFrom", fields: [fromAccountId], references: [id])
+  toAccountId      String?
+  toAccount        CompanyPaymentAccount? @relation("BankTxnTo", fields: [toAccountId], references: [id])
+  amount           Float
+  transactionDate  DateTime               @default(now())
+  reference        String?
+  note             String?
+  createdById      String
+  journalEntryId   String?
   /// Loose ref (no FK — mirrors FundingSourceTxn.expensePaymentId /
   /// CreditAccount.userId) to the ExpenseRequest a movement settles. Set only on
   /// a Petty Cash top-up's paying leg (a TRANSFER out of a digital account,
@@ -3356,7 +3559,7 @@ model BankTransaction {
   /// lib/custodian-report.ts can pair it with that request's Petty Cash REPLENISH
   /// FundingSourceTxn (which carries the same request id in expensePaymentId).
   expenseRequestId String?
-  createdAt       DateTime               @default(now())
+  createdAt        DateTime               @default(now())
 
   @@index([companyId, transactionDate])
   @@index([expenseRequestId])
@@ -3423,6 +3626,8 @@ model Budget {
 /// convention (see lib/cash-verify.ts canVerifyCash()).
 model AccountReconciliation {
   id                      String                @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId               String?
   companyPaymentAccountId String
   companyPaymentAccount   CompanyPaymentAccount @relation(fields: [companyPaymentAccountId], references: [id])
   periodStart             DateTime
@@ -3441,6 +3646,7 @@ model AccountReconciliation {
   items ReconciliationItem[]
 
   @@index([companyPaymentAccountId, periodStart])
+  @@index([companyId])
 }
 
 /// One line on one side of a reconciliation — either a SYSTEM line (a real
@@ -4975,14 +5181,14 @@ model ExpenseRequest {
   // a slug of the name) is what makes per-outlet numbering collision-free; NNNN
   // is that branch's continuous counter (see ExpenseRequestSequence). Nullable:
   // drafts and pre-Phase-3 rows have none.
-  requestNumber String? @unique
+  requestNumber  String?   @unique
   // The transaction KIND (Allowance | Purchase | Repair | Utility Bill | Digital
   // Expense | Casual Expense — EXPENSE_TYPES in lib/shared-constants.ts), a
   // dimension genuinely distinct from categoryId (the cost centre / GL account,
   // = the spec's expense_category). Nullable: pre-Phase-3 rows predate it and
   // are surfaced by scripts/flag-expense-type-backfill.ts for manual assignment,
   // never auto-guessed.
-  expenseType String?
+  expenseType    String?
   // When the request entered its CURRENT status — stamped on every status
   // change, so the Aging column can show time-in-current-stage (computed at
   // render, never stored). Backfilled to createdAt for existing rows.
@@ -5016,9 +5222,13 @@ model ExpenseRequest {
 /// never draw the same number, and it NEVER resets (the date is only a stamp).
 model ExpenseRequestSequence {
   id         String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId  String?
   scopeKey   String   @unique // resolved branch code, e.g. "MIK"
   lastNumber Int      @default(0)
   updatedAt  DateTime @updatedAt
+
+  @@index([companyId])
 }
 
 /// Optional line-item breakdown of an ExpenseRequest — identical shape to
@@ -5108,6 +5318,8 @@ model VerificationRecord {
 ///   docType: RECEIPT | INVOICE | PROOF_OF_PAYMENT | SCREENSHOT | OTHER
 model Attachment {
   id           String   @id @default(cuid())
+  /// Owning company (multi-company Phase 3). Nullable until the contract step makes it required.
+  companyId    String?
   entityType   String
   entityId     String
   url          String
@@ -5116,6 +5328,7 @@ model Attachment {
   createdAt    DateTime @default(now())
 
   @@index([entityType, entityId])
+  @@index([companyId])
 }
 
 /// Admin-defined custom field for a RequestType — graduates the Phase 1

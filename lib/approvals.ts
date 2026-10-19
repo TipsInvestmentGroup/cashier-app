@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { legacyAuthorityApplies } from '@/lib/tenant'
 
 /**
  * Who's allowed to manage departments/functions, approve petty cash and
@@ -18,6 +19,9 @@ import { prisma } from '@/lib/prisma'
  */
 
 async function getEmailList(settingKey: string, defaults: string[]): Promise<string[]> {
+  // These lists (and their hard-coded defaults) are the ORIGINAL company's. Another company has none until
+  // per-company grants exist - never TIPS's people.
+  if (!(await legacyAuthorityApplies())) return []
   const s = await prisma.setting.findUnique({ where: { key: settingKey } })
   if (s?.value) {
     try {
@@ -29,6 +33,7 @@ async function getEmailList(settingKey: string, defaults: string[]): Promise<str
 }
 
 async function setEmailList(settingKey: string, emails: string[]) {
+  if (!(await legacyAuthorityApplies())) throw new Error('Approver lists are not configurable for this company yet')
   const clean = (emails || []).map((e) => String(e).trim().toLowerCase()).filter(Boolean)
   await prisma.setting.upsert({
     where: { key: settingKey },

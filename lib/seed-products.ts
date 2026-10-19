@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client'
 import { roundMoney } from '@/lib/utils'
 import data from '@/lib/seed-products-data.json'
+import { ensureTipsCompany } from '@/lib/collection-template-seed'
 
 export interface SeedProduct {
   code: string
@@ -21,12 +22,13 @@ export const SEED_PRODUCTS = data as SeedProduct[]
 export async function seedProducts(prisma: PrismaClient) {
   let created = 0
   let updated = 0
+  const { id: companyId } = await ensureTipsCompany(prisma)
 
   for (const p of SEED_PRODUCTS) {
-    const existing = await prisma.product.findUnique({ where: { code: p.code } })
+    const existing = await prisma.product.findUnique({ where: { companyId_code: { companyId, code: p.code } } })
     if (existing) {
       await prisma.product.update({
-        where: { code: p.code },
+        where: { companyId_code: { companyId, code: p.code } },
         data: {
           name: p.name,
           category: p.category,
@@ -38,6 +40,7 @@ export async function seedProducts(prisma: PrismaClient) {
     } else {
       await prisma.product.create({
         data: {
+          companyId,
           code: p.code,
           name: p.name,
           category: p.category,

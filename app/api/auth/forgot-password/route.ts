@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { generateResetToken } from '@/lib/auth'
 import { sendMail } from '@/lib/email'
 import { clientIp, recordHit, tooMany } from '@/lib/rate-limit'

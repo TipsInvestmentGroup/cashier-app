@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomBytes } from 'crypto'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { comparePassword, hashPassword } from '@/lib/auth'
 import { signPlatformToken, platformAudit } from '@/lib/platform-auth'
 import { clearKey, clientIp, isLimited, recordHit, tooMany, type LimitRule } from '@/lib/rate-limit'

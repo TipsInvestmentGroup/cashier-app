@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { prismaSystem as prisma } from '@/lib/prisma'
 import { comparePassword } from '@/lib/auth'
 import { ensureMemberships, issueSession, pickMembership, usableMemberships } from '@/lib/tenant'
 import { clientIp, isLimited, recordHit, tooMany, type LimitRule } from '@/lib/rate-limit'

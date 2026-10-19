@@ -10,10 +10,10 @@ import { prisma } from '@/lib/prisma'
  * credentials (they must be reset). Full-fidelity disaster recovery is the
  * database-level point-in-time restore (Neon), not this export.
  */
-export async function dumpDatabase() {
+export async function dumpDatabase(opts: { includeSettings?: boolean } = {}) {
   const [
     users, outlets, dailyCollections, persons, signedBills, paidBills, billItems,
-    pettyCash, pettyCashItems, cashRecon, cashReconExcess, bankRecon, settings, departments, pettyFunctions,
+    pettyCash, pettyCashItems, cashRecon, cashReconExcess, bankRecon, settingsAll, departments, pettyFunctions,
     products, cancellations, personCategories, paymentChannels, auditLogs,
     pettyFunds, pettyFundTxns,
     expenseModuleConfigs, requestTypes, expenseCategories, fundingSources, fundingSourceTxns,
@@ -56,6 +56,10 @@ export async function dumpDatabase() {
     prisma.verificationRecord.findMany(),
     prisma.attachment.findMany(),
   ])
+
+  // Settings are deployment-global until per-company settings exist, so they are included only for the original
+  // company - another company's backup must never carry the original company's approver lists, branding or config.
+  const settings = opts.includeSettings === false ? [] : settingsAll
 
   // Strip credential material before anything is serialised (see header note).
   const safeUsers = users.map((u) => {

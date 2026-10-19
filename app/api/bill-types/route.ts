@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser, requireRole } from '@/lib/auth'
 import { seedBillTypesIfEmpty } from '@/lib/bill-reference'
+import { companyKey } from '@/lib/tenant'
 import { BILL_TYPE_CATEGORIES } from '@/lib/bill-reference-defaults'
 
 const CAN_MANAGE = ['ADMIN', 'DIRECTOR']
@@ -14,13 +15,14 @@ async function generateUniqueBillTypeCode(name: string): Promise<string> {
   const cleaned = String(name).trim().toUpperCase().replace(/[^A-Z0-9]+/g, '')
   const base = cleaned.slice(0, 4) || 'CUS'
 
-  const existing = await prisma.billTypeConfig.findUnique({ where: { code: base } })
+  const companyId = await companyKey()
+  const existing = await prisma.billTypeConfig.findUnique({ where: { companyId_code: { companyId, code: base } } })
   if (!existing) return base
 
   for (let n = 2; n < 1000; n++) {
     const suffix = String(n)
     const candidate = (base.slice(0, Math.max(1, 4 - suffix.length)) + suffix).slice(0, 4)
-    const clash = await prisma.billTypeConfig.findUnique({ where: { code: candidate } })
+    const clash = await prisma.billTypeConfig.findUnique({ where: { companyId_code: { companyId, code: candidate } } })
     if (!clash) return candidate
   }
   throw new Error(`Could not generate a unique bill type code from "${name}" — too many collisions`)
@@ -61,6 +63,7 @@ export async function POST(req: NextRequest) {
     const maxSort = await prisma.billTypeConfig.aggregate({ _max: { sortOrder: true } })
     const item = await prisma.billTypeConfig.create({
       data: {
+        companyId: await companyKey(),
         code,
         name,
         prefix,

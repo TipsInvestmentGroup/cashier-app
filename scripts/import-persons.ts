@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx'
 import { PrismaClient } from '@prisma/client'
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3'
 import 'dotenv/config'
+import { ensureTipsCompany } from '../lib/collection-template-seed'
 
 const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL || 'file:./dev.db' })
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,6 +71,7 @@ async function main() {
   }, {})
   console.log('  By type:', counts)
 
+  const { id: companyId } = await ensureTipsCompany(prisma)
   let created = 0
   let updated = 0
   for (const e of entries) {
@@ -85,7 +87,7 @@ async function main() {
       updated++
     } else {
       await prisma.person.create({
-        data: { name: e.name, type: e.type, creditLimit: e.creditLimit, isActive: true },
+        data: { companyId, name: e.name, type: e.type, creditLimit: e.creditLimit, isActive: true },
       })
       created++
     }
