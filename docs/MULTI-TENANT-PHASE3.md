@@ -87,7 +87,7 @@ over the existing `BillSequenceCounter` / `ExpenseRequestSequence` tables — so
   error — never a duplicate number).
 - **Contract PR**: drops the 25 global indexes (CashReconExcess/CollectionExcess have no company column: their own unique becomes a
   plain index and the registry, written in the same transaction, enforces per-company uniqueness). Deploy only after the expand PR.
-- Verified: guard test — 103 checks in the expand state, 109 in the contract state, including TIPS continuity per series, concurrent first use,
+- Verified: guard test — 93 checks in the expand state, 100 in the contract state, including TIPS continuity per series, concurrent first use,
   rollback/no-gap, self-healing after an out-of-band number, and the real POS route.
 
 ## Not in this change — remaining Phase 3 steps (in order)
