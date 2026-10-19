@@ -52,12 +52,47 @@ Master-data names/codes are now unique **per company** instead of across the who
 - Rollback: expand — revert the code (indexes are harmless); contract — recreate the 17 global indexes (they rebuild
   only while no two companies share a code).
 
+## 3f Per-company document numbering — EXPAND done (contract PR follows)
+Every human-readable document number now comes from a counter row keyed by **(company, scope)** — `lib/doc-numbering.ts`
+over the existing `BillSequenceCounter` / `ExpenseRequestSequence` tables — so each company has its own sequences.
+
+| Document | Format (unchanged) | Before | Now |
+|---|---|---|---|
+| Journal entry | `JE-000001` | one database-wide counter `JOURNAL_ENTRY` | per company (the original company keeps its row) |
+| Supplier invoice / payment | `INV-` / `PAY-000001` | database-wide counters `SEQ:INV` / `SEQ:PAY` | per company |
+| PO / GRN / stock transfer | `PO-` / `GRN-` / `TRF-000001` | `count()+1` — **not race-safe** | per-company counter `SEQ:PO` … seeded from the documents already issued |
+| POS order | `ORD-YYYYMMDD-NNN` | daily `count()+1` + retry | per-company daily counter `POS_ORDER:<date>` in the order's transaction |
+| Expense request | `EXP-YYYYMMDD-<BRANCH>-NNNN` | per-branch counter, database-wide | per company + branch |
+| Bill references / person codes | internal `B-YYYYMMDD-NNNNNN`, configured display ref, person code | database-wide `INTERNAL:<day>`, `BT:<type>…`, `PERSONCODE:<type>` | per company |
+
+- **Original company (TIPS) continues exactly**: same formats, no reset, no gap. Its existing counter rows are reused (a row
+  still without a company is adopted, never duplicated); a series that was `count()+1` starts its counter from the larger of the
+  documents' count and the highest number issued — the next number is what `count()+1` would have given, and a deleted document
+  can never cause a number to be re-issued.
+- **Race-safe**: the increment is one atomic `UPDATE … RETURNING` (row-locked until the caller's transaction ends); first use inserts
+  with `INSERT … ON CONFLICT DO NOTHING`. Nothing in the path can fail inside the caller's transaction (on Postgres a failed statement
+  would abort it). The number is drawn in the same transaction as the document, so a rolled-back document leaves no gap. Bill
+  references check the registry before inserting instead of relying on a failing insert. PO/GRN/TRF and POS orders also skip a
+  number that already exists (e.g. issued by the previous app version mid-deploy) and resynchronise the counter.
+- Documents are stamped with their company at creation (PO from its first outlet, GRN from its PO — previously set only after
+  receipt — transfer and POS order from their outlet).
+- **Not changed, on purpose**: event booking numbers (`TKT-`/`TBL-` + 8 random characters; looked up on a public page with no
+  company, so they must stay unique across the database), `autoKey`/`billRef` (they embed record ids), `StaffTransaction.referenceKey`
+  (already company-prefixed), product/account codes (3e).
+- **Expand PR** (`20261016100000_document_numbers_per_company_expand`): 21 unique indexes `("companyId", scopeKey)` on the two counter
+  tables and `("companyId", number)` on JournalEntry, SupplierInvoice, SupplierPayment, PurchaseOrder, Grn, StockTransfer, PosOrder,
+  ExpenseRequest, and internalBillId/displayReference on SignedBill (+ voucherNumber), PaidBill, Breakage, ExcessRefund,
+  BillReferenceRegistry. Old global indexes kept; the new keys are strictly weaker, so the build cannot fail on existing data.
+  Until the contract, a second company cannot draw from a scope TIPS already uses (it gets a clear "pending database migration"
+  error — never a duplicate number).
+- **Contract PR**: drops the 25 global indexes (CashReconExcess/CollectionExcess have no company column: their own unique becomes a
+  plain index and the registry, written in the same transaction, enforces per-company uniqueness). Deploy only after the expand PR.
+- Verified: guard test — 103 checks in the expand state, 109 in the contract state, including TIPS continuity per series, concurrent first use,
+  rollback/no-gap, self-healing after an out-of-band number, and the real POS route.
+
 ## Not in this change — remaining Phase 3 steps (in order)
-1. **3e (rest) Document numbers.** `PosOrder.orderNo`, PO/GRN/TRF numbers, `JournalEntry.entryNumber`, bill references
-   are still globally unique — they move with 3f's per-company counters.
-2. **3f Per-company numbering.** Counters keyed by company (`BillSequenceCounter`, `ExpenseRequestSequence`, `count()+1` PO/GRN/TRF numbers → race-safe counters).
-3. **3g `Setting` → per-company.** Key redesign to `(companyId, key)` + a `CompanyConfig` (branding, currency, VAT, receipt text); move the 15 keys; per-company caches.
-4. **3h Contract.** Apply `scripts/gen-tenancy-contract-sql.ts` as a reviewed migration together with `schema.prisma` (`String?` → `String`), after: census READY across a soak period, a clone-of-production rehearsal, and an agreed TIPS window.
+1. **3g `Setting` → per-company.** Key redesign to `(companyId, key)` + a `CompanyConfig` (branding, currency, VAT, receipt text); move the 15 keys; per-company caches.
+2. **3h Contract.** Apply `scripts/gen-tenancy-contract-sql.ts` as a reviewed migration together with `schema.prisma` (`String?` → `String`), after: census READY across a soak period, a clone-of-production rehearsal, and an agreed TIPS window.
 
 ## Still true: do NOT onboard a second company yet
 Columns now exist and are filled and stamped, but **reads are not yet filtered by company** outside the ~45 routes migrated in

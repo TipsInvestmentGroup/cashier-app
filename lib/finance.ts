@@ -8,9 +8,9 @@ import { postJournalEntry, nextScopedNumber, type Db } from './ledger'
 import { resolveAccountId, resolveChannelAccountId } from './finance-mapping'
 import { resolveVatConfig, splitInputVat } from './vat'
 
-async function nextSequenceNumber(db: Db, prefix: string, count: () => Promise<number>): Promise<string> {
-  // Race-safe (BillSequenceCounter) instead of count()+1 — see nextScopedNumber.
-  const n = await nextScopedNumber(db, `SEQ:${prefix}`, count)
+async function nextSequenceNumber(db: Db, companyId: string, prefix: string, count: () => Promise<number>): Promise<string> {
+  // Race-safe per-company counter instead of count()+1 — see nextScopedNumber.
+  const n = await nextScopedNumber(db, companyId, `SEQ:${prefix}`, count)
   return `${prefix}-${String(n).padStart(6, '0')}`
 }
 
@@ -93,7 +93,7 @@ export async function createSupplierInvoice(input: CreateSupplierInvoiceInput): 
       createdById: input.createdById, lines,
     })
 
-    const invoiceNumber = await nextSequenceNumber(tx, 'INV', () => tx.supplierInvoice.count())
+    const invoiceNumber = await nextSequenceNumber(tx, input.companyId, 'INV', () => tx.supplierInvoice.count({ where: { companyId: input.companyId } }))
     const invoice = await tx.supplierInvoice.create({
       data: {
         invoiceNumber, supplierId: input.supplierId, companyId: input.companyId, grnId: input.grnId,
@@ -165,7 +165,7 @@ export async function createSupplierPayment(input: CreateSupplierPaymentInput): 
       ],
     })
 
-    const paymentNumber = await nextSequenceNumber(tx, 'PAY', () => tx.supplierPayment.count())
+    const paymentNumber = await nextSequenceNumber(tx, input.companyId, 'PAY', () => tx.supplierPayment.count({ where: { companyId: input.companyId } }))
     const payment = await tx.supplierPayment.create({
       data: {
         paymentNumber, supplierId: input.supplierId, companyId: input.companyId, paymentChannelId: input.paymentChannelId,

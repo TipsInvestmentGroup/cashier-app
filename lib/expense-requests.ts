@@ -7,6 +7,7 @@
 // Disbursement section) and docs/expense-disbursement-framework-design.md.
 import type { Db } from '@/lib/ledger'
 import { roundMoney } from '@/lib/utils'
+import { nextDocNumber } from '@/lib/doc-numbering'
 import { computeActual } from '@/lib/finance-budget'
 import type { BudgetValidationMode, ExpenseRequestStatus } from '@/lib/expense-config'
 import { resolveExpenseModuleConfig } from '@/lib/expense-config'
@@ -240,15 +241,12 @@ const NO_OUTLET_BRANCH = 'GEN' // OUT requests always carry an outlet; defensive
  * date by the TZ offset, which is immaterial for an identifier whose uniqueness
  * comes from the branch + counter, not the date.
  */
-export async function allocateRequestNumber(db: Db, outlet: { branchCode: string | null; name: string } | null): Promise<string> {
+export async function allocateRequestNumber(db: Db, companyId: string, outlet: { branchCode: string | null; name: string } | null): Promise<string> {
   const branch = resolveOutletCode(null, outlet) || NO_OUTLET_BRANCH
-  const seq = await db.expenseRequestSequence.upsert({
-    where: { scopeKey: branch },
-    create: { scopeKey: branch, lastNumber: 1 },
-    update: { lastNumber: { increment: 1 } },
-  })
+  // Each company has its own per-branch counters (multi-company Phase 3f): (companyId, branch) is the counter key.
+  const n = await nextDocNumber(db, { table: 'ExpenseRequestSequence', companyId, scopeKey: branch })
   const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  return `EXP-${ymd}-${branch}-${String(seq.lastNumber).padStart(4, '0')}`
+  return `EXP-${ymd}-${branch}-${String(n).padStart(4, '0')}`
 }
 
 export async function submitExpenseRequest(db: Db, requestId: string): Promise<{ status: ExpenseRequestStatus; skipReason: string | null }> {
@@ -262,7 +260,7 @@ export async function submitExpenseRequest(db: Db, requestId: string): Promise<{
   // are not numbered. Idempotent (only when still null) so a re-submit can't
   // consume a second number.
   if (request.direction === 'OUT' && !request.requestNumber) {
-    const requestNumber = await allocateRequestNumber(db, request.outlet)
+    const requestNumber = await allocateRequestNumber(db, request.companyId, request.outlet)
     await db.expenseRequest.update({ where: { id: requestId }, data: { requestNumber } })
   }
 

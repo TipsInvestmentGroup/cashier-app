@@ -7,6 +7,7 @@
 // StockLedgerEntry. See the Finance Platform schema section comment in
 // prisma/schema.prisma for the full model shapes.
 import { roundMoney } from '@/lib/utils'
+import { nextDocNumber } from '@/lib/doc-numbering'
 import type { PrismaClient } from '@prisma/client'
 
 export const ACCOUNT_TYPES = ['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE'] as const
@@ -41,28 +42,19 @@ export interface PostJournalEntryInput {
 }
 
 /**
- * Race-safe monotonic sequence value for a scope, via the BillSequenceCounter
- * atomic counter. Replaces `count()+1`, where two concurrent writers could read
- * the same count and collide on a unique number — a real hazard on Postgres
- * (SQLite serialises writes, so it never reproduces there). On first use the
- * counter is seeded to the current row count so numbers already issued are
- * never re-used; thereafter each caller gets a distinct, ever-increasing value
- * (the atomic increment row-locks the counter for the caller's transaction).
- * No migration needed — the seed-if-absent makes it self-initialising.
+ * Race-safe monotonic sequence value for one COMPANY's scope (lib/doc-numbering.ts: an atomic counter row keyed by
+ * (companyId, scopeKey) in BillSequenceCounter). Replaces `count()+1`, where two concurrent writers could read the same
+ * count and collide on a unique number - a real hazard on Postgres (SQLite serialises writes, so it never reproduces
+ * there). On a company's first use of the scope the counter is seeded with `seedCount()` - the number of documents that
+ * company already issued - so numbers already issued are never re-used; thereafter each caller gets a distinct,
+ * ever-increasing value. Each company numbers independently (multi-company Phase 3 step 3f).
  */
-export async function nextScopedNumber(db: Db, scopeKey: string, seedCount: () => Promise<number>): Promise<number> {
-  const existing = await db.billSequenceCounter.findUnique({ where: { scopeKey } })
-  if (!existing) {
-    const seed = await seedCount()
-    // A concurrent first-use may create it first — fall through to the increment.
-    try { await db.billSequenceCounter.create({ data: { scopeKey, lastValue: seed } }) } catch { /* already created */ }
-  }
-  const updated = await db.billSequenceCounter.update({ where: { scopeKey }, data: { lastValue: { increment: 1 } } })
-  return updated.lastValue
+export async function nextScopedNumber(db: Db, companyId: string, scopeKey: string, seedCount: () => Promise<number>): Promise<number> {
+  return nextDocNumber(db, { companyId, scopeKey, seed: seedCount })
 }
 
-async function nextEntryNumber(db: Db, prefix: string): Promise<string> {
-  const n = await nextScopedNumber(db, 'JOURNAL_ENTRY', () => db.journalEntry.count())
+async function nextEntryNumber(db: Db, companyId: string, prefix: string): Promise<string> {
+  const n = await nextScopedNumber(db, companyId, 'JOURNAL_ENTRY', () => db.journalEntry.count({ where: { companyId } }))
   return `${prefix}-${String(n).padStart(6, '0')}`
 }
 
@@ -118,7 +110,7 @@ export async function postJournalEntry(db: Db, input: PostJournalEntryInput): Pr
 
   await assertPeriodOpen(db, input.companyId, input.entryDate)
 
-  const entryNumber = await nextEntryNumber(db, 'JE')
+  const entryNumber = await nextEntryNumber(db, input.companyId, 'JE')
   const entry = await db.journalEntry.create({
     data: {
       entryNumber,
